@@ -1,0 +1,35 @@
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: binance-trading-bot:latest
+    container_name: binance-trading-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # Config and secrets are injected, not baked into the image.
+      - ./config.yaml:/app/config.yaml:ro
+      # Persist logs, the SQLite DB, and downloaded historical data.
+      - ./data:/app/data
+      - ./logs:/app/logs
+    # Uncomment to run a one-off backtest instead of the live loop:
+    # command: ["python", "-m", "trading_bot", "backtest"]
+
+  # ---------------------------------------------------------------------------
+  # Optional Postgres for a future upgrade from SQLite. Point database.url in
+  # config.yaml at this service to use it.
+  # ---------------------------------------------------------------------------
+  # db:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_USER: bot
+  #     POSTGRES_PASSWORD: change_me
+  #     POSTGRES_DB: trading_bot
+  #   volumes:
+  #     - pgdata:/var/lib/postgresql/data
+  #   restart: unless-stopped
+
+# volumes:
+#   pgdata:

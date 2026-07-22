@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "binance-trading-bot"
+version = "0.1.0"
+description = "Professional-grade Binance Spot trading bot (testnet-first)."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dynamic = ["dependencies"]
+
+[project.scripts]
+trading-bot = "trading_bot.main:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.dynamic]
+dependencies = { file = ["requirements.txt"] }
+# NOTE: dev/test dependencies are intentionally NOT declared here. setuptools
+# cannot parse pip's "-r requirements.txt" include line, so reading
+# requirements-dev.txt would break `pip install -e .`. Install dev tools with
+# `pip install -r requirements-dev.txt` (pip understands "-r") instead.
+
+# --------------------------------------------------------------------------
+# Ruff: linting + formatting
+# --------------------------------------------------------------------------
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
+ignore = ["E501"]  # line length handled by the formatter
+
+[tool.ruff.lint.isort]
+known-first-party = ["trading_bot"]
+
+# --------------------------------------------------------------------------
+# mypy: static typing
+# --------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.12"
+packages = ["trading_bot"]
+mypy_path = "src"
+strict = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true   # a few third-party deps ship no type stubs
+
+# --------------------------------------------------------------------------
+# pytest
+# --------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "integration: tests that touch external services (deselect with -m 'not integration')",
+]
+
+[tool.coverage.run]
+source = ["trading_bot"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

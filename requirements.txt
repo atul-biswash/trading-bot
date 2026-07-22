@@ -1,0 +1,40 @@
+# ---------------------------------------------------------------------------
+# Runtime dependencies (Python 3.12+)
+# ---------------------------------------------------------------------------
+# Exchange connectivity. python-binance is chosen over the lighter official
+# connector for its built-in Testnet support, threaded/async websocket
+# managers, and mature order helpers.
+python-binance>=1.0.19
+
+# Data / numerical stack.
+# NOTE — `pandas-ta` was intentionally REMOVED. The 0.3.x line this project
+# originally targeted has been pulled from PyPI, and the only remaining release
+# (0.4.x) forces a heavyweight `numba`/LLVM dependency plus pinned NumPy/pandas
+# versions — fragile for software that manages money. Indicators (SMA, EMA, RSI,
+# MACD, Bollinger, ATR, ...) are implemented as small, unit-tested functions in
+# `indicators/` instead. To re-add the library: `pandas-ta==0.4.71b0` together
+# with `numpy>=2.2.6,<2.3` and `pandas>=2.3.2` (this also pulls in numba).
+numpy>=1.26,<3.0
+pandas>=2.1,<3.0
+
+# Configuration & validation.
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+PyYAML>=6.0.1
+python-dotenv>=1.0.1
+
+# HTTP (Telegram Bot API + general async HTTP) and resilience.
+httpx>=0.27.0
+tenacity>=8.2.3
+
+# Persistence. SQLite now; the same SQLAlchemy models upgrade to Postgres later
+# by swapping the connection URL in config.yaml.
+SQLAlchemy>=2.0.25
+aiosqlite>=0.19.0
+
+# Optional HTTP API / health + metrics endpoints (used in a later phase).
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+
+# Nicer console logging when available (logger degrades gracefully without it).
+rich>=13.7.0

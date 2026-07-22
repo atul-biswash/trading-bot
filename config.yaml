@@ -1,0 +1,105 @@
+# ===========================================================================
+# Non-secret runtime configuration.
+# Secrets (API keys, Telegram token) belong in .env, never here.
+# This file is parsed into typed pydantic models (see src/trading_bot/config).
+# ===========================================================================
+
+# Execution mode. SAFE DEFAULT = testnet.
+#   testnet  -> real Binance API, fake money (Binance Spot Testnet)
+#   live     -> real Binance API, REAL money
+#   paper    -> local simulator, live prices, no orders sent
+#   backtest -> historical replay, no live connection
+mode: testnet
+
+exchange:
+  name: binance
+  recv_window_ms: 5000        # Binance signed-request receive window
+  requests_timeout_s: 10
+  rate_limit_safety: 0.9      # use at most 90% of the reported rate limit
+
+trading:
+  base_currency: USDT
+  default_timeframe: 1m
+  pairs:
+    - symbol: BTCUSDT
+      timeframe: 1m
+      enabled: true
+    - symbol: ETHUSDT
+      timeframe: 5m
+      enabled: true
+
+strategy:
+  name: sma_crossover        # must match a name in the strategy registry
+  params:
+    fast_period: 20
+    slow_period: 50
+
+risk:
+  position_sizing:
+    method: fixed_fraction    # fixed_fraction | fixed_amount | risk_per_trade
+    fraction: 0.02            # 2% of equity per position (fixed_fraction)
+    fixed_amount: 100.0       # quote units per position (fixed_amount)
+    risk_per_trade: 0.01      # 1% of equity risked, sized from stop distance (risk_per_trade)
+  stop_loss:
+    enabled: true
+    type: percent             # percent | atr
+    percent: 2.0
+    atr_period: 14
+    atr_multiplier: 2.0
+  take_profit:
+    enabled: true
+    type: percent             # percent | rr (risk/reward multiple of stop)
+    percent: 4.0
+    rr_multiple: 2.0
+  trailing_stop:
+    enabled: false
+    activation_percent: 1.0   # profit needed before the trail activates
+    trail_percent: 1.0        # distance the stop trails behind price
+  limits:
+    max_open_positions: 3
+    max_daily_loss_percent: 5.0     # halt new entries after this daily drawdown
+    max_position_size_percent: 20.0 # cap any single position vs. equity
+    cooldown_minutes: 15            # per-symbol pause after a stop-out
+
+backtesting:
+  start_date: "2024-01-01"
+  end_date: "2024-06-30"
+  initial_balance: 10000.0
+  fee_percent: 0.1
+  slippage_percent: 0.05
+  data_dir: data/historical
+
+paper_trading:
+  initial_balance: 10000.0
+  fee_percent: 0.1
+  slippage_percent: 0.05
+
+notifications:
+  telegram:
+    enabled: false            # token/chat_id come from .env
+    notify_on:
+      - signal
+      - trade
+      - error
+      - daily_summary
+
+logging:
+  level: INFO
+  console: true
+  file:
+    enabled: true
+    path: logs/trading_bot.log
+    max_bytes: 10485760       # 10 MB
+    backup_count: 5
+    json: false               # true -> structured JSON lines
+
+database:
+  # SQLite for now. To upgrade later, change this URL (e.g. to a Postgres DSN)
+  # and the SQLAlchemy models keep working.
+  url: sqlite:///data/trading_bot.db
+  echo: false
+
+engine:
+  loop_interval_s: 1.0
+  reconnect_max_retries: 10
+  reconnect_backoff_s: 5.0
