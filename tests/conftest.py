@@ -34,7 +34,11 @@ def config_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+def _isolated_settings(
+    request: pytest.FixtureRequest,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
     """Give every test freshly-loaded settings in a clean environment.
 
     ``Secrets`` reads a relative ``.env`` file plus the process environment, so
@@ -43,8 +47,19 @@ def _isolated_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     secret-bearing variables and switches to a scratch directory so no stray
     ``.env`` is discovered. Tests that need specific values set them explicitly
     with ``monkeypatch.setenv``.
+
+    Integration tests (marked ``@pytest.mark.integration``) are exempt: they
+    connect to the real testnet and therefore need the developer's actual
+    credentials from the environment/``.env``. They still get a freshly-reset
+    settings cache.
     """
     from trading_bot.config.settings import get_settings
+
+    if request.node.get_closest_marker("integration") is not None:
+        get_settings.cache_clear()
+        yield
+        get_settings.cache_clear()
+        return
 
     for var in (
         "BINANCE_API_KEY",
