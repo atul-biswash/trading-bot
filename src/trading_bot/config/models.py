@@ -7,7 +7,7 @@ fails fast at startup with a clear error, instead of surfacing as an
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from trading_bot.core.enums import (
     PositionSizingMethod,
@@ -145,8 +145,22 @@ class DatabaseConfig(_Model):
 
 class EngineConfig(_Model):
     loop_interval_s: float = Field(1.0, gt=0)
-    reconnect_max_retries: int = Field(10, ge=0)
-    reconnect_backoff_s: float = Field(5.0, gt=0)
+    # WebSocket auto-reconnection (see exchange/websocket_client.py). 0 means
+    # retry indefinitely — the default for 24/7 operation, since a feed that
+    # stops silently is the worst failure mode for money software. A positive
+    # value caps *consecutive* failed reconnects; the counter resets after any
+    # message arrives on a healthy connection.
+    reconnect_max_retries: int = Field(0, ge=0)
+    reconnect_backoff_s: float = Field(5.0, gt=0)  # base (first) backoff, seconds
+    reconnect_backoff_max_s: float = Field(60.0, gt=0)  # backoff ceiling, seconds
+
+    @model_validator(mode="after")
+    def _check_backoff_bounds(self) -> EngineConfig:
+        if self.reconnect_backoff_max_s < self.reconnect_backoff_s:
+            raise ValueError(
+                "reconnect_backoff_max_s must be >= reconnect_backoff_s"
+            )
+        return self
 
 
 class AppConfig(_Model):

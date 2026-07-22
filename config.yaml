@@ -101,5 +101,9 @@ database:
 
 engine:
   loop_interval_s: 1.0
-  reconnect_max_retries: 10
-  reconnect_backoff_s: 5.0
+  # WebSocket auto-reconnection (see exchange/websocket_client.py).
+  # 0 = retry forever (recommended for 24/7 operation). A positive value caps
+  # consecutive failed reconnects; the counter resets after any healthy message.
+  reconnect_max_retries: 0
+  reconnect_backoff_s: 5.0        # base backoff (s); grows exponentially per retry
+  reconnect_backoff_max_s: 60.0   # backoff ceiling (s); jitter applied under it

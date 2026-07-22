@@ -220,6 +220,73 @@ def to_candles(
 
 
 # --------------------------------------------------------------------------
+# WebSocket kline streams
+# --------------------------------------------------------------------------
+# The streaming kline payload is shaped very differently from the REST kline
+# *array* above: it is a JSON object that nests the bar under a ``"k"`` key whose
+# fields are single-letter codes. These constants name those codes so the mapper
+# reads clearly and the ``"t"``/``"T"`` (open/close time) and ``"v"``/``"V"``
+# (volume/taker-buy volume) look-alikes cannot be confused. See the payload in
+# ``BinanceSocketManager.kline_socket``'s docstring for the full field list.
+_WS_KLINE = "k"  # the nested kline object within a kline event
+_WSK_SYMBOL = "s"  # symbol, e.g. "BTCUSDT"
+_WSK_INTERVAL = "i"  # interval, e.g. "1m"
+_WSK_OPEN_TIME = "t"  # bar start time (ms epoch)
+_WSK_CLOSE_TIME = "T"  # bar close time (ms epoch)
+_WSK_OPEN = "o"
+_WSK_HIGH = "h"
+_WSK_LOW = "l"
+_WSK_CLOSE = "c"
+_WSK_VOLUME = "v"  # base-asset volume
+_WSK_IS_CLOSED = "x"  # whether this bar is final
+
+
+def unwrap_stream_message(msg: dict[str, Any]) -> dict[str, Any]:
+    """Return the inner event from a combined-stream envelope, or ``msg`` as-is.
+
+    Binance's *combined* (multiplex) streams wrap every event as
+    ``{"stream": "<name>", "data": {<event>}}``, whereas a *single* raw stream
+    delivers the event unwrapped. Normalising both to the bare event here lets
+    the stream layer map either shape with one code path. A message that carries
+    a ``"stream"`` key but no ``"data"`` is malformed and is left to raise
+    ``KeyError`` (a bug, not a routine condition), consistent with the other
+    mappers in this module.
+    """
+    if "stream" in msg:
+        data: dict[str, Any] = msg["data"]
+        return data
+    return msg
+
+
+def ws_kline_to_candle(event: dict[str, Any]) -> Candle:
+    """Map a Binance WebSocket kline *event* into a :class:`Candle`.
+
+    ``event`` is the raw kline event (``{"e": "kline", ..., "k": {...}}``); for
+    combined/multiplex streams, unwrap the ``{"stream", "data"}`` envelope first
+    with :func:`unwrap_stream_message`.
+
+    Unlike the REST :func:`to_candle` — which cannot know whether the most recent
+    bar is still forming and so always marks ``is_closed=True`` — the streaming
+    payload reports finality directly via the ``"x"`` flag, so ``is_closed`` is
+    taken straight from the wire here. Money fields are parsed from Binance's
+    decimal *strings* into :class:`~decimal.Decimal`, never through ``float``.
+    """
+    k = event[_WS_KLINE]
+    return Candle(
+        symbol=k[_WSK_SYMBOL],
+        timeframe=k[_WSK_INTERVAL],
+        open_time=_ms_to_dt(k[_WSK_OPEN_TIME]),
+        close_time=_ms_to_dt(k[_WSK_CLOSE_TIME]),
+        open=_dec(k[_WSK_OPEN]),
+        high=_dec(k[_WSK_HIGH]),
+        low=_dec(k[_WSK_LOW]),
+        close=_dec(k[_WSK_CLOSE]),
+        volume=_dec(k[_WSK_VOLUME]),
+        is_closed=bool(k[_WSK_IS_CLOSED]),
+    )
+
+
+# --------------------------------------------------------------------------
 # Orders
 # --------------------------------------------------------------------------
 def to_order(raw: dict[str, Any]) -> Order:

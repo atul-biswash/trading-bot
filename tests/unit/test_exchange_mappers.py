@@ -80,6 +80,40 @@ KLINE_2 = [
     1_700_000_119_999, "593210.1", 80, "4.5", "292000.0", "0",
 ]
 
+# Recorded WebSocket kline events. Times/OHLCV mirror KLINE_1 so the WS and REST
+# mappers can be cross-checked for agreement. The "k" object nests the bar; "x"
+# is the finality flag.
+WS_KLINE_CLOSED = {  # a *final* bar (x == true) — the only kind handlers should see
+    "e": "kline",
+    "E": 1_700_000_060_001,
+    "s": "BTCUSDT",
+    "k": {
+        "t": 1_700_000_000_000, "T": 1_700_000_059_999,
+        "s": "BTCUSDT", "i": "1m",
+        "f": 100, "L": 200,
+        "o": "65000.00", "c": "65050.00", "h": "65100.00", "l": "64950.00",
+        "v": "12.50000000", "n": 100, "x": True,
+        "q": "812345.6", "V": "6.0", "Q": "390000.0", "B": "0",
+    },
+}
+
+WS_KLINE_FORMING = {  # a still-forming bar (x == false)
+    "e": "kline",
+    "E": 1_700_000_030_000,
+    "s": "BTCUSDT",
+    "k": {
+        "t": 1_700_000_000_000, "T": 1_700_000_059_999,
+        "s": "BTCUSDT", "i": "1m",
+        "f": 100, "L": 150,
+        "o": "65000.00", "c": "65010.00", "h": "65020.00", "l": "64990.00",
+        "v": "6.20000000", "n": 51, "x": False,
+        "q": "402000.0", "V": "3.0", "Q": "195000.0", "B": "0",
+    },
+}
+
+# The same closed event as delivered by a *combined* (multiplex) stream.
+WS_KLINE_COMBINED = {"stream": "btcusdt@kline_1m", "data": WS_KLINE_CLOSED}
+
 ORDER_LIMIT_NEW = {
     "symbol": "BTCUSDT",
     "orderId": 123456,
@@ -216,6 +250,63 @@ def test_to_candle_maps_ohlcv_and_times() -> None:
 def test_to_candles_preserves_order_and_count() -> None:
     candles = m.to_candles([KLINE_1, KLINE_2], symbol="BTCUSDT", timeframe="1m")
     assert [c.close for c in candles] == [Decimal("65050.00"), Decimal("65180.00")]
+
+
+# --------------------------------------------------------------------------
+# WebSocket kline streams
+# --------------------------------------------------------------------------
+def test_ws_kline_to_candle_maps_ohlcv_times_and_closed_flag() -> None:
+    c = m.ws_kline_to_candle(WS_KLINE_CLOSED)
+    assert c.symbol == "BTCUSDT"
+    assert c.timeframe == "1m"
+    assert c.open == Decimal("65000.00")
+    assert c.high == Decimal("65100.00")
+    assert c.low == Decimal("64950.00")
+    assert c.close == Decimal("65050.00")
+    assert c.volume == Decimal("12.5")
+    assert c.open_time == datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
+    assert c.close_time == datetime(2023, 11, 14, 22, 14, 19, 999000, tzinfo=timezone.utc)
+    assert c.is_closed is True  # taken from the wire ("x"), not defaulted
+
+
+def test_ws_kline_to_candle_reads_forming_flag() -> None:
+    c = m.ws_kline_to_candle(WS_KLINE_FORMING)
+    assert c.is_closed is False
+    assert c.close == Decimal("65010.00")
+
+
+def test_ws_kline_to_candle_uses_decimal_not_float() -> None:
+    c = m.ws_kline_to_candle(WS_KLINE_CLOSED)
+    assert isinstance(c.open, Decimal)
+    assert isinstance(c.volume, Decimal)
+    # A value chosen so a float round-trip would lose precision.
+    event = {"k": {**WS_KLINE_CLOSED["k"], "c": "65050.10000001"}}
+    assert m.ws_kline_to_candle(event).close == Decimal("65050.10000001")
+
+
+def test_ws_and_rest_mappers_agree_on_shared_bar() -> None:
+    """The WS and REST mappers must yield identical OHLCV/times for one bar.
+
+    ``is_closed`` is the sole intentional difference (the WS ``"x"`` flag is
+    authoritative; the REST mapper always marks closed), so it is excluded.
+    """
+    rest = m.to_candle(KLINE_1, symbol="BTCUSDT", timeframe="1m")
+    ws = m.ws_kline_to_candle(WS_KLINE_CLOSED)
+    fields = ("symbol", "timeframe", "open_time", "close_time",
+              "open", "high", "low", "close", "volume")
+    assert {f: getattr(ws, f) for f in fields} == {f: getattr(rest, f) for f in fields}
+
+
+def test_unwrap_stream_message_extracts_combined_payload() -> None:
+    inner = m.unwrap_stream_message(WS_KLINE_COMBINED)
+    assert inner is WS_KLINE_CLOSED
+    # ...and the unwrapped event maps to the same candle as the raw one.
+    assert m.ws_kline_to_candle(inner) == m.ws_kline_to_candle(WS_KLINE_CLOSED)
+
+
+def test_unwrap_stream_message_passes_through_single_stream() -> None:
+    # A raw event (no "stream" key) is returned unchanged.
+    assert m.unwrap_stream_message(WS_KLINE_CLOSED) is WS_KLINE_CLOSED
 
 
 # --------------------------------------------------------------------------

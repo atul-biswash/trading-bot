@@ -7,5 +7,6 @@ not.
 
 from trading_bot.exchange.base import BaseExchangeClient
 from trading_bot.exchange.binance_client import BinanceClient
+from trading_bot.exchange.websocket_client import BinanceMarketDataStream
 
-__all__ = ["BaseExchangeClient", "BinanceClient"]
+__all__ = ["BaseExchangeClient", "BinanceClient", "BinanceMarketDataStream"]
