@@ -28,6 +28,14 @@ trading:
       timeframe: 5m
       enabled: true
 
+data:
+  # Market-data provider (see data/market_data.py). At startup each enabled pair
+  # is seeded with `history_limit` closed candles over REST so strategies are
+  # warm immediately; the live WebSocket then appends each newly closed bar.
+  history_limit: 500          # candles fetched per pair at startup (Binance max: 1000/call)
+  buffer_size: 1000           # rolling in-memory bars per pair; must be >= history_limit
+                              # (~0.75 MB per pair at 1000 bars)
+
 strategy:
   name: sma_crossover        # must match a name in the strategy registry
   params:
@@ -107,3 +115,6 @@ engine:
   reconnect_max_retries: 0
   reconnect_backoff_s: 5.0        # base backoff (s); grows exponentially per retry
   reconnect_backoff_max_s: 60.0   # backoff ceiling (s); jitter applied under it
+  # Consecutive strategy failures tolerated per pair before that pair is
+  # quarantined (no further evaluation until restart). 0 = never quarantine.
+  max_strategy_errors: 5

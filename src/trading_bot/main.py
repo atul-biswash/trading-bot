@@ -16,12 +16,19 @@ Examples
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
+import signal
 import sys
+from typing import TYPE_CHECKING
 
-from trading_bot.config.settings import get_settings
+from trading_bot.config.settings import Settings, get_settings
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.exceptions import TradingBotError
 from trading_bot.utils.logger import get_logger, setup_logging
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from trading_bot.engine.live_engine import TradingEngine
 
 _BANNER = r"""
   ____  _                            ____        _
@@ -57,6 +64,40 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _install_shutdown_handlers(engine: TradingEngine) -> None:
+    """Ask the engine to stop on SIGINT/SIGTERM where the platform allows it.
+
+    ``add_signal_handler`` is POSIX-only — on Windows it raises
+    ``NotImplementedError``, and Ctrl-C arrives as a ``KeyboardInterrupt`` at
+    the current await instead. Both paths converge on the same clean shutdown
+    because :meth:`TradingEngine.run` stops the engine from a ``finally``.
+    """
+    loop = asyncio.get_running_loop()
+    for signal_name in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, signal_name, None)
+        if sig is None:  # pragma: no cover - platform dependent
+            continue
+        # Windows raises NotImplementedError here; Ctrl-C still works via
+        # KeyboardInterrupt, which _run_engine handles.
+        with contextlib.suppress(NotImplementedError):
+            loop.add_signal_handler(sig, engine.request_stop)
+
+
+async def _run_engine(settings: Settings) -> int:
+    """Build, run, and shut down the trading engine."""
+    # Deferred import: the engine (and its heavy deps) load only when running.
+    from trading_bot.engine.live_engine import TradingEngine
+
+    log = get_logger(__name__)
+    engine = await TradingEngine.create(settings)
+    _install_shutdown_handlers(engine)
+    try:
+        await engine.run()
+    except KeyboardInterrupt:  # pragma: no cover - interactive
+        log.info("Interrupted by user. Shutting down.")
+    return 0
+
+
 def _cmd_run(settings, mode_override: TradingMode | None) -> int:
     log = get_logger(__name__)
     if mode_override is not None:
@@ -70,10 +111,7 @@ def _cmd_run(settings, mode_override: TradingMode | None) -> int:
     if settings.mode.is_live_connection:
         settings.binance_credentials()  # raises ConfigError if missing
 
-    # Deferred import: the engine (and its heavy deps) load only when running.
-    # from trading_bot.engine.live_engine import LiveEngine
-    log.error("Trading engine is not implemented yet (scaffolding phase).")
-    return 0
+    return asyncio.run(_run_engine(settings))
 
 
 def _cmd_backtest(settings) -> int:

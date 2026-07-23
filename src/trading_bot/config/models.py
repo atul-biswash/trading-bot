@@ -50,6 +50,31 @@ class TradingConfig(_Model):
         return [p for p in self.pairs if p.enabled]
 
 
+class DataConfig(_Model):
+    """Market-data history seeding and the in-memory rolling window.
+
+    ``history_limit`` is how many closed candles are fetched per pair over REST
+    at startup so strategies are warm immediately instead of waiting hours for a
+    slow timeframe to fill. Binance caps a single ``klines`` call at 1000 bars,
+    so that is the hard upper bound here (paginated deeper history belongs to
+    the backtesting loader, not the live path).
+
+    ``buffer_size`` bounds memory: each pair keeps at most this many candles and
+    evicts the oldest, which is what makes 24/7 operation safe. It must be at
+    least ``history_limit``, otherwise startup would immediately discard part of
+    the history it just paid to fetch.
+    """
+
+    history_limit: int = Field(500, ge=1, le=1000)
+    buffer_size: int = Field(1000, ge=1)
+
+    @model_validator(mode="after")
+    def _check_buffer_covers_history(self) -> DataConfig:
+        if self.buffer_size < self.history_limit:
+            raise ValueError("buffer_size must be >= history_limit")
+        return self
+
+
 class StrategyConfig(_Model):
     name: str
     params: dict[str, object] = Field(default_factory=dict)
@@ -153,6 +178,12 @@ class EngineConfig(_Model):
     reconnect_max_retries: int = Field(0, ge=0)
     reconnect_backoff_s: float = Field(5.0, gt=0)  # base (first) backoff, seconds
     reconnect_backoff_max_s: float = Field(60.0, gt=0)  # backoff ceiling, seconds
+    # Consecutive strategy failures tolerated for one pair before the engine
+    # quarantines it (stops evaluating it until restart). A strategy raising on
+    # every bar produces no signals but would otherwise log a traceback forever;
+    # quarantining makes the failure loud once instead of endless. 0 disables
+    # quarantine — errors are still logged, and the pair keeps being retried.
+    max_strategy_errors: int = Field(5, ge=0)
 
     @model_validator(mode="after")
     def _check_backoff_bounds(self) -> EngineConfig:
@@ -169,6 +200,7 @@ class AppConfig(_Model):
     mode: TradingMode = TradingMode.TESTNET
     exchange: ExchangeConfig = Field(default_factory=ExchangeConfig)
     trading: TradingConfig = Field(default_factory=TradingConfig)
+    data: DataConfig = Field(default_factory=DataConfig)
     strategy: StrategyConfig
     risk: RiskConfig = Field(default_factory=RiskConfig)
     backtesting: BacktestConfig

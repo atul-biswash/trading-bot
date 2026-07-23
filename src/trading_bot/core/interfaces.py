@@ -62,6 +62,10 @@ class ExchangeClient(ABC):
 # A callback invoked whenever a (closed) candle arrives on the stream.
 CandleHandler = Callable[[Candle], Awaitable[None]]
 
+# A callback invoked whenever a strategy produces a signal. This is the seam
+# where risk management and execution attach to the engine in later phases.
+SignalHandler = Callable[[Signal], Awaitable[None]]
+
 
 class MarketDataStream(ABC):
     """A live source of streaming candles via WebSocket."""
@@ -75,6 +79,63 @@ class MarketDataStream(ABC):
 
     @abstractmethod
     async def stop(self) -> None: ...
+
+
+class MarketDataProvider(ABC):
+    """Time-ordered OHLCV history plus live updates, ready for strategies.
+
+    Bridges the REST client (history) and the live stream (updates) into the
+    ``DataFrame`` :meth:`Strategy.generate_signal` consumes. Money stays
+    ``Decimal`` in :meth:`last_candle`; only the DataFrame is ``float`` — that
+    conversion is the one deliberate Decimal->float boundary in the system, and
+    it exists because indicator maths runs on NumPy.
+    """
+
+    @abstractmethod
+    def track(self, symbol: str, timeframe: str) -> None:
+        """Register ``symbol``/``timeframe`` for seeding and live updates."""
+
+    @abstractmethod
+    def on_candle(self, handler: CandleHandler) -> None:
+        """Register ``handler``, invoked after each newly accepted closed candle."""
+
+    @abstractmethod
+    async def start(self) -> None:
+        """Seed history for every tracked pair, then begin consuming live candles."""
+
+    @abstractmethod
+    async def stop(self) -> None:
+        """Stop live consumption and release owned resources. Idempotent."""
+
+    @abstractmethod
+    def get_dataframe(self, symbol: str, timeframe: str) -> pd.DataFrame:
+        """Return the rolling OHLCV window for ``symbol``/``timeframe``.
+
+        Time-ordered ascending, indexed by a tz-aware UTC ``DatetimeIndex`` named
+        ``open_time``, with ``float64`` ``open``/``high``/``low``/``close``/
+        ``volume`` columns. Callers may mutate the result freely.
+        """
+
+    @abstractmethod
+    def candle_count(self, symbol: str, timeframe: str) -> int:
+        """Number of closed candles currently buffered for the pair."""
+
+    @abstractmethod
+    def last_candle(self, symbol: str, timeframe: str) -> Candle | None:
+        """Most recent closed candle, with ``Decimal`` precision intact.
+
+        Execution and risk read prices from here, never from the ``float``
+        DataFrame, so no money value is ever derived from a binary float.
+        """
+
+    def is_ready(self, symbol: str, timeframe: str, warmup_period: int) -> bool:
+        """Whether enough candles are buffered to satisfy ``warmup_period``.
+
+        Concrete (not abstract) because it is pure derivation from
+        :meth:`candle_count`; re-implementing it per adapter would invite two
+        subtly different definitions of "ready" in software that trades money.
+        """
+        return self.candle_count(symbol, timeframe) >= max(warmup_period, 1)
 
 
 class Strategy(ABC):
