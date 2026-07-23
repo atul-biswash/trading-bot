@@ -149,10 +149,28 @@ class Strategy(ABC):
         """Minimum number of candles required before signals are valid."""
 
     @abstractmethod
-    def generate_signal(self, symbol: str, candles: "pd.DataFrame") -> Signal | None:
+    def generate_signal(
+        self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
+    ) -> Signal | None:
         """Return a :class:`Signal` for the latest candle, or ``None`` to skip.
 
-        ``candles`` is time-ordered OHLCV with a ``DatetimeIndex``.
+        ``candles`` is time-ordered OHLCV with a ``DatetimeIndex``, in
+        ``float64`` -- the right shape for indicator maths and the wrong shape
+        for money.
+
+        ``last_candle`` is that same final bar with ``Decimal`` precision
+        intact, and is the **only** admissible source for ``Signal.price`` and
+        ``Signal.timestamp``. Rebuilding a price from the frame would round-trip
+        a money value through a binary float, undoing the precision the data
+        layer deliberately preserves. Nothing will catch that if it happens:
+        pydantic coerces a ``float`` to ``Decimal`` silently, so
+        ``Signal(price=65050.1)`` is accepted without complaint. Handing the
+        strategy the authoritative candle is what makes the mistake unnecessary.
+
+        Taking the whole candle rather than just its close also lets the
+        strategy stamp the signal with the bar's ``close_time``. Without it
+        ``Signal.timestamp`` falls back to wall-clock now, which is roughly
+        right when live and completely wrong in a backtest.
         """
 
 

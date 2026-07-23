@@ -71,7 +71,7 @@ binance-trading-bot/
 │   ├── exchange/          # Binance REST adapter + WebSocket kline stream
 │   ├── data/              # Market-data provider · historical loader (stub) · repository (stub)
 │   ├── strategies/        # Strategy base + registry/factory · example strategies (stubs)
-│   ├── indicators/        # Technical-indicator functions (stub — Phase 4)
+│   ├── indicators/        # Technical indicators: SMA, EMA, RSI, MACD, Bollinger, ATR
 │   ├── risk/              # Risk manager, position sizing, exit rules (stubs)
 │   ├── execution/         # Order executor + lifecycle manager (stubs)
 │   ├── engine/            # Bar-close orchestration · mode wiring (stub)

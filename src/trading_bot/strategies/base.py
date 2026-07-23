@@ -13,7 +13,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING, Any
 
 from trading_bot.core.interfaces import Strategy
-from trading_bot.core.models import Signal
+from trading_bot.core.models import Candle, Signal
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import pandas as pd
@@ -37,7 +37,15 @@ class BaseStrategy(Strategy):
         return 1
 
     @abstractmethod
-    def generate_signal(self, symbol: str, candles: "pd.DataFrame") -> Signal | None: ...
+    def generate_signal(
+        self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
+    ) -> Signal | None:
+        """See :meth:`trading_bot.core.interfaces.Strategy.generate_signal`.
+
+        ``last_candle`` carries the final bar at full ``Decimal`` precision and
+        is the only place a subclass may take ``Signal.price`` from; the
+        ``float64`` frame is for indicator maths only.
+        """
 
     def __repr__(self) -> str:  # pragma: no cover - cosmetic
         return f"{type(self).__name__}(name={self.name!r}, params={self.params})"

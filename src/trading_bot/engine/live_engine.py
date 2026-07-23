@@ -243,11 +243,11 @@ class TradingEngine:
             )
             return
 
-        signal = self._evaluate(key, strategy)
+        signal = self._evaluate(key, strategy, candle)
         if signal is not None:
             await self._emit(signal)
 
-    def _evaluate(self, key: _Key, strategy: Strategy) -> Signal | None:
+    def _evaluate(self, key: _Key, strategy: Strategy, candle: Candle) -> Signal | None:
         """Run one strategy against the current window, containing failures.
 
         ``generate_signal`` is synchronous and runs on the event loop. That is
@@ -256,11 +256,22 @@ class TradingEngine:
         the market-data buffer relies on. If a strategy ever becomes genuinely
         slow, the frame handed to it is already a private copy, so moving this
         call to ``asyncio.to_thread`` would be safe.
+
+        ``candle`` is forwarded alongside the frame because it is the same final
+        bar carrying full ``Decimal`` precision, and it is what lets a strategy
+        put an exact price on its signal. The engine passes the candle it was
+        handed rather than re-reading ``provider.last_candle()``: the two are
+        identical here -- the provider appends before it notifies -- but only
+        the former stays correct if this call ever moves off the current stack,
+        at which point ``last_candle()`` could already have advanced a bar. The
+        engine deliberately does no other enrichment; a signal leaves the
+        strategy complete, so the backtester in a later phase gets the same
+        object from the same code without reimplementing anything.
         """
         symbol, timeframe = key
         try:
             frame = self._provider.get_dataframe(symbol, timeframe)
-            signal = strategy.generate_signal(symbol, frame)
+            signal = strategy.generate_signal(symbol, frame, last_candle=candle)
         except Exception as exc:
             self._record_failure(key, exc)
             return None

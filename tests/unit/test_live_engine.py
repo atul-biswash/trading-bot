@@ -114,13 +114,17 @@ class ScriptedStrategy(Strategy):
         self._result = result
         self._raises = raises
         self.calls: list[tuple[str, pd.DataFrame]] = []
+        self.candles_seen: list[Candle] = []
 
     @property
     def warmup_period(self) -> int:
         return self._warmup
 
-    def generate_signal(self, symbol: str, candles: pd.DataFrame) -> Signal | None:
+    def generate_signal(
+        self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
+    ) -> Signal | None:
         self.calls.append((symbol, candles))
+        self.candles_seen.append(last_candle)
         if self._raises is not None:
             raise self._raises
         return self._result
@@ -241,6 +245,26 @@ async def test_strategy_is_called_once_warmup_is_satisfied() -> None:
     assert symbol == "BTCUSDT"
     assert frame is provider.frames[("BTCUSDT", "1m")]
     assert provider.dataframe_calls == [("BTCUSDT", "1m")]
+
+
+async def test_strategy_receives_the_bar_that_just_closed() -> None:
+    """The Decimal-precision candle travels with the float frame.
+
+    The engine forwards the candle it was handed rather than re-reading
+    ``provider.last_candle()`` -- this fake returns ``None`` from that method, so
+    the test would fail outright if the engine had taken the other route. That
+    is the point: the signal's price must come from the bar that was evaluated,
+    not from whatever the buffer happens to hold by the time anyone asks.
+    """
+    strategy = ScriptedStrategy(warmup=1)
+    engine, provider, _ = build_engine(strategy)
+    await engine.start()
+
+    bar = candle(7)
+    await provider.emit(bar)
+
+    assert strategy.candles_seen == [bar]
+    assert provider.last_candle("BTCUSDT", "1m") is None
 
 
 async def test_warns_when_history_cannot_cover_warmup(
@@ -423,7 +447,9 @@ async def test_a_success_resets_the_failure_streak() -> None:
             super().__init__()
             self._n = 0
 
-        def generate_signal(self, symbol: str, candles: pd.DataFrame) -> Signal | None:
+        def generate_signal(
+            self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
+        ) -> Signal | None:
             self.calls.append((symbol, candles))
             self._n += 1
             if self._n % 3 != 0:  # fails twice, then succeeds, forever
@@ -513,13 +539,17 @@ async def test_create_builds_one_strategy_instance_per_enabled_pair(tmp_path: An
     assert engine.strategy_for("DOGEUSDT", "1m") is None
 
 
-async def test_unimplemented_stub_strategy_is_quarantined_not_fatal(
+async def test_configured_strategies_run_without_quarantine(
     tmp_path: Any, caplog: pytest.LogCaptureFixture
 ) -> None:
-    """The shipped strategy stubs raise NotImplementedError on every bar.
+    """The shipped strategies are real now, so no pair may be quarantined.
 
-    The engine must survive that, log it once loudly, and fall silent — not
-    emit a traceback per candle forever.
+    Until Phase 4 M2 the registered strategies were stubs that raised
+    ``NotImplementedError`` on every bar, and this test asserted the *opposite*
+    — that the engine survived them, logged once, and fell silent. It is kept
+    pointed at the same config-driven wiring (``TradingEngine.create`` →
+    registry → real strategy) so the transition is covered rather than deleted:
+    every bar must now be evaluated, and the quarantine path must stay unused.
     """
     from trading_bot.config.settings import get_settings
 
@@ -534,6 +564,7 @@ async def test_unimplemented_stub_strategy_is_quarantined_not_fatal(
         for index in range(6):
             await provider.emit(candle(index))
 
-    assert "Quarantining BTCUSDT/1m" in caplog.text
-    # Two failures were evaluated, then the pair went quiet.
-    assert provider.dataframe_calls == [("BTCUSDT", "1m"), ("BTCUSDT", "1m")]
+    assert "Quarantining" not in caplog.text
+    assert "NotImplementedError" not in caplog.text
+    # Every bar was evaluated; the pair never went quiet.
+    assert provider.dataframe_calls == [("BTCUSDT", "1m")] * 6
