@@ -106,8 +106,8 @@ class RsiStrategy(BaseStrategy):
     ) -> Signal | None:
         """Emit ``BUY`` or ``CLOSE`` on a threshold crossing, else ``None``.
 
-        ``None`` means "no opinion"; an explicit ``HOLD`` is never emitted, for
-        the same reason as in the crossover strategy.
+        ``None`` means "no opinion"; there is no "do nothing" action to emit
+        instead, for the same reason as in the crossover strategy.
         """
         close = close_series(candles)
         values = last_two(rsi(close, self.period))

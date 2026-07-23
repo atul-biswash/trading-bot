@@ -63,6 +63,15 @@ class StrategyNotFoundError(StrategyError):
     """No strategy is registered under the requested name."""
 
 
+class StrategyConfigError(StrategyError):
+    """A strategy's configured parameters do not match its constructor.
+
+    Raised for wrong parameter *names* (a typo in ``config.yaml``). Wrong
+    *values* under correct names raise ``ValueError`` from the strategy itself,
+    where the message can be specific about the constraint that failed.
+    """
+
+
 # --- Risk -------------------------------------------------------------------
 class RiskError(TradingBotError):
     """Base class for risk-management rejections."""

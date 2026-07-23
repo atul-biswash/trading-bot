@@ -76,12 +76,17 @@ class PositionSide(str, Enum):
 
 
 class SignalAction(str, Enum):
-    """A strategy's instruction for a single symbol on a single candle."""
+    """A strategy's instruction for a single symbol on a single candle.
+
+    There is deliberately no ``HOLD``. ``Strategy.generate_signal`` returns
+    ``None`` to mean "no opinion", and two spellings of the same state is an
+    invitation for one consumer to handle one of them and miss the other. A
+    strategy with nothing to say emits nothing at all.
+    """
 
     BUY = "BUY"      # open / add to a long
     SELL = "SELL"    # open / add to a short (spot: typically ignored)
     CLOSE = "CLOSE"  # exit any open position
-    HOLD = "HOLD"    # do nothing
 
 
 class PositionSizingMethod(str, Enum):

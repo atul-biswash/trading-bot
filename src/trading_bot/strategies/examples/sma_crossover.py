@@ -108,9 +108,9 @@ class SmaCrossoverStrategy(BaseStrategy):
         """Emit ``BUY`` on a golden cross, ``CLOSE`` on a death cross, else ``None``.
 
         ``None`` means "no opinion" and is by far the common case -- a cross is
-        rare. An explicit ``HOLD`` signal is deliberately never emitted: it would
-        wake every registered signal handler on every bar of every pair, which
-        later phases would persist one row per bar and notify on.
+        rare. There is no "do nothing" signal to emit instead: one would wake
+        every registered handler on every bar of every pair, which later phases
+        would persist a row for and notify on.
 
         ``last_candle`` is the same final bar as the frame's last row, but with
         ``Decimal`` precision intact, and is the only admissible source for the

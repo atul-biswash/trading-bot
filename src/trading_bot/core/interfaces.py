@@ -162,10 +162,10 @@ class Strategy(ABC):
         intact, and is the **only** admissible source for ``Signal.price`` and
         ``Signal.timestamp``. Rebuilding a price from the frame would round-trip
         a money value through a binary float, undoing the precision the data
-        layer deliberately preserves. Nothing will catch that if it happens:
-        pydantic coerces a ``float`` to ``Decimal`` silently, so
-        ``Signal(price=65050.1)`` is accepted without complaint. Handing the
-        strategy the authoritative candle is what makes the mistake unnecessary.
+        layer deliberately preserves. The ``Money`` field type rejects that
+        outright -- ``Signal(price=65050.1)`` raises rather than silently
+        coercing -- so handing the strategy the authoritative candle is what
+        makes the correct thing also the easy one.
 
         Taking the whole candle rather than just its close also lets the
         strategy stamp the signal with the bar's ``close_time``. Without it

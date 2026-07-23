@@ -27,14 +27,15 @@ import pytest
 from tests.unit.test_live_engine import FakeMarketDataProvider
 from trading_bot.config.models import DataConfig
 from trading_bot.core.enums import SignalAction
-from trading_bot.core.exceptions import DataError
+from trading_bot.core.exceptions import DataError, StrategyConfigError
 from trading_bot.core.interfaces import Strategy
 from trading_bot.core.models import Candle, Signal
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.indicators import rsi, sma
+from trading_bot.strategies.base import BaseStrategy
 from trading_bot.strategies.examples.rsi_strategy import RsiStrategy
 from trading_bot.strategies.examples.sma_crossover import SmaCrossoverStrategy
-from trading_bot.strategies.registry import create_strategy
+from trading_bot.strategies.registry import create_strategy, register_strategy
 
 _SYMBOL = "BTCUSDT"
 _TIMEFRAME = "1m"
@@ -183,8 +184,8 @@ def test_sma_exit_is_close_never_sell() -> None:
     """Spot has no short side; ``SELL`` would mean "open one"."""
     actions = {signal.action for _, signal in scan_signals(sma_strategy(), SMA_CLOSES)}
 
+    assert actions <= {SignalAction.BUY, SignalAction.CLOSE}
     assert SignalAction.SELL not in actions
-    assert SignalAction.HOLD not in actions
 
 
 def test_sma_flat_market_produces_nothing() -> None:
@@ -250,8 +251,8 @@ def test_rsi_is_silent_throughout_the_warmup_region() -> None:
 def test_rsi_exit_is_close_never_sell() -> None:
     actions = {signal.action for _, signal in scan_signals(rsi_strategy(), RSI_CLOSES)}
 
+    assert actions <= {SignalAction.BUY, SignalAction.CLOSE}
     assert SignalAction.SELL not in actions
-    assert SignalAction.HOLD not in actions
 
 
 def test_rsi_flat_market_produces_nothing() -> None:
@@ -459,6 +460,37 @@ def test_registry_builds_both_strategies_with_params() -> None:
     candle = make_candle(frame)
     assert crossover.generate_signal(_SYMBOL, frame, last_candle=candle) is None
     assert mean_reversion.generate_signal(_SYMBOL, frame, last_candle=candle) is None
+
+
+def test_registry_names_the_accepted_parameters_on_a_config_typo() -> None:
+    """A typo used to surface as a bare TypeError naming neither strategy nor field."""
+    with pytest.raises(StrategyConfigError) as caught:
+        create_strategy("sma_crossover", fast_perio=20, slow_period=50)
+
+    message = str(caught.value)
+    assert "sma_crossover" in message
+    assert "fast_perio" in message
+    assert "fast_period, slow_period" in message  # tells you what it wanted
+
+
+def test_a_typeerror_from_inside_a_constructor_is_not_mislabelled() -> None:
+    """Binding the signature first keeps a real bug distinguishable from a typo."""
+
+    @register_strategy("_exploding_for_test")
+    class Exploding(BaseStrategy):
+        def __init__(self, period: int = 1) -> None:
+            super().__init__(period=period)
+            raise TypeError("a genuine bug inside the constructor")
+
+        def generate_signal(
+            self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
+        ) -> Signal | None:  # pragma: no cover - never reached
+            return None
+
+    with pytest.raises(TypeError) as caught:
+        create_strategy("_exploding_for_test", period=2)
+    assert not isinstance(caught.value, StrategyConfigError)
+    assert "genuine bug" in str(caught.value)
 
 
 def test_default_warmups_fit_the_default_history_limit() -> None:
