@@ -15,14 +15,28 @@ architecture and SOLID principles.
 
 ## Status
 
-**Version 0.1.0 — Phase 2 complete.** Python **3.12+**.
+**Version 0.1.0 — Phase 3 complete.** Python **3.12+**.
 
-What works today: typed configuration (`.env` + `config.yaml`), the `Decimal`-safe
-domain model, and a fully-tested **async Binance Spot REST adapter** (balances,
-symbol info, ticker, klines, create/cancel/query orders) with retry, rate-limit
-handling, and exchange-filter compliance — verified against Binance **Testnet**.
-Everything else in *Features* below is the target set; per-feature build status is
-tracked in the [Roadmap](#roadmap-build-phases).
+What works today, verified against Binance **Testnet**:
+
+- Typed configuration (`.env` + `config.yaml`) and the `Decimal`-safe domain model.
+- **Async Binance Spot REST adapter** — balances, symbol info, ticker, klines,
+  create/cancel/query orders — with retry, rate-limit handling, and
+  exchange-filter compliance.
+- **Live WebSocket kline streaming** that delivers closed candles 24/7, with
+  capped-exponential backoff and unbounded reconnection.
+- **Market-data provider** that seeds REST history, maintains a bounded rolling
+  buffer per pair, and exposes a time-ordered `float64` OHLCV DataFrame.
+- **Trading engine** that evaluates a strategy on every bar close, gated by the
+  strategy's warmup period, with per-pair failure containment.
+
+`python -m trading_bot run` connects to Testnet and exercises the whole
+data → strategy → signal path end to end.
+
+> **The bot cannot place an order yet.** Strategies are still stubs (Phase 4), so
+> every pair quarantines after its configured error budget; risk management,
+> order execution, persistence, and notifications are not built. Per-feature
+> status is tracked in the [Roadmap](#roadmap-build-phases).
 
 ## Features
 
@@ -30,7 +44,7 @@ tracked in the [Roadmap](#roadmap-build-phases).
 today versus planned.*
 
 - Secure Binance Spot connectivity with **Testnet, Live, Paper, and Backtest** modes (Testnet is the default).
-- Real-time market data over WebSockets.
+- Real-time market data over WebSockets, with automatic reconnection.
 - Pluggable, registry-based **strategies** selected from config.
 - Comprehensive **risk management**: position sizing, stop-loss, take-profit, trailing stop, max daily loss, max open positions, per-symbol cooldown.
 - Multiple trading pairs and timeframes.
@@ -54,13 +68,13 @@ binance-trading-bot/
 │   ├── main.py            # CLI entry point (run / backtest / strategies)
 │   ├── config/            # Typed settings: .env secrets + config.yaml
 │   ├── core/              # Domain: enums, models, interfaces, exceptions
-│   ├── exchange/          # Binance REST adapter (implemented) + WebSocket (stub)
-│   ├── data/              # Market-data provider, historical loader, repository
-│   ├── strategies/        # Strategy base, registry/factory, example strategies
-│   ├── indicators/        # Technical-indicator functions (pandas/NumPy, in-house)
-│   ├── risk/              # Risk manager, position sizing, exit rules
-│   ├── execution/         # Order executor + lifecycle manager
-│   ├── engine/            # Orchestration loop and mode wiring
+│   ├── exchange/          # Binance REST adapter + WebSocket kline stream
+│   ├── data/              # Market-data provider · historical loader (stub) · repository (stub)
+│   ├── strategies/        # Strategy base + registry/factory · example strategies (stubs)
+│   ├── indicators/        # Technical-indicator functions (stub — Phase 4)
+│   ├── risk/              # Risk manager, position sizing, exit rules (stubs)
+│   ├── execution/         # Order executor + lifecycle manager (stubs)
+│   ├── engine/            # Bar-close orchestration · mode wiring (stub)
 │   ├── backtesting/       # Backtest engine, portfolio, metrics
 │   ├── paper/             # Paper-trading simulator
 │   ├── notifications/     # Notifier base + Telegram
@@ -97,6 +111,16 @@ JSON is converted to domain models by the pure functions in `exchange.models`, a
 every call is routed through a shared retry/error-translation helper so callers
 only ever see domain exceptions (`RateLimitError`, `OrderError`, …), never raw
 library or transport errors.
+
+### The `Decimal` → `float` boundary
+
+Money is `Decimal` throughout the domain — never `float`, so no accounting value
+is ever subject to binary rounding. Indicator maths, however, runs on NumPy,
+which has no Decimal fast path. `data/market_data.py` is the **single, deliberate
+place** that conversion happens, and it is one-directional: the rolling buffer
+stores full-precision `Candle` objects and only the derived DataFrame is
+`float64`. Strategies read the `float` frame; risk and execution read prices back
+through `MarketDataProvider.last_candle()`, which still returns `Decimal`.
 
 ## Getting started
 
@@ -226,6 +250,64 @@ asyncio.run(main())
 > Live trading uses the same code path but requires `mode: live` (or `BOT_MODE=live`)
 > **and** live API keys. Start on Testnet and promote deliberately.
 
+## Streaming market data and running the engine
+
+`BufferedMarketDataProvider` bridges REST history and the live WebSocket into the
+DataFrame strategies consume. `TradingEngine` sits on top and evaluates a strategy
+each time a bar closes — it does not poll.
+
+```python
+import asyncio
+
+from trading_bot.config.settings import get_settings
+from trading_bot.data.market_data import BufferedMarketDataProvider
+from trading_bot.engine.live_engine import TradingEngine
+
+
+async def main() -> None:
+    settings = get_settings()  # mode from config.yaml (default: testnet)
+
+    # --- Market data on its own -------------------------------------------
+    provider = await BufferedMarketDataProvider.create(settings)  # tracks enabled pairs
+    await provider.start()  # seeds history, then goes live
+    try:
+        df = provider.get_dataframe("BTCUSDT", "1m")
+        print(df.shape, df.index.tz, df["close"].dtype)  # (499, 5) UTC float64
+
+        # Money keeps full precision behind the float frame:
+        print(provider.last_candle("BTCUSDT", "1m").close)  # Decimal('...')
+        print(provider.is_ready("BTCUSDT", "1m", warmup_period=50))  # True
+    finally:
+        await provider.stop()
+
+    # --- Or let the engine drive it ---------------------------------------
+    engine = await TradingEngine.create(settings)  # builds provider + per-pair strategies
+
+    async def on_signal(signal) -> None:
+        print("signal:", signal.action.value, signal.symbol, signal.reason)
+
+    engine.on_signal(on_signal)  # risk + execution attach here in later phases
+    await engine.run()  # runs until SIGINT/SIGTERM or engine.request_stop()
+
+
+asyncio.run(main())
+```
+
+Relevant `config.yaml` knobs:
+
+```yaml
+data:
+  history_limit: 500        # candles seeded per pair at startup (Binance max: 1000/call)
+  buffer_size: 1000         # rolling in-memory bars per pair (must be >= history_limit)
+
+engine:
+  reconnect_max_retries: 0  # 0 = reconnect forever (recommended for 24/7)
+  max_strategy_errors: 5    # consecutive failures before a pair is quarantined
+```
+
+If a strategy's `warmup_period` exceeds `data.history_limit`, the engine warns at
+startup and that pair stays silent until enough bars have closed live.
+
 ## Running the bot
 
 ```bash
@@ -235,11 +317,12 @@ python -m trading_bot backtest            # historical replay
 python -m trading_bot strategies          # list registered strategies
 ```
 
-> **Note:** the CLI is wired, but the trading **engine**, **backtester**, and
-> **strategies** arrive in later phases (see the Roadmap). Today `run` and
-> `backtest` initialise and validate configuration, then report that the engine is
-> not yet implemented. The exchange adapter and connectivity check above are the
-> functional Phase 2 surface.
+> **What `run` does today.** It connects to Testnet, seeds history, streams live
+> candles, and evaluates strategies on each bar close. Because strategies are
+> still stubs, each pair logs a failure and is quarantined after
+> `engine.max_strategy_errors` bars — that is the expected Phase 3 output. Stop
+> with Ctrl-C; SIGINT/SIGTERM both trigger a graceful shutdown that closes the
+> WebSocket and REST connections. `backtest` remains unimplemented.
 
 ### With Docker
 
@@ -269,8 +352,16 @@ make check     # lint + type + test
 
 On Windows without make, run the tools directly, e.g. `ruff check src tests`,
 `mypy`, `pytest`. New code is developed under `mypy --strict` and `ruff`
-(`E, F, I, N, UP, B, C4, SIM, RUF`); the Phase 2 modules
-(`src/trading_bot/exchange/`, `scripts/check_testnet.py`) pass both.
+(`E, F, I, N, UP, B, C4, SIM, RUF`), and every module built so far
+(`exchange/`, `data/`, `engine/`, `config/`, `core/`, `utils/`) passes both.
+
+Both tools currently report a stable set of findings on **deliberate, locked
+patterns** in earlier scaffolding — `str`+`Enum` bases, `timezone.utc` (kept in
+preference to the `datetime.UTC` alias), quoted forward references, and pydantic
+`default_factory` under an unpinned newer mypy. Those are known and unchanged;
+the working rule is that new work adds **zero net findings**. Adding
+`plugins = ["pydantic.mypy"]` to `[tool.mypy]` clears the `default_factory`
+group if you would rather fix than freeze them.
 
 ### Tests
 
@@ -305,21 +396,32 @@ export BINANCE_TESTNET_API_SECRET="your_testnet_secret"
 pytest -m integration
 ```
 
-The integration test performs read-only calls only (ping, balances, ticker) and
-never places an order.
+The integration tests never place an order. There are three, all opt-in:
+
+| Test | What it does |
+| --- | --- |
+| `test_testnet_integration.py` | Read-only REST calls (ping, balances, ticker). |
+| `test_ws_stream_integration.py` | Subscribes to a live kline stream, waits for one closed candle. |
+| `test_market_data_integration.py` | Seeds real history, then waits for a live candle to extend the frame. |
+
+The two streaming tests wait on a 1-minute bar, so each can take up to a minute.
 
 ## Roadmap (build phases)
 
 1. **Scaffolding** — structure, config, logging, domain models, interfaces, tests. ✅
 2. **Binance connectivity** — async REST adapter (balances, symbol info, ticker, klines, orders), `Decimal`-safe response mapping, retry + rate-limit handling, exchange-filter compliance, Testnet/Live. ✅
-3. WebSocket market-data streaming. ⬅️ *next*
-4. Indicators + concrete strategies.
+3. **Market data + engine skeleton** — WebSocket kline streaming with auto-reconnect, the rolling-buffer market-data provider (`Decimal`→`float` boundary), and the bar-close trading engine with warmup gating and failure containment. ✅
+4. Indicators + concrete strategies. ⬅️ *next*
 5. Risk management (sizing + exit rules).
-6. Order execution + lifecycle.
-7. Engine orchestration (live/testnet/paper loop).
+6. Order execution + lifecycle — the first phase in which the bot can place an order.
+7. Engine completion: wire risk + execution into the loop, paper-trading mode.
 8. Backtesting engine + metrics.
 9. Persistence (SQLAlchemy) + Telegram notifications.
-10. Hardening: reconnection, monitoring, optional FastAPI health/metrics.
+10. Hardening: gap backfill, staleness watchdog, monitoring, optional FastAPI health/metrics.
+
+Phase 3 delivered the orchestration skeleton earlier than originally planned
+(it was item 7), because the market-data provider needed a consumer to be
+verifiable end to end. Item 7 is now about filling that skeleton in.
 
 ## License
 

@@ -336,17 +336,28 @@ class BufferedMarketDataProvider(MarketDataProvider):
         """Fill one buffer with REST history."""
         candles = await self._client.get_klines(symbol, timeframe, limit=self._history_limit)
         accepted = sum(1 for candle in candles if self._append((symbol, timeframe), candle))
-        rejected = len(candles) - accepted
-        if rejected:
-            # Expected to be 0 or 1: Binance returns ascending klines and the
-            # client marks a still-forming final bar, which the gate drops.
-            # Anything larger means the history came back out of order.
+
+        # A trailing still-forming bar is the normal case, not an anomaly: REST
+        # history is almost always fetched mid-bar. Warning about it would fire
+        # on every startup and teach the operator to ignore warnings, so it is
+        # separated out and only genuinely out-of-order data is escalated.
+        forming = sum(1 for candle in candles if not candle.is_closed)
+        out_of_order = len(candles) - accepted - forming
+        if out_of_order > 0:
             _log.warning(
-                "Seeding %s/%s dropped %d of %d candles (unclosed or out of order)",
+                "Seeding %s/%s dropped %d out-of-order candle(s) of %d; "
+                "history came back unsorted",
                 symbol,
                 timeframe,
-                rejected,
+                out_of_order,
                 len(candles),
+            )
+        if forming:
+            _log.debug(
+                "Ignored %d still-forming candle(s) while seeding %s/%s",
+                forming,
+                symbol,
+                timeframe,
             )
         _log.info("Seeded %s/%s with %d closed candle(s)", symbol, timeframe, accepted)
 

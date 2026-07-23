@@ -261,8 +261,8 @@ class TradingEngine:
         try:
             frame = self._provider.get_dataframe(symbol, timeframe)
             signal = strategy.generate_signal(symbol, frame)
-        except Exception:
-            self._record_failure(key)
+        except Exception as exc:
+            self._record_failure(key, exc)
             return None
 
         self._error_counts.pop(key, None)  # a success clears the streak
@@ -276,14 +276,26 @@ class TradingEngine:
             )
         return signal
 
-    def _record_failure(self, key: _Key) -> None:
-        """Log a strategy failure and quarantine the pair if it keeps failing."""
+    def _record_failure(self, key: _Key, exc: Exception) -> None:
+        """Log a strategy failure and quarantine the pair if it keeps failing.
+
+        The full traceback is logged once. Repeats of the same broken strategy
+        are logged as one-liners instead, so the eventual quarantine message is
+        not buried under identical stack traces.
+        """
         symbol, timeframe = key
         count = self._error_counts.get(key, 0) + 1
         self._error_counts[key] = count
-        _log.exception(
-            "Strategy failed for %s/%s (consecutive failure %d)", symbol, timeframe, count
-        )
+        if count == 1:
+            _log.exception("Strategy failed for %s/%s", symbol, timeframe)
+        else:
+            _log.error(
+                "Strategy failed for %s/%s (consecutive failure %d): %r",
+                symbol,
+                timeframe,
+                count,
+                exc,
+            )
         if self._max_strategy_errors and count >= self._max_strategy_errors:
             self._quarantined.add(key)
             _log.error(

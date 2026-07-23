@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import signal
 import sys
 from typing import TYPE_CHECKING
@@ -65,22 +64,44 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _install_shutdown_handlers(engine: TradingEngine) -> None:
-    """Ask the engine to stop on SIGINT/SIGTERM where the platform allows it.
+    """Route SIGINT/SIGTERM to a graceful engine shutdown on every platform.
 
-    ``add_signal_handler`` is POSIX-only — on Windows it raises
-    ``NotImplementedError``, and Ctrl-C arrives as a ``KeyboardInterrupt`` at
-    the current await instead. Both paths converge on the same clean shutdown
-    because :meth:`TradingEngine.run` stops the engine from a ``finally``.
+    ``loop.add_signal_handler`` is POSIX-only. Letting Windows fall through to
+    the default ``KeyboardInterrupt`` behaviour is not equivalent: that cancels
+    the running task, and a *second* Ctrl-C arriving while the WebSocket and
+    REST connections are closing aborts that cleanup half-way and leaks them.
+    The plain ``signal.signal`` fallback below hands off to the loop instead, so
+    both platforms take the same graceful path and repeated Ctrl-C is harmless.
+
+    ``call_soon_threadsafe`` is the one asyncio API documented as safe to call
+    from a signal handler. The logging deliberately happens in the callback it
+    schedules — which runs on the loop — because ``logging`` takes locks and is
+    not async-signal-safe.
     """
     loop = asyncio.get_running_loop()
-    for signal_name in ("SIGINT", "SIGTERM"):
-        sig = getattr(signal, signal_name, None)
+    log = get_logger(__name__)
+
+    def request_stop(signal_name: str) -> None:
+        log.info("Received %s; shutting down gracefully", signal_name)
+        engine.request_stop()
+
+    for name in ("SIGINT", "SIGTERM"):
+        sig = getattr(signal, name, None)
         if sig is None:  # pragma: no cover - platform dependent
             continue
-        # Windows raises NotImplementedError here; Ctrl-C still works via
-        # KeyboardInterrupt, which _run_engine handles.
-        with contextlib.suppress(NotImplementedError):
-            loop.add_signal_handler(sig, engine.request_stop)
+        try:
+            loop.add_signal_handler(sig, request_stop, name)
+        except NotImplementedError:  # pragma: no cover - Windows
+            def _handler(signum: int, frame: object, _name: str = name) -> None:
+                loop.call_soon_threadsafe(request_stop, _name)
+
+            try:
+                signal.signal(sig, _handler)
+            except ValueError:
+                # signal.signal() only works on the main thread; if the engine
+                # is driven from a worker thread we simply keep the default
+                # behaviour rather than failing to start.
+                log.debug("Could not install a %s handler off the main thread", name)
 
 
 async def _run_engine(settings: Settings) -> int:
@@ -88,13 +109,9 @@ async def _run_engine(settings: Settings) -> int:
     # Deferred import: the engine (and its heavy deps) load only when running.
     from trading_bot.engine.live_engine import TradingEngine
 
-    log = get_logger(__name__)
     engine = await TradingEngine.create(settings)
     _install_shutdown_handlers(engine)
-    try:
-        await engine.run()
-    except KeyboardInterrupt:  # pragma: no cover - interactive
-        log.info("Interrupted by user. Shutting down.")
+    await engine.run()
     return 0
 
 

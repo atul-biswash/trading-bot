@@ -1,0 +1,194 @@
+diff --git a/src/trading_bot/main.py b/src/trading_bot/main.py
+index 91f6feb..ef3fd4f 100644
+--- a/src/trading_bot/main.py
++++ b/src/trading_bot/main.py
+@@ -17,7 +17,6 @@ from __future__ import annotations
+ 
+ import argparse
+ import asyncio
+-import contextlib
+ import signal
+ import sys
+ from typing import TYPE_CHECKING
+@@ -65,22 +64,44 @@ def _build_parser() -> argparse.ArgumentParser:
+ 
+ 
+ def _install_shutdown_handlers(engine: TradingEngine) -> None:
+-    """Ask the engine to stop on SIGINT/SIGTERM where the platform allows it.
+-
+-    ``add_signal_handler`` is POSIX-only — on Windows it raises
+-    ``NotImplementedError``, and Ctrl-C arrives as a ``KeyboardInterrupt`` at
+-    the current await instead. Both paths converge on the same clean shutdown
+-    because :meth:`TradingEngine.run` stops the engine from a ``finally``.
++    """Route SIGINT/SIGTERM to a graceful engine shutdown on every platform.
++
++    ``loop.add_signal_handler`` is POSIX-only. Letting Windows fall through to
++    the default ``KeyboardInterrupt`` behaviour is not equivalent: that cancels
++    the running task, and a *second* Ctrl-C arriving while the WebSocket and
++    REST connections are closing aborts that cleanup half-way and leaks them.
++    The plain ``signal.signal`` fallback below hands off to the loop instead, so
++    both platforms take the same graceful path and repeated Ctrl-C is harmless.
++
++    ``call_soon_threadsafe`` is the one asyncio API documented as safe to call
++    from a signal handler. The logging deliberately happens in the callback it
++    schedules — which runs on the loop — because ``logging`` takes locks and is
++    not async-signal-safe.
+     """
+     loop = asyncio.get_running_loop()
+-    for signal_name in ("SIGINT", "SIGTERM"):
+-        sig = getattr(signal, signal_name, None)
++    log = get_logger(__name__)
++
++    def request_stop(signal_name: str) -> None:
++        log.info("Received %s; shutting down gracefully", signal_name)
++        engine.request_stop()
++
++    for name in ("SIGINT", "SIGTERM"):
++        sig = getattr(signal, name, None)
+         if sig is None:  # pragma: no cover - platform dependent
+             continue
+-        # Windows raises NotImplementedError here; Ctrl-C still works via
+-        # KeyboardInterrupt, which _run_engine handles.
+-        with contextlib.suppress(NotImplementedError):
+-            loop.add_signal_handler(sig, engine.request_stop)
++        try:
++            loop.add_signal_handler(sig, request_stop, name)
++        except NotImplementedError:  # pragma: no cover - Windows
++            def _handler(signum: int, frame: object, _name: str = name) -> None:
++                loop.call_soon_threadsafe(request_stop, _name)
++
++            try:
++                signal.signal(sig, _handler)
++            except ValueError:
++                # signal.signal() only works on the main thread; if the engine
++                # is driven from a worker thread we simply keep the default
++                # behaviour rather than failing to start.
++                log.debug("Could not install a %s handler off the main thread", name)
+ 
+ 
+ async def _run_engine(settings: Settings) -> int:
+@@ -88,15 +109,9 @@ async def _run_engine(settings: Settings) -> int:
+     # Deferred import: the engine (and its heavy deps) load only when running.
+     from trading_bot.engine.live_engine import TradingEngine
+ 
+-    log = get_logger(__name__)
+     engine = await TradingEngine.create(settings)
+     _install_shutdown_handlers(engine)
+-    try:
+-        await engine.run()
+-    except KeyboardInterrupt:  # pragma: no cover - interactive
+-        # run() has already shut the engine down in its `finally`, so this
+-        # reports a completed shutdown rather than announcing a pending one.
+-        log.info("Interrupted by user; shutdown complete.")
++    await engine.run()
+     return 0
+ 
+ 
+diff --git a/tests/unit/test_main_shutdown.py b/tests/unit/test_main_shutdown.py
+new file mode 100644
+index 0000000..01e7303
+--- /dev/null
++++ b/tests/unit/test_main_shutdown.py
+@@ -0,0 +1,102 @@
++"""Tests for the CLI's signal wiring — including the Windows fallback.
++
++``loop.add_signal_handler`` is POSIX-only, so on Windows the CLI falls back to
++``signal.signal``. That branch cannot be reached on a POSIX test runner
++naturally, so the loop method is patched to raise ``NotImplementedError`` and
++the fallback is asserted directly. This matters because the two paths are not
++interchangeable: without the fallback, Windows shuts down via task cancellation,
++and a second Ctrl-C arriving mid-cleanup aborts the close of the WebSocket and
++REST connections.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import signal
++from typing import Any
++
++import pytest
++
++from trading_bot.main import _install_shutdown_handlers
++
++
++class SpyEngine:
++    """Stands in for TradingEngine; records graceful-stop requests."""
++
++    def __init__(self) -> None:
++        self.stop_requests = 0
++
++    def request_stop(self) -> None:
++        self.stop_requests += 1
++
++
++async def test_posix_path_uses_the_loop_signal_handler() -> None:
++    engine = SpyEngine()
++    loop = asyncio.get_running_loop()
++    installed: list[Any] = []
++    original = loop.add_signal_handler
++
++    def record(sig: Any, callback: Any, *args: Any) -> None:
++        installed.append((sig, callback, args))
++
++    loop.add_signal_handler = record  # type: ignore[method-assign]
++    try:
++        _install_shutdown_handlers(engine)  # type: ignore[arg-type]
++    finally:
++        loop.add_signal_handler = original  # type: ignore[method-assign]
++
++    assert [entry[0] for entry in installed] == [signal.SIGINT, signal.SIGTERM]
++    # The callback runs on the loop, so logging inside it is safe.
++    for _sig, callback, args in installed:
++        callback(*args)
++    assert engine.stop_requests == 2
++
++
++async def test_windows_fallback_installs_a_plain_signal_handler(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """When the loop refuses, a signal.signal handler must take over."""
++    engine = SpyEngine()
++    loop = asyncio.get_running_loop()
++
++    def unsupported(*args: Any, **kwargs: Any) -> None:
++        raise NotImplementedError("Windows")
++
++    handlers: dict[Any, Any] = {}
++
++    def fake_signal(sig: Any, handler: Any) -> Any:
++        handlers[sig] = handler
++        return None
++
++    monkeypatch.setattr(loop, "add_signal_handler", unsupported)
++    monkeypatch.setattr(signal, "signal", fake_signal)
++
++    _install_shutdown_handlers(engine)  # type: ignore[arg-type]
++
++    assert set(handlers) == {signal.SIGINT, signal.SIGTERM}
++
++    # Firing the handler must not touch the engine synchronously: it schedules
++    # onto the loop, which is what makes it safe from a signal context.
++    handlers[signal.SIGINT](signal.SIGINT, None)
++    assert engine.stop_requests == 0
++    await asyncio.sleep(0)  # let the scheduled callback run
++    assert engine.stop_requests == 1
++
++
++async def test_windows_fallback_survives_a_non_main_thread(
++    monkeypatch: pytest.MonkeyPatch,
++) -> None:
++    """signal.signal() raises off the main thread; startup must not fail."""
++    engine = SpyEngine()
++    loop = asyncio.get_running_loop()
++
++    def unsupported(*args: Any, **kwargs: Any) -> None:
++        raise NotImplementedError("Windows")
++
++    def refuses(sig: Any, handler: Any) -> Any:
++        raise ValueError("signal only works in main thread")
++
++    monkeypatch.setattr(loop, "add_signal_handler", unsupported)
++    monkeypatch.setattr(signal, "signal", refuses)
++
++    _install_shutdown_handlers(engine)  # type: ignore[arg-type]  # must not raise

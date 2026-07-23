@@ -13,6 +13,7 @@ production path uses.
 
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any
 
@@ -295,6 +296,32 @@ async def test_seeding_drops_a_still_forming_final_candle() -> None:
     last = provider.last_candle("BTCUSDT", "1m")
     assert last is not None
     assert last.open_time == closed[-1].open_time
+
+
+async def test_seeding_does_not_warn_about_a_forming_final_candle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The routine case must stay quiet, or startup cries wolf on every run."""
+    closed = [rest_candle(i) for i in range(3)]
+    forming = rest_candle(3).model_copy(update={"is_closed": False})
+    provider, _, _ = build_provider({("BTCUSDT", "1m"): [*closed, forming]})
+
+    with caplog.at_level(logging.WARNING):
+        await provider.start()
+
+    assert caplog.records == []
+
+
+async def test_seeding_warns_about_genuinely_out_of_order_history(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    scrambled = [rest_candle(0), rest_candle(5), rest_candle(2)]
+    provider, _, _ = build_provider({("BTCUSDT", "1m"): scrambled})
+
+    with caplog.at_level(logging.WARNING):
+        await provider.start()
+
+    assert "dropped 1 out-of-order candle" in caplog.text
 
 
 async def test_seeding_drops_out_of_order_history() -> None:

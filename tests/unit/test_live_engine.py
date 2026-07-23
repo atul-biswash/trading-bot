@@ -383,6 +383,23 @@ async def test_strategy_exception_does_not_kill_the_engine() -> None:
     assert seen == []
 
 
+async def test_repeat_failures_log_once_with_a_traceback(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One stack trace, then one-liners — so quarantine is not buried."""
+    strategy = ScriptedStrategy(raises=RuntimeError("indicator blew up"))
+    engine, provider, _ = build_engine(strategy, max_strategy_errors=0)
+    await engine.start()
+
+    with caplog.at_level(logging.ERROR):
+        for index in range(4):
+            await provider.emit(candle(index))
+
+    with_traceback = [r for r in caplog.records if r.exc_info is not None]
+    assert len(with_traceback) == 1
+    assert "consecutive failure 4" in caplog.text
+
+
 async def test_pair_is_quarantined_after_consecutive_failures(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
