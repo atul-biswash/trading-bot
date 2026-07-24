@@ -60,6 +60,21 @@ def round_price(price: Decimal, tick_size: Decimal) -> Decimal:
     return (price / tick_size).to_integral_value(rounding=ROUND_DOWN) * tick_size
 
 
+def round_to_tick(price: Decimal, tick_size: Decimal, *, rounding: str) -> Decimal:
+    """Round ``price`` to a multiple of ``tick_size`` using ``rounding``.
+
+    ``rounding`` is a ``decimal`` rounding mode (e.g. ``ROUND_FLOOR`` /
+    ``ROUND_CEILING``). :func:`round_price` is the fixed-``ROUND_DOWN`` special
+    case used by order dispatch; protective-exit levels instead choose the
+    direction per level -- a stop rounds *toward its reference* so the realized
+    distance never exceeds the configured one -- so they call this directly. As
+    with :func:`round_price`, a non-positive ``tick_size`` is a no-op.
+    """
+    if tick_size <= 0:
+        return price
+    return (price / tick_size).to_integral_value(rounding=rounding) * tick_size
+
+
 def clamp(value: float, low: float, high: float) -> float:
     """Constrain ``value`` to the inclusive range ``[low, high]``."""
     return max(low, min(value, high))

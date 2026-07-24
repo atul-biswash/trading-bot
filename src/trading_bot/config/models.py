@@ -123,24 +123,47 @@ class PositionSizingConfig(_Model):
 
 
 class StopLossConfig(_Model):
+    """Stop-loss placement.
+
+    ``percent`` and ``atr_multiplier`` are ``Decimal``: Phase 5 M2 multiplies
+    both by money (the entry price and the ATR value respectively), so the
+    ``float`` -> ``Decimal`` conversion happens here, once, at config load -- see
+    the module docstring. ``atr_period`` stays ``int``: it is a lookback passed
+    to ``indicators.atr``, never multiplied by money.
+    """
+
     enabled: bool = True
     type: StopType = StopType.PERCENT
-    percent: float = Field(2.0, gt=0)
+    percent: Decimal = Field(Decimal("2.0"), gt=0)
     atr_period: int = Field(14, gt=0)
-    atr_multiplier: float = Field(2.0, gt=0)
+    atr_multiplier: Decimal = Field(Decimal("2.0"), gt=0)
 
 
 class TakeProfitConfig(_Model):
+    """Take-profit placement.
+
+    ``percent`` multiplies the entry price and ``rr_multiple`` multiplies the
+    stop distance -- both money arithmetic in Phase 5 M2 -- so both are
+    ``Decimal`` from config load. See the module docstring.
+    """
+
     enabled: bool = True
     type: TakeProfitType = TakeProfitType.PERCENT
-    percent: float = Field(4.0, gt=0)
-    rr_multiple: float = Field(2.0, gt=0)
+    percent: Decimal = Field(Decimal("4.0"), gt=0)
+    rr_multiple: Decimal = Field(Decimal("2.0"), gt=0)
 
 
 class TrailingStopConfig(_Model):
+    """Trailing-stop placement.
+
+    ``activation_percent`` and ``trail_percent`` are multiplied by the position's
+    high-water mark (money) in Phase 5 M2, so both become ``Decimal`` at config
+    load. See the module docstring.
+    """
+
     enabled: bool = False
-    activation_percent: float = Field(1.0, gt=0)
-    trail_percent: float = Field(1.0, gt=0)
+    activation_percent: Decimal = Field(Decimal("1.0"), gt=0)
+    trail_percent: Decimal = Field(Decimal("1.0"), gt=0)
 
 
 class RiskLimitsConfig(_Model):
@@ -164,6 +187,39 @@ class RiskConfig(_Model):
     take_profit: TakeProfitConfig = Field(default_factory=TakeProfitConfig)
     trailing_stop: TrailingStopConfig = Field(default_factory=TrailingStopConfig)
     limits: RiskLimitsConfig = Field(default_factory=RiskLimitsConfig)
+
+    @model_validator(mode="after")
+    def _check_stop_distance_is_available(self) -> RiskConfig:
+        """Reject config that multiplies a stop distance a disabled stop never gives.
+
+        Both an ``rr`` take-profit and ``risk_per_trade`` sizing derive their size
+        from the stop distance; with ``stop_loss.enabled`` false there is no such
+        distance. Catching it here fails fast at startup with a clear message,
+        rather than raising on the first signal hours into a run. The runtime
+        checks in ``risk.rules`` / ``risk.position_sizing`` stay as defence in
+        depth -- a caller can pass ``stop_price``/``stop_distance`` directly,
+        bypassing config entirely.
+        """
+        if (
+            self.take_profit.enabled
+            and self.take_profit.type is TakeProfitType.RR
+            and not self.stop_loss.enabled
+        ):
+            raise ValueError(
+                "take_profit.type='rr' sizes the target from the stop distance, but "
+                "stop_loss.enabled is false -- enable stop_loss or use "
+                "take_profit.type='percent'"
+            )
+        if (
+            self.position_sizing.method is PositionSizingMethod.RISK_PER_TRADE
+            and not self.stop_loss.enabled
+        ):
+            raise ValueError(
+                "position_sizing.method='risk_per_trade' sizes from the stop distance, "
+                "but stop_loss.enabled is false -- enable stop_loss or choose another "
+                "sizing method"
+            )
+        return self
 
 
 class BacktestConfig(_Model):
