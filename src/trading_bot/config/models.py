@@ -188,6 +188,39 @@ class RiskConfig(_Model):
     trailing_stop: TrailingStopConfig = Field(default_factory=TrailingStopConfig)
     limits: RiskLimitsConfig = Field(default_factory=RiskLimitsConfig)
 
+    @model_validator(mode="after")
+    def _check_stop_distance_is_available(self) -> RiskConfig:
+        """Reject config that multiplies a stop distance a disabled stop never gives.
+
+        Both an ``rr`` take-profit and ``risk_per_trade`` sizing derive their size
+        from the stop distance; with ``stop_loss.enabled`` false there is no such
+        distance. Catching it here fails fast at startup with a clear message,
+        rather than raising on the first signal hours into a run. The runtime
+        checks in ``risk.rules`` / ``risk.position_sizing`` stay as defence in
+        depth -- a caller can pass ``stop_price``/``stop_distance`` directly,
+        bypassing config entirely.
+        """
+        if (
+            self.take_profit.enabled
+            and self.take_profit.type is TakeProfitType.RR
+            and not self.stop_loss.enabled
+        ):
+            raise ValueError(
+                "take_profit.type='rr' sizes the target from the stop distance, but "
+                "stop_loss.enabled is false -- enable stop_loss or use "
+                "take_profit.type='percent'"
+            )
+        if (
+            self.position_sizing.method is PositionSizingMethod.RISK_PER_TRADE
+            and not self.stop_loss.enabled
+        ):
+            raise ValueError(
+                "position_sizing.method='risk_per_trade' sizes from the stop distance, "
+                "but stop_loss.enabled is false -- enable stop_loss or choose another "
+                "sizing method"
+            )
+        return self
+
 
 class BacktestConfig(_Model):
     start_date: str

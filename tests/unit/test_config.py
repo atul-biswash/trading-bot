@@ -8,12 +8,14 @@ from pathlib import Path
 import pytest
 
 from trading_bot.config.models import (
+    PositionSizingConfig,
+    RiskConfig,
     StopLossConfig,
     TakeProfitConfig,
     TrailingStopConfig,
 )
 from trading_bot.config.settings import get_settings
-from trading_bot.core.enums import TradingMode
+from trading_bot.core.enums import PositionSizingMethod, TakeProfitType, TradingMode
 from trading_bot.core.exceptions import ConfigError
 
 
@@ -115,3 +117,38 @@ class TestExitConfigDecimalBoundary:
                 TakeProfitConfig(rr_multiple=bad)
             with pytest.raises(ValueError, match="trail_percent"):
                 TrailingStopConfig(trail_percent=bad)
+
+
+class TestRiskConfigCoherence:
+    """A stop distance that a disabled stop-loss never produces is rejected at
+    load, not hours later on the first signal."""
+
+    def test_defaults_are_coherent(self) -> None:
+        RiskConfig()  # stop enabled, take-profit percent, fixed_fraction sizing
+
+    def test_rr_take_profit_without_a_stop_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="take_profit"):
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(type=TakeProfitType.RR),
+            )
+
+    def test_risk_per_trade_sizing_without_a_stop_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="risk_per_trade"):
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                position_sizing=PositionSizingConfig(method=PositionSizingMethod.RISK_PER_TRADE),
+            )
+
+    def test_rr_take_profit_with_a_stop_is_allowed(self) -> None:
+        RiskConfig(
+            stop_loss=StopLossConfig(enabled=True),
+            take_profit=TakeProfitConfig(type=TakeProfitType.RR),
+        )
+
+    def test_percent_take_profit_without_a_stop_is_allowed(self) -> None:
+        """A percent target needs no stop distance, so disabling the stop is fine."""
+        RiskConfig(
+            stop_loss=StopLossConfig(enabled=False),
+            take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
+        )
