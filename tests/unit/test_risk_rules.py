@@ -279,14 +279,16 @@ class TestAtrBoundary:
                 atr_value=float("inf"),
             )
 
-    def test_non_positive_atr_is_rejected(self) -> None:
-        with pytest.raises(ValueError, match="must be > 0"):
+    def test_negative_atr_is_rejected(self) -> None:
+        """ATR is non-negative by construction, so a negative value is corrupt
+        data (a wrong-sided stop otherwise), not a market state."""
+        with pytest.raises(ValueError, match="must not be negative"):
             stop_loss_level(
                 side=LONG,
                 entry_price=D("100"),
                 config=StopLossConfig(type=StopType.ATR, atr_multiplier=D("2.0")),
                 tick_size=D("0.01"),
-                atr_value=0.0,
+                atr_value=-1.0,
             )
 
     def test_atr_type_without_a_value_raises(self) -> None:
@@ -565,16 +567,81 @@ class TestParameterValidation:
                 side=PositionSide.FLAT, entry_price=D("100"), config=StopLossConfig(), tick_size=D("0.01")
             )
 
-    def test_sub_tick_stop_distance_raises(self) -> None:
-        """A 0.001% stop on a 0.01 tick collapses onto entry -- a config/symbol
-        mismatch that must surface, not a silent zero-distance stop."""
-        with pytest.raises(ValueError, match="smaller than one tick"):
+
+# --------------------------------------------------------------------------
+# Sub-tick distance is a representable outcome, not a raise
+# --------------------------------------------------------------------------
+class TestSubTickDistanceIsRepresentable:
+    """A configured distance below one tick is a transient low-volatility state,
+    not a config error: the level comes back None with a reason, and no exception
+    reaches the engine's consecutive-failure quarantine.
+    """
+
+    def test_percent_stop_below_one_tick_returns_none(self) -> None:
+        """0.001% of 100 is 0.001, below a 0.01 tick -- no placeable stop."""
+        assert (
             stop_loss_level(
                 side=LONG,
                 entry_price=D("100"),
                 config=StopLossConfig(type=StopType.PERCENT, percent=D("0.001")),
                 tick_size=D("0.01"),
             )
+            is None
+        )
+
+    def test_atr_stop_below_one_tick_returns_none(self) -> None:
+        """A tiny ATR (a quiet market) puts the stop distance below one tick."""
+        assert (
+            stop_loss_level(
+                side=LONG,
+                entry_price=D("100"),
+                config=StopLossConfig(type=StopType.ATR, atr_multiplier=D("2.0")),
+                tick_size=D("0.01"),
+                atr_value=0.001,
+            )
+            is None
+        )
+
+    def test_zero_atr_returns_none_not_raise(self) -> None:
+        """A flat/frozen window (ATR 0) is the extreme of the same quiet state."""
+        assert (
+            stop_loss_level(
+                side=LONG,
+                entry_price=D("100"),
+                config=StopLossConfig(type=StopType.ATR, atr_multiplier=D("2.0")),
+                tick_size=D("0.01"),
+                atr_value=0.0,
+            )
+            is None
+        )
+
+    def test_protective_levels_carry_a_none_stop_and_a_reason(self) -> None:
+        levels = compute_protective_levels(
+            symbol="BTCUSDT",
+            side=LONG,
+            entry_price=D("100"),
+            stop_loss=StopLossConfig(type=StopType.PERCENT, percent=D("0.001")),
+            take_profit=TakeProfitConfig(enabled=False),
+            tick_size=D("0.01"),
+        )
+        assert levels.stop_loss is None
+        assert levels.stop_distance is None
+        assert "below one tick" in levels.basis
+
+    def test_rr_target_is_representable_when_the_stop_is_sub_tick(self) -> None:
+        """A sub-tick stop leaves no distance, so the rr target is None too --
+        computed on the signal path without raising."""
+        levels = compute_protective_levels(
+            symbol="BTCUSDT",
+            side=LONG,
+            entry_price=D("100"),
+            stop_loss=StopLossConfig(type=StopType.PERCENT, percent=D("0.001")),
+            take_profit=TakeProfitConfig(type=TakeProfitType.RR, rr_multiple=D("2.0")),
+            tick_size=D("0.01"),
+        )
+        assert levels.stop_loss is None
+        assert levels.take_profit is None
+        assert "rr target" in levels.basis
 
 
 # --------------------------------------------------------------------------

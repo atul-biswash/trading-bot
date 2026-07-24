@@ -30,9 +30,14 @@ strictly positive, so ``ROUND_CEILING``/``ROUND_FLOOR`` are the number-line
 directions "up"/"down".
 
 If the configured distance is smaller than one tick, rounding toward the
-reference collapses the level onto (or past) it; that is a symbol/config mismatch
-the operator must fix, so it raises rather than silently placing a zero-distance
-or wrong-sided stop.
+reference collapses the level onto (or past) it. That is treated as "no placeable
+level this bar": the level comes back ``None`` with a reason, never an exception.
+An ATR stop distance can fall below a tick simply because volatility went quiet
+-- a transient, self-healing state -- and this path runs on *every* signal, so a
+raise would reach ``TradingEngine``'s consecutive-failure quarantine and disable
+a healthy pair, the very failure ``SizingDecision`` exists to avoid. Genuinely
+incoherent *inputs* still raise: a non-positive price or a non-finite ATR value
+is a contract violation, not a market state.
 
 The ATR ``float`` -> ``Decimal`` boundary
 -----------------------------------------
@@ -230,25 +235,27 @@ def _round_toward(level: Decimal, reference: Decimal, tick_size: Decimal) -> Dec
     return round_to_tick(level, tick_size, rounding=rounding)
 
 
-def _protective_level(
-    raw: Decimal, reference: Decimal, tick_size: Decimal, *, kind: str
-) -> Decimal:
-    """Round ``raw`` toward ``reference`` and keep it strictly on ``raw``'s side.
+def _protective_level(raw: Decimal, reference: Decimal, tick_size: Decimal) -> Decimal | None:
+    """Round ``raw`` toward ``reference``, keeping it strictly on ``raw``'s side.
 
-    Raises when the configured distance is sub-tick and rounding collapses the
-    level onto (or past) the reference -- a symbol/config mismatch, not a
-    transient market state, so it must be surfaced rather than placed.
+    Returns ``None`` when the configured distance is sub-tick and rounding
+    collapses the level onto (or past) the reference: "no placeable level this
+    bar", a representable outcome the caller turns into a ``None`` level carrying
+    a reason -- never an exception (see the module docstring).
     """
     below = raw < reference
     level = _round_toward(raw, reference, tick_size)
     on_protective_side = level < reference if below else level > reference
-    if not on_protective_side:
-        raise ValueError(
-            f"{kind} distance is smaller than one tick ({tick_size}): rounding {raw} "
-            f"toward {reference} collapses it onto the reference. Widen the {kind} "
-            f"or trade a symbol with a finer tick."
-        )
-    return level
+    return level if on_protective_side else None
+
+
+def _level_basis(enabled: bool, level: Decimal | None, kind: str, tick_size: Decimal) -> str:
+    """One human-readable clause explaining a level's presence or absence."""
+    if not enabled:
+        return "disabled"
+    if level is not None:
+        return f"{kind} {level}"
+    return f"distance below one tick ({tick_size}); none placed"
 
 
 def _atr_to_decimal(value: float) -> Decimal:
@@ -258,10 +265,15 @@ def _atr_to_decimal(value: float) -> Decimal:
             f"ATR value must be finite, got {value!r} -- ATR is NaN during warmup, so "
             "this is a contract violation (the caller sized/entered before ATR was ready)"
         )
-    if value <= 0:
-        raise ValueError(f"ATR value must be > 0 to form a stop distance, got {value!r}")
+    if value < 0:
+        raise ValueError(
+            f"ATR value must not be negative, got {value!r} -- ATR is non-negative by "
+            "construction, so a negative is corrupt data, not a market state"
+        )
     # str(float(x)) is the shortest round-tripping repr for both float and
-    # numpy.float64; Decimal(x) would instead inject the full binary expansion.
+    # numpy.float64; Decimal(x) would instead inject the full binary expansion. A
+    # zero ATR (a flat/frozen window) yields a zero distance, which the caller
+    # then treats as "no placeable stop" -- a quiet-market state, not an error.
     return Decimal(str(float(value)))
 
 
@@ -290,10 +302,13 @@ def stop_loss_level(
     tick_size: Decimal,
     atr_value: float | None = None,
 ) -> Decimal | None:
-    """Tick-aligned stop-loss price, or ``None`` if stop-loss is disabled.
+    """Tick-aligned stop-loss price, or ``None`` if there is no placeable stop.
 
-    The level is rounded *toward entry*, so ``|entry - level|`` never exceeds the
-    configured distance. ``atr_value`` is required only for ``type='atr'``.
+    ``None`` means either stop-loss is disabled or the configured distance is
+    sub-tick this bar (a transient low-volatility state -- see the module
+    docstring). The level is rounded *toward entry*, so ``|entry - level|`` never
+    exceeds the configured distance. ``atr_value`` is required only for
+    ``type='atr'``.
     """
     if not config.enabled:
         return None
@@ -302,7 +317,7 @@ def stop_loss_level(
 
     distance = _stop_distance(config, entry_price, atr_value)
     raw = entry_price - distance if side is PositionSide.LONG else entry_price + distance
-    return _protective_level(raw, entry_price, tick_size, kind="stop-loss")
+    return _protective_level(raw, entry_price, tick_size)
 
 
 def take_profit_level(
@@ -313,10 +328,12 @@ def take_profit_level(
     tick_size: Decimal,
     stop_distance: Decimal | None = None,
 ) -> Decimal | None:
-    """Tick-aligned take-profit price, or ``None`` if take-profit is disabled.
+    """Tick-aligned take-profit price, or ``None`` if there is no placeable target.
 
+    ``None`` means take-profit is disabled or the configured distance is sub-tick.
     ``rr`` targets are ``rr_multiple`` times ``stop_distance``, which must
-    therefore be supplied (compute the stop first). The level rounds *toward
+    therefore be supplied (compute the stop first); passing ``stop_distance=None``
+    for an ``rr`` target is a caller error and raises. The level rounds *toward
     entry*, so the realized reward is never overstated.
     """
     if not config.enabled:
@@ -338,7 +355,7 @@ def take_profit_level(
         raise ValueError(f"Unsupported take_profit type: {config.type!r}")
 
     raw = entry_price + distance if side is PositionSide.LONG else entry_price - distance
-    return _protective_level(raw, entry_price, tick_size, kind="take-profit")
+    return _protective_level(raw, entry_price, tick_size)
 
 
 def compute_protective_levels(
@@ -354,8 +371,9 @@ def compute_protective_levels(
     """Compute stop-loss and take-profit for a new position, in the fixed order.
 
     Stop first (its realized distance feeds an ``rr`` take-profit), then the
-    take-profit. Returns a :class:`ProtectiveLevels`; either level may be
-    ``None`` when its rule is disabled in config.
+    take-profit. Returns a :class:`ProtectiveLevels`; either level may be ``None``
+    when its rule is disabled or its configured distance is sub-tick this bar. The
+    ``basis`` string records why each level is present or absent.
     """
     _require_directional(side)
     _require_positive("entry_price", entry_price)
@@ -364,16 +382,31 @@ def compute_protective_levels(
         side=side, entry_price=entry_price, config=stop_loss, tick_size=tick_size, atr_value=atr_value
     )
     distance = None if stop is None else abs(entry_price - stop)
-    target = take_profit_level(
-        side=side,
-        entry_price=entry_price,
-        config=take_profit,
-        tick_size=tick_size,
-        stop_distance=distance,
+
+    # An rr target multiplies the stop distance; when the stop is unavailable this
+    # bar (disabled, or sub-tick), the target is equally unavailable. Represent it
+    # as no target rather than letting take_profit_level raise on a live signal.
+    rr_without_distance = (
+        take_profit.enabled and take_profit.type is TakeProfitType.RR and distance is None
+    )
+    target = (
+        None
+        if rr_without_distance
+        else take_profit_level(
+            side=side,
+            entry_price=entry_price,
+            config=take_profit,
+            tick_size=tick_size,
+            stop_distance=distance,
+        )
     )
 
-    stop_desc = f"{stop_loss.type.value} {stop}" if stop is not None else "disabled"
-    tp_desc = f"{take_profit.type.value} {target}" if target is not None else "disabled"
+    stop_desc = _level_basis(stop_loss.enabled, stop, stop_loss.type.value, tick_size)
+    tp_desc = (
+        "no stop distance for rr target"
+        if rr_without_distance
+        else _level_basis(take_profit.enabled, target, take_profit.type.value, tick_size)
+    )
     basis = f"{side.value} @ {entry_price}: stop-loss {stop_desc}, take-profit {tp_desc}"
     return ProtectiveLevels(
         symbol=symbol,
@@ -433,7 +466,18 @@ def update_trailing_stop(
         )
 
     factor = _ONE - config.trail_percent / _PERCENT if long else _ONE + config.trail_percent / _PERCENT
-    candidate = _protective_level(mark * factor, mark, tick_size, kind="trailing-stop")
+    candidate = _protective_level(mark * factor, mark, tick_size)
+    if candidate is None:
+        # Trail distance is sub-tick this bar (very low volatility or a very tight
+        # trail). Keep the previous stop rather than tightening on a rounding
+        # artefact; the trail resumes once the distance clears one tick. Still
+        # activated -- activation is sticky.
+        return TrailingStopUpdate(
+            high_water=mark,
+            stop_price=existing_stop,
+            activated=True,
+            detail=f"trail distance below one tick ({tick_size}); stop unchanged",
+        )
     if existing_stop is None:
         new_stop = candidate
     else:
