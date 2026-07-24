@@ -123,24 +123,47 @@ class PositionSizingConfig(_Model):
 
 
 class StopLossConfig(_Model):
+    """Stop-loss placement.
+
+    ``percent`` and ``atr_multiplier`` are ``Decimal``: Phase 5 M2 multiplies
+    both by money (the entry price and the ATR value respectively), so the
+    ``float`` -> ``Decimal`` conversion happens here, once, at config load -- see
+    the module docstring. ``atr_period`` stays ``int``: it is a lookback passed
+    to ``indicators.atr``, never multiplied by money.
+    """
+
     enabled: bool = True
     type: StopType = StopType.PERCENT
-    percent: float = Field(2.0, gt=0)
+    percent: Decimal = Field(Decimal("2.0"), gt=0)
     atr_period: int = Field(14, gt=0)
-    atr_multiplier: float = Field(2.0, gt=0)
+    atr_multiplier: Decimal = Field(Decimal("2.0"), gt=0)
 
 
 class TakeProfitConfig(_Model):
+    """Take-profit placement.
+
+    ``percent`` multiplies the entry price and ``rr_multiple`` multiplies the
+    stop distance -- both money arithmetic in Phase 5 M2 -- so both are
+    ``Decimal`` from config load. See the module docstring.
+    """
+
     enabled: bool = True
     type: TakeProfitType = TakeProfitType.PERCENT
-    percent: float = Field(4.0, gt=0)
-    rr_multiple: float = Field(2.0, gt=0)
+    percent: Decimal = Field(Decimal("4.0"), gt=0)
+    rr_multiple: Decimal = Field(Decimal("2.0"), gt=0)
 
 
 class TrailingStopConfig(_Model):
+    """Trailing-stop placement.
+
+    ``activation_percent`` and ``trail_percent`` are multiplied by the position's
+    high-water mark (money) in Phase 5 M2, so both become ``Decimal`` at config
+    load. See the module docstring.
+    """
+
     enabled: bool = False
-    activation_percent: float = Field(1.0, gt=0)
-    trail_percent: float = Field(1.0, gt=0)
+    activation_percent: Decimal = Field(Decimal("1.0"), gt=0)
+    trail_percent: Decimal = Field(Decimal("1.0"), gt=0)
 
 
 class RiskLimitsConfig(_Model):

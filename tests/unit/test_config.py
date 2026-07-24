@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+from trading_bot.config.models import (
+    StopLossConfig,
+    TakeProfitConfig,
+    TrailingStopConfig,
+)
 from trading_bot.config.settings import get_settings
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.exceptions import ConfigError
@@ -65,3 +71,47 @@ def test_invalid_config_rejected(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError):
         get_settings(str(bad))
+
+
+class TestExitConfigDecimalBoundary:
+    """The Phase 5 M2 exit-rule config fields convert ``float`` -> ``Decimal``
+    exactly, once, here -- the same boundary already proven for position sizing.
+
+    A YAML value such as ``1.005`` must become ``Decimal("1.005")``, not the
+    binary expansion ``Decimal(1.005)`` gives, because these fields are later
+    multiplied by money and ``Decimal * float`` raises ``TypeError``.
+    """
+
+    def test_stop_loss_fields_are_exact_decimals(self) -> None:
+        # 1.005 is *not* exactly representable in binary, so it exposes the leak.
+        from_yaml = 1.005  # what yaml.safe_load hands pydantic
+        cfg = StopLossConfig(percent=2.0, atr_multiplier=from_yaml)
+        assert cfg.percent == Decimal("2.0")
+        assert cfg.atr_multiplier == Decimal("1.005")
+        assert isinstance(cfg.percent, Decimal)
+        assert isinstance(cfg.atr_multiplier, Decimal)
+        assert cfg.atr_multiplier != Decimal(from_yaml)  # the binary-float leak avoided
+        assert isinstance(cfg.atr_period, int)  # a lookback, deliberately not Decimal
+
+    def test_take_profit_fields_are_exact_decimals(self) -> None:
+        cfg = TakeProfitConfig(percent=4.0, rr_multiple=1.5)
+        assert cfg.percent == Decimal("4.0")
+        assert cfg.rr_multiple == Decimal("1.5")
+        assert isinstance(cfg.percent, Decimal)
+        assert isinstance(cfg.rr_multiple, Decimal)
+
+    def test_trailing_stop_fields_are_exact_decimals(self) -> None:
+        cfg = TrailingStopConfig(activation_percent=1.0, trail_percent=0.75)
+        assert cfg.activation_percent == Decimal("1.0")
+        assert cfg.trail_percent == Decimal("0.75")
+        assert isinstance(cfg.activation_percent, Decimal)
+        assert isinstance(cfg.trail_percent, Decimal)
+
+    def test_positivity_constraints_survive_the_type_change(self) -> None:
+        for bad in (0, -0.1):
+            with pytest.raises(ValueError, match="percent"):
+                StopLossConfig(percent=bad)
+            with pytest.raises(ValueError, match="rr_multiple"):
+                TakeProfitConfig(rr_multiple=bad)
+            with pytest.raises(ValueError, match="trail_percent"):
+                TrailingStopConfig(trail_percent=bad)
