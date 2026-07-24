@@ -1,0 +1,13 @@
+# Line endings are pinned by the repository, not left to each machine's
+# `core.autocrlf` setting.
+#
+# Without this, a patch authored on Linux arrives as LF and is silently
+# rewritten to CRLF on checkout for Windows contributors. The result applies
+# and runs correctly but no longer matches its own checksums, so byte
+# verification of a patch fails for a reason that has nothing to do with the
+# patch. Pinning it here makes the tree reproducible on every machine and
+# retires the "preserve each file's existing line endings" rule, which only
+# ever existed because the tree was inconsistent.
+#
+# `text=auto` still leaves genuinely binary files untouched.
+* text=auto eol=lf

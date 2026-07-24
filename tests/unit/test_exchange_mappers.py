@@ -6,7 +6,6 @@ no mocking. Money assertions use ``Decimal`` throughout.
 
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -463,5 +462,5 @@ def test_connection_error_maps_to_connection_error() -> None:
 
 def test_timeout_maps_to_connection_error() -> None:
     assert isinstance(
-        m.translate_binance_error(asyncio.TimeoutError()), ExchangeConnectionError
+        m.translate_binance_error(TimeoutError()), ExchangeConnectionError
     )

@@ -43,11 +43,14 @@ strategy:
     slow_period: 50
 
 risk:
+  # Values marked (exact) are parsed as Decimal, not float: 0.02 means exactly
+  # 2/100, never 0.02000000000000000041. They are multiplied by account equity,
+  # so the distinction is real money. Write them as plain decimals.
   position_sizing:
     method: fixed_fraction    # fixed_fraction | fixed_amount | risk_per_trade
-    fraction: 0.02            # 2% of equity per position (fixed_fraction)
-    fixed_amount: 100.0       # quote units per position (fixed_amount)
-    risk_per_trade: 0.01      # 1% of equity risked, sized from stop distance (risk_per_trade)
+    fraction: 0.02            # (exact) 2% of equity per position (fixed_fraction)
+    fixed_amount: 100.0       # (exact) quote units per position (fixed_amount)
+    risk_per_trade: 0.01      # (exact) 1% of equity risked, sized from stop distance
   stop_loss:
     enabled: true
     type: percent             # percent | atr
@@ -66,7 +69,7 @@ risk:
   limits:
     max_open_positions: 3
     max_daily_loss_percent: 5.0     # halt new entries after this daily drawdown
-    max_position_size_percent: 20.0 # cap any single position vs. equity
+    max_position_size_percent: 20.0 # (exact) cap any single position vs. equity
     cooldown_minutes: 15            # per-symbol pause after a stop-out
 
 backtesting:

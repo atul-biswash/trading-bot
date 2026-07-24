@@ -6,6 +6,6 @@ the strategies become discoverable through the registry.
 
 from __future__ import annotations
 
-from trading_bot.strategies.examples import rsi_strategy, sma_crossover  # noqa: F401
+from trading_bot.strategies.examples import rsi_strategy, sma_crossover
 
-__all__ = ["sma_crossover", "rsi_strategy"]
+__all__ = ["rsi_strategy", "sma_crossover"]

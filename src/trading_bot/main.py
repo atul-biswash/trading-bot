@@ -115,7 +115,7 @@ async def _run_engine(settings: Settings) -> int:
     return 0
 
 
-def _cmd_run(settings, mode_override: TradingMode | None) -> int:
+def _cmd_run(settings: Settings, mode_override: TradingMode | None) -> int:
     log = get_logger(__name__)
     if mode_override is not None:
         settings.mode = mode_override
@@ -131,7 +131,7 @@ def _cmd_run(settings, mode_override: TradingMode | None) -> int:
     return asyncio.run(_run_engine(settings))
 
 
-def _cmd_backtest(settings) -> int:
+def _cmd_backtest(settings: Settings) -> int:
     log = get_logger(__name__)
     log.info("Backtest window: %s -> %s", settings.config.backtesting.start_date,
              settings.config.backtesting.end_date)

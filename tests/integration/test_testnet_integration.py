@@ -13,25 +13,19 @@ order. The mode is pinned to TESTNET here regardless of configuration.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 
+from tests.integration.credentials import HAS_CREDENTIALS, SKIP_REASON
 from trading_bot.config.settings import get_settings
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.models import Balance
 from trading_bot.exchange import BinanceClient
 
-_HAS_KEYS = bool(
-    os.getenv("BINANCE_TESTNET_API_KEY") or os.getenv("BINANCE_API_KEY")
-)
-
 pytestmark = [
     pytest.mark.integration,
     pytest.mark.skipif(
-        not _HAS_KEYS,
-        reason="Set BINANCE_TESTNET_API_KEY/SECRET (or BINANCE_API_KEY/SECRET) "
-        "to run testnet integration tests.",
+        not HAS_CREDENTIALS,
+        reason=SKIP_REASON,
     ),
 ]
 

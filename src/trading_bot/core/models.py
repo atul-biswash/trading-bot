@@ -16,12 +16,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
-
-
-def _utcnow() -> datetime:
-    """Timezone-aware UTC now (used as a pydantic default factory)."""
-    return datetime.now(timezone.utc)
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
 
 from trading_bot.core.enums import (
     OrderSide,
@@ -30,6 +25,11 @@ from trading_bot.core.enums import (
     PositionSide,
     SignalAction,
 )
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (used as a pydantic default factory)."""
+    return datetime.now(timezone.utc)
 
 
 def _reject_float(value: object) -> object:
@@ -186,6 +186,61 @@ class Position(BaseModel):
         if self.side is PositionSide.SHORT:
             return (self.entry_price - price) * self.quantity
         return Decimal(0)
+
+
+class SizingDecision(_Frozen):
+    """How much to trade -- or, when the answer is nothing, why.
+
+    Returned by :meth:`trading_bot.core.interfaces.RiskManager.size_position`.
+
+    A quantity of zero is a **normal, expected** outcome, not an error: an
+    account too small to clear a symbol's ``min_notional`` produces one on every
+    signal, and raising there would turn a routine condition into exception
+    control flow in the hot path. Returning a bare ``Decimal(0)`` instead would
+    be silent -- arithmetic carries it forward happily. Wrapping the number is
+    what makes zero safe: a caller cannot reach ``quantity`` without also seeing
+    ``reason``, and cannot hand this object to an ``OrderRequest`` by accident.
+
+    ``requested_quantity`` is the size the configured method asked for, before
+    the ``max_position_size_percent`` cap and before lot rounding. It is what
+    answers an operator's first question -- "how close were we?" -- numerically,
+    rather than by parsing it back out of ``reason``.
+    """
+
+    symbol: str
+    quantity: Money            # exchange-compliant; Decimal(0) means "do not trade"
+    requested_quantity: Money  # pre-cap, pre-rounding size, for diagnostics
+    reason: str
+
+    @property
+    def is_tradeable(self) -> bool:
+        """``True`` when this decision authorises a non-zero order."""
+        return self.quantity > 0
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> SizingDecision:
+        """Enforce the three things a caller is entitled to assume.
+
+        The last one is the load-bearing check: sizing may cap and may round,
+        and both only ever *reduce*. Asserting ``quantity <= requested_quantity``
+        here makes "sizing never rounds up" a property of the type rather than a
+        claim in a docstring -- a rounding bug that inflated an order would fail
+        at construction instead of at the exchange.
+        """
+        if self.quantity < 0:
+            raise ValueError(f"quantity must not be negative, got {self.quantity}")
+        if self.requested_quantity < 0:
+            raise ValueError(
+                f"requested_quantity must not be negative, got {self.requested_quantity}"
+            )
+        if not self.reason:
+            raise ValueError("reason must explain the decision, including a zero quantity")
+        if self.quantity > self.requested_quantity:
+            raise ValueError(
+                f"quantity {self.quantity} exceeds requested {self.requested_quantity}; "
+                "sizing may cap and round down, never up"
+            )
+        return self
 
 
 class Signal(_Frozen):

@@ -77,7 +77,7 @@ class RiskError(TradingBotError):
     """Base class for risk-management rejections."""
 
 
-class RiskLimitExceeded(RiskError):
+class RiskLimitExceeded(RiskError):  # noqa: N818 - established public name
     """A configured risk limit blocked an action."""
 
 

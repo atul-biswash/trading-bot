@@ -3,9 +3,36 @@
 Parsing YAML into these pydantic models means a malformed or nonsensical config
 fails fast at startup with a clear error, instead of surfacing as an
 ``AttributeError`` deep inside the trading loop.
+
+The ``float`` -> ``Decimal`` boundary
+------------------------------------
+YAML has no decimal type: ``fraction: 0.02`` arrives as a binary ``float``. Any
+config value that is later *multiplied by money* is therefore declared
+``Decimal`` here, and pydantic performs the conversion at validation time using
+the value's shortest repr -- ``0.02`` becomes ``Decimal("0.02")``, not
+``Decimal("0.020000000000000000416...")`` as ``Decimal(0.02)`` would give.
+
+Doing it here rather than at each use site means the domain never sees a float
+it would have to convert, and there is no ``Decimal(str(x))`` scattered through
+the risk layer. Note the deliberate asymmetry with ``core.models.Money``: this
+is the one place a float is *allowed* to become a Decimal, precisely because it
+is the system's edge; inside the domain the ``Money`` guard rejects floats
+outright.
+
+Fields are converted at the milestone that first does money arithmetic with
+them, not speculatively -- converting a field before the code that consumes it
+exists would mean guessing its semantics. Fields still typed ``float`` below are
+ones no money arithmetic touches yet.
+
+**Caveat for any future "dump the effective config" feature:** ``yaml.safe_dump``
+cannot represent a ``Decimal`` (it raises ``RepresenterError``). Config is
+load-only today, so nothing is affected; a dumper would need an explicit
+representer or ``model_dump(mode="json")``.
 """
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -81,10 +108,18 @@ class StrategyConfig(_Model):
 
 
 class PositionSizingConfig(_Model):
+    """Inputs to ``risk.position_sizing``. All three are money arithmetic.
+
+    ``fraction`` and ``risk_per_trade`` multiply equity; ``fixed_amount`` *is* a
+    quote-currency amount. All are ``Decimal`` so sizing never has to convert:
+    ``Decimal("10000") * 0.02`` raises ``TypeError`` in Python, which is exactly
+    the error this typing removes.
+    """
+
     method: PositionSizingMethod = PositionSizingMethod.FIXED_FRACTION
-    fraction: float = Field(0.02, gt=0, le=1)
-    fixed_amount: float = Field(100.0, gt=0)
-    risk_per_trade: float = Field(0.01, gt=0, le=1)
+    fraction: Decimal = Field(Decimal("0.02"), gt=0, le=1)
+    fixed_amount: Decimal = Field(Decimal("100"), gt=0)
+    risk_per_trade: Decimal = Field(Decimal("0.01"), gt=0, le=1)
 
 
 class StopLossConfig(_Model):
@@ -109,9 +144,17 @@ class TrailingStopConfig(_Model):
 
 
 class RiskLimitsConfig(_Model):
+    """Hard limits applied on top of whatever the sizing method asks for.
+
+    ``max_position_size_percent`` is ``Decimal`` because position sizing caps
+    against equity with it today. ``max_daily_loss_percent`` is still ``float``:
+    the daily-loss tracker that multiplies it by equity does not exist yet, and
+    converting it now would be typing ahead of the code.
+    """
+
     max_open_positions: int = Field(3, ge=1)
     max_daily_loss_percent: float = Field(5.0, gt=0)
-    max_position_size_percent: float = Field(20.0, gt=0, le=100)
+    max_position_size_percent: Decimal = Field(Decimal("20"), gt=0, le=100)
     cooldown_minutes: int = Field(15, ge=0)
 
 

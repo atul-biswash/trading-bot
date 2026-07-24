@@ -34,7 +34,15 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B", "C4", "SIM", "RUF"]
-ignore = ["E501"]  # line length handled by the formatter
+ignore = [
+    "E501",   # line length is the formatter's job
+    # ---- Deliberate, project-wide style decisions. Not defects; suppressed so
+    # ---- that `ruff check` reads zero and a real finding cannot hide in noise.
+    "UP017",  # `timezone.utc`, not the `datetime.UTC` alias (locked decision)
+    "UP042",  # `str, Enum`, not `StrEnum`: StrEnum changes `str(member)` from
+              # "OrderSide.BUY" to "BUY", which would silently alter log output
+              # and any persisted string. Revisit deliberately, not by autofix.
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["trading_bot"]
@@ -43,6 +51,9 @@ known-first-party = ["trading_bot"]
 # mypy: static typing
 # --------------------------------------------------------------------------
 [tool.mypy]
+# The pydantic plugin teaches mypy how `Field(default_factory=Model)` is typed.
+# Without it mypy reports 10 false positives against correct pydantic code.
+plugins = ["pydantic.mypy"]
 python_version = "3.12"
 packages = ["trading_bot"]
 mypy_path = "src"

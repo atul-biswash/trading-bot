@@ -116,7 +116,7 @@ def get_settings(config_path: str | None = None) -> Settings:
     The path is taken from the ``config_path`` argument, then the
     ``BOT_CONFIG_PATH`` env var, then :data:`DEFAULT_CONFIG_PATH`.
     """
-    path = config_path or os.getenv("BOT_CONFIG_PATH", DEFAULT_CONFIG_PATH)
+    path: str | Path = config_path or os.getenv("BOT_CONFIG_PATH") or DEFAULT_CONFIG_PATH
     config = _load_yaml_config(path)
     secrets = Secrets()
     return Settings(config=config, secrets=secrets)

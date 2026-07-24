@@ -9,6 +9,7 @@ changes to the engine (Open for extension, closed for modification).
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from trading_bot.core.exceptions import StrategyConfigError, StrategyNotFoundError
@@ -16,13 +17,13 @@ from trading_bot.core.exceptions import StrategyConfigError, StrategyNotFoundErr
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.strategies.base import BaseStrategy
 
-_REGISTRY: dict[str, type["BaseStrategy"]] = {}
+_REGISTRY: dict[str, type[BaseStrategy]] = {}
 
 
-def register_strategy(name: str):
+def register_strategy(name: str) -> Callable[[type[BaseStrategy]], type[BaseStrategy]]:
     """Class decorator that registers a strategy under ``name``."""
 
-    def decorator(cls: type["BaseStrategy"]) -> type["BaseStrategy"]:
+    def decorator(cls: type[BaseStrategy]) -> type[BaseStrategy]:
         key = name.lower()
         if key in _REGISTRY:
             raise ValueError(f"Strategy already registered: {name!r}")
@@ -33,7 +34,7 @@ def register_strategy(name: str):
     return decorator
 
 
-def create_strategy(name: str, **params: Any) -> "BaseStrategy":
+def create_strategy(name: str, **params: Any) -> BaseStrategy:
     """Instantiate the strategy registered under ``name`` with ``params``."""
     # Import examples so their decorators run and populate the registry.
     from trading_bot.strategies import examples  # noqa: F401

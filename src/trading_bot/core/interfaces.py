@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
+from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from trading_bot.core.models import (
@@ -21,6 +22,7 @@ from trading_bot.core.models import (
     Order,
     OrderRequest,
     Signal,
+    SizingDecision,
     SymbolInfo,
     Ticker,
 )
@@ -178,11 +180,47 @@ class RiskManager(ABC):
     """Vets signals and sizes positions against configured limits."""
 
     @abstractmethod
-    def size_position(self, signal: Signal, *, equity, price, stop_price=None): ...
+    def size_position(
+        self,
+        signal: Signal,
+        *,
+        equity: Decimal,
+        price: Decimal,
+        stop_price: Decimal | None = None,
+    ) -> SizingDecision:
+        """Return how much of ``signal.symbol`` to trade, or why nothing will be.
+
+        ``equity`` is **total portfolio value in the quote currency** -- free
+        quote balance plus the mark-to-market value of open positions -- not
+        free balance alone. The distinction is the difference between "2% of
+        equity per position" meaning a stable size and meaning one that shrinks
+        as capital deploys. A caller must therefore *separately* confirm that
+        free balance covers the resulting order.
+
+        ``price`` is the entry reference, normally ``signal.price``, which is an
+        exact ``Decimal`` taken from the closed candle the signal was computed
+        on. ``stop_price`` is required only by the ``risk_per_trade`` method,
+        which sizes from the distance between entry and stop.
+
+        Returning a :class:`~trading_bot.core.models.SizingDecision` rather than
+        a bare quantity is deliberate: "the account is too small for this
+        symbol" is a routine outcome that must carry its reason to the operator,
+        not an exception and not a silent zero.
+        """
 
     @abstractmethod
-    def approve(self, signal: Signal, *, portfolio) -> bool:
-        """Return ``True`` if acting on ``signal`` respects all risk limits."""
+    def approve(self, signal: Signal, *, portfolio) -> bool:  # type: ignore[no-untyped-def]
+        """Return ``True`` if acting on ``signal`` respects all risk limits.
+
+        ``portfolio`` is deliberately unannotated until the portfolio type
+        exists; typing it here would mean inventing that shape ahead of the code
+        that owns it.
+
+        The ``type: ignore`` above is self-removing rather than permanent:
+        ``warn_unused_ignores`` is enabled, so the moment the portfolio phase
+        annotates this parameter, mypy will flag the ignore as unused and force
+        it to be deleted. The suppression cannot outlive its reason.
+        """
 
 
 class OrderExecutor(ABC):
