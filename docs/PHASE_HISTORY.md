@@ -163,6 +163,104 @@ Result: **373 passed · mypy 0 · ruff 0.**
 
 ---
 
+## Phase 5 M2 — Protective exit rules
+
+`risk/rules.py`: pure functions that compute a position's protective levels and
+decide when it should exit. Also the six `StopLossConfig` / `TakeProfitConfig` /
+`TrailingStopConfig` percent-and-multiplier fields converted `float`→`Decimal`
+(the milestone that first multiplies them by money), a directional `round_to_tick`
+helper, and a `RiskConfig` load-time coherence validator.
+
+```python
+def stop_loss_level(*, side, entry_price, config, tick_size, atr_value=None) -> Decimal | None
+def take_profit_level(*, side, entry_price, config, tick_size, stop_distance=None) -> Decimal | None
+def compute_protective_levels(*, symbol, side, entry_price, stop_loss, take_profit,
+                              tick_size, atr_value=None) -> ProtectiveLevels
+def update_trailing_stop(*, side, entry_price, price, high_water, existing_stop,
+                         config, tick_size) -> TrailingStopUpdate
+def should_exit(*, position, price) -> ExitDecision | None
+```
+
+Decisions and their reasoning:
+
+- **A stop rounds toward its reference; a take-profit rounds toward entry.**
+  `round_price`'s unconditional `ROUND_DOWN` is correct for at most one side of a
+  level — a long stop rounded *down* (away from entry) widens the realised stop
+  past what `risk_per_trade` sizing divided by, silently breaching the risk
+  budget. So every level rounds so its realised distance can only *shrink*: the
+  initial stop toward entry, the trailing stop toward the high-water mark, the
+  take-profit toward entry (reward never overstated). One helper, `_round_toward`,
+  over a new `round_to_tick(rounding=...)`; `round_price` is left untouched
+  because order dispatch relies on its `ROUND_DOWN`. Modes are
+  `ROUND_CEILING` / `ROUND_FLOOR` (prices are strictly positive). *Rejected:*
+  rounding the trailing stop *away* from price — it lets realised give-back exceed
+  the configured `trail_percent`, the mirror of the risk-budget breach, so it
+  folds under the same "toward the reference" rule instead.
+
+- **`_atr_to_decimal` is the second `float`→`Decimal` boundary** (the first is
+  config load). `atr()` is float64; a stop price is `Money`, which rejects
+  `float` / `numpy.float64`. The conversion is `Decimal(str(float(x)))` — the
+  shortest round-tripping repr, the same principle config load uses, not the
+  binary expansion `Decimal(x)` injects. It stays **private to `rules.py`**: a
+  public `float`→`Decimal` converter is a Money-guard-defeating tool, and the ATR
+  value is the one runtime statistic that legitimately needs one. The residual
+  float error is orders of magnitude below the tick, which the directional
+  rounding then dominates — a precision funnel, not a leak.
+
+- **`rules.py` takes a scalar ATR value, not a DataFrame** — keeps pandas out of
+  the risk layer and every test a plain-`Decimal` call. Intended M3 bridge: the
+  manager holds a `MarketDataProvider` reference and passes `atr(...).iloc[-1]`.
+  *Rejected:* ATR in `Signal.metadata` (the strategy would own a *risk*-config
+  period, and metadata is deliberately non-load-bearing) and a changed port
+  (over-engineering for one indicator).
+
+- **Order is stop → realised distance → size (M1) → take-profit**, enforced by
+  the types: `take_profit_level` requires `stop_distance` for an `rr` target, so
+  it cannot be computed before the stop.
+
+- **The trailing stop is the only stateful rule and is kept pure.** Its
+  high-water mark lives on `Position` (`highest_price` / `lowest_price`);
+  `update_trailing_stop` returns the new mark and level for the caller to store.
+  Monotonicity — `max` for a long, `min` for a short — makes "never moves against
+  the position" a property of the code, not a comment.
+
+- **A sub-tick protective distance is representable, not an error.** When the
+  configured distance is below one tick, rounding toward the reference collapses
+  the level onto it; `_protective_level` returns `None` ("no placeable level this
+  bar") and the reason lands in `ProtectiveLevels.basis`. An ATR distance can go
+  sub-tick simply because volatility went quiet — transient and self-healing —
+  and this path runs on *every* signal, so raising would reach the engine's
+  consecutive-failure quarantine and disable a healthy pair (the failure
+  "insufficient data is not an error" already forbids). This *overruled* an
+  initial design that raised. Genuinely incoherent *inputs* still raise:
+  non-positive price, non-finite ATR, and negative ATR (impossible by
+  construction). A zero ATR is the extreme of the quiet-market state and flows to
+  a `None` stop.
+
+- **Frozen, `Money`-typed result objects** — `ProtectiveLevels`,
+  `TrailingStopUpdate`, `ExitDecision` — mirror `SizingDecision`: "no level built
+  from a float" is structural, and both "disabled" and "no placeable level" stay
+  representable. The primitive `stop_loss_level` / `take_profit_level` return a
+  bare `Decimal | None`; the reason is composed once, in the orchestrator.
+
+- **`should_exit` is the pure predicate; acting on it is M3.** It returns which
+  rule fired (an `ExitReason`, richer than a bool) — an operator must know whether
+  a stop, a trailing stop or a target closed the position. A stop beats the
+  take-profit when a single price triggers both, reported at the stop level (the
+  worst fill). It evaluates a *single* price, so M3 decides deliberately whether
+  to feed the bar's close or its high/low.
+
+- **`RiskConfig` gains a load-time coherence validator.** An `rr` take-profit or
+  `risk_per_trade` sizing with `stop_loss.enabled = False` multiplies a stop
+  distance a disabled stop never produces; the validator rejects both at startup
+  instead of on the first signal hours later. The runtime raises in `rules` /
+  `position_sizing` stay as defence in depth — a caller can bypass config.
+
+75 tests in `tests/unit/test_risk_rules.py` (plus config-coherence and
+`round_to_tick` tests), exact `Decimal` assertions.
+
+---
+
 ## Known open items
 
 - Tool versions are unpinned (`ruff>=0.3.0`, `mypy>=1.8.0`). Now that the gate

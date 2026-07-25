@@ -50,11 +50,15 @@ arithmetic needs a deliberate conversion boundary.
 indicator maths runs on NumPy. `last_candle()` returns full `Decimal` precision.
 Anything needing a price takes it from the candle, never the frame.
 
-**The reverse boundary (`float`→`Decimal`) is config load**, done once by
-pydantic. Rule: *a config field becomes `Decimal` at the milestone that first
-multiplies it by money.* Never scatter `Decimal(str(x))` through business logic.
-Note the deliberate asymmetry: config is where a float is *allowed* to become a
-Decimal; the domain is where it is forbidden.
+**The `float`→`Decimal` boundaries are two, both named and singular.** The
+primary is config load, done once by pydantic — *a config field becomes `Decimal`
+at the milestone that first multiplies it by money.* The second is
+`risk/rules.py::_atr_to_decimal`, for the ATR value: a runtime float64 market
+statistic (indicator maths runs on NumPy) that a stop price needs as `Decimal`.
+Both are single, tested functions using the shortest-repr form — never scatter
+`Decimal(str(x))` ad-hoc through business logic. Note the deliberate asymmetry:
+these edges are where a float is *allowed* to become a Decimal; the domain is
+where it is forbidden.
 
 ---
 
@@ -129,8 +133,25 @@ src/trading_bot/
   trade" is routine, not exceptional. `_enforce` stays as an independent last
   line of defence.
 - "No trade" is a **frozen value object carrying its reason**, never a bare
-  `Decimal(0)`, `None`, or an exception. See `SizingDecision`.
+  `Decimal(0)`, `None`, or an exception. See `SizingDecision`. Protective results
+  follow suit: frozen, `Money`-typed `ProtectiveLevels` / `TrailingStopUpdate` /
+  `ExitDecision`.
 - `equity` means **total portfolio value in quote currency**, not free balance.
+- **A protective level rounds toward its reference** so its realised distance can
+  only shrink — the initial stop toward entry (realised loss ≤ the
+  `risk_per_trade` budget), the trailing stop toward the high-water mark, the
+  take-profit toward entry. Uses `round_to_tick` (`ROUND_CEILING` / `ROUND_FLOOR`);
+  `round_price` keeps `ROUND_DOWN` for order dispatch.
+- **A sub-tick protective distance is representable, not a raise** — the level is
+  `None` with its reason in `ProtectiveLevels.basis`. A stop can go sub-tick from
+  a quiet market (transient) and the path runs every signal, so a raise would hit
+  the engine quarantine. Only incoherent *inputs* raise (non-positive price,
+  non-finite or negative ATR).
+- **The trailing stop is pure**: its high-water mark lives on `Position`;
+  `update_trailing_stop` returns the new level, and `max` / `min` make "never
+  moves against the position" a code property. `should_exit` is a pure predicate
+  returning which rule fired (a stop beats the take-profit on one price); acting
+  on it is M3.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -166,8 +187,8 @@ src/trading_bot/
 ## Quality gates — hard zero
 
 ```bash
-pytest                      # 373 passed  (370 unit + 3 opt-in Testnet integration)
-pytest -m "not integration" # 370 passed  — use this for fast iteration
+pytest                      # 460 passed  (457 unit + 3 opt-in Testnet integration)
+pytest -m "not integration" # 457 passed  — use this for fast iteration
 mypy                        # Success: no issues found in 54 source files
 ruff check src tests        # All checks passed!
 make check                  # all three
@@ -209,5 +230,6 @@ renames) in **separate commits** from semantic ones. Never mix them.
 
 ## Current state
 
-Phases 1–4 complete. Phase 5 M1 (position sizing) complete. Tooling cleanup
-complete. See `docs/NEXT_MILESTONE.md` for what is in flight.
+Phases 1–4 complete. Phase 5 M1 (position sizing) and M2 (protective exit rules)
+complete. Tooling cleanup complete. See `docs/NEXT_MILESTONE.md` for what is in
+flight.
