@@ -21,11 +21,13 @@ from trading_bot.core.models import (
     Candle,
     Order,
     OrderRequest,
+    RiskDecision,
     Signal,
     SizingDecision,
     SymbolInfo,
     Ticker,
 )
+from trading_bot.core.portfolio import Portfolio
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import pandas as pd
@@ -209,17 +211,25 @@ class RiskManager(ABC):
         """
 
     @abstractmethod
-    def approve(self, signal: Signal, *, portfolio) -> bool:  # type: ignore[no-untyped-def]
-        """Return ``True`` if acting on ``signal`` respects all risk limits.
+    def approve(self, signal: Signal, *, portfolio: Portfolio) -> RiskDecision:
+        """Vet ``signal`` against the configured risk limits.
 
-        ``portfolio`` is deliberately unannotated until the portfolio type
-        exists; typing it here would mean inventing that shape ahead of the code
-        that owns it.
+        ``portfolio`` supplies every fact the limits are evaluated against --
+        open positions, free balance, the day's realised P&L, per-symbol
+        cooldowns -- so this stays a pure function of its arguments and the
+        clock. It is read, never mutated: recording an entry or an exit belongs
+        to whoever actually places the order.
 
-        The ``type: ignore`` above is self-removing rather than permanent:
-        ``warn_unused_ignores`` is enabled, so the moment the portfolio phase
-        annotates this parameter, mypy will flag the ignore as unused and force
-        it to be deleted. The suppression cannot outlive its reason.
+        Returns a :class:`~trading_bot.core.models.RiskDecision` rather than a
+        ``bool``. The reason is the one that produced ``SizingDecision`` and
+        ``ProtectiveLevels``: a refusal that cannot say *which* limit fired
+        leaves an operator staring at a silent bot with no way to tell a
+        daily-loss halt from a position cap. ``True``/``False`` was the
+        placeholder that made this method typeable before the portfolio type
+        existed; both halves of that placeholder are now gone.
+
+        This vets *entries*. An exit must always be permitted -- a limit that
+        could trap an open position would be a risk rule that creates risk.
         """
 
 

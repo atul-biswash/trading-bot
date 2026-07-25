@@ -23,6 +23,7 @@ from trading_bot.core.enums import (
     OrderStatus,
     OrderType,
     PositionSide,
+    RiskRule,
     SignalAction,
 )
 
@@ -239,6 +240,40 @@ class SizingDecision(_Frozen):
             raise ValueError(
                 f"quantity {self.quantity} exceeds requested {self.requested_quantity}; "
                 "sizing may cap and round down, never up"
+            )
+        return self
+
+
+class RiskDecision(_Frozen):
+    """Whether acting on a signal respects the configured risk limits -- and if
+    not, which rule refused it.
+
+    Returned by :meth:`trading_bot.core.interfaces.RiskManager.approve`, which
+    returned a bare ``bool`` until Phase 5 M3. The change applies the same rule
+    :class:`SizingDecision` and ``ProtectiveLevels`` already follow: "no trade"
+    is a frozen value object carrying its reason, never a bare sentinel. A
+    ``False`` tells an operator that the bot will not enter; it cannot tell them
+    the account is halted for the day rather than merely at its position cap,
+    and those two demand completely different responses.
+
+    ``rule`` is set on refusal and ``None`` on approval, so the two fields
+    cannot drift: a rejection always names the rule that fired, enforced below
+    rather than asserted in a docstring.
+    """
+
+    symbol: str
+    approved: bool
+    reason: str
+    rule: RiskRule | None = None
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> RiskDecision:
+        if not self.reason:
+            raise ValueError("reason must explain the decision, including an approval")
+        if self.approved != (self.rule is None):
+            raise ValueError(
+                f"approved={self.approved} contradicts rule={self.rule!r}; a refusal "
+                "must name the rule that fired and an approval must name none"
             )
         return self
 
