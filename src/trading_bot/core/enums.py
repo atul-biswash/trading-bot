@@ -89,6 +89,29 @@ class SignalAction(str, Enum):
     CLOSE = "CLOSE"  # exit any open position
 
 
+class RiskRule(str, Enum):
+    """Which risk rule refused a signal, reported by ``RiskManager.approve``.
+
+    Richer than a boolean for the same reason :class:`SignalAction` has no
+    ``HOLD``: an operator staring at a bot that stopped entering needs to know
+    *which* limit is holding it back, and "False" cannot say. It names only the
+    rules :meth:`~trading_bot.core.interfaces.RiskManager.approve` itself
+    evaluates -- sizing and protective-level refusals carry their own reasons on
+    ``SizingDecision`` / ``ProtectiveLevels``.
+
+    The first two are portfolio-wide states in which *no* entry is acceptable;
+    the middle two are facts about one symbol; the last is the portfolio-wide
+    count, which only applies to a genuinely new position.
+    """
+
+    NO_MARK_PRICE = "no_mark_price"          # an open position cannot be valued
+    NO_EQUITY = "no_equity"                  # equity is not strictly positive
+    DAILY_LOSS_HALT = "daily_loss_halt"      # realised loss today breached the cap
+    ALREADY_IN_POSITION = "already_in_position"
+    COOLDOWN = "cooldown"                    # symbol still cooling down after an exit
+    MAX_OPEN_POSITIONS = "max_open_positions"
+
+
 class PositionSizingMethod(str, Enum):
     FIXED_FRACTION = "fixed_fraction"
     FIXED_AMOUNT = "fixed_amount"

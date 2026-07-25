@@ -170,13 +170,17 @@ class RiskLimitsConfig(_Model):
     """Hard limits applied on top of whatever the sizing method asks for.
 
     ``max_position_size_percent`` is ``Decimal`` because position sizing caps
-    against equity with it today. ``max_daily_loss_percent`` is still ``float``:
-    the daily-loss tracker that multiplies it by equity does not exist yet, and
-    converting it now would be typing ahead of the code.
+    against equity with it. ``max_daily_loss_percent`` joins it as ``Decimal``
+    in Phase 5 M3: the daily-loss tracker multiplies it by equity to derive the
+    halt threshold, which is money arithmetic, and ``Decimal * float`` raises
+    ``TypeError`` -- the error this typing removes.
+
+    ``max_open_positions`` and ``cooldown_minutes`` stay ``int``. One is a count
+    and the other a duration; neither is ever multiplied by money.
     """
 
     max_open_positions: int = Field(3, ge=1)
-    max_daily_loss_percent: float = Field(5.0, gt=0)
+    max_daily_loss_percent: Decimal = Field(Decimal("5.0"), gt=0)
     max_position_size_percent: Decimal = Field(Decimal("20"), gt=0, le=100)
     cooldown_minutes: int = Field(15, ge=0)
 
