@@ -28,7 +28,9 @@ therefore already has a home, which is why the risk rules can stay pure.
   symbol-info cache.
 - `exchange/binance_client.py` — `BinanceClient` over `AsyncClient`, with
   `enforce_filters` and an async `create(settings)` factory.
-- `scripts/check_testnet.py` — connectivity smoke check.
+- `scripts/check_testnet.py` — connectivity smoke check. `scripts/download_data.py`
+  landed alongside it as the historical-kline fetcher the backtesting phase will
+  use; it is not exercised by any phase built so far.
 
 `_enforce` **raises** `OrderError` on `min_qty` / `min_notional` violations. That
 raising behaviour is load-bearing for the risk layer's design (see Phase 5 M1).
@@ -74,8 +76,11 @@ Port change: `generate_signal(symbol, candles, *, last_candle: Candle)` — the
 strategy copies an exact `Decimal` instead of rebuilding one from the float
 frame, and stamps `Signal.timestamp` from `candle.close_time`.
 
-**M2 follow-ups** — the `Money` type began enforcing `Decimal` on all 33 money
-fields (floats and `numpy.float64` now raise rather than coerce);
+**M2 follow-ups** — the `Money` type began enforcing `Decimal` on all money
+fields (33 of them at the time; floats and `numpy.float64` raise rather than
+coerce). The count has grown with every phase since — it is recorded here as a
+fact about *this* milestone, not a running total, and is deliberately not
+restated anywhere in this document.
 `SignalAction.HOLD` was removed; `StrategyConfigError` was added to name the
 accepted parameters when `config.yaml` has a typo.
 
@@ -229,13 +234,24 @@ Decisions and their reasoning:
   the level onto it; `_protective_level` returns `None` ("no placeable level this
   bar") and the reason lands in `ProtectiveLevels.basis`. An ATR distance can go
   sub-tick simply because volatility went quiet — transient and self-healing —
-  and this path runs on *every* signal, so raising would reach the engine's
-  consecutive-failure quarantine and disable a healthy pair (the failure
-  "insufficient data is not an error" already forbids). This *overruled* an
-  initial design that raised. Genuinely incoherent *inputs* still raise:
+  and this path runs on *every* signal. This *overruled* an initial design that
+  raised. Genuinely incoherent *inputs* still raise:
   non-positive price, non-finite ATR, and negative ATR (impossible by
   construction). A zero ATR is the extreme of the quiet-market state and flows to
   a `None` stop.
+
+  > **Corrected in M3.** As written at the time, this bullet justified itself by
+  > saying a raise "would reach the engine's consecutive-failure quarantine and
+  > disable a healthy pair". That was wrong, and wrong in the direction that
+  > matters: quarantine counts **strategy** failures only —
+  > `TradingEngine._record_failure` is reached from `_evaluate` and nowhere else
+  > — while these rules run under a *signal handler*, whose exceptions `_emit`
+  > catches, logs and steps over. A raise here would therefore not disable the
+  > pair loudly; it would log a traceback every bar while the bot went on looking
+  > healthy. The decision stands, but on a **stronger** premise than it was made
+  > on: the alternative was never "loud shutdown", it was "silent bleeding". The
+  > Phase 3 M4 entry above already described the three isolation layers
+  > correctly; only this bullet drew the wrong inference from them.
 
 - **Frozen, `Money`-typed result objects** — `ProtectiveLevels`,
   `TrailingStopUpdate`, `ExitDecision` — mirror `SizingDecision`: "no level built
@@ -261,11 +277,223 @@ Decisions and their reasoning:
 
 ---
 
+## Phase 5 M3 — Risk manager and portfolio
+
+`core/portfolio.py` (`Portfolio`), `core/models.py` (`RiskDecision`),
+`core/enums.py` (`RiskRule`), and `risk/manager.py` — the concrete `RiskManager`
+that composes M1 and M2 into the live decision path. Also
+`max_daily_loss_percent` converted `float`→`Decimal` (the milestone that first
+multiplies it by money).
+
+```python
+class RiskManager:
+    def approve(self, signal, *, portfolio) -> RiskDecision          # port
+    def size_position(self, signal, *, equity, price,
+                      stop_price=None) -> SizingDecision             # port
+    def evaluate(self, signal, *, portfolio) -> RiskAssessment       # the composed path
+    def check_exit(self, position, candle) -> ExitDecision | None
+    def advance_trailing_stop(self, position, candle) -> TrailingStopUpdate | None
+```
+
+The pipeline: **preconditions → equity → approve → ATR → levels → stop gate →
+size → affordability → intent.** The order is forced, not chosen —
+`risk_per_trade` sizes from the stop distance, an `rr` take-profit multiplies the
+same distance, and an ATR stop needs a statistic that does not exist during
+warmup.
+
+Decisions and their reasoning:
+
+- **State lives on `Portfolio`; policy lives on `RiskManager`.** The manager owns
+  configuration, a market-data reference, per-pair exchange filters and a clock;
+  the account state it reasons about arrives per call. That keeps the manager
+  reconstructible after a restart, gives persistence one object to serialise
+  instead of reaching into a risk component, and lets backtest and paper reuse
+  one ledger. *Rejected:* holding positions and the limit ledger on the manager —
+  it makes the manager stateful, un-restartable, and forces a second ledger for
+  backtest.
+
+- **`Portfolio` is mutable, and lives in `core/`.** Mutable by the rule that
+  already makes `Position` mutable: value objects are frozen, things that
+  accumulate over a run's life are not. A frozen per-signal snapshot would also
+  have nowhere to record "cooldown started at T", which is a write. It lives in
+  `core/` because `core/interfaces.py` must reference it, and `core/` is the
+  innermost layer.
+
+- **`validate_assignment=True` on `Portfolio` — and then on `Position`.** Plain
+  pydantic models validate at *construction only*, so `portfolio.free_quote = 1.5`
+  would slip a binary float past the `Money` guard on a mutable model. Adding it
+  to `Portfolio` exposed that `Position` — mutable since Phase 1, and the one
+  domain object written to on **every bar** — had the same hole, so it was closed
+  in the same milestone. The leak path there is concrete rather than theoretical:
+  the trailing stop is advanced from NumPy-derived market data, and
+  `numpy.float64` is a `float` subclass. Guarding birth but not mutation had
+  protected the less exposed half.
+
+  An audit of every pydantic model in the package found `Position` was the only
+  unguarded one in `core/`. Five `config/models.py` classes are also unguarded on
+  assignment, and were deliberately left that way: their fields are plain
+  `Decimal` rather than `Money`, and config is **loaded once from YAML and never
+  mutated at runtime**, so there is no write for a guard to intercept. (An earlier
+  draft of this reasoning claimed a corrupted config field would "fail loudly at
+  the first `Decimal * float`". That is false and was not the reason: `Decimal`
+  compares against `float` silently, and `update_trailing_stop` consumes
+  `activation_percent` by comparison — `move_pct < config.activation_percent` —
+  which would not raise. Immutability after load is the whole argument.)
+
+- **Where a cross-field invariant would go, if one is ever needed.**
+  `advance_trailing_stop` writes `highest_price` and `trailing_stop` in two
+  statements, so with `validate_assignment` on, a future
+  `model_validator(mode="after")` on `Position` would fire against the
+  intermediate state. The recorded fix is to collapse those writes into a single
+  method **on `Position`**, not to relax the validator to tolerate the halfway
+  state — an invariant that accepts the halfway position is not an invariant, and
+  a tolerant one would also accept a trailing stop that had genuinely drifted from
+  its high-water mark.
+
+- **Nothing in `Portfolio` reads a clock.** Every time-dependent method takes
+  `now` explicitly; only the manager holds the injected `Clock`. That keeps the
+  ledger a pure function of its inputs and makes the daily-loss and cooldown
+  tests hermetic with no patching. Naive `datetime`s are rejected rather than
+  assumed UTC — guessing a timezone is how a day boundary silently moves by
+  hours.
+
+- **`equity(marks)` takes mark prices per call.** Holding a `MarketDataProvider`
+  on `Portfolio` would be an import cycle (`core.interfaces` imports the module)
+  and would hide I/O behind an attribute read. A missing mark *raises* — equity
+  is the denominator of every sizing and daily-loss decision, so defaulting to
+  the entry price or to zero would silently misstate it. The manager checks
+  first and converts the condition into a `RiskRule.NO_MARK_PRICE` refusal, so
+  the raise stays a contract violation rather than a market state.
+
+- **The daily-loss threshold is a percentage of *current* equity.** A deliberate
+  approximation with a known direction: after a 5% loss equity is 95% of where it
+  started, so a 5% cap sits at 4.75% of the original and the halt fires
+  marginally **early**. Early is the correct direction for a loss limit.
+  *Rejected:* exact start-of-day equity — it requires the ledger to be handed
+  mark prices at the day roll, which can fall when no signal is in flight, and
+  the alternative approximation errs *late*. The day rolls **lazily**, on read as
+  well as on write: a scheduled reset would leave a bot that trades nothing
+  overnight carrying yesterday's halt into a new day with nothing to poke it.
+
+- **`approve` returns `RiskDecision`, not `bool`** — the port changed. Same rule
+  `SizingDecision` and `ProtectiveLevels` already follow: "no trade" is a frozen
+  object carrying its reason. A `False` cannot tell an operator whether the
+  account is halted for the day or merely at its position cap, and those demand
+  different responses. A validator ties `approved` to `rule is None`, so a
+  refusal must name the rule that fired. This is what retired the self-removing
+  `# type: ignore[no-untyped-def]` on the unannotated `portfolio` parameter,
+  exactly as designed — `type: ignore` now appears nowhere in `src/`.
+
+- **`RiskRule` names only what `approve` evaluates** (six members, including
+  `NO_MARK_PRICE` and `NO_EQUITY` — both genuinely "do not trade" policies). The
+  other refusals on the path — no signal price, unknown pair, ATR not ready, no
+  placeable stop, unaffordable, too small to trade — carry a reason *string*.
+  *Rejected:* an enum member per refusal. `SizingDecision` already sets the
+  precedent: several distinct rejection causes, one `reason` string, no enum.
+
+- **The manager performs no I/O; `SymbolInfo` is injected.** This was the friction
+  the milestone plan did not anticipate: the port's `size_position` is
+  synchronous and has no `symbol_info` parameter, while
+  `calculate_position_size` requires one and `ExchangeClient.get_symbol_info` is
+  a coroutine. Filters (and the pair's timeframe) arrive as a
+  `Mapping[str, PairContext]` primed by the composition root. An unknown symbol
+  then fails at boot rather than on the first signal hours later, and a unit test
+  builds a manager from a plain dict with no fake exchange client at all.
+  *Rejected:* an async `evaluate` awaiting `get_symbol_info` per signal (hides
+  network I/O in the hot path and breaks `risk/`'s "no I/O" promise), and
+  changing the port to pass `symbol_info` into `size_position` (a wider port
+  change to solve a wiring problem).
+
+- **Every refusal is a value; nothing on the path raises for a market
+  condition.** Worth recording precisely, because M2's reasoning was based on a
+  false premise: the engine does **not** quarantine a raising signal handler.
+  `_record_failure` is reached only from `_evaluate`, so quarantine counts
+  *strategy* failures; handler exceptions are caught in `_emit`, logged, and
+  isolated. A raise here would therefore print a traceback on every bar forever
+  rather than disabling the pair. Weaker consequence, same conclusion.
+
+- **A stop that is enabled but not placeable this bar skips the entry — for
+  *every* sizing method.** Only `risk_per_trade` consumes the stop numerically,
+  so the narrow fix would have been to refuse just that method. But the operator
+  asked for a stop; entering unprotected under `fixed_fraction` contradicts the
+  instruction just as plainly, and the state is transient (M2's sub-tick case).
+  `stop_loss.enabled` is what separates "stops are off, deliberately" from "no
+  level fits the tick right now". This gate is also what keeps a `None` stop away
+  from `calculate_position_size`'s contract check, which raises by design.
+
+- **The ATR bridge needs two gates, not one.** `is_ready(atr_period + 1)` —
+  because true range is undefined on the first bar — checked *before* the frame
+  is built, so warmup costs nothing. Then `isfinite` on the scalar, because bar
+  count alone is **not** sufficient: `_seeded_recursive_mean` re-masks NaN inputs
+  after the seed, so a single bad tick yields a NaN long after warmup has passed.
+  ATR is computed only when `stop_loss.type is ATR`, so a percent stop never
+  inherits the warmup gate. When no ATR is available the signal is refused.
+  *Rejected:* falling back to a percent stop (silently substitutes a different
+  risk model for the configured one) and entering unprotected (breaks
+  `risk_per_trade` outright).
+
+- **`TradeIntent` is deliberately not an `OrderRequest`.** That type has no
+  take-profit field, and its `stop_price` means "the trigger price of this
+  order", not "the protective stop guarding this entry" — expressing an entry
+  plus its two protective levels as one `OrderRequest` would be a lie execution
+  would have to un-learn. Mapping an intent to an entry order plus protective
+  orders is execution's job, where `_enforce` re-checks immediately before
+  dispatch.
+
+- **`TradeIntent` and `RiskAssessment` live in `risk/`, not `core/`.**
+  `TradeIntent` embeds `ProtectiveLevels`, which lives in `risk/rules.py`, and
+  `core/` must not import from `risk/`. Keeping the composed `evaluate` *off* the
+  port avoids dragging `ProtectiveLevels` into `core/` for no benefit — the port
+  keeps its two methods and the composition root wires the concrete manager to
+  `on_signal`. `RiskAssessment` carries the component results (`decision`,
+  `levels`, `sizing`) so an operator can see *where* a signal stopped without
+  parsing the reason string.
+
+- **A `CLOSE` bypasses the limits entirely.** An exit is not a new risk, and a
+  limit that could trap an open position would be a risk rule that *creates*
+  risk. Quantity is whatever is held; no sizing, no protective levels.
+
+- **Exits are defined here and driven by execution.** This *overrules* the
+  earlier note that "acting on `should_exit` is M3". An exit check is
+  per-candle-per-position, but `on_signal` fires only when a strategy has an
+  opinion — wiring exits into the signal path would skip every quiet bar, which
+  is precisely the set of bars a stop exists for. The correct seam is the candle
+  subscription, and acting means sending a closing order. So M3 ships the
+  methods; the execution milestone subscribes.
+
+- **Both exit methods are fed the closed candle's `close`, not its high/low.** On
+  a close-driven engine the bot reacts at bar close and would fill near it; using
+  the bar's low for a long stop would claim a fill at a price that has already
+  gone — optimistic in backtest and dishonest live. Real protective orders rest
+  at the exchange and fill intrabar; this path is the fallback, and `close` makes
+  it trigger late, never early.
+
+50 tests in `tests/unit/test_risk_manager.py`. Hermetic with no patching at all:
+injected clock, scripted fake provider, filters as a plain dict — which is what
+the no-I/O design buys. Both time-dependent rules are driven *through* their
+boundary rather than only inside it.
+
+Two tests exist in their current form because the first draft passed for the
+wrong reason:
+
+- The ATR-gap test NaNs the final bar's **high**, not its close. True range
+  compares against the *previous* close, so a NaN close does not poison its own
+  bar — the original version left ATR finite, approved the signal, and proved
+  nothing. It now fails without the `isfinite` check.
+- The sub-tick stop is asserted across all three sizing methods. A test of
+  `risk_per_trade` alone would not have shown that `fixed_fraction` and
+  `fixed_amount` also decline to enter unprotected.
+
+---
+
 ## Known open items
 
-- Tool versions are unpinned (`ruff>=0.3.0`, `mypy>=1.8.0`). Now that the gate
-  reads a clean zero, a new release can break the build with no code change.
-- `ruff format` is not a gate and ~16 files are formatter-dirty. Worth its own
-  mechanical commit plus `ruff format --check` in `make check` — but check what
-  it does to hand-laid tables inside `parametrize` first.
-- The integration suite takes 1–2 minutes, dominated by the WebSocket test.
+**Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**
+
+This file is a build log: it records what each milestone decided and why, in the
+tense it was decided. An open-items list is the opposite — it is current state,
+and current state kept in two places drifts. It did: this section carried
+"~16 files are formatter-dirty" while the real number had moved to 19, and
+listed the `Position` assignment guard as outstanding after it had been closed.
+Both were found by an audit rather than by reading, which is the argument for
+keeping one copy.

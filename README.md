@@ -15,7 +15,7 @@ architecture and SOLID principles.
 
 ## Status
 
-**Version 0.1.0 — Phase 3 complete.** Python **3.12+**.
+**Version 0.1.0 — Phases 1–4 complete; Phase 5 (risk) through M3.** Python **3.12+**.
 
 What works today, verified against Binance **Testnet**:
 
@@ -29,14 +29,20 @@ What works today, verified against Binance **Testnet**:
   buffer per pair, and exposes a time-ordered `float64` OHLCV DataFrame.
 - **Trading engine** that evaluates a strategy on every bar close, gated by the
   strategy's warmup period, with per-pair failure containment.
+- **Hand-written indicators** (SMA, EMA, RSI, MACD, Bollinger, ATR) and two real
+  strategies (SMA crossover, RSI), edge-triggered and stateless.
+- **Risk management** — position sizing, protective stop-loss / take-profit /
+  trailing-stop levels, and a risk manager that turns a signal into an approved,
+  sized, protected `TradeIntent` against portfolio limits.
 
 `python -m trading_bot run` connects to Testnet and exercises the whole
-data → strategy → signal path end to end.
+data → strategy → signal path end to end, emitting real signals.
 
-> **The bot cannot place an order yet.** Strategies are still stubs (Phase 4), so
-> every pair quarantines after its configured error budget; risk management,
-> order execution, persistence, and notifications are not built. Per-feature
-> status is tracked in the [Roadmap](#roadmap-build-phases).
+> **The bot cannot place an order yet.** The risk layer produces a complete
+> `TradeIntent`, but nothing dispatches it: order execution, persistence and
+> notifications are still stubs, and the risk manager is not yet wired into the
+> engine's signal handler. That wiring is Phase 5 M4, and order dispatch is M5.
+> Per-feature status is tracked in the [Roadmap](#roadmap-build-phases).
 
 ## Features
 
@@ -67,18 +73,18 @@ binance-trading-bot/
 ├── src/trading_bot/
 │   ├── main.py            # CLI entry point (run / backtest / strategies)
 │   ├── config/            # Typed settings: .env secrets + config.yaml
-│   ├── core/              # Domain: enums, models, interfaces, exceptions
+│   ├── core/              # Domain: enums, models, portfolio, interfaces, exceptions
 │   ├── exchange/          # Binance REST adapter + WebSocket kline stream
 │   ├── data/              # Market-data provider · historical loader (stub) · repository (stub)
-│   ├── strategies/        # Strategy base + registry/factory · example strategies (stubs)
+│   ├── strategies/        # Strategy base + registry/factory · SMA crossover, RSI
 │   ├── indicators/        # Technical indicators: SMA, EMA, RSI, MACD, Bollinger, ATR
-│   ├── risk/              # Risk manager, position sizing, exit rules (stubs)
+│   ├── risk/              # Risk manager, position sizing, protective exit rules
 │   ├── execution/         # Order executor + lifecycle manager (stubs)
 │   ├── engine/            # Bar-close orchestration · mode wiring (stub)
-│   ├── backtesting/       # Backtest engine, portfolio, metrics
-│   ├── paper/             # Paper-trading simulator
-│   ├── notifications/     # Notifier base + Telegram
-│   ├── persistence/       # SQLAlchemy engine + ORM models
+│   ├── backtesting/       # Backtest engine, portfolio, metrics (stubs)
+│   ├── paper/             # Paper-trading simulator (stub)
+│   ├── notifications/     # Notifier base + Telegram (stubs)
+│   ├── persistence/       # SQLAlchemy engine + ORM models (stubs)
 │   └── utils/             # Logging setup + pure helpers
 ├── tests/                 # unit/ and integration/ suites
 ├── scripts/               # Operational scripts (check_testnet.py, download_data.py)
@@ -286,7 +292,7 @@ async def main() -> None:
     async def on_signal(signal) -> None:
         print("signal:", signal.action.value, signal.symbol, signal.reason)
 
-    engine.on_signal(on_signal)  # risk + execution attach here in later phases
+    engine.on_signal(on_signal)  # RiskManager.evaluate attaches here in M4
     await engine.run()  # runs until SIGINT/SIGTERM or engine.request_stop()
 
 
@@ -308,6 +314,49 @@ engine:
 If a strategy's `warmup_period` exceeds `data.history_limit`, the engine warns at
 startup and that pair stays silent until enough bars have closed live.
 
+## Risk: from a signal to a sized, protected intent
+
+`RiskManager` is the component that decides whether a signal becomes a trade. It
+holds configuration, a market-data reference, per-pair exchange filters and a
+clock — and performs **no I/O**, so it is entirely testable with plain numbers.
+Account state lives separately on `Portfolio` and is passed in per call.
+
+```python
+from decimal import Decimal
+
+from trading_bot.core.portfolio import Portfolio
+from trading_bot.risk import PairContext, RiskManager
+
+# Filters are primed once at startup rather than fetched per signal.
+info = await client.get_symbol_info("BTCUSDT")
+manager = RiskManager(
+    config=settings.config.risk,
+    provider=provider,
+    pairs={"BTCUSDT": PairContext(timeframe="1m", symbol_info=info)},
+)
+
+portfolio = Portfolio(free_quote=Decimal("10000"))
+assessment = manager.evaluate(signal, portfolio=portfolio)
+
+if assessment.approved:
+    intent = assessment.intent            # quantity, side, price, protective levels
+    print(intent.quantity, intent.levels.stop_loss, intent.levels.take_profit)
+else:
+    print("no trade:", assessment.reason)  # always says which rule refused, and why
+```
+
+The decision runs in a fixed order — limits → ATR → protective levels → sizing →
+affordability — because each step depends on the one before it. Every refusal is
+a **returned value carrying its reason**, never an exception and never a silent
+zero: "the account is too small for this symbol", "the daily-loss cap is hit",
+"no stop fits on the tick this bar" are all routine answers, and an operator has
+to be able to tell them apart. With `risk_per_trade` sizing the quantity is
+chosen so the loss at the *realised* (post-rounding) stop never exceeds the
+configured fraction of equity.
+
+> Nothing here places an order — `evaluate` returns an intent. Mapping that
+> intent onto an entry order plus its protective orders is Phase 5 M5.
+
 ## Running the bot
 
 ```bash
@@ -318,11 +367,11 @@ python -m trading_bot strategies          # list registered strategies
 ```
 
 > **What `run` does today.** It connects to Testnet, seeds history, streams live
-> candles, and evaluates strategies on each bar close. Because strategies are
-> still stubs, each pair logs a failure and is quarantined after
-> `engine.max_strategy_errors` bars — that is the expected Phase 3 output. Stop
-> with Ctrl-C; SIGINT/SIGTERM both trigger a graceful shutdown that closes the
-> WebSocket and REST connections. `backtest` remains unimplemented.
+> candles, evaluates strategies on each bar close, and **logs the signals they
+> produce**. It does not size, vet or place anything: the risk manager is built
+> and tested but not yet attached to `engine.on_signal`, which is Phase 5 M4.
+> Stop with Ctrl-C; SIGINT/SIGTERM both trigger a graceful shutdown that closes
+> the WebSocket and REST connections. `backtest` remains unimplemented.
 
 ### With Docker
 
@@ -351,50 +400,48 @@ make check     # lint + type + test
 ```
 
 On Windows without make, run the tools directly, e.g. `ruff check src tests`,
-`mypy`, `pytest`. New code is developed under `mypy --strict` and `ruff`
-(`E, F, I, N, UP, B, C4, SIM, RUF`), and every module built so far
-(`exchange/`, `data/`, `engine/`, `config/`, `core/`, `utils/`) passes both.
+`mypy`, `pytest`. Code is developed under `mypy --strict` and `ruff`
+(`E, F, I, N, UP, B, C4, SIM, RUF`).
 
-Both tools currently report a stable set of findings on **deliberate, locked
-patterns** in earlier scaffolding — `str`+`Enum` bases, `timezone.utc` (kept in
-preference to the `datetime.UTC` alias), quoted forward references, and pydantic
-`default_factory` under an unpinned newer mypy. Those are known and unchanged;
-the working rule is that new work adds **zero net findings**. Adding
-`plugins = ["pydantic.mypy"]` to `[tool.mypy]` clears the `default_factory`
-group if you would rather fix than freeze them.
+**Both tools report a hard zero.** This is a gate, not a baseline to diff
+against — any new finding is a regression:
+
+```
+pytest                      # 510 passed  (507 unit + 3 opt-in Testnet integration)
+pytest -m "not integration" # 507 passed  — use this for fast iteration
+mypy                        # Success: no issues found in 55 source files
+ruff check src tests        # All checks passed!
+```
+
+Zero is not reached by suppression: `type: ignore` appears nowhere in `src/`.
+The two project-wide `ruff` ignores that do exist (`UP017` for `timezone.utc`,
+`UP042` for `str`+`Enum`) are deliberate style decisions documented with their
+reasoning in `pyproject.toml`, not silenced defects.
+
+Note `ruff format` is **not** a gate, and some files are not formatter-clean.
+Run it deliberately in its own commit if you want to close that gap — check what
+it does to hand-laid data tables in tests first.
 
 ### Tests
 
-The default suite is **hermetic and offline** — unit tests inject a mock exchange,
-so `make test` (and plain `pytest`) never touch the network. Integration tests are
-marked `integration` and excluded from the default run.
+Unit tests are **hermetic**: no network, no real time, scripted fakes, and
+injectable seams (the `sleep` used by retry/backoff, and the `Clock` the
+time-dependent risk rules read). Money assertions are exact `Decimal`
+comparisons — never a float tolerance, because a result that is merely *close*
+is a bug, and a tolerant test cannot detect the float leak the domain exists to
+prevent.
 
 ```bash
-pytest                        # offline unit tests (integration auto-skips)
-pytest -m "not integration"   # explicitly exclude integration
-pytest -m integration         # opt-in: live read-only check against Testnet
+pytest                        # everything, including integration if keys are present
+pytest -m "not integration"   # offline only — use this for fast iteration
+pytest -m integration         # just the live read-only checks against Testnet
 ```
 
-**Running the integration test.** Its skip-guard checks the **process
-environment** (`BINANCE_TESTNET_API_KEY` / `..._SECRET`, or the primary keys). If
-your keys live only in `.env`, the app and `scripts/check_testnet.py` will still
-pick them up and connect — but the integration test will **skip**, because a bare
-`.env` is not exported to the process environment. To actually run it, export the
-keys for the session:
-
-```powershell
-# PowerShell
-$env:BINANCE_TESTNET_API_KEY="your_testnet_key"
-$env:BINANCE_TESTNET_API_SECRET="your_testnet_secret"
-pytest -m integration
-```
-
-```bash
-# bash
-export BINANCE_TESTNET_API_KEY="your_testnet_key"
-export BINANCE_TESTNET_API_SECRET="your_testnet_secret"
-pytest -m integration
-```
+**Running the integration tests.** The skip-guard reads credentials through the
+application's own `Secrets` object, so keys in **`.env` are enough** — they do
+not need to be exported to the process environment. With keys present, plain
+`pytest` runs them (the two streaming tests each wait on a 1-minute bar, so the
+full run takes ~90s); without keys, they skip with an explanatory reason.
 
 The integration tests never place an order. There are three, all opt-in:
 
@@ -411,17 +458,16 @@ The two streaming tests wait on a 1-minute bar, so each can take up to a minute.
 1. **Scaffolding** — structure, config, logging, domain models, interfaces, tests. ✅
 2. **Binance connectivity** — async REST adapter (balances, symbol info, ticker, klines, orders), `Decimal`-safe response mapping, retry + rate-limit handling, exchange-filter compliance, Testnet/Live. ✅
 3. **Market data + engine skeleton** — WebSocket kline streaming with auto-reconnect, the rolling-buffer market-data provider (`Decimal`→`float` boundary), and the bar-close trading engine with warmup gating and failure containment. ✅
-4. Indicators + concrete strategies. ⬅️ *next*
-5. Risk management (sizing + exit rules).
-6. Order execution + lifecycle — the first phase in which the bot can place an order.
-7. Engine completion: wire risk + execution into the loop, paper-trading mode.
-8. Backtesting engine + metrics.
-9. Persistence (SQLAlchemy) + Telegram notifications.
-10. Hardening: gap backfill, staleness watchdog, monitoring, optional FastAPI health/metrics.
+4. **Indicators + concrete strategies** — hand-written SMA, EMA, RSI, MACD, Bollinger and ATR (warmup expressed as leading `NaN`), plus edge-triggered SMA-crossover and RSI strategies. ✅
+5. **Risk management** — position sizing (M1 ✅), protective stop-loss / take-profit / trailing-stop rules (M2 ✅), the risk manager + portfolio that compose them into a `TradeIntent` (M3 ✅), then the composition root that wires it into the engine behind a log-only executor (M4 ⬅️ *next*), then order execution + lifecycle (M5) — the milestone in which the bot can first place an order.
+6. Engine completion: wire risk + execution into the loop, paper-trading mode.
+7. Backtesting engine + metrics.
+8. Persistence (SQLAlchemy) + Telegram notifications.
+9. Hardening: gap backfill, staleness watchdog, monitoring, optional FastAPI health/metrics.
 
 Phase 3 delivered the orchestration skeleton earlier than originally planned
-(it was item 7), because the market-data provider needed a consumer to be
-verifiable end to end. Item 7 is now about filling that skeleton in.
+(it was a later item), because the market-data provider needed a consumer to be
+verifiable end to end. Phase 5 M4 is now about filling that skeleton in.
 
 ## License
 

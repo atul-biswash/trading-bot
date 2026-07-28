@@ -177,8 +177,12 @@ class Position(BaseModel):
     ``validate_assignment`` on, a ``model_validator(mode="after")`` re-runs on
     *every* assignment. ``RiskManager.advance_trailing_stop`` writes
     ``highest_price`` and ``trailing_stop`` in two separate statements, so such a
-    validator would see the intermediate state between them. Either make the
-    invariant tolerant of that, or write both fields in one ``model_copy``.
+    validator would see the intermediate state between them. The fix is to
+    collapse those writes into **one method on this class**, so the invariant
+    holds at every point an outside caller can observe. Do *not* weaken the
+    validator to tolerate partial state: an invariant that accepts the halfway
+    position is not an invariant, and it would silently accept a trailing stop
+    that had genuinely drifted away from its high-water mark.
     """
 
     model_config = ConfigDict(validate_assignment=True)

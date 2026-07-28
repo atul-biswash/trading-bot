@@ -67,21 +67,26 @@ where it is forbidden.
 Clean Architecture. `core/` holds domain models and abstract ports; outer layers
 implement them and depend inward only.
 
+Files marked † are **docstring-only stubs**. Check before assuming behaviour.
+
 ```
 src/trading_bot/
-  core/          models · enums · interfaces (ports) · exceptions
+  main.py        CLI entry point (run · backtest · strategies)
+  core/          models · enums · interfaces (ports) · portfolio · exceptions
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
-  data/          market_data · historical · repository
+  data/          market_data · historical† · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
-  engine/        live_engine · modes
+  engine/        live_engine · modes†
   risk/          manager · rules · position_sizing
-  backtesting/   engine · portfolio · metrics
-  paper/         simulator
-  persistence/   database · models
-  notifications/ base · telegram
+  execution/     executor† · order_manager†
+  backtesting/   engine† · portfolio† · metrics†
+  paper/         simulator†
+  persistence/   database† · models†
+  notifications/ base† · telegram†
   utils/         logger · helpers
+scripts/         check_testnet.py · download_data.py
 ```
 
 ### Key seams
@@ -95,7 +100,11 @@ src/trading_bot/
   `Signal.price` and `Signal.timestamp`.
 - **`TradingEngine.on_signal(handler)`** — where risk and execution attach. The
   engine does **not** enrich signals; a signal leaves the strategy complete, so
-  backtest and live share one code path.
+  backtest and live share one code path. Handlers are isolated: one that raises
+  is logged and cannot stop the others or the feed.
+- **`RiskManager.evaluate(signal, *, portfolio) -> RiskAssessment`** — the seam
+  execution picks up. `assessment.intent` is the approved, sized, protected
+  `TradeIntent`; `None` with a `reason` is a normal, expected answer.
 
 ---
 
@@ -144,14 +153,38 @@ src/trading_bot/
   `round_price` keeps `ROUND_DOWN` for order dispatch.
 - **A sub-tick protective distance is representable, not a raise** — the level is
   `None` with its reason in `ProtectiveLevels.basis`. A stop can go sub-tick from
-  a quiet market (transient) and the path runs every signal, so a raise would hit
-  the engine quarantine. Only incoherent *inputs* raise (non-positive price,
+  a quiet market (transient) and the path runs every signal, so a raise would log
+  a traceback on every bar forever. (It would *not* quarantine the pair: the
+  engine counts **strategy** failures only — handler exceptions are caught and
+  isolated in `_emit`.) Only incoherent *inputs* raise (non-positive price,
   non-finite or negative ATR).
 - **The trailing stop is pure**: its high-water mark lives on `Position`;
   `update_trailing_stop` returns the new level, and `max` / `min` make "never
   moves against the position" a code property. `should_exit` is a pure predicate
-  returning which rule fired (a stop beats the take-profit on one price); acting
-  on it is M3.
+  returning which rule fired (a stop beats the take-profit on one price).
+- **State is `Portfolio`; policy is `RiskManager`.** The manager holds config, a
+  market-data reference, injected per-pair filters (`PairContext`) and an
+  injected `Clock`, performs **no I/O**, and takes the portfolio per call.
+  `Portfolio` is mutable with `validate_assignment=True` and never reads a clock —
+  every time-dependent method takes `now`, and a naive `datetime` raises.
+- **The manager's order of operations is forced, not chosen:** preconditions →
+  equity → `approve` → ATR → levels → stop gate → size → affordability → intent.
+- **A stop that is enabled but not placeable this bar skips the entry — for every
+  sizing method**, not just `risk_per_trade`. The operator asked for a stop; the
+  state is transient. `stop_loss.enabled` distinguishes "stops are off" from "no
+  level fits the tick right now".
+- **The ATR bridge gates twice**: `is_ready(atr_period + 1)` before building the
+  frame, then `isfinite` on the scalar — bar count alone is not sufficient,
+  because a bad tick re-masks to NaN long after warmup. No ATR ⇒ refuse the
+  signal; never fall back to a percent stop.
+- **Exit evaluation is fed the closed candle's `close`**, never its high/low —
+  triggering on a price the bar has already left is optimistic in backtest and
+  dishonest live. `check_exit` / `advance_trailing_stop` live on the manager;
+  *driving* them from the candle subscription is execution's job, because an exit
+  check is per-candle-per-position and `on_signal` skips quiet bars.
+- **`TradeIntent` is not an `OrderRequest`** — no take-profit field, and
+  `stop_price` there means "this order's trigger". Mapping intent → orders is
+  execution's job.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -187,9 +220,9 @@ src/trading_bot/
 ## Quality gates — hard zero
 
 ```bash
-pytest                      # 460 passed  (457 unit + 3 opt-in Testnet integration)
-pytest -m "not integration" # 457 passed  — use this for fast iteration
-mypy                        # Success: no issues found in 54 source files
+pytest                      # 517 passed  (514 unit + 3 opt-in Testnet integration)
+pytest -m "not integration" # 514 passed  — use this for fast iteration
+mypy                        # Success: no issues found in 55 source files
 ruff check src tests        # All checks passed!
 make check                  # all three
 ```
@@ -199,9 +232,15 @@ against. Any new finding is a regression.
 
 Do **not** reach zero by adding `noqa` or `type: ignore`. Fix the code. If a
 suppression is genuinely warranted, make it *self-removing* and justify it in a
-comment — e.g. `RiskManager.approve` carries
-`# type: ignore[no-untyped-def]` and `warn_unused_ignores` is enabled, so mypy
-will force its deletion the moment the parameter is typed.
+comment. The worked example is now closed: `RiskManager.approve` carried
+`# type: ignore[no-untyped-def]` on its unannotated `portfolio` until M3 typed
+it, at which point `warn_unused_ignores` forced the deletion. **`type: ignore`
+now appears nowhere in `src/`** — keep it that way.
+
+Note `mypy` checks `packages = ["trading_bot"]` only, so `tests/` is *not*
+type-checked. A `# type: ignore` in a test is inert as far as the gate is
+concerned; use one only to document a deliberate violation under test (passing a
+`float` where `Money` is expected), never to silence a weakly-typed helper.
 
 The 3 integration tests are read-only against Binance **Testnet**, never place an
 order, and are gated by `tests/integration/credentials.py` (which reads through
@@ -212,9 +251,11 @@ order, and are gated by `tests/integration/credentials.py` (which reads through
 ## Testing style
 
 Unit tests are hermetic: no network, no real time, scripted fakes, injectable
-seams, injected `sleep`. `asyncio_mode=auto`. Exact `Decimal` assertions in money
-code — no float tolerance, because a result that is merely *close* is a bug and a
-tolerant test cannot detect the float leak the domain exists to prevent.
+seams — injected `sleep` for retry/backoff, injected `Clock` for the
+time-dependent risk rules (daily-loss roll, cooldown expiry). `asyncio_mode=auto`.
+Exact `Decimal` assertions in money code — no float tolerance, because a result
+that is merely *close* is a bug and a tolerant test cannot detect the float leak
+the domain exists to prevent.
 
 ---
 
@@ -226,10 +267,32 @@ three gates must be green. Write the *why* in the commit body, not just the what
 I review via `git diff` — so keep mechanical changes (formatting, line endings,
 renames) in **separate commits** from semantic ones. Never mix them.
 
+**Docs rotation, at the end of every milestone:**
+
+1. Append the milestone to `docs/PHASE_HISTORY.md` — decisions and *why*,
+   including alternatives rejected. It is a build log written in the tense it was
+   decided: never restate current state there, and never renumber past entries.
+2. Update this file — "Current state", the baseline numbers in "Quality gates"
+   taken from a **fresh `make check`** (never a remembered count), and any new
+   locked decision.
+3. Rewrite `docs/NEXT_MILESTONE.md` for the next milestone, carrying forward any
+   open items that are still open. This is the single home for live open items.
+
+There is no separate workflow document; these three steps are the procedure, and
+they live here because this is the only file loaded into every session. Docs that
+must be remembered to be read are how the four drifts found in the M3 audit got
+in.
+
 ---
 
 ## Current state
 
-Phases 1–4 complete. Phase 5 M1 (position sizing) and M2 (protective exit rules)
-complete. Tooling cleanup complete. See `docs/NEXT_MILESTONE.md` for what is in
-flight.
+Phases 1–4 complete. Phase 5 M1 (position sizing), M2 (protective exit rules) and
+M3 (risk manager + `Portfolio`) complete. Tooling cleanup complete.
+
+The decision path is complete **as a library**: `RiskManager.evaluate` turns a
+signal into an approved, sized, protected `TradeIntent`. It is **not wired** —
+`main.py` registers no `on_signal` handler, so `python -m trading_bot run` still
+only logs signals, and nothing constructs a `Portfolio` or primes a
+`PairContext`. Building that composition root and making the intent stream
+observable is M4; placing an order is M5. See `docs/NEXT_MILESTONE.md`.

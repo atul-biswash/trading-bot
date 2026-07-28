@@ -566,6 +566,14 @@ class RiskManager(RiskManagerPort):
             config=config,
             tick_size=self._tick_size(position.symbol),
         )
+        # Two statements, so the position is briefly observable with a new
+        # high-water mark and the previous stop. Harmless today: Position
+        # declares no cross-field validator, and nothing reads it between these
+        # lines. If such an invariant is ever added, collapse these writes into
+        # a single method on Position rather than relaxing the validator to
+        # tolerate the intermediate state -- an invariant that accepts the
+        # halfway position is not an invariant. `Position.validate_assignment`
+        # keeps the Money guard on each of these writes.
         if long:
             position.highest_price = update.high_water
         else:

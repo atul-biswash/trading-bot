@@ -1,165 +1,210 @@
-# Current milestone — Phase 5 M3: risk manager
+# Current milestone — Phase 5 M4: composition root and the observable intent path
 
 **Status:** not started
-**Baseline to confirm first:** 460 passed · mypy 0 · ruff 0
+**Baseline to confirm first:** 517 passed (514 unit + 3 integration) · mypy 0 · ruff 0
 
-Scope is **`src/trading_bot/risk/manager.py`** — the concrete `RiskManager` that
-vets each signal against configured limits, sizes it (M1), attaches its protective
-levels (M2), and is the handler wired into `TradingEngine.on_signal`. This is the
-milestone that finally composes M1 + M2 into a live path.
+Scope is the **composition root**: the component that owns a `Portfolio`, primes
+the `Mapping[str, PairContext]` a `RiskManager` needs, attaches
+`RiskManager.evaluate` to `TradingEngine.on_signal`, and logs every resulting
+`TradeIntent` in a structured, analysable form.
 
-It also owns the portfolio/limit **state** the manager reads (open positions, free
-balance, equity, daily P&L, per-symbol cooldown) and the **ATR data bridge** that
-turns a `MarketDataProvider` frame into the scalar `atr_value` M2's `rules.py`
-expects.
+**Nothing is dispatched.** The executor at the end of this chain writes a log
+line and returns. Order placement is M5.
 
-Do **not** place orders or touch execution/`OrderExecutor`, the paper simulator,
-or the backtest engine — producing an approved, sized, protected *intent* is the
-boundary. Order dispatch is the next milestone.
+This milestone exists because it was split out of execution deliberately. The
+whole decision path — sizing, the ATR gate, the protective levels, the limits —
+has never once run against live market data; it has only ever run against
+scripted fakes. Wiring it behind a log-only executor makes it observable on
+Testnet for days at zero risk, and turns M5's hardest questions (what does
+`Portfolio` look like after eight hours? how often does the sub-tick stop gate
+actually fire?) into things you have *data* about instead of opinions.
+
+It also exercises a property M3 designed for but never proved: an unknown symbol
+must fail at **boot**, when the filters are primed, rather than on the first
+signal hours later.
 
 Read `CLAUDE.md` for the rules and locked decisions, and `docs/PHASE_HISTORY.md`
-for why M1 and M2 are shaped the way they are — M3 must compose with both without
-reworking them.
+for why M1–M3 are shaped the way they are.
 
 ---
 
 ## Contracts to verify empirically before designing
 
-Do not take these from this document — confirm them in the code. They are listed
-so you know what to look at, not so you can skip looking.
+Do not take these from this document — confirm them in the code.
 
-- `RiskManager` in `core/interfaces.py` — **both** methods. `size_position`
-  returns a `SizingDecision`; `approve(signal, *, portfolio)` currently returns
-  `bool` and carries a self-removing `# type: ignore[no-untyped-def]` on its
-  unannotated `portfolio`. Typing `portfolio` this milestone is what forces that
-  ignore to be deleted (`warn_unused_ignores` is on).
-- `calculate_position_size` in `risk/position_sizing.py` — what `size_position`
-  delegates to, and the `stop_price` it needs for `risk_per_trade`.
-- `compute_protective_levels` / `should_exit` / `ProtectiveLevels` in
-  `risk/rules.py` — how M3 obtains the stop the sizer needs, and the exit predicate
-  M3 acts on. Note a level can come back `None` (disabled or sub-tick).
-- `Position` in `core/models.py` — the mutable open-position type, its protective
-  fields, and `unrealized_pnl(price)`.
-- `RiskLimitsConfig` in `config/models.py` — `max_open_positions`,
-  `max_daily_loss_percent` (still **`float`**), `max_position_size_percent`
-  (already `Decimal`), `cooldown_minutes`. `StopLossConfig.atr_period` for the ATR
-  bridge.
-- `TradingEngine.on_signal` and its isolation model in `engine/live_engine.py` —
-  the seam M3 attaches to, and how a raising handler is treated (quarantine).
-- `MarketDataProvider` in `core/interfaces.py` — `get_dataframe`, `last_candle`,
-  `is_ready` — the source the ATR bridge reads from.
-- `atr()` in `indicators/indicators.py` — float64, **NaN during warmup** (the
-  bridge must not hand a NaN to `rules.py`, which rejects non-finite ATR).
-- The **injected-clock / injected-sleep** pattern already used (e.g. in
-  `exchange/base.py`, the engine) — daily-loss and cooldown are time-dependent and
-  must be testable without real time.
+- `RiskManager.__init__` in `risk/manager.py` — exactly what must be supplied:
+  `config`, `provider`, `pairs`, `clock`. Note it takes a `Mapping[str, PairContext]`
+  and copies it; nothing refreshes it after construction.
+- `PairContext` — `timeframe` **and** `symbol_info` together. Confirm there is no
+  state in which one resolves and the other does not.
+- `RiskAssessment` / `TradeIntent` in `risk/manager.py` — every field available to
+  log, which components are populated on a refusal, and the fact that
+  `levels is None` marks an exit intent.
+- `RiskDecision.rule` and `RiskRule` in `core/models.py` / `core/enums.py` — the
+  six rules `approve` can report, and which refusals instead carry only a string.
+- `Portfolio` in `core/portfolio.py` — `record_realised_pnl`, `start_cooldown`,
+  `positions`, `free_quote`. M3 defined these and calls **none** of them.
+- `TradingEngine.create` and `TradingEngine.on_signal` in `engine/live_engine.py`
+  — how the engine is built today, and where a handler attaches.
+- `TradingEngine._emit` — read it. Confirm exactly what happens to a handler that
+  raises, because Q-A depends on it and an earlier version of the docs got it
+  backwards.
+- `BinanceClient.get_symbol_info` in `exchange/binance_client.py` — it is a
+  coroutine and it caches. This is why filters are primed at startup rather than
+  fetched per signal.
+- `main.py` — the current wiring, which registers **no** signal handler at all.
+- `utils/logger.py` — what structured logging support already exists, before
+  inventing any.
 
 ---
 
-## The config conversion M3 owns
+## The config conversion M4 owns
 
-Per the project rule — *a config field becomes `Decimal` at the milestone that
-first multiplies it by money* — M3 converts:
-
-- `RiskLimitsConfig.max_daily_loss_percent` (the daily-loss tracker multiplies it
-  by equity).
-
-`max_open_positions` and `cooldown_minutes` stay `int` (a count and a duration,
-never multiplied by money).
+**None — confirm rather than assume.** Nothing on this path multiplies a config
+field by money: the log-only executor performs no arithmetic. If the design
+proves otherwise, convert the field in its own commit per the project rule.
 
 ---
 
 ## Design questions to resolve before writing code
 
-**1. The portfolio type — the most consequential decision in M3.**
+**1. Where does the composition root live, and what owns the `Portfolio`?**
 
-`approve` takes a `portfolio` that has no type yet. Decide its shape and where it
-lives. It must be referenced by the `RiskManager` port in `core/interfaces.py`, so
-— like `SizingDecision` — it cannot live in `risk/`; `core/` is the innermost
-layer. What does it hold: open `Position`s, free quote balance, equity, realised
-daily P&L, per-symbol cooldown timestamps? Is it a frozen snapshot passed in per
-call, or mutable live state the manager owns and updates? Argue it, and make
-`equity` (total quote value incl. mark-to-market) computable from it.
+`main.py` currently builds an engine and runs it. Decide whether the wiring goes
+there, into `engine/modes.py` (which exists as a stub for exactly this), or into
+a new module. State who holds the single `Portfolio` instance for the process
+lifetime, and how a second component would be prevented from making its own.
 
-**2. `approve`'s return shape — a port change to weigh.**
+**2. Priming `PairContext`, and what happens when it fails.**
 
-The port returns `bool`, but a rejected signal must tell an operator *why* (max
-positions hit, symbol in cooldown, daily-loss halt). Decide whether to change the
-port to a reason-carrying frozen object — the same problem M1 and M2 solved with
-`SizingDecision` / `ProtectiveLevels` — and justify the port change if you make
-it. State how it stays consistent with those two.
+Filters come from `get_symbol_info` per enabled pair at startup. Decide the
+failure policy: one bad symbol out of five — refuse to start, or start without
+it? Say which, and make the reason visible. Note the "fails at boot" property is
+worth nothing if the failure is a warning nobody reads.
 
-**3. The ATR data bridge.**
+**3. Q-A — handler-failure detection. Scoped INTO this milestone.**
 
-Confirm the M2-flagged intent: the manager holds a `MarketDataProvider` reference,
-computes `atr(high, low, close, stop_loss.atr_period)`, and passes
-`float(series.iloc[-1])` to `compute_protective_levels`. Decide how warmup is
-handled — ATR is NaN until `atr_period + 1` bars, and `rules.py` **raises** on a
-non-finite ATR, so the bridge must gate on readiness (skip, or fall back) rather
-than hand a NaN across. State where `atr_period` readiness is checked.
+`_emit` catches, logs and continues, with no counter and no state. Add a
+**per-handler consecutive-failure counter** whose output is an **alert and a
+state flag only**, mirroring the strategy quarantine so there is one mechanism
+and one mental model. Any success resets it.
 
-**4. Order of operations for one signal.**
+**Automatic removal of a failing handler from the chain is explicitly rejected.**
+Disabling a broken executor converts "orders are failing" into "orders are not
+being attempted" while positions are open — a silent downgrade from a loud
+problem, which is the exact inversion this project keeps finding and fixing.
+The counter reports; it does not amputate.
 
-`risk_per_trade` sizing needs a stop; the stop may need ATR; `approve` may reject
-before any of it. Pin the sequence: approve → protective levels (ATR) → size (from
-the stop) → assemble the intent. Make the manager method express it, and decide
-what a `None` stop (M2 sub-tick/disabled) means for `risk_per_trade` sizing here.
+**4. Q-B — escalation policy. Deferred to M5, recorded here so it is not
+rediscovered.**
 
-**5. Daily-loss tracking and cooldown — the stateful, time-dependent parts.**
+A `HandlerFatalError` that `_emit` re-raises needs two things this milestone does
+not have: a **named recipient** (nothing consumes alerts until notifications
+exist) and a **defined shutdown sequence**. A bare re-raise out of `_emit`
+propagates into the candle callback and tears down the feed — and the feed is
+what drives `check_exit`, so the escalation would remove the exit path along with
+the entry path.
 
-Both need a clock. Decide where realised P&L accrues, how the day boundary is
-defined (UTC) and reset, and how a per-symbol cooldown is recorded and expired.
-Inject the clock so tests are hermetic. Keep the state's owner explicit.
+"Suspend entries, keep exits" is the intended shape, but it must state **which
+failure classes it covers**, given that `CLOSE` signals traverse the same handler
+chain as `BUY` signals. A policy that cannot distinguish "the executor cannot
+place entries" from "the executor cannot place anything" is not a policy.
 
-**6. What M3 outputs, and where it stops.**
+**5. Q-C — resting protective orders vs the client-side view. Opens M5.**
 
-On an approved signal M3 produces an intent (an `OrderRequest`?) carrying quantity
-and protective levels — but does **not** dispatch it. Decide the exact output type
-and the seam the execution milestone will pick up, so it slots in without rework.
+Decide which protective levels are placed as **resting orders at the exchange**
+and how they reconcile against `Position.stop_loss` / `trailing_stop`.
 
-**7. `should_exit` wiring.**
+The client-side stop evaluated on bar close (`RiskManager.check_exit`) is correct
+**as policy** — it refuses to claim a fill at a price the bar has already left —
+and incomplete **as survival**: it requires a live process to act on it. A bot
+that is not running has no stop at all. A resting exchange stop survives the
+process; a trailing stop that moves every bar cannot practically rest. Decide the
+split, and how the two views are reconciled after a restart, **before**
+`execution/executor.py` is written — this constrains its shape more than any
+other decision.
 
-M2's `should_exit` is a pure predicate over one price. Decide whether M3 drives it
-here (per closed candle, choosing close vs high/low deliberately) or whether that
-belongs with execution. If here, say which price it feeds and why.
+---
+
+## Scope constraints
+
+- **"Observable" means a structured log line per intent, with fixed fields:**
+  `symbol`, `action`, `quantity`, `entry price`, `stop`, `take-profit`,
+  `approved`, `rule fired`, `refusal reason`. Not free text. The Testnet output
+  has to be analysable after the fact — grep-able, and ideally parseable into a
+  frame — or the milestone has not delivered its only real deliverable.
+- **The log-only executor sits at the same `on_signal` seam the real executor
+  will occupy, and consumes `TradeIntent` unmodified.** It must not reach around
+  the seam for data the real executor would not have. If it needs something the
+  intent does not carry, that is a finding about `TradeIntent`, not a licence to
+  bypass it.
+- Do not touch `risk/` behaviour. If M4 wants a change there, that is a finding
+  to report, not to implement.
 
 ---
 
 ## Tests
 
-Hermetic unit tests in `tests/unit/test_risk_manager.py`, no network, no real
-time (inject the clock), scripted fake `MarketDataProvider`. Exact `Decimal`
-assertions in money code. Cover:
+Hermetic unit tests, no network, no real time. Cover:
 
-- each limit independently: `max_open_positions`, daily-loss halt, per-symbol
-  cooldown — with the clock advanced explicitly
-- `approve` rejection carries a reason naming the rule that fired
-- equity = free quote + mark-to-market of open positions
-- the ATR bridge: the manager computes ATR and feeds `rules.py`; **warmup is
-  handled without raising** (NaN ATR never reaches `rules.py`)
-- a `None` stop (sub-tick/disabled) handled coherently for each sizing method
-- an **integration-style unit test composing M1 + M2 + M3**: a signal in →
-  approved, sized, protected intent out, asserting the realised risk at the stop
-  ≤ the `risk_per_trade` budget end to end
-- no result built from a float — structural via the `Money` guard
-- the `RiskManager.approve` `# type: ignore` is gone (mypy would flag it unused)
+- the composition root builds a manager whose `pairs` covers every enabled pair
+- a symbol whose `get_symbol_info` fails produces the chosen boot behaviour
+- the log-only executor emits every fixed field, for an approved intent **and**
+  for a refusal, asserted on the structured record rather than on a message string
+- an exit intent (`levels is None`) logs coherently
+- **a raising handler leaves the other handlers and the feed intact** — the
+  isolation property `_emit` claims, asserted rather than assumed
+- the per-handler failure counter increments on consecutive failures, resets on
+  success, and raises its alert at the threshold without removing the handler
+- no money value built from a float — structural, via the `Money` guard
 
 ---
 
 ## Definition of done
 
 - `pytest` → all green, no previously passing test broken
-- `mypy` → zero (including the forced removal of `approve`'s `# type: ignore`)
-- `ruff check src tests` → zero
+- `mypy` → zero; `ruff check src tests` → zero
+- No `type: ignore` added to `src/` (it is currently free of them)
 - Design was presented and confirmed **before** implementation
-- Committed as its own commit(s), with the reasoning in the body; keep the
-  `max_daily_loss_percent` type change in its own commit, separate from new logic
+- Committed as its own commit(s), with the reasoning in the body
+- **A Testnet run of at least one full session, with the structured intent log
+  retained and eyeballed.** This milestone's output is observability; a green
+  test suite does not demonstrate it.
 
 ---
 
-## After this: Phase 5 M4 (execution wiring)
+## Open items — not scoped to this milestone
 
-Placing the approved, sized, protected intent: `OrderExecutor` over
-`BinanceClient.create_order`, protective-order placement (stop / take-profit),
-and the paper simulator. `_enforce` remains the independent last line of defence
-immediately before dispatch.
+Tracked here rather than in `PHASE_HISTORY.md`, which is a build log and must not
+carry current state.
+
+- **Unused runtime dependencies.** `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`
+  and `uvicorn` are declared in `requirements.txt` and imported nowhere.
+  `fastapi`/`uvicorn` are annotated as belonging to a later phase; the other
+  three are not. Install weight and attack surface for software that manages
+  money — decide per package whether it is genuinely pending or should be dropped
+  until needed.
+- **`Signal.metadata` is a convention, not a constraint.** `CLAUDE.md` requires
+  plain `int`/`float`/`str` values because the field gets persisted and NumPy
+  scalars break serialisation, but the field is `dict[str, object]` and nothing
+  enforces it. Strategies comply today by hand. Worth enforcing structurally
+  before persistence exists, since that is when a violation starts costing
+  something.
+- **`ruff` and `mypy` versions are unpinned** (`ruff>=0.3.0`, `mypy>=1.8.0`). The
+  gate reads an absolute zero, so a new release can turn the build red with no
+  code change.
+- **19 files are not `ruff format`-clean** (59 are). `ruff format` is not part of
+  `make check`. Worth a single mechanical commit plus adding
+  `ruff format --check` to the gate — but check what the formatter does to
+  hand-laid data tables inside `parametrize` first, and keep it in its own commit
+  away from anything semantic.
+
+---
+
+## After this: Phase 5 M5 — order dispatch
+
+`OrderExecutor` over `BinanceClient.create_order`, protective-order placement
+resolved per Q-C, the unprotected window between an entry fill and its stop,
+idempotency via `client_order_id`, order-status tracking, and `Portfolio`
+write-back. `_enforce` remains the independent last line of defence immediately
+before dispatch. Q-B is settled at the start of that milestone, not during it.

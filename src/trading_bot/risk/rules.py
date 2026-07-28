@@ -33,11 +33,17 @@ If the configured distance is smaller than one tick, rounding toward the
 reference collapses the level onto (or past) it. That is treated as "no placeable
 level this bar": the level comes back ``None`` with a reason, never an exception.
 An ATR stop distance can fall below a tick simply because volatility went quiet
--- a transient, self-healing state -- and this path runs on *every* signal, so a
-raise would reach ``TradingEngine``'s consecutive-failure quarantine and disable
-a healthy pair, the very failure ``SizingDecision`` exists to avoid. Genuinely
-incoherent *inputs* still raise: a non-positive price or a non-finite ATR value
-is a contract violation, not a market state.
+-- a transient, self-healing state -- and this path runs on *every* signal.
+
+The consequence of raising here is **worse** than the quarantine an earlier
+version of this note claimed. Quarantine counts *strategy* failures only:
+``TradingEngine._record_failure`` is reached from ``_evaluate`` and nowhere else,
+while these rules run under a signal handler, whose exceptions ``_emit`` catches,
+logs and steps over. So a raise would not disable the pair loudly -- it would log
+a traceback every bar while the bot went on looking healthy, which is the failure
+that survives an operator's attention rather than the one that ends it.
+Genuinely incoherent *inputs* still raise: a non-positive price or a non-finite
+ATR value is a contract violation, not a market state.
 
 The ATR ``float`` -> ``Decimal`` boundary
 -----------------------------------------
