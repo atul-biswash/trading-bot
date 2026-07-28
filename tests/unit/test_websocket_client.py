@@ -25,6 +25,13 @@ from trading_bot.exchange.websocket_client import BinanceMarketDataStream
 # --------------------------------------------------------------------------
 # Recorded WebSocket payloads (single-letter kline codes; "x" is finality)
 # --------------------------------------------------------------------------
+# The "k" object keeps the wire's single-letter keys rather than being built from
+# named fields: the mapper under test is what translates them, so a fixture that
+# already spelled them out would be testing the translation with itself. Grouped
+# by meaning, one concern per row --
+# t/T: start & close time · s/i: symbol & interval · o/c/h/l: OHLC ·
+# v: base volume · n: trade count · x: finality.
+# fmt: off
 def _kline_event(*, close: str, is_closed: bool, symbol: str = "BTCUSDT",
                  interval: str = "1m") -> dict[str, Any]:
     return {
@@ -38,6 +45,7 @@ def _kline_event(*, close: str, is_closed: bool, symbol: str = "BTCUSDT",
             "v": "12.50000000", "n": 100, "x": is_closed,
         },
     }
+# fmt: on
 
 
 BTC_CLOSED = _kline_event(close="65050.00", is_closed=True)

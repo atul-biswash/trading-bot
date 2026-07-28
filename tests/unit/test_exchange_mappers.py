@@ -70,6 +70,13 @@ TICKER_24H = {
     "closeTime": 1_700_000_000_123,
 }
 
+# Binance kline arrays are positional, and these fixtures deliberately keep that
+# raw shape rather than being built by a helper: `to_candle` is precisely what
+# turns position into meaning, so a fixture that already knew the field names
+# would be testing the helper instead of the mapper. Row 1 is
+# open_time / open / high / low / close / volume; row 2 is
+# close_time / quote_volume / trades / taker_base / taker_quote / ignore.
+# fmt: off
 KLINE_1 = [
     1_700_000_000_000, "65000.00", "65100.00", "64950.00", "65050.00", "12.50000000",
     1_700_000_059_999, "812345.6", 100, "6.0", "390000.0", "0",
@@ -78,6 +85,7 @@ KLINE_2 = [
     1_700_000_060_000, "65050.00", "65200.00", "65000.00", "65180.00", "9.10000000",
     1_700_000_119_999, "593210.1", 80, "4.5", "292000.0", "0",
 ]
+# fmt: on
 
 # Recorded WebSocket kline events. Times/OHLCV mirror KLINE_1 so the WS and REST
 # mappers can be cross-checked for agreement. The "k" object nests the bar; "x"

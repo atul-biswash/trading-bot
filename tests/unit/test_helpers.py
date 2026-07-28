@@ -30,9 +30,15 @@ def test_round_price_rounds_down_to_tick() -> None:
 
 
 def test_round_to_tick_honours_the_direction() -> None:
-    # Same value, opposite modes, on an awkward tick.
+    # Same value, opposite modes, on an awkward tick. The two asserts are one
+    # line each and vertically aligned on purpose: the only differences that
+    # matter are the rounding mode and the expected result, and side-by-side is
+    # what makes that visible.
+    #        value      tick       mode              expected
+    # fmt: off
     assert round_to_tick(Decimal("100.00"), Decimal("0.13"), rounding=ROUND_CEILING) == Decimal("100.10")
     assert round_to_tick(Decimal("100.00"), Decimal("0.13"), rounding=ROUND_FLOOR) == Decimal("99.97")
+    # fmt: on
 
 
 def test_round_to_tick_exact_multiple_is_unchanged() -> None:
