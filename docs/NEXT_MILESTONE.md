@@ -178,6 +178,24 @@ Hermetic unit tests, no network, no real time. Cover:
 Tracked here rather than in `PHASE_HISTORY.md`, which is a build log and must not
 carry current state.
 
+- **`Decimal`-vs-`float` comparison in decision paths.** `Decimal * float` raises
+  `TypeError`, which is what makes the config conversion boundary
+  self-announcing. `Decimal < float` does **not** raise — it compares against the
+  binary expansion (`0.1` → `0.1000000000000000055…`), so the decision is made on
+  a number that is not the one in `config.yaml`. The locked rule has been amended
+  to "multiplies **or compares**" (see `CLAUDE.md`), because a field consumed only
+  by comparison would otherwise never trigger its own conversion.
+
+  A survey of `src/` found **no current instance** — every comparison in `risk/`
+  is `Decimal`-vs-`Decimal` or `int`-vs-`int`, and every remaining `float` config
+  field is either unused or float-to-float seconds in the websocket backoff. This
+  is therefore a *forward* hazard, and its first victims are predictable:
+  `BacktestConfig` and `PaperTradingConfig` carry `fee_percent` and
+  `slippage_percent` as `float`, and both will be consumed against money by M5 and
+  the backtest milestone. Convert them at that point, under the amended rule —
+  and note that a threshold comparison now counts as the trigger, not just an
+  arithmetic one.
+
 - **Unused runtime dependencies.** `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`
   and `uvicorn` are declared in `requirements.txt` and imported nowhere.
   `fastapi`/`uvicorn` are annotated as belonging to a later phase; the other

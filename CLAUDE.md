@@ -52,7 +52,12 @@ Anything needing a price takes it from the candle, never the frame.
 
 **The `float`→`Decimal` boundaries are two, both named and singular.** The
 primary is config load, done once by pydantic — *a config field becomes `Decimal`
-at the milestone that first multiplies it by money.* The second is
+at the milestone that first multiplies it by money **or compares it against
+money**.* Comparison is the same boundary crossing as multiplication, minus the
+warning: `Decimal * float` raises `TypeError`, so that crossing announces itself,
+but `Decimal < float` is silent and decides against
+`0.1000000000000000055…` rather than the `0.1` written in `config.yaml`. A field
+consumed only by comparison would never trigger its own conversion. The second is
 `risk/rules.py::_atr_to_decimal`, for the ATR value: a runtime float64 market
 statistic (indicator maths runs on NumPy) that a stop price needs as `Decimal`.
 Both are single, tested functions using the shortest-repr form — never scatter
@@ -282,6 +287,13 @@ There is no separate workflow document; these three steps are the procedure, and
 they live here because this is the only file loaded into every session. Docs that
 must be remembered to be read are how the four drifts found in the M3 audit got
 in.
+
+**The Claude.ai Project knowledge is a fourth drift surface, and nothing audits
+it.** It is outside the repo, so no gate, grep or review touches it —
+`MILESTONE_WORKFLOW.md` was referenced there for months while existing nowhere in
+the tree. **This file is the authority.** Project knowledge should *point at* it,
+not restate it; anything restated there will eventually contradict the code, and
+the contradiction will be invisible from inside the repo.
 
 ---
 
