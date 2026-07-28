@@ -226,12 +226,38 @@ carry current state.
   is the same silent-swallow shape as A1, and it is what Q-A and Q-B exist to
   address.
 
-- **Unused runtime dependencies.** `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`
-  and `uvicorn` are declared in `requirements.txt` and imported nowhere.
-  `fastapi`/`uvicorn` are annotated as belonging to a later phase; the other
-  three are not. Install weight and attack surface for software that manages
-  money — decide per package whether it is genuinely pending or should be dropped
-  until needed.
+- **Declared-but-unused dependencies.** Runtime: `httpx`, `SQLAlchemy`,
+  `aiosqlite`, `fastapi` and `uvicorn` are in `requirements.txt` and imported
+  nowhere. Dev: `freezegun` and `respx` likewise — the tests inject a `Clock`
+  rather than freezing time, and nothing calls `httpx` yet. Install weight and
+  attack surface for software that manages money. All seven are deliberately
+  left on floors rather than pinned, because pinning them would assert a
+  commitment the project has not made; decide per package whether it is genuinely
+  pending or should be dropped until a caller exists. (`python-dotenv` is a
+  separate case: unimported but genuinely required, pulled in by
+  `pydantic-settings` for `.env` loading.)
+
+- **Transitive dependencies still float.** The direct layer is pinned exactly for
+  everything `src/` imports or a gate executes; nothing pins what those packages
+  in turn depend on. Two findings from checking the metadata, which point in
+  opposite directions:
+
+  - `pydantic 2.13.4` requires `pydantic-core==2.46.4` — **exact**. Pinning
+    `pydantic` therefore genuinely pins the Rust engine that performs `Decimal`
+    coercion, so the `Money` guard's verified behaviour is locked, not merely
+    appearing to be.
+  - `pandas 2.3.3` requires `numpy>=1.26.0` (Python ≥3.12) — a **floor with no
+    ceiling**. `pandas` does not constrain `numpy` upward at all. The float64
+    leak path is pinned only because `requirements.txt` pins `numpy` directly;
+    that protection is ours and would vanish if the direct pin were ever relaxed
+    on the assumption that `pandas` covers it.
+
+  Everything else — `websockets` and `aiohttp` under `python-binance`, `anyio`
+  under `httpx`, and so on — resolves freely. The proper fix is `pip-compile`
+  with hashes over a `requirements.in`, producing a fully resolved lock.
+  Deferred deliberately: it changes the install procedure for every contributor
+  and the Docker build, so it wants its own decision rather than riding along in
+  a hygiene commit.
 - **`Signal.metadata` is a convention, not a constraint.** `CLAUDE.md` requires
   plain `int`/`float`/`str` values because the field gets persisted and NumPy
   scalars break serialisation, but the field is `dict[str, object]` and nothing

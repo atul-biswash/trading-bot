@@ -1,10 +1,19 @@
 # ---------------------------------------------------------------------------
 # Runtime dependencies (Python 3.12+)
 # ---------------------------------------------------------------------------
+# Pinning policy: a package is pinned exactly (==) when `src/` imports it or a
+# quality gate executes it; everything else keeps a floor. Each pin equals the
+# version the current green baseline was verified against, so raising one is a
+# deliberate act with a fresh `make check`, not routine hygiene.
+#
+# This reproduces the *direct* layer only — transitive dependencies still float.
+# See docs/NEXT_MILESTONE.md open items for why a full lock (pip-compile with
+# hashes) is deferred rather than simply missing.
+
 # Exchange connectivity. python-binance is chosen over the lighter official
 # connector for its built-in Testnet support, threaded/async websocket
 # managers, and mature order helpers.
-python-binance>=1.0.19
+python-binance==1.0.37
 
 # Data / numerical stack.
 # NOTE — `pandas-ta` was intentionally REMOVED. The 0.3.x line this project
@@ -14,21 +23,33 @@ python-binance>=1.0.19
 # MACD, Bollinger, ATR, ...) are implemented as small, unit-tested functions in
 # `indicators/` instead. To re-add the library: `pandas-ta==0.4.71b0` together
 # with `numpy>=2.2.6,<2.3` and `pandas>=2.3.2` (this also pulls in numba).
-numpy>=1.26,<3.0
-pandas>=2.1,<3.0
+numpy==2.5.1   # verified behaviour: numpy.float64 is a float subclass, which is
+               # what the Money guard's _reject_float catches on the realistic
+               # leak path (DataFrame.iloc). Not a routine bump.
+pandas==2.3.3  # verified behaviour: float64 OHLCV, NaN propagation through
+               # ewm/rolling (the indicator warmup contract), and the iloc return
+               # type the one deliberate Decimal->float boundary rests on.
+               # pandas itself constrains numpy only as `>=1.26.0` — the upper
+               # bound above is ours, not inherited. Not a routine bump.
 
 # Configuration & validation.
-pydantic>=2.5.0
-pydantic-settings>=2.1.0
-PyYAML>=6.0.1
-python-dotenv>=1.0.1
+pydantic==2.13.4  # the most semantically load-bearing pin here: the Money guard
+                  # IS pydantic validation (_reject_float runs as a
+                  # BeforeValidator), and Decimal coercion behaviour —
+                  # shortest-repr, verified for this version — is not
+                  # contractual across releases. Transitively pins
+                  # pydantic-core==2.46.4, the engine doing the coercion.
+                  # Not a routine bump.
+pydantic-settings==2.14.2
+PyYAML==6.0.3
+python-dotenv>=1.0.1   # not imported directly; pulled in by pydantic-settings
 
 # HTTP (Telegram Bot API + general async HTTP) and resilience.
-httpx>=0.27.0
-tenacity>=8.2.3
+httpx>=0.27.0          # not imported yet — belongs to the notifications phase
+tenacity==9.1.4
 
 # Persistence. SQLite now; the same SQLAlchemy models upgrade to Postgres later
-# by swapping the connection URL in config.yaml.
+# by swapping the connection URL in config.yaml. Neither is imported yet.
 SQLAlchemy>=2.0.25
 aiosqlite>=0.19.0
 
@@ -37,4 +58,4 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.29.0
 
 # Nicer console logging when available (logger degrades gracefully without it).
-rich>=13.7.0
+rich==15.0.0
