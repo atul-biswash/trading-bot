@@ -163,7 +163,25 @@ class Trade(_Frozen):
 
 
 class Position(BaseModel):
-    """An open position and its protective levels. Mutable by design."""
+    """An open position and its protective levels. Mutable by design.
+
+    ``validate_assignment`` is what makes the ``Money`` guard survive that
+    mutability. Pydantic validates at construction only unless asked otherwise,
+    so without it ``position.trailing_stop = 98.5`` stores a binary ``float`` in
+    a ``Money`` field -- silently, and on the one model in the domain that is
+    written to on every bar. The trailing stop is advanced from a NumPy-derived
+    world, which is exactly the leak path ``_reject_float`` exists to close, so
+    the guard has to cover the write and not just the birth.
+
+    Note for anyone adding a cross-field validator here: with
+    ``validate_assignment`` on, a ``model_validator(mode="after")`` re-runs on
+    *every* assignment. ``RiskManager.advance_trailing_stop`` writes
+    ``highest_price`` and ``trailing_stop`` in two separate statements, so such a
+    validator would see the intermediate state between them. Either make the
+    invariant tolerant of that, or write both fields in one ``model_copy``.
+    """
+
+    model_config = ConfigDict(validate_assignment=True)
 
     symbol: str
     side: PositionSide

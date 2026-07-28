@@ -98,3 +98,74 @@ def test_money_guard_covers_optional_fields_too() -> None:
             entry_price=Decimal("100"),
             stop_loss=98.5,
         )
+
+
+# --------------------------------------------------------------------------
+# The guard survives mutation, not just construction
+# --------------------------------------------------------------------------
+def _open_position() -> Position:
+    return Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("1"),
+        entry_price=Decimal("100"),
+    )
+
+
+def test_money_guard_survives_assignment_on_position() -> None:
+    """``Position`` is the one mutable money model, so construction-time
+    validation alone would leave the guard open exactly where it is written to.
+
+    Pydantic validates at construction only unless ``validate_assignment`` is
+    set; without it this assignment succeeds and stores a binary ``float`` in a
+    ``Money`` field.
+    """
+    position = _open_position()
+
+    with pytest.raises(ValidationError, match="must not be built from a float"):
+        position.stop_loss = 98.5  # type: ignore[assignment]
+
+    assert position.stop_loss is None  # the rejected write left no trace
+
+
+@pytest.mark.parametrize("field", ["trailing_stop", "highest_price", "take_profit"])
+def test_money_guard_covers_every_mutable_level(field: str) -> None:
+    """The trailing-stop bookkeeping fields are the realistic leak path: they
+    are advanced from NumPy-derived market data on every bar."""
+    position = _open_position()
+
+    with pytest.raises(ValidationError, match="must not be built from a float"):
+        setattr(position, field, 108.9)
+
+
+def test_numpy_float_cannot_be_assigned_to_a_position() -> None:
+    """``np.float64`` is what ``DataFrame.iloc`` returns -- the leak path in
+    practice, and a ``float`` subclass, so the same guard catches it."""
+    numpy = pytest.importorskip("numpy")
+    position = _open_position()
+
+    with pytest.raises(ValidationError, match="must not be built from a float"):
+        position.trailing_stop = numpy.float64(108.9)  # type: ignore[assignment]
+
+
+def test_valid_decimal_assignment_still_works_exactly() -> None:
+    """The guard must not cost precision on the writes that are legitimate."""
+    position = _open_position()
+
+    position.trailing_stop = Decimal("108.90")
+    position.highest_price = Decimal("110")
+
+    assert position.trailing_stop == Decimal("108.90")
+    assert str(position.trailing_stop) == "108.90"  # exponent preserved
+    assert position.highest_price == Decimal("110")
+
+
+def test_clearing_a_level_to_none_is_still_allowed() -> None:
+    """``update_trailing_stop`` legitimately returns ``None`` while the trail is
+    inactive, and ``advance_trailing_stop`` assigns it straight through."""
+    position = _open_position()
+    position.trailing_stop = Decimal("108.90")
+
+    position.trailing_stop = None
+
+    assert position.trailing_stop is None
