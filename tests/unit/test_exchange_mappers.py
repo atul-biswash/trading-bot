@@ -90,6 +90,15 @@ KLINE_2 = [
 # Recorded WebSocket kline events. Times/OHLCV mirror KLINE_1 so the WS and REST
 # mappers can be cross-checked for agreement. The "k" object nests the bar; "x"
 # is the finality flag.
+#
+# Like KLINE_1/KLINE_2 above, the "k" object keeps the wire's single-letter keys
+# rather than being built from named fields: `to_candle_from_ws` is what
+# translates them, so a fixture that already spelled them out would be testing
+# the translation with itself. Grouped by meaning, one concern per row --
+# t/T: start & close time · s/i: symbol & interval · f/L: first & last trade id ·
+# o/c/h/l: OHLC · v/n/x: base volume, trade count, finality ·
+# q/V/Q/B: quote volume, taker base, taker quote, ignore.
+# fmt: off
 WS_KLINE_CLOSED = {  # a *final* bar (x == true) — the only kind handlers should see
     "e": "kline",
     "E": 1_700_000_060_001,
@@ -117,6 +126,7 @@ WS_KLINE_FORMING = {  # a still-forming bar (x == false)
         "q": "402000.0", "V": "3.0", "Q": "195000.0", "B": "0",
     },
 }
+# fmt: on
 
 # The same closed event as delivered by a *combined* (multiplex) stream.
 WS_KLINE_COMBINED = {"stream": "btcusdt@kline_1m", "data": WS_KLINE_CLOSED}
