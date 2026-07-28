@@ -196,6 +196,36 @@ carry current state.
   and note that a threshold comparison now counts as the trigger, not just an
   arithmetic one.
 
+  **This and the config-mutability decision are one finding from two
+  directions.** `config/models.py` was left unguarded on assignment on the
+  argument that config is never mutated after load — a convention, not something
+  enforced. The comparison hole is exactly what would make violating that
+  convention *silent*: a float assigned into a `Decimal` config field would flow
+  into `move_pct < config.activation_percent` and decide a trailing stop without
+  raising.
+
+  The obvious hardening was checked before being recommended. **Answered for
+  pydantic 2.13.4, and explicitly not as a contract:** assigning `0.1` to a plain
+  `Decimal`-annotated field under `validate_assignment` coerces via the
+  shortest-repr path, yielding `Decimal('0.1')` — not
+  `Decimal('0.1000000000000000055…')`. So guarding the five config classes would
+  be cheap hardening rather than the harmful "freeze binary noise into a
+  canonical-looking Decimal" it might have been. Not implemented now.
+
+  That answer is **observed runtime behaviour of an unpinned dependency**
+  (`pydantic>=2.5.0`), which is the uncomfortable part. The `Money` guard itself
+  rests on the same unpinned validation semantics. Note the asymmetry in how the
+  two classes of dependency fail: a lint or type-checker bump breaks the build
+  **loudly**, on a morning when nothing changed; a change in validation semantics
+  breaks the **money domain quietly**, and no gate in this project would notice.
+
+  Related, and not a separate finding: `risk/` raises 24 bare `ValueError`s for
+  incoherent inputs and **nothing in `src/` catches any of them**. Their only
+  containment is `_evaluate`'s handler, and only for the sites a strategy can
+  reach — the risk rules run under a signal handler, where `_emit` swallows. That
+  is the same silent-swallow shape as A1, and it is what Q-A and Q-B exist to
+  address.
+
 - **Unused runtime dependencies.** `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`
   and `uvicorn` are declared in `requirements.txt` and imported nowhere.
   `fastapi`/`uvicorn` are annotated as belonging to a later phase; the other

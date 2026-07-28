@@ -73,12 +73,19 @@ class StrategyConfigError(StrategyError):
 
 
 # --- Risk -------------------------------------------------------------------
-class RiskError(TradingBotError):
-    """Base class for risk-management rejections."""
-
-
-class RiskLimitExceeded(RiskError):  # noqa: N818 - established public name
-    """A configured risk limit blocked an action."""
+# There is deliberately no risk exception. A risk outcome is a *value* in this
+# system -- SizingDecision, ProtectiveLevels, RiskDecision, RiskAssessment --
+# never a raise, because "too small to trade", "no placeable stop this bar" and
+# "the daily-loss cap is hit" are routine answers that must carry their reason to
+# an operator. `RiskError` / `RiskLimitExceeded` existed here from the scaffold
+# until Phase 5 M3 and never acquired a caller; a class whose docstring read
+# "risk-management rejections" named precisely the thing M1-M3 decided must not
+# be an exception, so keeping it would have invited the pattern back.
+#
+# Genuinely incoherent *inputs* to the risk rules (non-positive price, non-finite
+# ATR) still raise, as bare `ValueError` -- the same convention `indicators/`
+# documents: ValueError for invalid parameters, DataError for malformed data.
+# Re-add a risk exception only alongside a caller that catches it.
 
 
 # --- Notifications ----------------------------------------------------------
