@@ -114,10 +114,10 @@ class SymbolInfo(_Frozen):
     symbol: str
     base_asset: str
     quote_asset: str
-    price_tick: Money        # PRICE_FILTER tickSize
-    step_size: Money         # LOT_SIZE stepSize
-    min_qty: Money           # LOT_SIZE minQty
-    min_notional: Money      # MIN_NOTIONAL / NOTIONAL
+    price_tick: Money  # PRICE_FILTER tickSize
+    step_size: Money  # LOT_SIZE stepSize
+    min_qty: Money  # LOT_SIZE minQty
+    min_notional: Money  # MIN_NOTIONAL / NOTIONAL
 
 
 class OrderRequest(_Frozen):
@@ -127,8 +127,8 @@ class OrderRequest(_Frozen):
     side: OrderSide
     type: OrderType
     quantity: Money
-    price: Money | None = None            # required for LIMIT orders
-    stop_price: Money | None = None       # required for STOP/TAKE_PROFIT orders
+    price: Money | None = None  # required for LIMIT orders
+    stop_price: Money | None = None  # required for STOP/TAKE_PROFIT orders
     client_order_id: str | None = None
 
 
@@ -196,7 +196,7 @@ class Position(BaseModel):
     take_profit: Money | None = None
     trailing_stop: Money | None = None
     highest_price: Money | None = None  # for trailing-stop bookkeeping (long)
-    lowest_price: Money | None = None   # for trailing-stop bookkeeping (short)
+    lowest_price: Money | None = None  # for trailing-stop bookkeeping (short)
 
     @property
     def is_open(self) -> bool:
@@ -231,7 +231,7 @@ class SizingDecision(_Frozen):
     """
 
     symbol: str
-    quantity: Money            # exchange-compliant; Decimal(0) means "do not trade"
+    quantity: Money  # exchange-compliant; Decimal(0) means "do not trade"
     requested_quantity: Money  # pre-cap, pre-rounding size, for diagnostics
     reason: str
 
@@ -306,7 +306,7 @@ class Signal(_Frozen):
     symbol: str
     action: SignalAction
     timestamp: datetime = Field(default_factory=_utcnow)
-    price: Money | None = None            # reference price at signal time
-    strength: float = 1.0                   # 0..1 confidence, strategy-defined
-    reason: str = ""                        # human-readable explanation for logs
+    price: Money | None = None  # reference price at signal time
+    strength: float = 1.0  # 0..1 confidence, strategy-defined
+    reason: str = ""  # human-readable explanation for logs
     metadata: dict[str, object] = Field(default_factory=dict)

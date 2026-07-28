@@ -80,18 +80,32 @@ KLINE_2 = [
 ]
 # fmt: on
 ORDER_LIMIT_NEW = {
-    "symbol": "BTCUSDT", "orderId": 123456, "clientOrderId": "myclient-1",
-    "transactTime": 1_700_000_000_123, "price": "64000.00000000",
-    "origQty": "0.00100000", "executedQty": "0.00000000",
-    "cummulativeQuoteQty": "0.00000000", "status": "NEW", "type": "LIMIT",
+    "symbol": "BTCUSDT",
+    "orderId": 123456,
+    "clientOrderId": "myclient-1",
+    "transactTime": 1_700_000_000_123,
+    "price": "64000.00000000",
+    "origQty": "0.00100000",
+    "executedQty": "0.00000000",
+    "cummulativeQuoteQty": "0.00000000",
+    "status": "NEW",
+    "type": "LIMIT",
     "side": "BUY",
 }
 ORDER_CANCELED = {**ORDER_LIMIT_NEW, "status": "CANCELED"}
 OPEN_ORDER = {
-    "symbol": "BTCUSDT", "orderId": 111, "clientOrderId": "resting-1",
-    "price": "64000.00000000", "origQty": "0.00200000", "executedQty": "0.00000000",
-    "cummulativeQuoteQty": "0.00000000", "status": "NEW", "type": "LIMIT",
-    "side": "BUY", "time": 1_700_000_000_000, "updateTime": 1_700_000_000_000,
+    "symbol": "BTCUSDT",
+    "orderId": 111,
+    "clientOrderId": "resting-1",
+    "price": "64000.00000000",
+    "origQty": "0.00200000",
+    "executedQty": "0.00000000",
+    "cummulativeQuoteQty": "0.00000000",
+    "status": "NEW",
+    "type": "LIMIT",
+    "side": "BUY",
+    "time": 1_700_000_000_000,
+    "updateTime": 1_700_000_000_000,
 }
 
 
@@ -122,8 +136,11 @@ def _make(client: AsyncMock, **kwargs: Any) -> BinanceClient:
 
 def _limit_req() -> OrderRequest:
     return OrderRequest(
-        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT,
-        quantity=Decimal("0.001"), price=Decimal("64000.00"),
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.001"),
+        price=Decimal("64000.00"),
         client_order_id="myclient-1",
     )
 
@@ -243,8 +260,11 @@ async def test_create_order_rounds_to_filters() -> None:
     bc = _make(client, enforce_filters=True)
 
     req = OrderRequest(
-        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT,
-        quantity=Decimal("0.0012345"), price=Decimal("64000.017"),
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.0012345"),
+        price=Decimal("64000.017"),
     )
     await bc.create_order(req)
 
@@ -264,8 +284,11 @@ async def test_create_order_rejects_below_min_notional_without_dispatch() -> Non
     bc = _make(client, enforce_filters=True)
 
     req = OrderRequest(
-        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT,
-        quantity=Decimal("0.00001"), price=Decimal("100.00"),  # notional 0.001
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.00001"),
+        price=Decimal("100.00"),  # notional 0.001
     )
     with pytest.raises(OrderError):
         await bc.create_order(req)
@@ -279,8 +302,11 @@ async def test_create_order_rejects_below_min_qty_without_dispatch() -> None:
     bc = _make(client, enforce_filters=True)
 
     req = OrderRequest(
-        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT,
-        quantity=Decimal("0.0005"), price=Decimal("64000.00"),
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.0005"),
+        price=Decimal("64000.00"),
     )
     with pytest.raises(OrderError):
         await bc.create_order(req)
@@ -306,9 +332,7 @@ async def test_cancel_order_sends_integer_order_id() -> None:
 
     order = await bc.cancel_order("BTCUSDT", "123456")
 
-    client.cancel_order.assert_awaited_once_with(
-        symbol="BTCUSDT", orderId=123456, recvWindow=5000
-    )
+    client.cancel_order.assert_awaited_once_with(symbol="BTCUSDT", orderId=123456, recvWindow=5000)
     assert order.status is OrderStatus.CANCELED
 
 

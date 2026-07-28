@@ -37,9 +37,7 @@ def test_env_mode_override(config_path: Path, monkeypatch: pytest.MonkeyPatch) -
     assert settings.mode is TradingMode.PAPER
 
 
-def test_testnet_prefers_testnet_keys(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_testnet_prefers_testnet_keys(config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BINANCE_API_KEY", "live_key")
     monkeypatch.setenv("BINANCE_API_SECRET", "live_secret")
     monkeypatch.setenv("BINANCE_TESTNET_API_KEY", "tn_key")
@@ -50,9 +48,7 @@ def test_testnet_prefers_testnet_keys(
     assert secret == "tn_secret"
 
 
-def test_live_mode_without_keys_raises(
-    config_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_live_mode_without_keys_raises(config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("BOT_MODE", "live")
     monkeypatch.delenv("BINANCE_API_KEY", raising=False)
     monkeypatch.delenv("BINANCE_API_SECRET", raising=False)

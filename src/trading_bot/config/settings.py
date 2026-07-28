@@ -75,10 +75,7 @@ class Settings:
         """
         if self.mode is TradingMode.TESTNET:
             key = self._secrets.binance_testnet_api_key or self._secrets.binance_api_key
-            secret = (
-                self._secrets.binance_testnet_api_secret
-                or self._secrets.binance_api_secret
-            )
+            secret = self._secrets.binance_testnet_api_secret or self._secrets.binance_api_secret
         else:
             key = self._secrets.binance_api_key
             secret = self._secrets.binance_api_secret

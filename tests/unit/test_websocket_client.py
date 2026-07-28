@@ -56,7 +56,9 @@ ETH_CLOSED = _kline_event(close="3500.00", is_closed=True, symbol="ETHUSDT")
 BTC_COMBINED = {"stream": "btcusdt@kline_1m", "data": BTC_CLOSED}
 # The sentinel ReconnectingWebsocket pushes once it exhausts its own reconnects.
 ERROR_SENTINEL = {
-    "e": "error", "type": "BinanceWebsocketUnableToConnect", "m": "max reconnects",
+    "e": "error",
+    "type": "BinanceWebsocketUnableToConnect",
+    "m": "max reconnects",
 }
 # A non-kline control frame (e.g. a subscription ack) that must be ignored.
 NON_KLINE = {"result": None, "id": 1}
@@ -229,9 +231,7 @@ async def _drain(source: FakeSocketSource, subscriptions, script, *, expected):
 
 
 async def test_only_closed_candles_reach_handlers() -> None:
-    source = FakeSocketSource(
-        [FakeSocket([BTC_FORMING, BTC_CLOSED], park_when_empty=True)]
-    )
+    source = FakeSocketSource([FakeSocket([BTC_FORMING, BTC_CLOSED], park_when_empty=True)])
     received, _ = await _drain(source, [("BTCUSDT", "1m")], None, expected=1)
     assert [c.is_closed for c in received] == [True]
     assert received[0].close == Decimal("65050.00")  # the forming bar was dropped
@@ -245,9 +245,7 @@ async def test_multiplex_envelope_is_unwrapped() -> None:
 
 
 async def test_non_kline_messages_are_ignored() -> None:
-    source = FakeSocketSource(
-        [FakeSocket([NON_KLINE, BTC_CLOSED], park_when_empty=True)]
-    )
+    source = FakeSocketSource([FakeSocket([NON_KLINE, BTC_CLOSED], park_when_empty=True)])
     received, _ = await _drain(source, [("BTCUSDT", "1m")], None, expected=1)
     assert len(received) == 1  # the control frame did not crash or reconnect
     assert received[0].close == Decimal("65050.00")
@@ -268,9 +266,7 @@ async def test_routes_candles_by_symbol_and_timeframe() -> None:
         if btc and eth:
             done.set()
 
-    source = FakeSocketSource(
-        [FakeSocket([BTC_CLOSED, ETH_CLOSED], park_when_empty=True)]
-    )
+    source = FakeSocketSource([FakeSocket([BTC_CLOSED, ETH_CLOSED], park_when_empty=True)])
     stream = _make(source)
     stream.subscribe("BTCUSDT", "1m", on_btc)
     stream.subscribe("ETHUSDT", "1m", on_eth)
@@ -296,11 +292,9 @@ async def test_a_failing_handler_does_not_stop_the_feed() -> None:
         if len(good) >= 2:
             done.set()
 
-    source = FakeSocketSource(
-        [FakeSocket([BTC_CLOSED, BTC_CLOSED_2], park_when_empty=True)]
-    )
+    source = FakeSocketSource([FakeSocket([BTC_CLOSED, BTC_CLOSED_2], park_when_empty=True)])
     stream = _make(source)
-    stream.subscribe("BTCUSDT", "1m", bad)          # raises every time
+    stream.subscribe("BTCUSDT", "1m", bad)  # raises every time
     stream.subscribe("BTCUSDT", "1m", good_handler)  # must still receive both
     await stream.start()
     try:
@@ -320,8 +314,12 @@ async def test_capped_exponential_backoff_sequence() -> None:
     holder: list[Any] = [None]
     source = FakeSocketSource([_raising_socket(ConnectionError("down")) for _ in range(6)])
     stream = BinanceMarketDataStream(
-        source, backoff_base_s=1.0, backoff_max_s=5.0, max_retries=None,
-        sleep=_stopping_sleep(holder, recorded, stop_after=6), random_fn=lambda: 1.0,
+        source,
+        backoff_base_s=1.0,
+        backoff_max_s=5.0,
+        max_retries=None,
+        sleep=_stopping_sleep(holder, recorded, stop_after=6),
+        random_fn=lambda: 1.0,
     )
     holder[0] = stream
     stream.subscribe("BTCUSDT", "1m", _null_handler)
@@ -341,15 +339,21 @@ async def test_counter_resets_after_a_good_message() -> None:
     async def handler(c: Candle) -> None:
         received.append(c)
 
-    source = FakeSocketSource([
-        _raising_socket(ConnectionError("down")),   # attempt 0 -> 1.0
-        _raising_socket(ConnectionError("down")),   # attempt 1 -> 2.0
-        _raising_socket(ConnectionError("down")),   # attempt 2 -> 4.0
-        FakeSocket([BTC_CLOSED, ERROR_SENTINEL]),   # good msg resets, then drop
-    ])
+    source = FakeSocketSource(
+        [
+            _raising_socket(ConnectionError("down")),  # attempt 0 -> 1.0
+            _raising_socket(ConnectionError("down")),  # attempt 1 -> 2.0
+            _raising_socket(ConnectionError("down")),  # attempt 2 -> 4.0
+            FakeSocket([BTC_CLOSED, ERROR_SENTINEL]),  # good msg resets, then drop
+        ]
+    )
     stream = BinanceMarketDataStream(
-        source, backoff_base_s=1.0, backoff_max_s=60.0, max_retries=None,
-        sleep=_stopping_sleep(holder, recorded, stop_after=4), random_fn=lambda: 1.0,
+        source,
+        backoff_base_s=1.0,
+        backoff_max_s=60.0,
+        max_retries=None,
+        sleep=_stopping_sleep(holder, recorded, stop_after=4),
+        random_fn=lambda: 1.0,
     )
     holder[0] = stream
     stream.subscribe("BTCUSDT", "1m", handler)
@@ -371,33 +375,41 @@ async def test_error_sentinel_triggers_a_fresh_socket() -> None:
         received.append(c)
         holder[0]._running = False  # stop once we prove the reconnect delivered
 
-    source = FakeSocketSource([
-        FakeSocket([ERROR_SENTINEL]),  # library gave up -> reconnect
-        FakeSocket([BTC_CLOSED]),      # fresh socket delivers a candle
-    ])
+    source = FakeSocketSource(
+        [
+            FakeSocket([ERROR_SENTINEL]),  # library gave up -> reconnect
+            FakeSocket([BTC_CLOSED]),  # fresh socket delivers a candle
+        ]
+    )
     stream = BinanceMarketDataStream(
-        source, backoff_base_s=1.0, backoff_max_s=60.0, max_retries=None,
-        sleep=_recording_sleep(recorded), random_fn=lambda: 1.0,
+        source,
+        backoff_base_s=1.0,
+        backoff_max_s=60.0,
+        max_retries=None,
+        sleep=_recording_sleep(recorded),
+        random_fn=lambda: 1.0,
     )
     holder[0] = stream
     stream.subscribe("BTCUSDT", "1m", handler)
     stream._running = True
     await stream._run()
 
-    assert recorded == [1.0]                    # exactly one backoff for the drop
-    assert len(source.multiplex_calls) == 2     # a fresh socket after the sentinel
+    assert recorded == [1.0]  # exactly one backoff for the drop
+    assert len(source.multiplex_calls) == 2  # a fresh socket after the sentinel
     assert [c.close for c in received] == [Decimal("65050.00")]
 
 
 async def test_zero_max_retries_reconnects_indefinitely() -> None:
     recorded: list[float] = []
     holder: list[Any] = [None]
-    source = FakeSocketSource(
-        [_raising_socket(ConnectionError("down")) for _ in range(20)]
-    )
+    source = FakeSocketSource([_raising_socket(ConnectionError("down")) for _ in range(20)])
     stream = BinanceMarketDataStream(
-        source, backoff_base_s=1.0, backoff_max_s=5.0, max_retries=0,  # 0 == infinite
-        sleep=_stopping_sleep(holder, recorded, stop_after=20), random_fn=lambda: 1.0,
+        source,
+        backoff_base_s=1.0,
+        backoff_max_s=5.0,
+        max_retries=0,  # 0 == infinite
+        sleep=_stopping_sleep(holder, recorded, stop_after=20),
+        random_fn=lambda: 1.0,
     )
     holder[0] = stream
     stream.subscribe("BTCUSDT", "1m", _null_handler)
@@ -409,39 +421,47 @@ async def test_zero_max_retries_reconnects_indefinitely() -> None:
 
 async def test_bounded_max_retries_gives_up_and_raises() -> None:
     recorded: list[float] = []
-    source = FakeSocketSource(
-        [_raising_socket(ConnectionError("down")) for _ in range(3)]
-    )
+    source = FakeSocketSource([_raising_socket(ConnectionError("down")) for _ in range(3)])
     stream = BinanceMarketDataStream(
-        source, backoff_base_s=1.0, backoff_max_s=5.0, max_retries=2,
-        sleep=_recording_sleep(recorded), random_fn=lambda: 1.0,
+        source,
+        backoff_base_s=1.0,
+        backoff_max_s=5.0,
+        max_retries=2,
+        sleep=_recording_sleep(recorded),
+        random_fn=lambda: 1.0,
     )
     stream.subscribe("BTCUSDT", "1m", _null_handler)
     stream._running = True
     with pytest.raises(ConnectionError):
         await stream._run()
 
-    assert len(recorded) == 2              # backed off twice, then gave up
+    assert len(recorded) == 2  # backed off twice, then gave up
     assert len(source.multiplex_calls) == 3
 
 
 def test_backoff_delay_applies_equal_jitter_and_caps() -> None:
     floor = BinanceMarketDataStream(
-        FakeSocketSource([]), backoff_base_s=4.0, backoff_max_s=10.0,
+        FakeSocketSource([]),
+        backoff_base_s=4.0,
+        backoff_max_s=10.0,
         random_fn=lambda: 0.0,
     )
     full = BinanceMarketDataStream(
-        FakeSocketSource([]), backoff_base_s=4.0, backoff_max_s=10.0,
+        FakeSocketSource([]),
+        backoff_base_s=4.0,
+        backoff_max_s=10.0,
         random_fn=lambda: 1.0,
     )
-    assert floor._backoff_delay(0) == 2.0   # ceiling(4) * 0.5
-    assert full._backoff_delay(0) == 4.0    # ceiling(4) * 1.0
-    assert full._backoff_delay(1) == 8.0    # ceiling(8)
-    assert full._backoff_delay(2) == 10.0   # min(10, 16) capped
+    assert floor._backoff_delay(0) == 2.0  # ceiling(4) * 0.5
+    assert full._backoff_delay(0) == 4.0  # ceiling(4) * 1.0
+    assert full._backoff_delay(1) == 8.0  # ceiling(8)
+    assert full._backoff_delay(2) == 10.0  # min(10, 16) capped
 
     rng = Random(0)
     jittered = BinanceMarketDataStream(
-        FakeSocketSource([]), backoff_base_s=1.0, backoff_max_s=5.0,
+        FakeSocketSource([]),
+        backoff_base_s=1.0,
+        backoff_max_s=5.0,
         random_fn=rng.random,
     )
     for attempt in range(8):

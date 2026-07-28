@@ -181,9 +181,7 @@ class TradeIntent(_Frozen):
             # The levels carry their own symbol and entry price; disagreement
             # would mean protecting one position with another's stop.
             if self.levels.symbol != self.symbol:
-                raise ValueError(
-                    f"levels are for {self.levels.symbol}, not {self.symbol}"
-                )
+                raise ValueError(f"levels are for {self.levels.symbol}, not {self.symbol}")
             if self.levels.entry_price != self.price:
                 raise ValueError(
                     f"levels priced at {self.levels.entry_price} but intent at {self.price}"
@@ -264,9 +262,7 @@ class RiskManager(RiskManagerPort):
             )
         return self._approve(signal, portfolio=portfolio, equity=portfolio.equity(marks))
 
-    def _approve(
-        self, signal: Signal, *, portfolio: Portfolio, equity: Decimal
-    ) -> RiskDecision:
+    def _approve(self, signal: Signal, *, portfolio: Portfolio, equity: Decimal) -> RiskDecision:
         """Evaluate the limits against an already-computed ``equity``.
 
         First failure wins, in a fixed order: the portfolio-wide halt that makes
@@ -278,9 +274,7 @@ class RiskManager(RiskManagerPort):
         now = self._clock()
 
         def refuse(rule: RiskRule, detail: str) -> RiskDecision:
-            return RiskDecision(
-                symbol=signal.symbol, approved=False, rule=rule, reason=detail
-            )
+            return RiskDecision(symbol=signal.symbol, approved=False, rule=rule, reason=detail)
 
         if equity <= 0:
             return refuse(RiskRule.NO_EQUITY, f"equity is {equity}; nothing to risk")
@@ -298,15 +292,13 @@ class RiskManager(RiskManagerPort):
         if portfolio.has_position(signal.symbol):
             return refuse(
                 RiskRule.ALREADY_IN_POSITION,
-                f"{signal.symbol} already has an open position; this system does not "
-                "add to one",
+                f"{signal.symbol} already has an open position; this system does not add to one",
             )
 
         if portfolio.in_cooldown(signal.symbol, now):
             return refuse(
                 RiskRule.COOLDOWN,
-                f"{signal.symbol} is in cooldown until "
-                f"{portfolio.cooldown_expiry(signal.symbol)}",
+                f"{signal.symbol} is in cooldown until {portfolio.cooldown_expiry(signal.symbol)}",
             )
 
         if portfolio.position_count >= limits.max_open_positions:
@@ -459,9 +451,7 @@ class RiskManager(RiskManagerPort):
                 levels=levels,
             )
 
-        sizing = self.size_position(
-            signal, equity=equity, price=price, stop_price=levels.stop_loss
-        )
+        sizing = self.size_position(signal, equity=equity, price=price, stop_price=levels.stop_loss)
         if not sizing.is_tradeable:
             return refuse(sizing.reason, decision=decision, levels=levels, sizing=sizing)
 

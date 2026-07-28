@@ -177,9 +177,7 @@ class ProtectiveLevels(_Frozen):
         if self.stop_loss is not None and self.stop_distance is not None:
             expected = abs(self.entry_price - self.stop_loss)
             if self.stop_distance != expected:
-                raise ValueError(
-                    f"stop_distance {self.stop_distance} != |entry - stop| {expected}"
-                )
+                raise ValueError(f"stop_distance {self.stop_distance} != |entry - stop| {expected}")
         return self
 
 
@@ -286,7 +284,9 @@ def _atr_to_decimal(value: float) -> Decimal:
 # ---------------------------------------------------------------------------
 # Stop-loss and take-profit levels
 # ---------------------------------------------------------------------------
-def _stop_distance(config: StopLossConfig, entry_price: Decimal, atr_value: float | None) -> Decimal:
+def _stop_distance(
+    config: StopLossConfig, entry_price: Decimal, atr_value: float | None
+) -> Decimal:
     """Raw (pre-rounding) stop distance from the configured method."""
     if config.type is StopType.PERCENT:
         return entry_price * config.percent / _PERCENT
@@ -385,7 +385,11 @@ def compute_protective_levels(
     _require_positive("entry_price", entry_price)
 
     stop = stop_loss_level(
-        side=side, entry_price=entry_price, config=stop_loss, tick_size=tick_size, atr_value=atr_value
+        side=side,
+        entry_price=entry_price,
+        config=stop_loss,
+        tick_size=tick_size,
+        atr_value=atr_value,
     )
     distance = None if stop is None else abs(entry_price - stop)
 
@@ -471,7 +475,9 @@ def update_trailing_stop(
             detail=f"trail inactive: move {move_pct}% < activation {config.activation_percent}%",
         )
 
-    factor = _ONE - config.trail_percent / _PERCENT if long else _ONE + config.trail_percent / _PERCENT
+    factor = (
+        _ONE - config.trail_percent / _PERCENT if long else _ONE + config.trail_percent / _PERCENT
+    )
     candidate = _protective_level(mark * factor, mark, tick_size)
     if candidate is None:
         # Trail distance is sub-tick this bar (very low volatility or a very tight
@@ -529,7 +535,9 @@ def should_exit(*, position: Position, price: Decimal) -> ExitDecision | None:
     if triggered:
         # The first stop price reaches as it moves adversely binds: highest for a
         # long, lowest for a short.
-        reason, level = max(triggered, key=lambda t: t[1]) if long else min(triggered, key=lambda t: t[1])
+        reason, level = (
+            max(triggered, key=lambda t: t[1]) if long else min(triggered, key=lambda t: t[1])
+        )
         arrow = "<=" if long else ">="
         return ExitDecision(
             symbol=position.symbol,

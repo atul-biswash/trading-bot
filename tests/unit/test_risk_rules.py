@@ -225,7 +225,9 @@ class TestDirectionalRoundingInvariant:
             price=mark,
             high_water=None,
             existing_stop=None,
-            config=TrailingStopConfig(enabled=True, activation_percent=D("0.5"), trail_percent=trail),
+            config=TrailingStopConfig(
+                enabled=True, activation_percent=D("0.5"), trail_percent=trail
+            ),
             tick_size=t,
         )
         assert update.activated
@@ -314,7 +316,9 @@ class TestTrailingStop:
             price=D("100.5"),
             high_water=None,
             existing_stop=None,
-            config=TrailingStopConfig(enabled=True, activation_percent=D("1.0"), trail_percent=D("1.0")),
+            config=TrailingStopConfig(
+                enabled=True, activation_percent=D("1.0"), trail_percent=D("1.0")
+            ),
             tick_size=D("0.01"),
         )
         assert update.activated is False
@@ -329,7 +333,9 @@ class TestTrailingStop:
             price=D("110"),
             high_water=None,
             existing_stop=None,
-            config=TrailingStopConfig(enabled=True, activation_percent=D("1.0"), trail_percent=D("1.0")),
+            config=TrailingStopConfig(
+                enabled=True, activation_percent=D("1.0"), trail_percent=D("1.0")
+            ),
             tick_size=D("0.13"),
         )
         assert update.activated is True
@@ -472,9 +478,7 @@ class TestProtectiveLevelsInvariants:
             )
 
     def test_frozen(self) -> None:
-        levels = ProtectiveLevels(
-            symbol="X", side=LONG, entry_price=D("100"), basis="ok"
-        )
+        levels = ProtectiveLevels(symbol="X", side=LONG, entry_price=D("100"), basis="ok")
         with pytest.raises(ValueError, match="frozen"):
             levels.stop_loss = D("98")  # type: ignore[misc]
 
@@ -483,9 +487,7 @@ class TestProtectiveLevelsInvariants:
 # should_exit: precedence, both sides
 # --------------------------------------------------------------------------
 def _long_position(**levels: Decimal) -> Position:
-    return Position(
-        symbol="BTCUSDT", side=LONG, quantity=D("1"), entry_price=D("100"), **levels
-    )
+    return Position(symbol="BTCUSDT", side=LONG, quantity=D("1"), entry_price=D("100"), **levels)
 
 
 class TestShouldExit:
@@ -532,8 +534,12 @@ class TestShouldExit:
 
     def test_short_stop_and_take_profit(self) -> None:
         position = Position(
-            symbol="BTCUSDT", side=SHORT, quantity=D("1"), entry_price=D("100"),
-            stop_loss=D("102"), take_profit=D("96"),
+            symbol="BTCUSDT",
+            side=SHORT,
+            quantity=D("1"),
+            entry_price=D("100"),
+            stop_loss=D("102"),
+            take_profit=D("96"),
         )
         stop = should_exit(position=position, price=D("103"))
         assert stop is not None and stop.reason is ExitReason.STOP_LOSS and stop.price == D("102")
@@ -541,7 +547,9 @@ class TestShouldExit:
         assert target is not None and target.reason is ExitReason.TAKE_PROFIT
 
     def test_flat_position_never_exits(self) -> None:
-        position = Position(symbol="BTCUSDT", side=PositionSide.FLAT, quantity=D("0"), entry_price=D("100"))
+        position = Position(
+            symbol="BTCUSDT", side=PositionSide.FLAT, quantity=D("0"), entry_price=D("100")
+        )
         assert should_exit(position=position, price=D("50")) is None
 
 
@@ -564,7 +572,10 @@ class TestParameterValidation:
     def test_flat_side_rejected_in_stop_level(self) -> None:
         with pytest.raises(ValueError, match="long or short"):
             stop_loss_level(
-                side=PositionSide.FLAT, entry_price=D("100"), config=StopLossConfig(), tick_size=D("0.01")
+                side=PositionSide.FLAT,
+                entry_price=D("100"),
+                config=StopLossConfig(),
+                tick_size=D("0.01"),
             )
 
 

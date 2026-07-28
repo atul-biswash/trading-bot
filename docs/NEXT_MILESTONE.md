@@ -267,11 +267,14 @@ carry current state.
 - **`ruff` and `mypy` versions are unpinned** (`ruff>=0.3.0`, `mypy>=1.8.0`). The
   gate reads an absolute zero, so a new release can turn the build red with no
   code change.
-- **19 files are not `ruff format`-clean** (59 are). `ruff format` is not part of
-  `make check`. Worth a single mechanical commit plus adding
-  `ruff format --check` to the gate — but check what the formatter does to
-  hand-laid data tables inside `parametrize` first, and keep it in its own commit
-  away from anything semantic.
+- **`scripts/` is outside every gate.** `ruff check`, `ruff format --check` and
+  `mypy` are all scoped to `src`/`tests`, so `scripts/check_testnet.py` and
+  `scripts/download_data.py` are neither linted, formatter-checked, nor
+  type-checked. Unlike `tests/` being outside mypy — which is policy — this is an
+  accident of the path list. It matters more than it looks: `check_testnet.py`
+  connects to Binance with **real credentials** and is exempt from the strict
+  typing the rest of the policy depends on. Bringing it in is its own commit,
+  because it may surface real findings rather than being a no-op.
 
 ---
 

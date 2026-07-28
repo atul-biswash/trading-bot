@@ -80,9 +80,7 @@ class KlineSocket(Protocol):
 
     async def __aenter__(self) -> KlineSocket: ...
 
-    async def __aexit__(
-        self, exc_type: object, exc: object, tb: object
-    ) -> object: ...
+    async def __aexit__(self, exc_type: object, exc: object, tb: object) -> object: ...
 
     async def recv(self) -> dict[str, Any]: ...
 
@@ -234,9 +232,7 @@ class BinanceMarketDataStream(MarketDataStream):
         if not self._stream_names:
             raise ValueError("no subscriptions; call subscribe() before start()")
         self._running = True
-        self._task = asyncio.create_task(
-            self._run(), name="binance-market-data-stream"
-        )
+        self._task = asyncio.create_task(self._run(), name="binance-market-data-stream")
 
     async def stop(self) -> None:
         """Cancel the receive task and release the underlying connection.
@@ -292,16 +288,14 @@ class BinanceMarketDataStream(MarketDataStream):
                     break
                 if self._max_retries is not None and attempt >= self._max_retries:
                     _log.error(
-                        "Market-data stream giving up after %d consecutive "
-                        "reconnect attempts: %s",
+                        "Market-data stream giving up after %d consecutive reconnect attempts: %s",
                         self._max_retries,
                         exc,
                     )
                     raise
                 delay = self._backoff_delay(attempt)
                 _log.warning(
-                    "Market-data stream disconnected (%s); reconnecting in "
-                    "%.1fs (attempt %d)",
+                    "Market-data stream disconnected (%s); reconnecting in %.1fs (attempt %d)",
                     exc,
                     delay,
                     attempt + 1,
@@ -319,9 +313,7 @@ class BinanceMarketDataStream(MarketDataStream):
         """
         event = unwrap_stream_message(message)
         if event.get(_WS_EVENT_TYPE) != _WS_EVENT_KLINE:
-            _log.debug(
-                "Ignoring non-kline stream message: %r", event.get(_WS_EVENT_TYPE)
-            )
+            _log.debug("Ignoring non-kline stream message: %r", event.get(_WS_EVENT_TYPE))
             return
 
         candle = ws_kline_to_candle(event)

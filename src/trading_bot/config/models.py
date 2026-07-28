@@ -291,9 +291,7 @@ class EngineConfig(_Model):
     @model_validator(mode="after")
     def _check_backoff_bounds(self) -> EngineConfig:
         if self.reconnect_backoff_max_s < self.reconnect_backoff_s:
-            raise ValueError(
-                "reconnect_backoff_max_s must be >= reconnect_backoff_s"
-            )
+            raise ValueError("reconnect_backoff_max_s must be >= reconnect_backoff_s")
         return self
 
 

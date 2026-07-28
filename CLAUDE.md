@@ -199,7 +199,20 @@ scripts/         check_testnet.py · download_data.py
   pinned NumPy/pandas — fragile for software that manages money. Indicators are
   small hand-written unit-tested functions in `indicators/`.
 - `requirements.txt` is the single runtime dependency source; dev tools in
-  `requirements-dev.txt`.
+  `requirements-dev.txt`. **23 direct dependencies, in three categories:**
+
+  | | Runtime | Dev | Rule |
+  |---|---|---|---|
+  | **Pinned `==`** | 8 | 7 | `src/` imports it, or a gate executes it |
+  | **Deliberately floored** | 1 | 0 | `python-dotenv` — unimported but genuinely required, pulled in by `pydantic-settings` |
+  | **Unused, pending deletion** | 5 | 2 | `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`, `uvicorn`; `freezegun`, `respx` |
+
+  Pinning the unused ones would assert a commitment the project has not made to
+  dependencies it may drop. Pins encode a **verified** version, not a working
+  one: `pydantic`, `pandas` and `numpy` carry line comments saying so, because
+  the `Money` guard *is* pydantic validation and the float64 leak path *is*
+  `numpy.float64` being a `float` subclass. Raising one of those is never
+  routine hygiene. Transitive dependencies still float — see the open items.
 
 **Style**
 - `timezone.utc` — do **not** switch to the `datetime.UTC` alias (`UP017` is
@@ -211,10 +224,35 @@ scripts/         check_testnet.py · download_data.py
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
 - **All files are LF**, pinned by `.gitattributes`. Write LF.
-- `# fmt: off` / `# fmt: on` fences hand-laid data tables in tests. It only works
-  at **statement boundaries** — it does *not* protect a table inside a
+- `ruff format` is a gate (`make check`). It runs over `src tests` — the same
+  paths as `ruff check` — so a formatting failure surfaces in seconds, before
+  pytest.
+- `# fmt: off` / `# fmt: on` fences hand-laid data tables. It only works at
+  **statement boundaries** — it does *not* protect a table inside a
   `@pytest.mark.parametrize` argument list. Define such tables at module level
-  and reference them from `parametrize`.
+  and reference them from `parametrize` (`_STOP_ROUNDING_CASES` is the worked
+  example).
+- **Fence only where layout is the sole carrier of a correspondence to an
+  external contract.** Six fenced fixtures across five files:
+
+  | File | Fixture | Contract it mirrors |
+  |---|---|---|
+  | `test_binance_client.py` | `KLINE_1`/`KLINE_2` | Binance REST positional kline array |
+  | `test_exchange_mappers.py` | `KLINE_1`/`KLINE_2` | same |
+  | `test_exchange_mappers.py` | `WS_KLINE_CLOSED`/`WS_KLINE_FORMING` | WS single-letter kline schema |
+  | `test_websocket_client.py` | `_kline_event` | same |
+  | `test_helpers.py` | paired rounding assertions | the two rounding directions, read side by side |
+  | `test_risk_rules.py` | `_STOP_ROUNDING_CASES` | tick/percent case grid |
+
+  Each keeps the raw wire shape deliberately: the mapper under test is what
+  turns position into meaning, so a fixture that already knew the field names
+  would test the helper with itself. Each carries a comment naming its columns
+  in schema order.
+
+  **Declined, and recorded as declined rather than missed:** `ORDER_LIMIT_NEW`,
+  the `fields` tuple, `ERROR_SENTINEL`, and an aligned trailing comment on a
+  `FakeSocket` argument. Their layout is convenient, not load-bearing. Spending
+  the mechanism on those would blunt the signal that a fence means something.
 
 **Config & safety**
 - **Testnet is the default everywhere.** Live trading requires explicit
@@ -225,12 +263,31 @@ scripts/         check_testnet.py · download_data.py
 ## Quality gates — hard zero
 
 ```bash
-pytest                      # 517 passed  (514 unit + 3 opt-in Testnet integration)
-pytest -m "not integration" # 514 passed  — use this for fast iteration
+pytest                      # 517 passed = 514 unit + 3 opt-in Testnet integration
+pytest -m "not integration" # 514 passed — use this for fast iteration
 mypy                        # Success: no issues found in 55 source files
 ruff check src tests        # All checks passed!
-make check                  # all three
+ruff format --check src tests  # 78 files already formatted
+make check                  # all four, formatter check before pytest
 ```
+
+**517 is the total.** Quote it as `517 = 514 + 3` rather than bare, because both
+numbers are correct answers to different questions and a bare figure invites the
+wrong comparison.
+
+**What each gate actually covers** — the boundaries differ, and the difference
+is not all deliberate:
+
+| Gate | Scope | Files |
+|---|---|---|
+| `ruff check` / `ruff format --check` | `src tests` | 78 |
+| `mypy` | `packages = ["trading_bot"]` | 55 |
+| `pytest` | `tests/` | — |
+
+`tests/` sits outside mypy **by policy** (see below). `scripts/` — two files,
+including `check_testnet.py`, which connects to Binance with real credentials —
+sits outside **all three**, and that is *not* policy but an accident of the path
+list. Tracked as an open item in `docs/NEXT_MILESTONE.md`.
 
 **mypy and ruff must report ZERO.** This is a hard gate, not a baseline to diff
 against. Any new finding is a regression.

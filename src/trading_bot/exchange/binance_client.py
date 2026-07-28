@@ -132,9 +132,7 @@ class BinanceClient(BaseExchangeClient):
         raw = await self._call(self._client.get_ticker, symbol=symbol)
         return to_ticker(raw)
 
-    async def get_klines(
-        self, symbol: str, timeframe: str, *, limit: int = 500
-    ) -> list[Candle]:
+    async def get_klines(self, symbol: str, timeframe: str, *, limit: int = 500) -> list[Candle]:
         raw = await self._call(
             self._client.get_klines, symbol=symbol, interval=timeframe, limit=limit
         )
@@ -158,9 +156,7 @@ class BinanceClient(BaseExchangeClient):
         params["recvWindow"] = self._recv_window
         # Order placement is NOT idempotent: retry only on rate-limit (rejected
         # pre-acceptance), never on a connection timeout that may have landed.
-        raw = await self._call(
-            self._client.create_order, idempotent=False, **params
-        )
+        raw = await self._call(self._client.create_order, idempotent=False, **params)
         return to_order(raw)
 
     async def validate_order(self, request: OrderRequest) -> None:
@@ -216,11 +212,7 @@ class BinanceClient(BaseExchangeClient):
         """
         info = await self.get_symbol_info(request.symbol)
         quantity = round_step_size(request.quantity, info.step_size)
-        price = (
-            round_price(request.price, info.price_tick)
-            if request.price is not None
-            else None
-        )
+        price = round_price(request.price, info.price_tick) if request.price is not None else None
 
         if quantity != request.quantity or price != request.price:
             self._log.info(

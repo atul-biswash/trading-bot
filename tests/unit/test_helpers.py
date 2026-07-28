@@ -42,7 +42,9 @@ def test_round_to_tick_honours_the_direction() -> None:
 
 
 def test_round_to_tick_exact_multiple_is_unchanged() -> None:
-    assert round_to_tick(Decimal("99.97"), Decimal("0.13"), rounding=ROUND_CEILING) == Decimal("99.97")
+    assert round_to_tick(Decimal("99.97"), Decimal("0.13"), rounding=ROUND_CEILING) == Decimal(
+        "99.97"
+    )
 
 
 def test_round_to_tick_zero_tick_is_noop() -> None:

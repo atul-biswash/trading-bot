@@ -91,8 +91,9 @@ def _ws_kline_event(
     }
 
 
-def rest_candle(index: int, *, close: str = _CLOSE, symbol: str = "BTCUSDT",
-                timeframe: str = "1m") -> Candle:
+def rest_candle(
+    index: int, *, close: str = _CLOSE, symbol: str = "BTCUSDT", timeframe: str = "1m"
+) -> Candle:
     return to_candle(_rest_kline(index, close=close), symbol=symbol, timeframe=timeframe)
 
 
@@ -272,9 +273,7 @@ async def test_start_seeds_every_tracked_pair() -> None:
         ("BTCUSDT", "1m"): [rest_candle(i) for i in range(3)],
         ("ETHUSDT", "5m"): [rest_candle(i, symbol="ETHUSDT", timeframe="5m") for i in range(2)],
     }
-    provider, client, stream = build_provider(
-        history, pairs=(("BTCUSDT", "1m"), ("ETHUSDT", "5m"))
-    )
+    provider, client, stream = build_provider(history, pairs=(("BTCUSDT", "1m"), ("ETHUSDT", "5m")))
 
     await provider.start()
 
@@ -661,9 +660,7 @@ async def test_stop_stops_the_stream_before_closing_the_client() -> None:
 
 
 async def test_stop_closes_a_client_the_provider_owns() -> None:
-    provider, client, _ = build_provider(
-        {("BTCUSDT", "1m"): [rest_candle(0)]}, owns_client=True
-    )
+    provider, client, _ = build_provider({("BTCUSDT", "1m"): [rest_candle(0)]}, owns_client=True)
     await provider.start()
 
     await provider.stop()

@@ -113,7 +113,9 @@ class FakeProvider(MarketDataProvider):
         return self._candles.get(symbol)
 
 
-def ohlcv(bars: int, *, high: float = 101.0, low: float = 99.0, close: float = 100.0) -> pd.DataFrame:
+def ohlcv(
+    bars: int, *, high: float = 101.0, low: float = 99.0, close: float = 100.0
+) -> pd.DataFrame:
     """A float64 OHLCV frame shaped like the provider's, with a constant range.
 
     A constant ``high``/``low``/``close`` makes the true range constant too, so
@@ -215,8 +217,7 @@ def build_manager(
     the_clock = clock or FakeClock()
     manager = RiskManager(
         config=config or risk_config(),
-        provider=provider
-        or FakeProvider(frames={SYMBOL: ohlcv(50)}, candles={SYMBOL: candle()}),
+        provider=provider or FakeProvider(frames={SYMBOL: ohlcv(50)}, candles={SYMBOL: candle()}),
         pairs=pairs or {SYMBOL: PairContext(timeframe=TIMEFRAME, symbol_info=symbol_info())},
         clock=the_clock,
     )
@@ -556,9 +557,7 @@ class TestNoPlaceableStop:
                 take_profit=TakeProfitConfig(enabled=False),
             ),
             pairs={
-                SYMBOL: PairContext(
-                    timeframe=TIMEFRAME, symbol_info=symbol_info(price_tick="1.00")
-                )
+                SYMBOL: PairContext(timeframe=TIMEFRAME, symbol_info=symbol_info(price_tick="1.00"))
             },
         )
         assessment = manager.evaluate(buy("100"), portfolio=Portfolio(free_quote=D("10000")))
@@ -626,9 +625,7 @@ class TestEvaluate:
 
     def test_sell_is_unreachable_on_spot(self) -> None:
         manager, _ = build_manager()
-        signal = Signal(
-            symbol=SYMBOL, action=SignalAction.SELL, price=D("100"), timestamp=NOW
-        )
+        signal = Signal(symbol=SYMBOL, action=SignalAction.SELL, price=D("100"), timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
         assert not assessment.approved
         assert "short" in assessment.reason
@@ -678,15 +675,11 @@ class TestEvaluate:
         """An exit is not a new risk. A limit that could trap an open position
         would be a risk rule that creates risk."""
         manager, _ = build_manager(config=risk_config(max_open_positions=1))
-        portfolio = Portfolio(
-            free_quote=D("0"), positions={SYMBOL: long_position(quantity="0.75")}
-        )
+        portfolio = Portfolio(free_quote=D("0"), positions={SYMBOL: long_position(quantity="0.75")})
         portfolio.start_cooldown(SYMBOL, now=NOW, minutes=60)
         portfolio.record_realised_pnl(D("-99999"), now=NOW)
 
-        signal = Signal(
-            symbol=SYMBOL, action=SignalAction.CLOSE, price=D("123.45"), timestamp=NOW
-        )
+        signal = Signal(symbol=SYMBOL, action=SignalAction.CLOSE, price=D("123.45"), timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=portfolio)
 
         assert assessment.approved
@@ -697,9 +690,7 @@ class TestEvaluate:
 
     def test_close_with_nothing_open_is_refused(self) -> None:
         manager, _ = build_manager()
-        signal = Signal(
-            symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW
-        )
+        signal = Signal(symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("1000")))
         assert not assessment.approved
         assert "nothing to close" in assessment.reason
@@ -805,9 +796,7 @@ class TestComposedPath:
         manager, _ = build_manager(
             config=config,
             pairs={
-                SYMBOL: PairContext(
-                    timeframe=TIMEFRAME, symbol_info=symbol_info(price_tick="0.13")
-                )
+                SYMBOL: PairContext(timeframe=TIMEFRAME, symbol_info=symbol_info(price_tick="0.13"))
             },
         )
         assessment = manager.evaluate(buy("100"), portfolio=Portfolio(free_quote=D("10000")))
@@ -882,6 +871,4 @@ class TestMoneyGuard:
 
     def test_a_risk_decision_approval_must_not_name_a_rule(self) -> None:
         with pytest.raises(ValidationError, match="must name the rule"):
-            RiskDecision(
-                symbol=SYMBOL, approved=True, reason="fine", rule=RiskRule.COOLDOWN
-            )
+            RiskDecision(symbol=SYMBOL, approved=True, reason="fine", rule=RiskRule.COOLDOWN)

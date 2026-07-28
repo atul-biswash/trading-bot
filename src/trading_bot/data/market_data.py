@@ -345,8 +345,7 @@ class BufferedMarketDataProvider(MarketDataProvider):
         out_of_order = len(candles) - accepted - forming
         if out_of_order > 0:
             _log.warning(
-                "Seeding %s/%s dropped %d out-of-order candle(s) of %d; "
-                "history came back unsorted",
+                "Seeding %s/%s dropped %d out-of-order candle(s) of %d; history came back unsorted",
                 symbol,
                 timeframe,
                 out_of_order,

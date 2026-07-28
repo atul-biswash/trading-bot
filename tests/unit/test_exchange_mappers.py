@@ -228,8 +228,12 @@ def test_to_symbol_info_accepts_legacy_min_notional() -> None:
 
 
 def test_to_symbol_info_missing_required_filter_raises() -> None:
-    broken = {"symbol": "BTCUSDT", "baseAsset": "BTC", "quoteAsset": "USDT",
-              "filters": [{"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"}]}
+    broken = {
+        "symbol": "BTCUSDT",
+        "baseAsset": "BTC",
+        "quoteAsset": "USDT",
+        "filters": [{"filterType": "LOT_SIZE", "stepSize": "0.001", "minQty": "0.001"}],
+    }
     with pytest.raises(ExchangeAPIError):
         m.to_symbol_info(broken)
 
@@ -309,8 +313,17 @@ def test_ws_and_rest_mappers_agree_on_shared_bar() -> None:
     """
     rest = m.to_candle(KLINE_1, symbol="BTCUSDT", timeframe="1m")
     ws = m.ws_kline_to_candle(WS_KLINE_CLOSED)
-    fields = ("symbol", "timeframe", "open_time", "close_time",
-              "open", "high", "low", "close", "volume")
+    fields = (
+        "symbol",
+        "timeframe",
+        "open_time",
+        "close_time",
+        "open",
+        "high",
+        "low",
+        "close",
+        "volume",
+    )
     assert {f: getattr(ws, f) for f in fields} == {f: getattr(rest, f) for f in fields}
 
 
@@ -363,18 +376,23 @@ def test_to_order_reads_time_when_transacttime_absent() -> None:
 # OrderRequest -> Binance params
 # --------------------------------------------------------------------------
 def test_market_order_params_are_minimal() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.MARKET,
-                       quantity=Decimal("0.001"))
+    req = OrderRequest(
+        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.MARKET, quantity=Decimal("0.001")
+    )
     params = m.order_request_to_params(req)
-    assert params == {"symbol": "BTCUSDT", "side": "BUY", "type": "MARKET",
-                      "quantity": "0.001"}
+    assert params == {"symbol": "BTCUSDT", "side": "BUY", "type": "MARKET", "quantity": "0.001"}
     assert "price" not in params and "timeInForce" not in params
 
 
 def test_limit_order_params_include_price_and_tif() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.SELL, type=OrderType.LIMIT,
-                       quantity=Decimal("0.001"), price=Decimal("64000.00"),
-                       client_order_id="cid-1")
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.001"),
+        price=Decimal("64000.00"),
+        client_order_id="cid-1",
+    )
     params = m.order_request_to_params(req)
     assert params["price"] == "64000.00"
     assert params["timeInForce"] == "GTC"
@@ -382,9 +400,14 @@ def test_limit_order_params_include_price_and_tif() -> None:
 
 
 def test_stop_loss_limit_params_include_stop_price() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.SELL,
-                       type=OrderType.STOP_LOSS_LIMIT, quantity=Decimal("0.001"),
-                       price=Decimal("63000.00"), stop_price=Decimal("63100.00"))
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS_LIMIT,
+        quantity=Decimal("0.001"),
+        price=Decimal("63000.00"),
+        stop_price=Decimal("63100.00"),
+    )
     params = m.order_request_to_params(req)
     assert params["price"] == "63000.00"
     assert params["stopPrice"] == "63100.00"
@@ -392,24 +415,30 @@ def test_stop_loss_limit_params_include_stop_price() -> None:
 
 
 def test_stop_loss_market_params_have_stop_but_no_price() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.SELL,
-                       type=OrderType.STOP_LOSS, quantity=Decimal("0.001"),
-                       stop_price=Decimal("63100.00"))
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        quantity=Decimal("0.001"),
+        stop_price=Decimal("63100.00"),
+    )
     params = m.order_request_to_params(req)
     assert params["stopPrice"] == "63100.00"
     assert "price" not in params and "timeInForce" not in params
 
 
 def test_limit_order_without_price_raises() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT,
-                       quantity=Decimal("0.001"))
+    req = OrderRequest(
+        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT, quantity=Decimal("0.001")
+    )
     with pytest.raises(OrderError):
         m.order_request_to_params(req)
 
 
 def test_stop_order_without_stop_price_raises() -> None:
-    req = OrderRequest(symbol="BTCUSDT", side=OrderSide.SELL, type=OrderType.TAKE_PROFIT,
-                       quantity=Decimal("0.001"))
+    req = OrderRequest(
+        symbol="BTCUSDT", side=OrderSide.SELL, type=OrderType.TAKE_PROFIT, quantity=Decimal("0.001")
+    )
     with pytest.raises(OrderError):
         m.order_request_to_params(req)
 
@@ -439,8 +468,9 @@ def test_ip_ban_status_418_is_rate_limit() -> None:
 
 
 def test_insufficient_balance_maps_specifically() -> None:
-    exc = _api_error(code=-2010, status=400,
-                     message="Account has insufficient balance for requested action.")
+    exc = _api_error(
+        code=-2010, status=400, message="Account has insufficient balance for requested action."
+    )
     assert isinstance(m.translate_binance_error(exc), InsufficientBalanceError)
 
 
@@ -479,6 +509,4 @@ def test_connection_error_maps_to_connection_error() -> None:
 
 
 def test_timeout_maps_to_connection_error() -> None:
-    assert isinstance(
-        m.translate_binance_error(TimeoutError()), ExchangeConnectionError
-    )
+    assert isinstance(m.translate_binance_error(TimeoutError()), ExchangeConnectionError)

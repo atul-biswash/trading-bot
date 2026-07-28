@@ -92,6 +92,7 @@ def _install_shutdown_handlers(engine: TradingEngine) -> None:
         try:
             loop.add_signal_handler(sig, request_stop, name)
         except NotImplementedError:  # pragma: no cover - Windows
+
             def _handler(signum: int, frame: object, _name: str = name) -> None:
                 loop.call_soon_threadsafe(request_stop, _name)
 
@@ -133,8 +134,11 @@ def _cmd_run(settings: Settings, mode_override: TradingMode | None) -> int:
 
 def _cmd_backtest(settings: Settings) -> int:
     log = get_logger(__name__)
-    log.info("Backtest window: %s -> %s", settings.config.backtesting.start_date,
-             settings.config.backtesting.end_date)
+    log.info(
+        "Backtest window: %s -> %s",
+        settings.config.backtesting.start_date,
+        settings.config.backtesting.end_date,
+    )
     log.error("Backtesting engine is not implemented yet (scaffolding phase).")
     return 0
 

@@ -12,9 +12,9 @@ from enum import Enum
 class TradingMode(str, Enum):
     """How the bot connects to the market and whether real orders are placed."""
 
-    TESTNET = "testnet"   # real API, fake money
-    LIVE = "live"         # real API, real money
-    PAPER = "paper"       # local simulator, live prices, no orders sent
+    TESTNET = "testnet"  # real API, fake money
+    LIVE = "live"  # real API, real money
+    PAPER = "paper"  # local simulator, live prices, no orders sent
     BACKTEST = "backtest"  # historical replay, no live connection
 
     @property
@@ -84,8 +84,8 @@ class SignalAction(str, Enum):
     strategy with nothing to say emits nothing at all.
     """
 
-    BUY = "BUY"      # open / add to a long
-    SELL = "SELL"    # open / add to a short (spot: typically ignored)
+    BUY = "BUY"  # open / add to a long
+    SELL = "SELL"  # open / add to a short (spot: typically ignored)
     CLOSE = "CLOSE"  # exit any open position
 
 
@@ -104,11 +104,11 @@ class RiskRule(str, Enum):
     count, which only applies to a genuinely new position.
     """
 
-    NO_MARK_PRICE = "no_mark_price"          # an open position cannot be valued
-    NO_EQUITY = "no_equity"                  # equity is not strictly positive
-    DAILY_LOSS_HALT = "daily_loss_halt"      # realised loss today breached the cap
+    NO_MARK_PRICE = "no_mark_price"  # an open position cannot be valued
+    NO_EQUITY = "no_equity"  # equity is not strictly positive
+    DAILY_LOSS_HALT = "daily_loss_halt"  # realised loss today breached the cap
     ALREADY_IN_POSITION = "already_in_position"
-    COOLDOWN = "cooldown"                    # symbol still cooling down after an exit
+    COOLDOWN = "cooldown"  # symbol still cooling down after an exit
     MAX_OPEN_POSITIONS = "max_open_positions"
 
 

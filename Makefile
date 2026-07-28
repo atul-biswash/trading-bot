@@ -31,8 +31,9 @@ test: ## Run the test suite
 cov: ## Run tests with coverage
 	pytest --cov --cov-report=term-missing
 
-lint: ## Lint with ruff
+lint: ## Lint + formatter check with ruff
 	ruff check src tests
+	ruff format --check src tests
 
 format: ## Auto-format with ruff
 	ruff format src tests && ruff check --fix src tests
@@ -40,7 +41,7 @@ format: ## Auto-format with ruff
 type: ## Type-check with mypy
 	mypy
 
-check: lint type test ## Lint + type-check + test
+check: lint type test ## Lint + format-check + type-check + test
 
 clean: ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage build dist *.egg-info

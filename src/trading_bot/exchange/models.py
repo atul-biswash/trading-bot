@@ -213,9 +213,7 @@ def to_candle(raw: Sequence[Any], *, symbol: str, timeframe: str) -> Candle:
     )
 
 
-def to_candles(
-    raw: Sequence[Sequence[Any]], *, symbol: str, timeframe: str
-) -> list[Candle]:
+def to_candles(raw: Sequence[Sequence[Any]], *, symbol: str, timeframe: str) -> list[Candle]:
     return [to_candle(k, symbol=symbol, timeframe=timeframe) for k in raw]
 
 
@@ -299,9 +297,7 @@ def to_order(raw: dict[str, Any]) -> Order:
     """
     executed = _dec(raw.get("executedQty", "0"))
     cummulative = _dec(raw.get("cummulativeQuoteQty", "0"))  # Binance's spelling
-    average_price = (
-        cummulative / executed if executed > 0 and cummulative > 0 else None
-    )
+    average_price = cummulative / executed if executed > 0 and cummulative > 0 else None
 
     price = _opt_dec(raw.get("price"))
     if price is not None and price == 0:
@@ -322,9 +318,7 @@ def to_order(raw: dict[str, Any]) -> Order:
     )
 
 
-_NEEDS_PRICE = frozenset(
-    {OrderType.LIMIT, OrderType.STOP_LOSS_LIMIT, OrderType.TAKE_PROFIT_LIMIT}
-)
+_NEEDS_PRICE = frozenset({OrderType.LIMIT, OrderType.STOP_LOSS_LIMIT, OrderType.TAKE_PROFIT_LIMIT})
 _NEEDS_STOP = frozenset(
     {
         OrderType.STOP_LOSS,
@@ -385,10 +379,7 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
         message = getattr(exc, "message", "") or str(exc)
         if status in _RATE_LIMIT_STATUS or code == _RATE_LIMIT_CODE:
             return RateLimitError(message)
-        if (
-            code == _INSUFFICIENT_BALANCE_CODE
-            and "insufficient balance" in message.lower()
-        ):
+        if code == _INSUFFICIENT_BALANCE_CODE and "insufficient balance" in message.lower():
             return InsufficientBalanceError(message)
         if code in _ORDER_REJECT_CODES:
             return OrderError(message)
