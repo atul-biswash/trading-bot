@@ -55,7 +55,11 @@ known-first-party = ["trading_bot"]
 # Without it mypy reports 10 false positives against correct pydantic code.
 plugins = ["pydantic.mypy"]
 python_version = "3.12"
-packages = ["trading_bot"]
+# `files`, not `packages`: the type gate covers the package *and* scripts/, and
+# the two keys are mutually exclusive (mypy errors if both are set).
+# scripts/check_testnet.py connects to Binance with real credentials, so leaving
+# it outside strict typing was an accident of the path list, not a policy.
+files = ["src/trading_bot", "scripts"]
 mypy_path = "src"
 strict = true
 warn_unused_ignores = true

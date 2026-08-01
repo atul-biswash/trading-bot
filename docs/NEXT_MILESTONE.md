@@ -267,14 +267,16 @@ carry current state.
 - **`ruff` and `mypy` versions are unpinned** (`ruff>=0.3.0`, `mypy>=1.8.0`). The
   gate reads an absolute zero, so a new release can turn the build red with no
   code change.
-- **`scripts/` is outside every gate.** `ruff check`, `ruff format --check` and
-  `mypy` are all scoped to `src`/`tests`, so `scripts/check_testnet.py` and
-  `scripts/download_data.py` are neither linted, formatter-checked, nor
-  type-checked. Unlike `tests/` being outside mypy — which is policy — this is an
-  accident of the path list. It matters more than it looks: `check_testnet.py`
-  connects to Binance with **real credentials** and is exempt from the strict
-  typing the rest of the policy depends on. Bringing it in is its own commit,
-  because it may surface real findings rather than being a no-op.
+- ~~`scripts/` is outside every gate.~~ **Closed.** `ruff check`,
+  `ruff format --check` and `mypy` now cover `scripts/` too (80 files linted, 57
+  type-checked). Worth recording what the fix actually found, because the open
+  item overstated the risk: both scripts already passed `ruff check` and
+  `mypy --strict` cleanly — verified as genuine rather than vacuous by probing
+  with a deliberately untyped function, which mypy rejected. The only real
+  finding was one redundant line split the formatter absorbed. The gap was
+  therefore **absence of enforcement**, not bad code: nothing had stopped the
+  next edit from regressing, and the file had drifted formatter-dirty precisely
+  because nothing checked it.
 
 ---
 

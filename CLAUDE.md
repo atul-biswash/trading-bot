@@ -224,9 +224,9 @@ scripts/         check_testnet.py · download_data.py
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
 - **All files are LF**, pinned by `.gitattributes`. Write LF.
-- `ruff format` is a gate (`make check`). It runs over `src tests` — the same
-  paths as `ruff check` — so a formatting failure surfaces in seconds, before
-  pytest.
+- `ruff format` is a gate (`make check`). It runs over `src tests scripts` — the
+  same paths as `ruff check` — so a formatting failure surfaces in seconds,
+  before pytest.
 - `# fmt: off` / `# fmt: on` fences hand-laid data tables. It only works at
   **statement boundaries** — it does *not* protect a table inside a
   `@pytest.mark.parametrize` argument list. Define such tables at module level
@@ -265,9 +265,9 @@ scripts/         check_testnet.py · download_data.py
 ```bash
 pytest                      # 517 passed = 514 unit + 3 opt-in Testnet integration
 pytest -m "not integration" # 514 passed — use this for fast iteration
-mypy                        # Success: no issues found in 55 source files
-ruff check src tests        # All checks passed!
-ruff format --check src tests  # 78 files already formatted
+mypy                        # Success: no issues found in 57 source files
+ruff check src tests scripts        # All checks passed!
+ruff format --check src tests scripts  # 80 files already formatted
 make check                  # all four, formatter check before pytest
 ```
 
@@ -275,19 +275,20 @@ make check                  # all four, formatter check before pytest
 numbers are correct answers to different questions and a bare figure invites the
 wrong comparison.
 
-**What each gate actually covers** — the boundaries differ, and the difference
-is not all deliberate:
+**What each gate covers** — one boundary, stated once, and it is now deliberate
+everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests` | 78 |
-| `mypy` | `packages = ["trading_bot"]` | 55 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 80 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 57 |
 | `pytest` | `tests/` | — |
 
-`tests/` sits outside mypy **by policy** (see below). `scripts/` — two files,
-including `check_testnet.py`, which connects to Binance with real credentials —
-sits outside **all three**, and that is *not* policy but an accident of the path
-list. Tracked as an open item in `docs/NEXT_MILESTONE.md`.
+`tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
+three until it was brought in — an accident of the path list rather than a
+decision, and the one that mattered most, since `check_testnet.py` connects to
+Binance with real credentials. Note mypy uses `files`, not `packages`: the two
+keys are mutually exclusive and mypy errors if both are set.
 
 **mypy and ruff must report ZERO.** This is a hard gate, not a baseline to diff
 against. Any new finding is a regression.

@@ -83,9 +83,7 @@ async def _check(mode: TradingMode, symbol: str, config: str | None) -> int:
             print(f"    {balance.asset:>6}  free={balance.free}  locked={balance.locked}")
 
         ticker = await client.get_ticker(symbol)
-        print(
-            f"  {symbol} last={ticker.last}  bid={ticker.bid}  ask={ticker.ask}"
-        )
+        print(f"  {symbol} last={ticker.last}  bid={ticker.bid}  ask={ticker.ask}")
     finally:
         await client.close()
 
