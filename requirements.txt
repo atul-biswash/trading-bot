@@ -1,14 +1,20 @@
 # ---------------------------------------------------------------------------
 # Runtime dependencies (Python 3.12+)
 # ---------------------------------------------------------------------------
-# Pinning policy: a package is pinned exactly (==) when `src/` imports it or a
-# quality gate executes it; everything else keeps a floor. Each pin equals the
-# version the current green baseline was verified against, so raising one is a
-# deliberate act with a fresh `make check`, not routine hygiene.
+# Every entry falls in exactly one of three categories, and each is labelled
+# below. The middle one exists because it was got wrong once: a dependency can
+# be unimported and still live, and "nothing imports it" is not sufficient
+# grounds for deletion.
 #
-# This reproduces the *direct* layer only — transitive dependencies still float.
-# See docs/NEXT_MILESTONE.md open items for why a full lock (pip-compile with
-# hashes) is deferred rather than simply missing.
+# Each pin equals the version the current green baseline was verified against,
+# so raising one is a deliberate act with a fresh `python scripts/check.py`, not
+# routine hygiene. This reproduces the *direct* layer only -- transitive
+# dependencies still float; see docs/NEXT_MILESTONE.md for why a full lock
+# (pip-compile with hashes) is deferred rather than missing.
+
+# ---------------------------------------------------------------------------
+# Pinned -- imported by src/ or scripts/
+# ---------------------------------------------------------------------------
 
 # Exchange connectivity. python-binance is chosen over the lighter official
 # connector for its built-in Testnet support, threaded/async websocket
@@ -42,20 +48,24 @@ pydantic==2.13.4  # the most semantically load-bearing pin here: the Money guard
                   # Not a routine bump.
 pydantic-settings==2.14.2
 PyYAML==6.0.3
-python-dotenv>=1.0.1   # not imported directly; pulled in by pydantic-settings
 
-# HTTP (Telegram Bot API + general async HTTP) and resilience.
-httpx>=0.27.0          # not imported yet — belongs to the notifications phase
+# Resilience: retry/backoff for the exchange adapter.
 tenacity==9.1.4
-
-# Persistence. SQLite now; the same SQLAlchemy models upgrade to Postgres later
-# by swapping the connection URL in config.yaml. Neither is imported yet.
-SQLAlchemy>=2.0.25
-aiosqlite>=0.19.0
-
-# Optional HTTP API / health + metrics endpoints (used in a later phase).
-fastapi>=0.110.0
-uvicorn[standard]>=0.29.0
 
 # Nicer console logging when available (logger degrades gracefully without it).
 rich==15.0.0
+
+# ---------------------------------------------------------------------------
+# Pinned -- not imported, but executed on a gated path
+# ---------------------------------------------------------------------------
+# Unimported and still live. pydantic-settings pulls it in unconditionally and
+# executes it whenever `Secrets()` is constructed -- which is the path the three
+# opt-in Testnet integration tests gate through, and how a developer's `.env` is
+# read at all. Deleting it because grep finds no `import dotenv` would remove a
+# dependency the credential path actually runs.
+python-dotenv==1.2.2
+
+# ---------------------------------------------------------------------------
+# Floored, deliberately -- reason per entry
+# ---------------------------------------------------------------------------
+# (none)

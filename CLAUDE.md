@@ -65,6 +65,19 @@ Both are single, tested functions using the shortest-repr form — never scatter
 these edges are where a float is *allowed* to become a Decimal; the domain is
 where it is forbidden.
 
+**The log sink is a third edge, and it is safe.** `JsonFormatter` serialises via
+`json.dumps(payload, default=str)`, so a `Decimal` reaches a JSON log line as a
+**string** — `"50.000"`, exact, never a JSON number and never a float. A bare
+`json.dumps(Decimal(...))` would raise `TypeError`; `default=str` is what catches
+it. Any downstream consumer must therefore parse those fields back as `Decimal`,
+never as a number.
+
+The sharp edge: `default=str` is a **catch-all**, not a money-aware hook. Any
+object it does not recognise lands as its `repr` rather than failing, so passing
+a non-plain value through `extra=` produces a plausible-looking log line and no
+error. That is the same convention-not-enforcement shape as the `metadata` rule
+below — the type does not stop you, only the discipline does.
+
 ---
 
 ## Architecture
@@ -199,20 +212,30 @@ scripts/         check_testnet.py · download_data.py
   pinned NumPy/pandas — fragile for software that manages money. Indicators are
   small hand-written unit-tested functions in `indicators/`.
 - `requirements.txt` is the single runtime dependency source; dev tools in
-  `requirements-dev.txt`. **23 direct dependencies, in three categories:**
+  `requirements-dev.txt`. **16 direct dependencies, every one pinned `==`**, in
+  three labelled categories:
 
-  | | Runtime | Dev | Rule |
-  |---|---|---|---|
-  | **Pinned `==`** | 8 | 7 | `src/` imports it, or a gate executes it |
-  | **Deliberately floored** | 1 | 0 | `python-dotenv` — unimported but genuinely required, pulled in by `pydantic-settings` |
-  | **Unused, pending deletion** | 5 | 2 | `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`, `uvicorn`; `freezegun`, `respx` |
+  | Category | Runtime | Dev |
+  |---|---|---|
+  | Pinned — imported by `src/` or `scripts/` | 8 | 7 |
+  | Pinned — not imported, but executed on a gated path | 1 (`python-dotenv`) | 1 (`freezegun`) |
+  | Floored, deliberately | 0 | 0 |
 
-  Pinning the unused ones would assert a commitment the project has not made to
-  dependencies it may drop. Pins encode a **verified** version, not a working
-  one: `pydantic`, `pandas` and `numpy` carry line comments saying so, because
-  the `Money` guard *is* pydantic validation and the float64 leak path *is*
-  `numpy.float64` being a `float` subclass. Raising one of those is never
-  routine hygiene. Transitive dependencies still float — see the open items.
+  The middle category is load-bearing and was got wrong once: **"nothing imports
+  it" is not sufficient grounds for deletion.** `python-dotenv` is executed
+  whenever `Secrets()` is built; `freezegun` is used as a `@freeze_time`
+  decorator with no bare package import.
+
+- **For a test-only dependency, "used" has three surfaces** — an import
+  statement, a **decorator**, and a **fixture name in a test signature**. The
+  third takes no import and no decorator, so grepping the package name misses it
+  entirely. Check all three before deleting.
+
+- Pins encode a **verified** version, not a working one: `pydantic`, `pandas` and
+  `numpy` carry line comments saying so, because the `Money` guard *is* pydantic
+  validation and the float64 leak path *is* `numpy.float64` being a `float`
+  subclass. Raising one of those is never routine hygiene. Transitive
+  dependencies still float — see the open items.
 
 **Style**
 - `timezone.utc` — do **not** switch to the `datetime.UTC` alias (`UP017` is
@@ -274,6 +297,14 @@ as are `make lint` / `type` / `test`. The definition lives in Python because
 `make` is not installed on every development machine — a Makefile-native gate is
 one that cannot be run where the work happens, and for five phases it never was.
 
+**Never pipe `check.py`.** A shell pipeline's exit status is the *last* stage's
+unless `set -o pipefail` is in force, so `python scripts/check.py | tail` reports
+`tail`'s success no matter what the gate did. This has masked a non-zero exit
+**twice** in this project: once hiding a `SIM108` finding in `check.py` itself,
+once hiding a failing test. Both times the truncated output also discarded the
+diagnostic that named the cause. Run it bare, let it print its own summary, and
+read its own exit code.
+
 The four steps, and what each reports when green:
 
 ```
@@ -284,10 +315,41 @@ pytest                                 514 passed, 3 skipped
                                        (517 passed with Testnet credentials present)
 ```
 
-**The test count is not a function of the tree alone.** The three integration
-tests are `skipif(not HAS_CREDENTIALS)`, so a machine with `.env` credentials
-reports `517 passed` and one without reports `514 passed, 3 skipped`. Both are
-green. Quote the count with its condition, never bare.
+**The gate's output is not a function of the tree alone — this is a property,
+not a footnote.** It varies by **credentials** and by **network state**.
+
+*Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
+the *same commit* reports:
+
+- `517 passed` on a machine with Binance Testnet credentials in `.env`
+- `514 passed, 3 skipped` on a machine without them
+
+**Both are honestly green.** A fresh clone, a new contributor, or the first CI
+runner will see 514 and must not read it as a regression against a documented
+517. Quote the count with its condition, never bare.
+
+*Network.* The integration tests make live calls to Binance Testnet and two of
+them wait on a real 1-minute bar, so they can fail for reasons that have nothing
+to do with the tree. **There is one observed, unidentified flake:** on
+2026-08-01 a full run reported `1 failed, 516 passed` and did not reproduce
+across three subsequent runs (`517 passed`, `514 passed` unit-only, `3 passed`
+integration-only). **The failing test's name was not captured** — the run was
+piped through `tail`, which discarded pytest's summary, and it was re-run before
+the output was read.
+
+This is **open and unidentified**, not resolved. The unit suite is deterministic
+at 514; treat a lone failure in a full run as suspect-integration until proven
+otherwise, and capture the output *before* re-running. `addopts` already carries
+`-ra`, so pytest prints a short summary of every non-passing test — it only has
+to be allowed to reach the terminal.
+
+**Count coupling — a known drift trigger with nothing enforcing it.** Adding any
+file under `src/trading_bot/` or `scripts/` moves *both* the mypy count and the
+`ruff format` count, and each of those numbers appears in **both** `CLAUDE.md`
+and `README.md` — four places, updated by hand. This has already fired once:
+`scripts/check.py` moved mypy 57→58 and ruff 80→81 in the same commit that
+created it. When you add a file, grep both documents for the old numbers before
+committing.
 
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:

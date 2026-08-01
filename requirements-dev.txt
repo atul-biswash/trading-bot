@@ -1,20 +1,40 @@
 # ---------------------------------------------------------------------------
 # Development & test dependencies. Install with: pip install -r requirements-dev.txt
 # ---------------------------------------------------------------------------
-# Same policy as requirements.txt: anything a quality gate executes is pinned
-# exactly, because the gate is an absolute zero rather than a baseline to diff
-# against. A floating linter turns the build red on a morning when no code
-# changed, and `ruff format`'s output — including the formatter-dirty file count
-# recorded in the docs — is itself version-dependent.
+# Same three categories as requirements.txt. Anything a quality gate executes is
+# pinned exactly, because the gate is an absolute zero rather than a baseline to
+# diff against: a floating linter turns the build red on a morning when no code
+# changed, and `ruff format`'s output -- including the file counts recorded in
+# CLAUDE.md and README.md -- is itself version-dependent.
+#
+# For a test-only dependency, "used" has THREE surfaces, and all three must be
+# checked before deleting one: an import statement, a decorator, and a fixture
+# name in a test signature. The third takes no import and no decorator, so grep
+# for the package name misses it entirely. See freezegun below.
 -r requirements.txt
 
+# ---------------------------------------------------------------------------
+# Pinned -- executed by a gate
+# ---------------------------------------------------------------------------
 pytest==9.1.1
 pytest-asyncio==1.4.0     # asyncio_mode=auto semantics changed across majors
 pytest-cov==7.1.0
 pytest-mock==3.15.1
-freezegun>=1.4.0          # declared but unused: tests inject a Clock instead
-respx>=0.20.2             # declared but unused: nothing calls httpx yet
 
 ruff==0.15.22             # linter + formatter; hard-zero gate
 mypy==2.3.0               # static type checking; hard-zero gate
 types-PyYAML==6.0.12.20260518   # type stubs
+
+# ---------------------------------------------------------------------------
+# Pinned -- not imported by src/, but executed on a gated path
+# ---------------------------------------------------------------------------
+# Used as a decorator, never as a bare import of the package name: `freeze_time`
+# at tests/unit/test_binance_client.py:174 and :186 pins the wall clock so the
+# "is the final kline still forming?" branch is testable. It patches datetime
+# internals, so a quiet minor bump is precisely the risk a pin exists for.
+freezegun==1.5.5
+
+# ---------------------------------------------------------------------------
+# Floored, deliberately -- reason per entry
+# ---------------------------------------------------------------------------
+# (none)

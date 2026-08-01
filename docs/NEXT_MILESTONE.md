@@ -226,16 +226,30 @@ carry current state.
   is the same silent-swallow shape as A1, and it is what Q-A and Q-B exist to
   address.
 
-- **Declared-but-unused dependencies.** Runtime: `httpx`, `SQLAlchemy`,
-  `aiosqlite`, `fastapi` and `uvicorn` are in `requirements.txt` and imported
-  nowhere. Dev: `freezegun` and `respx` likewise — the tests inject a `Clock`
-  rather than freezing time, and nothing calls `httpx` yet. Install weight and
-  attack surface for software that manages money. All seven are deliberately
-  left on floors rather than pinned, because pinning them would assert a
-  commitment the project has not made; decide per package whether it is genuinely
-  pending or should be dropped until a caller exists. (`python-dotenv` is a
-  separate case: unimported but genuinely required, pulled in by
-  `pydantic-settings` for `.env` loading.)
+- ~~Declared-but-unused dependencies.~~ **Closed — but the register was wrong,
+  and that is the part worth carrying forward.**
+
+  Six were deleted: `httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`, `uvicorn`
+  (runtime) and `respx` (dev). Each was verified unimported across `src/`,
+  `scripts/` and `tests/` first, including `respx`'s `respx_mock` pytest fixture,
+  which needs no import and no decorator.
+
+  **`freezegun` was a false entry.** This item, and the
+  `requirements-dev.txt` comment beside it, both claimed it was unused because
+  "the tests inject a `Clock` instead". It is used —
+  `from freezegun import freeze_time` at `tests/unit/test_binance_client.py:18`,
+  applied as `@freeze_time(...)` at lines 174 and 186 to pin the wall clock for
+  the "is the final kline still forming?" branch. The claim was wrong from the
+  pinning commit (`ffd6fe6`) onward and was repeated in the session handoff
+  notes, so it had been asserted several times before anyone grepped for
+  `freeze_time`. It is now pinned at `1.5.5`.
+
+  **The register has been wrong before; treat an entry as a claim to re-verify,
+  not a fact to act on.** The specific failure was checking one surface (the
+  package name) for a dependency used through another (a decorator). `ruff`
+  would have flagged a genuinely unused *import* as F401 — the gate being green
+  should itself have been the clue that "declared but unused" could not be right
+  for something that is imported.
 
 - **Transitive dependencies still float.** The direct layer is pinned exactly for
   everything `src/` imports or a gate executes; nothing pins what those packages
