@@ -348,6 +348,39 @@ async def test_failing_signal_handler_does_not_stop_the_others() -> None:
     assert len(survivors) == 1
 
 
+async def test_failing_signal_handler_does_not_stop_the_feed() -> None:
+    """The *other* half of handler isolation: the bar after the failure.
+
+    Isolating co-registered handlers is not the same property as surviving to the
+    next candle -- an exception that escaped ``_emit`` would propagate into the
+    provider's candle callback and kill the subscription, and a test that emits
+    only one bar cannot tell the two apart. This is the failure mode that matters
+    for a 24/7 process: execution raising once must not silently end the feed
+    that drives every subsequent exit check.
+    """
+    engine, provider, _ = build_engine(ScriptedStrategy(result=buy()))
+    survivors: list[Signal] = []
+    failures = 0
+
+    async def boom(signal: Signal) -> None:
+        nonlocal failures
+        failures += 1
+        raise RuntimeError("executor exploded")
+
+    async def record(signal: Signal) -> None:
+        survivors.append(signal)
+
+    engine.on_signal(boom)
+    engine.on_signal(record)
+    await engine.start()
+
+    await provider.emit(candle())
+    await provider.emit(candle())  # the bar *after* the failure
+
+    assert failures == 2, "the failing handler was silently dropped from the chain"
+    assert len(survivors) == 2, "the feed did not survive a raising handler"
+
+
 # --------------------------------------------------------------------------
 # Routing
 # --------------------------------------------------------------------------

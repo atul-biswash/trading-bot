@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from trading_bot.config.models import (
     PositionSizingConfig,
@@ -148,3 +149,60 @@ class TestRiskConfigCoherence:
             stop_loss=StopLossConfig(enabled=False),
             take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
         )
+
+
+# --------------------------------------------------------------------------
+# Assignment guard: config is loaded once and never mutated
+# --------------------------------------------------------------------------
+class TestConfigIsImmutableInPractice:
+    """``validate_assignment`` turns "config is never mutated after load" from a
+    convention into an enforced property.
+
+    That convention is load-bearing: it is the reason a ``Decimal`` config field
+    is safe despite the models being mutable. A float written into one would flow
+    into ``move_pct < config.activation_percent`` and decide a trailing stop
+    *without raising*, because ``Decimal < float`` compares silently.
+    """
+
+    def test_a_float_assigned_to_a_decimal_field_is_coerced_by_shortest_repr(self) -> None:
+        """Config fields are plain ``Decimal``, **not** ``Money``, so assignment
+        coerces rather than rejecting -- and it coerces the safe way.
+
+        ``0.1`` becomes ``Decimal("0.1")``, not the binary expansion
+        ``Decimal(0.1)`` would give. Without ``validate_assignment`` the float
+        would simply be stored as a ``float``, and then
+        ``move_pct < config.activation_percent`` would compare against
+        ``0.1000000000000000055…`` silently, because ``Decimal < float`` does not
+        raise. The guard is what converts it at the boundary instead.
+        """
+        config = TrailingStopConfig()
+        config.activation_percent = 0.1  # type: ignore[assignment]
+
+        # Bound to a name rather than written inline: `Decimal(<float literal>)`
+        # is the anti-pattern this project forbids outright (ruff RUF032), and it
+        # appears here only as the value being asserted *against*.
+        naive = 0.1
+        assert isinstance(config.activation_percent, Decimal)
+        assert config.activation_percent == Decimal("0.1")
+        assert config.activation_percent != Decimal(naive)  # the binary expansion
+        assert format(config.activation_percent, ".30f") == "0.100000000000000000000000000000"
+
+    def test_a_valid_decimal_assignment_is_kept_exact(self) -> None:
+        config = TrailingStopConfig()
+        config.activation_percent = Decimal("2.50")
+        assert config.activation_percent == Decimal("2.50")
+        assert str(config.activation_percent) == "2.50"  # exponent preserved
+
+    def test_an_out_of_range_assignment_is_rejected(self) -> None:
+        """Field constraints apply on assignment too, not only at construction.
+        Without the guard, ``gt=0`` holds at load and never again."""
+        config = TrailingStopConfig()
+        with pytest.raises(ValidationError):
+            config.activation_percent = Decimal("-1")
+
+    def test_a_typo_on_assignment_is_rejected(self) -> None:
+        """``extra="forbid"`` catches a misspelled key in ``config.yaml``; this
+        catches the same typo made in code against a loaded config."""
+        config = TrailingStopConfig()
+        with pytest.raises(ValidationError, match="has no attribute"):
+            config.activaton_percent = Decimal("1")  # type: ignore[attr-defined]

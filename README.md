@@ -420,13 +420,13 @@ against — any new finding is a regression:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  82 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 535 passed, 3 skipped
-                                       (538 passed with Testnet credentials present)
+pytest                                 551 passed, 3 skipped
+                                       (554 passed with Testnet credentials present)
 ```
 
 **The test count depends on your environment, not just the tree.** The three
-integration tests skip without Binance Testnet credentials, so `535 passed,
-3 skipped` and `538 passed` are both green — see [Tests](#tests).
+integration tests skip without Binance Testnet credentials, so `551 passed,
+3 skipped` and `554 passed` are both green — see [Tests](#tests).
 
 Zero is not reached by suppression: `type: ignore` appears nowhere in `src/`.
 The two project-wide `ruff` ignores that do exist (`UP017` for `timezone.utc`,

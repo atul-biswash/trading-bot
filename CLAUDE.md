@@ -331,8 +331,8 @@ The four steps, and what each reports when green:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  82 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 535 passed, 3 skipped
-                                       (538 passed with Testnet credentials present)
+pytest                                 551 passed, 3 skipped
+                                       (554 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -341,24 +341,24 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `538 passed` on a machine with Binance Testnet credentials in `.env`
-- `535 passed, 3 skipped` on a machine without them
+- `554 passed` on a machine with Binance Testnet credentials in `.env`
+- `551 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 535 and must not read it as a regression against a documented
-538. Quote the count with its condition, never bare.
+runner will see 551 and must not read it as a regression against a documented
+554. Quote the count with its condition, never bare.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
 to do with the tree. **There is one observed, unidentified flake:** on
 2026-08-01 a full run reported `1 failed, 516 passed` and did not reproduce
-across three subsequent runs (all green; the suite has since grown to 538/535)
+across three subsequent runs (all green; the suite has since grown to 554/551)
 integration-only). **The failing test's name was not captured** — the run was
 piped through `tail`, which discarded pytest's summary, and it was re-run before
 the output was read.
 
 This is **open and unidentified**, not resolved. The unit suite is deterministic
-at 535; treat a lone failure in a full run as suspect-integration until proven
+at 551; treat a lone failure in a full run as suspect-integration until proven
 otherwise, and capture the output *before* re-running. `addopts` already carries
 `-ra`, so pytest prints a short summary of every non-passing test — it only has
 to be allowed to reach the terminal.

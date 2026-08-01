@@ -46,7 +46,17 @@ from trading_bot.core.enums import (
 
 class _Model(BaseModel):
     # Reject unknown keys so typos in config.yaml are caught immediately.
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    #
+    # `validate_assignment` makes "config is loaded once and never mutated" an
+    # enforced property rather than a convention. That convention is what
+    # justifies leaving these models unguarded elsewhere -- notably the argument
+    # for not worrying that a float assigned to a Decimal field would flow into
+    # `move_pct < config.activation_percent` and decide a trailing stop without
+    # raising, because `Decimal < float` is silent. Nothing in src/ or scripts/
+    # assigns to a config model today (`settings.mode = ...` targets the plain
+    # `Settings` facade, not these), so the guard costs nothing if the convention
+    # holds -- and fails loudly the moment it stops holding.
+    model_config = ConfigDict(extra="forbid", populate_by_name=True, validate_assignment=True)
 
 
 class ExchangeConfig(_Model):

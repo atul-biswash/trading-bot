@@ -128,24 +128,54 @@ def test_money_guard_survives_assignment_on_position() -> None:
     assert position.stop_loss is None  # the rejected write left no trace
 
 
-@pytest.mark.parametrize("field", ["trailing_stop", "highest_price", "take_profit"])
-def test_money_guard_covers_every_mutable_level(field: str) -> None:
-    """The trailing-stop bookkeeping fields are the realistic leak path: they
-    are advanced from NumPy-derived market data on every bar."""
+#: Every ``Money`` field on ``Position``. Enumerated rather than sampled: the
+#: guard is only as good as its least-covered field, and a future field added
+#: without a test would be exactly the gap that goes unnoticed.
+_POSITION_MONEY_FIELDS = [
+    "quantity",
+    "entry_price",
+    "stop_loss",
+    "take_profit",
+    "trailing_stop",
+    "highest_price",
+    "lowest_price",
+]
+
+
+def test_money_field_list_is_complete() -> None:
+    """Fails if a ``Money`` field is added to ``Position`` without being covered.
+
+    Derived from the model rather than hand-maintained, so the parametrised
+    tests below cannot silently fall behind the type they guard.
+    """
+    declared = {
+        name for name, field in Position.model_fields.items() if "Decimal" in str(field.annotation)
+    }
+    assert set(_POSITION_MONEY_FIELDS) == declared
+
+
+@pytest.mark.parametrize("field", _POSITION_MONEY_FIELDS)
+def test_money_guard_covers_every_money_field_against_float(field: str) -> None:
+    """The trailing-stop bookkeeping fields are the realistic leak path -- they
+    are advanced from NumPy-derived market data on every bar -- but the guard is
+    asserted on all seven, including the two set at entry."""
     position = _open_position()
 
     with pytest.raises(ValidationError, match="must not be built from a float"):
         setattr(position, field, 108.9)
 
 
-def test_numpy_float_cannot_be_assigned_to_a_position() -> None:
+@pytest.mark.parametrize("field", _POSITION_MONEY_FIELDS)
+def test_money_guard_covers_every_money_field_against_numpy_float(field: str) -> None:
     """``np.float64`` is what ``DataFrame.iloc`` returns -- the leak path in
-    practice, and a ``float`` subclass, so the same guard catches it."""
+    practice, and a ``float`` subclass, so the same guard catches it. Asserted
+    per field rather than on one sample, because ``numpy`` is how the value
+    actually arrives."""
     numpy = pytest.importorskip("numpy")
     position = _open_position()
 
     with pytest.raises(ValidationError, match="must not be built from a float"):
-        position.trailing_stop = numpy.float64(108.9)  # type: ignore[assignment]
+        setattr(position, field, numpy.float64(108.9))
 
 
 def test_valid_decimal_assignment_still_works_exactly() -> None:
