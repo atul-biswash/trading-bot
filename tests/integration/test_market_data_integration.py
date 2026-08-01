@@ -82,9 +82,37 @@ async def test_testnet_provider_seeds_history_and_extends_it_live(
         assert live.timeframe == "1m"
         assert live.is_closed is True
 
+        # The first live bar may be a *new* bar or a *re-delivery of the seed's
+        # last bar*, and which one happens is a race with the minute boundary:
+        # REST history can end on the very bar the WebSocket is about to close.
+        # `_append` handles both -- it appends a new `open_time` and **replaces**
+        # an equal one ("same bar re-delivered, possibly corrected"), which is
+        # what makes a corrected bar safe after a reconnect. So the frame grows
+        # by one on the append path and by zero on the replace path, and this
+        # test asserts the invariant common to both rather than a fixed
+        # increment. An earlier version asserted `len(seeded) + 1` and failed
+        # intermittently for years' worth of runs against correct behaviour.
         extended = provider.get_dataframe("BTCUSDT", "1m")
-        assert len(extended) == len(seeded) + 1
+        growth = len(extended) - len(seeded)
+        assert growth in (0, 1), f"buffer grew by {growth}; only append or replace is legal"
         assert extended.index[-1] == live.open_time
         assert extended.index.is_monotonic_increasing
+        assert extended.index.is_unique
+
+        if growth == 0:
+            # Replacement path. "Grew by 0" is also what a provider that silently
+            # *dropped* the bar would produce, so prove the replacement actually
+            # replaced: the final row must differ from the one seeding left, and
+            # must equal the candle just delivered.
+            assert extended.index[-1] == seeded.index[-1], "replaced a different bar"
+            assert not extended.iloc[-1].equals(seeded.iloc[-1]), (
+                "buffer length unchanged and the last row is identical -- the "
+                "re-delivered bar was dropped rather than replacing the seeded one"
+            )
+            assert extended["close"].iloc[-1] == pytest.approx(float(live.close))
+        else:
+            # Append path: a genuinely new bar, beyond everything seeded.
+            assert extended.index[-1] > seeded.index[-1]
+            assert extended.iloc[:-1].equals(seeded), "appending disturbed the seeded rows"
     finally:
         await provider.stop()

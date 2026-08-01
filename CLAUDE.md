@@ -356,12 +356,13 @@ runner will see 566 and must not read it as a regression against a documented
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
-to do with the tree. **One such flake is known and identified:**
-`test_testnet_provider_seeds_history_and_extends_it_live` asserts the first live
+to do with the tree. **One such flake was found and fixed:**
+`test_testnet_provider_seeds_history_and_extends_it_live` asserted the first live
 candle is always a *new* bar, but when the REST seed's last bar is the same bar
 the stream then closes, `_append` replaces it in place instead — so the frame
-grows by 0, not 1. The production behaviour is correct and the assertion is
-wrong. See `docs/NEXT_MILESTONE.md`; the fix is not yet made.
+grows by 0, not 1. The production behaviour was correct and the assertion was
+wrong; it now asserts the invariant common to both paths. See
+`docs/PHASE_HISTORY.md`.
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the

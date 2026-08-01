@@ -180,33 +180,35 @@ copy the log aside, before starting a long run.
 
 ## Open items — not scoped to this milestone
 
-- **A flaky integration test — now IDENTIFIED, and the fix belongs to the test.**
-  `tests/integration/test_market_data_integration.py::test_testnet_provider_seeds_history_and_extends_it_live`.
-  It failed on 2026-08-01 (`1 failed / 516 passed`), was unidentifiable because
-  that run had been piped through `tail`, and reproduced during the M4a docs
-  rotation on a run made **bare** — which is how it was finally named.
+- ~~A flaky integration test.~~ **Closed — and worth keeping as a worked
+  example of a test asserting more than its contract promised.**
 
-  ```
-  assert 120 == (120 + 1)
-  ```
+  `test_testnet_provider_seeds_history_and_extends_it_live` asserted
+  `len(extended) == len(seeded) + 1`: that the first live candle is always a
+  *new* bar. It is not. When the REST seed's last bar is the same bar the
+  WebSocket then closes, `BufferedMarketDataProvider._append` **replaces it in
+  place** (`market_data.py:378`, *"same bar re-delivered, possibly corrected"*)
+  and the frame grows by **zero**. Which path occurs is a race with the minute
+  boundary.
 
-  **Cause.** The test asserts `len(extended) == len(seeded) + 1`, i.e. that the
-  first live candle is always a *new* bar. It is not always: when the REST seed
-  lands such that its final bar is the same bar the WebSocket then closes,
-  `BufferedMarketDataProvider._append` **replaces it in place** rather than
-  appending — `market_data.py:378`, *"same bar re-delivered, possibly
-  corrected"*. The failure output shows exactly that: identical `open_time`
-  (`11:10:00+00:00`), volume `0.04062` → `0.05837`.
+  The production code was correct throughout — replace-on-equal-`open_time` is a
+  locked decision and is what makes a corrected bar safe after a reconnect.
+  The test now asserts the invariant common to both paths: growth ∈ {0, 1}, last
+  index equals `live.open_time`, index monotonic and unique; on the replace path
+  the final row must have *changed* and match the delivered candle; on the append
+  path the seeded rows must be undisturbed.
 
-  **The production code is correct**; replace-on-equal-`open_time` is a locked
-  decision and is what makes a corrected bar safe after a reconnect. The test
-  encodes an assumption the contract never made. The fix is to assert the
-  *invariant* — the frame grew by 0 or 1, the last index equals `live.open_time`,
-  the index stays monotonic and unique — rather than a fixed increment.
+  The changed-row assertion is the load-bearing one: "grew by 0" is equally
+  satisfied by a provider that **dropped** the bar, which is a real failure
+  wearing the same shape. Both branches and three illegal shapes (drop, grow-by-2,
+  wrong final index) were exercised against a fake before trusting a live run.
 
-  **Still no retry decorator.** The rule held and paid: retrying would have
-  hidden a real gap between a test's assumption and a documented contract. Fix
-  the assertion, in its own commit, not here.
+  **Two rules paid for themselves here.** It went unidentified for several
+  sessions because the run that first hit it was piped through `tail`, which
+  discarded pytest's summary; it was named the moment a run was made **bare**.
+  And no retry decorator was ever added — retrying would have hidden a genuine
+  gap between a test's assumption and a documented contract rather than exposing
+  it.
 - **`make check` has never been executed through `make` on this machine.** `make`
   is not installed. The four delegating recipes are tab-indented (verified) and
   the gate itself no longer depends on `make`, but `$(PYTHON)` expansion and
