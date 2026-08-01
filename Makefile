@@ -25,23 +25,26 @@ paper: ## Run in paper-trading mode
 backtest: ## Run the backtesting engine
 	$(PYTHON) -m trading_bot backtest
 
-test: ## Run the test suite
-	pytest
-
 cov: ## Run tests with coverage
 	pytest --cov --cov-report=term-missing
 
+# The gate is defined once, in scripts/check.py, and these targets delegate to
+# it. `make` is not installed on every development machine, so a Makefile-native
+# gate is one that cannot be run where the work happens.
 lint: ## Lint + formatter check with ruff
-	ruff check src tests scripts
-	ruff format --check src tests scripts
+	$(PYTHON) scripts/check.py lint
 
 format: ## Auto-format with ruff
 	ruff format src tests scripts && ruff check --fix src tests scripts
 
 type: ## Type-check with mypy
-	mypy
+	$(PYTHON) scripts/check.py type
 
-check: lint type test ## Lint + format-check + type-check + test
+test: ## Run the test suite
+	$(PYTHON) scripts/check.py test
+
+check: ## The full gate: ruff check + format check + mypy + pytest
+	$(PYTHON) scripts/check.py
 
 clean: ## Remove caches and build artifacts
 	rm -rf .pytest_cache .mypy_cache .ruff_cache htmlcov .coverage build dist *.egg-info

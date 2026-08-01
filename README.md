@@ -391,36 +391,47 @@ make docker-up               # runs the bot; logs/ and data/ are mounted
 
 ## Development
 
+**The quality gate is `scripts/check.py`**, and it runs anywhere Python does:
+
 ```bash
-make lint      # ruff
-make type      # mypy (strict)
-make test      # pytest (offline; integration deselected)
-make cov       # pytest with coverage
-make check     # lint + type + test
+python scripts/check.py           # all four steps, in order
+python scripts/check.py lint      # ruff check + ruff format --check
+python scripts/check.py type      # mypy
+python scripts/check.py test      # pytest
+python scripts/check.py --fail-fast   # stop at the first failure
 ```
 
-On Windows without make, run the tools directly, e.g. `ruff check src tests`,
-`mypy`, `pytest`. Code is developed under `mypy --strict` and `ruff`
-(`E, F, I, N, UP, B, C4, SIM, RUF`).
+The `make` targets are a convenience wrapper — `make check`, `make lint`,
+`make type` and `make test` are one-line delegations to the same script, so
+there is one definition rather than two that drift. `make` itself is optional
+and is not installed on every development machine, which is why the gate is not
+defined there.
 
-**Both tools report a hard zero.** This is a gate, not a baseline to diff
+```bash
+make check     # -> python scripts/check.py
+make cov       # pytest with coverage (native)
+make format    # ruff format + ruff check --fix (native)
+```
+
+**All four steps report a hard zero.** This is a gate, not a baseline to diff
 against — any new finding is a regression:
 
 ```
-pytest                      # 510 passed  (507 unit + 3 opt-in Testnet integration)
-pytest -m "not integration" # 507 passed  — use this for fast iteration
-mypy                        # Success: no issues found in 55 source files
-ruff check src tests        # All checks passed!
+ruff check src tests scripts           All checks passed!
+ruff format --check src tests scripts  81 files already formatted
+mypy                                   Success: no issues found in 58 source files
+pytest                                 514 passed, 3 skipped
+                                       (517 passed with Testnet credentials present)
 ```
+
+**The test count depends on your environment, not just the tree.** The three
+integration tests skip without Binance Testnet credentials, so `514 passed,
+3 skipped` and `517 passed` are both green — see [Tests](#tests).
 
 Zero is not reached by suppression: `type: ignore` appears nowhere in `src/`.
 The two project-wide `ruff` ignores that do exist (`UP017` for `timezone.utc`,
 `UP042` for `str`+`Enum`) are deliberate style decisions documented with their
 reasoning in `pyproject.toml`, not silenced defects.
-
-Note `ruff format` is **not** a gate, and some files are not formatter-clean.
-Run it deliberately in its own commit if you want to close that gap — check what
-it does to hand-laid data tables in tests first.
 
 ### Tests
 

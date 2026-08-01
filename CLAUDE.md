@@ -263,26 +263,40 @@ scripts/         check_testnet.py · download_data.py
 ## Quality gates — hard zero
 
 ```bash
-pytest                      # 517 passed = 514 unit + 3 opt-in Testnet integration
-pytest -m "not integration" # 514 passed — use this for fast iteration
-mypy                        # Success: no issues found in 57 source files
-ruff check src tests scripts        # All checks passed!
-ruff format --check src tests scripts  # 80 files already formatted
-make check                  # all four, formatter check before pytest
+python scripts/check.py     # THE GATE — all four steps, in this order
+python scripts/check.py lint   # ruff check + ruff format --check
+python scripts/check.py type   # mypy
+python scripts/check.py test   # pytest
 ```
 
-**517 is the total.** Quote it as `517 = 514 + 3` rather than bare, because both
-numbers are correct answers to different questions and a bare figure invites the
-wrong comparison.
+`scripts/check.py` **is** the gate; `make check` is a one-line delegation to it,
+as are `make lint` / `type` / `test`. The definition lives in Python because
+`make` is not installed on every development machine — a Makefile-native gate is
+one that cannot be run where the work happens, and for five phases it never was.
+
+The four steps, and what each reports when green:
+
+```
+ruff check src tests scripts           All checks passed!
+ruff format --check src tests scripts  81 files already formatted
+mypy                                   Success: no issues found in 58 source files
+pytest                                 514 passed, 3 skipped
+                                       (517 passed with Testnet credentials present)
+```
+
+**The test count is not a function of the tree alone.** The three integration
+tests are `skipif(not HAS_CREDENTIALS)`, so a machine with `.env` credentials
+reports `517 passed` and one without reports `514 passed, 3 skipped`. Both are
+green. Quote the count with its condition, never bare.
 
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 80 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 57 |
-| `pytest` | `tests/` | — |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 81 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 58 |
+| `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
 three until it was brought in — an accident of the path list rather than a
@@ -300,7 +314,7 @@ comment. The worked example is now closed: `RiskManager.approve` carried
 it, at which point `warn_unused_ignores` forced the deletion. **`type: ignore`
 now appears nowhere in `src/`** — keep it that way.
 
-Note `mypy` checks `packages = ["trading_bot"]` only, so `tests/` is *not*
+Note `mypy` covers `files = ["src/trading_bot", "scripts"]`, so `tests/` is *not*
 type-checked. A `# type: ignore` in a test is inert as far as the gate is
 concerned; use one only to document a deliberate violation under test (passing a
 `float` where `Money` is expected), never to silence a weakly-typed helper.
