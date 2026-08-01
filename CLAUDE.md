@@ -78,6 +78,26 @@ a non-plain value through `extra=` produces a plausible-looking log line and no
 error. That is the same convention-not-enforcement shape as the `metadata` rule
 below — the type does not stop you, only the discipline does.
 
+**Structured fields reach both sinks, and that took work.** `PlainFormatter`
+appends `extra=` fields as logfmt (`key=value`, quoted when the value contains
+whitespace, `=` or a quote) using `str()`, matching the JSON path's
+`default=str` — so a `Decimal` renders `50.000` identically in text and JSON.
+Before it, text mode **silently dropped** every structured field while JSON kept
+them: same call site, lossy output, no error. There are **three** plain sinks,
+not two — `RichHandler`, the `StreamHandler` used when `rich` is missing, and
+the file handler.
+
+**`extra=` field names are validated — enforced, not convention.**
+`Logger.makeRecord` raises at the *call site*:
+`KeyError: "Attempt to overwrite 'name' in LogRecord"`. The reserved set is every
+`LogRecord` attribute plus `message` and `asctime`, and it contains plausible
+field names — `module`, `name`, `process`, `thread`, `msg`, `args`, `levelname`.
+This is one of the few things in this area the runtime enforces rather than the
+discipline. Note `message`/`asctime` are *not* on a fresh record:
+`logging.Formatter.format` assigns them while rendering, so any code diffing a
+post-format record against a fresh one must add them back or it will report the
+log message as a caller-supplied field.
+
 ---
 
 ## Architecture
@@ -309,10 +329,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  81 files already formatted
+ruff format --check src tests scripts  82 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 514 passed, 3 skipped
-                                       (517 passed with Testnet credentials present)
+pytest                                 535 passed, 3 skipped
+                                       (538 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -321,24 +341,24 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `517 passed` on a machine with Binance Testnet credentials in `.env`
-- `514 passed, 3 skipped` on a machine without them
+- `538 passed` on a machine with Binance Testnet credentials in `.env`
+- `535 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 514 and must not read it as a regression against a documented
-517. Quote the count with its condition, never bare.
+runner will see 535 and must not read it as a regression against a documented
+538. Quote the count with its condition, never bare.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
 to do with the tree. **There is one observed, unidentified flake:** on
 2026-08-01 a full run reported `1 failed, 516 passed` and did not reproduce
-across three subsequent runs (`517 passed`, `514 passed` unit-only, `3 passed`
+across three subsequent runs (all green; the suite has since grown to 538/535)
 integration-only). **The failing test's name was not captured** — the run was
 piped through `tail`, which discarded pytest's summary, and it was re-run before
 the output was read.
 
 This is **open and unidentified**, not resolved. The unit suite is deterministic
-at 514; treat a lone failure in a full run as suspect-integration until proven
+at 535; treat a lone failure in a full run as suspect-integration until proven
 otherwise, and capture the output *before* re-running. `addopts` already carries
 `-ra`, so pytest prints a short summary of every non-passing test — it only has
 to be allowed to reach the terminal.
@@ -356,7 +376,7 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 81 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 82 |
 | `mypy` | `files = ["src/trading_bot", "scripts"]` | 58 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
