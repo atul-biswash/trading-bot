@@ -486,6 +486,183 @@ wrong reason:
 
 ---
 
+## Phase 5 — pre-M4 hardening pass
+
+Not a milestone: no `NEXT_MILESTONE.md` ever scoped it, so unlike M1–M3 this
+entry is **reconstructed from the fourteen commits** between the M3 rotation
+(`b4b2e47`) and `d13fd58`. It began as an audit of `CLAUDE.md` and
+`PHASE_HISTORY.md` against the tree and turned into a sequence of small fixes,
+each of which surfaced the next.
+
+The through-line worth carrying: **every finding here was something a gate
+reported and nobody read, or something asserted repeatedly without being
+checked.** None of it was hard to discover once looked at.
+
+### The gate moved into Python
+
+`make check` had been the documented gate for five phases and had **never once
+been executed as written** — `make` is not installed on the development machine,
+so only its individual commands, retyped by hand, had ever run. The definition
+moved to `scripts/check.py`; the Makefile targets became one-line delegations so
+there is one definition rather than two that drift.
+
+- Every step runs as `sys.executable -m <tool>`, so the checks cannot silently
+  execute in a different Python earlier on `PATH`. That `ruff` resolves this way
+  was verified rather than assumed — it is a Rust binary and the `__main__` shim
+  was worth confirming.
+- **Five negative controls**, because a gate that cannot fail is worse than no
+  gate. Each violation was introduced, run, reverted: `ruff check` (unused
+  import), `ruff format` (redundant split), `mypy` (untyped def), `pytest`
+  (flipped `Decimal`), and — the one that matters — **two simultaneously**. An
+  accumulator that broke early or got overwritten would still exit non-zero and
+  still look correct under the four single-violation probes.
+- **`check.py` returns its own exit code**, never a subprocess's verbatim, proven
+  by a pytest collection error: pytest exits 2, `check.py` exits 1.
+- **Two deliberate divergences from `make`**, both named so neither reads as an
+  accident: run-all by default (`--fail-fast` restores halting), and delegated
+  `make lint` no longer halting between `ruff check` and `ruff format --check`.
+- Writing the controls exposed a **`SIM108` finding in `check.py` itself** — the
+  gate caught its own author. It had been misread as passing because
+  `ruff check <file> | tail -1` printed a fixes hint rather than
+  `All checks passed!`.
+
+### `| tail` — the defect that hid two others
+
+A shell pipeline's exit status is the **last stage's** unless `set -o pipefail`,
+so `python scripts/check.py | tail` reports `tail`'s success regardless of what
+the gate did. This masked a non-zero exit **twice**: the `SIM108` finding above,
+and a failing test.
+
+The second cost is worse than the first. `addopts` already carried `-ra`, so
+pytest **was** printing a summary naming the failing test — the truncation
+discarded it, and the run was repeated before the output was read. The test has
+never been identified. **Rule: never pipe `check.py`.**
+
+### Dependency register — six deletions and one false entry
+
+`httpx`, `SQLAlchemy`, `aiosqlite`, `fastapi`, `uvicorn` and `respx` were deleted
+after verifying each was unimported across `src/`, `scripts/` and `tests/`.
+
+**`freezegun` was not deleted, and the register was wrong about it.** It is
+imported at `tests/unit/test_binance_client.py:18` and used as `@freeze_time` at
+lines 174 and 186. The claim that it was unused had been carried in the
+`requirements-dev.txt` comment since the pinning commit (`ffd6fe6`), repeated in
+the `NEXT_MILESTONE` open item, and repeated again in the session handoff notes —
+asserted three times, checked zero. Nobody grepped for `freeze_time`, because the
+package name and the imported name differ.
+
+`ruff` would have flagged a genuinely unused *import* as `F401`. **The gate
+reading green should itself have been the clue** that "declared but unused" could
+not be true of something imported.
+
+The generalisation, now in `CLAUDE.md`: for a test-only dependency, "used" has
+**three surfaces** — an import statement, a **decorator**, and a **fixture name in
+a test signature**. The third needs neither an import nor a decorator, so
+grepping the package name cannot see it. `respx` was re-checked against exactly
+that surface (`respx_mock`: 0 hits) before deletion.
+
+*Rejected:* treating the register as authoritative. It is a claim to re-verify,
+not a fact to act on.
+
+### `extra=` was silently dropped in text mode
+
+Structured fields attached via `logger.info(..., extra={...})` were merged into
+JSON output and discarded in text output — same call site, lossy result, no
+error. Text is the default (`logging.file.json` is false), so M4's seven-field
+intent line would have vanished in the default configuration while appearing to
+work.
+
+`PlainFormatter` appends them as logfmt, using `str()` to match the JSON sink's
+`default=str`, so a `Decimal` renders identically in both. The empirical pass
+found **three** plain sinks, not two: `RichHandler` (which carried *no* formatter
+at all and renders its own columns), the `StreamHandler` used when `rich` is
+missing, and the file handler.
+
+**The required empty-`extra=` test failed on its first run**, and its cause is
+the durable lesson: `logging.Formatter.format` **mutates the record**, assigning
+`message` and `asctime` while rendering. "Surplus fields" is therefore only
+meaningful **relative to a point in the format lifecycle** — a set computed from a
+fresh record is correct before `super().format()` and wrong after it. Every plain
+line the bot emits would have gained `message="..." asctime="..."`.
+
+Resolved by **converging on `Logger.makeRecord`'s own guard** — the reserved set
+is now every `LogRecord` attribute plus those two, which is exactly what the
+stdlib refuses to let `extra=` overwrite — rather than special-casing the two
+names at the formatter. Both ends of the contract now agree by construction.
+
+Verified by byte-comparison captured before the change and re-run after: six
+captures, zero differing. **First test coverage `utils/logger.py` has ever had**,
+which is how the silent drop survived this long.
+
+### `Position` — already closed, coverage completed
+
+The assignment guard was reported as an open hole by the project-knowledge
+document. **It was not:** `bd73a8d` closed it earlier in the same sequence, and
+the document predated that commit. Verified empirically before touching anything.
+
+What *was* incomplete was the coverage: three of seven `Money` fields sampled for
+`float`, one for `numpy.float64`. Now all seven against both — and the field list
+is **derived from `Position.model_fields`** by a test that fails if a `Money`
+field is added without being covered, so the parametrised tests cannot fall
+behind the type they guard.
+
+### Config models — the guard that broke nothing
+
+`validate_assignment=True` added to `config/models.py`'s base. **Nothing broke,
+which is the finding**: it means the "config is loaded once and never mutated"
+convention was true. The only two mutation sites in the tree both assign
+`settings.mode`, and `Settings` is a plain class, not a pydantic model.
+
+**The benefit is narrower than first assumed, and the tests say so.** Config
+fields are plain `Decimal`, **not** `Money`, so assignment *coerces* rather than
+rejecting — and coerces the safe way: `config.activation_percent = 0.1` yields
+`Decimal("0.1")`, not `Decimal(0.1)`'s `0.1000000000000000055…`. So the guard
+buys **shortest-repr conversion at the boundary, constraint enforcement (`gt=0`)
+and typo rejection on assignment** — *not* float rejection. A first draft of the
+test asserted a `ValidationError` and had to be corrected once measured.
+
+That matters because the convention is load-bearing: without the guard a float
+would simply be stored as a `float`, and `move_pct < config.activation_percent`
+would compare against the binary expansion **silently**, since `Decimal < float`
+does not raise.
+
+### `Signal.metadata` — enforced by exact type, not `isinstance`
+
+The "plain `int`/`float`/`str`" rule was convention only; the field is
+`dict[str, object]` and nothing checked it. The hazard had sharpened: with the
+log sink's `default=str`, a NumPy scalar no longer fails at serialisation — it
+lands in a log line and in persistence as the repr `np.float64(1.5)`. The failure
+moved from loud-at-write to quiet-forever.
+
+**The mechanism deliberately differs from the `Money` guard**, and the asymmetry
+is the point:
+
+* `_reject_float` rejects the whole `float` family, so `isinstance` is exactly
+  right there — `numpy.float64` is a subclass and is caught for free.
+* `metadata` must **accept** `float` and **reject** `numpy.float64`, and no
+  `isinstance` test separates them. Measured:
+  `isinstance(np.float64(1.5), float)` is `True` while
+  `type(np.float64(1.5)) is float` is `False`.
+
+Same principle, necessarily different operator, pinned by a test asserting both
+halves of that trap — if NumPy ever stops subclassing `float`, it flips and the
+guard can be simplified.
+
+Exact typing also **rejects every NumPy scalar without `core/` importing, or even
+naming, NumPy**, which is what decided it over any hand-rolled detector: the
+innermost layer stays free of the data stack. `bool` is listed explicitly because
+`type(True) is int` is `False`, making its admission a decision rather than an
+accident. Keys need no check — pydantic already rejects a non-`str` key from the
+annotation.
+
+`helpers.py`'s `float()` coercion was **kept**, measured as load-bearing rather
+than redundant: `last_two` returns plain `float` where raw `iloc` yields
+`float64`. Boundary conversion and domain enforcement are the two halves;
+removing either turns a clean conversion into an error at every strategy that
+reads an indicator.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**

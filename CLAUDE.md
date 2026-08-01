@@ -356,26 +356,37 @@ runner will see 566 and must not read it as a regression against a documented
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
-to do with the tree. **There is one observed, unidentified flake:** on
-2026-08-01 a full run reported `1 failed, 516 passed` and did not reproduce
-across three subsequent runs (all green; the suite has since grown to 569/566)
-integration-only). **The failing test's name was not captured** — the run was
-piped through `tail`, which discarded pytest's summary, and it was re-run before
-the output was read.
+to do with the tree. **One such flake is known and identified:**
+`test_testnet_provider_seeds_history_and_extends_it_live` asserts the first live
+candle is always a *new* bar, but when the REST seed's last bar is the same bar
+the stream then closes, `_append` replaces it in place instead — so the frame
+grows by 0, not 1. The production behaviour is correct and the assertion is
+wrong. See `docs/NEXT_MILESTONE.md`; the fix is not yet made.
 
-This is **open and unidentified**, not resolved. The unit suite is deterministic
-at 566; treat a lone failure in a full run as suspect-integration until proven
-otherwise, and capture the output *before* re-running. `addopts` already carries
-`-ra`, so pytest prints a short summary of every non-passing test — it only has
-to be allowed to reach the terminal.
+It went unidentified for several sessions because the run that first hit it was
+piped through `tail`, which discarded pytest's summary, and was re-run before the
+output was read. The unit suite is deterministic at 566, so **treat a lone
+failure in a full run as suspect-integration, and read the output before
+re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
+has to be allowed to reach the terminal.
 
-**Count coupling — a known drift trigger with nothing enforcing it.** Adding any
-file under `src/trading_bot/` or `scripts/` moves *both* the mypy count and the
-`ruff format` count, and each of those numbers appears in **both** `CLAUDE.md`
-and `README.md` — four places, updated by hand. This has already fired once:
-`scripts/check.py` moved mypy 57→58 and ruff 80→81 in the same commit that
-created it. When you add a file, grep both documents for the old numbers before
-committing.
+**Count coupling — a known drift trigger with nothing enforcing it.** Each
+documented number appears in **both** `CLAUDE.md` and `README.md`, updated by
+hand. Which ones move depends on **what kind of file changed**, not on how big
+the commit is:
+
+| Change | `ruff format` | `mypy` | `pytest` |
+|---|---|---|---|
+| `tests/` file **added** | moves | **no** — `tests/` is outside mypy by policy | moves if it adds test functions |
+| `src/` or `scripts/` file **added** | moves | moves | no |
+| `src/` file **modified** | no | no | no |
+
+In practice a `src/` file never arrives alone here — it arrives with its tests —
+so a typical `src/` commit moves all three. The counter-example worth knowing is
+**D3**: one `src/` file *modified*, so `ruff format` held at 82 and `mypy` at 58
+while `pytest` moved 554 → 569.
+
+Before committing, grep both documents for the old numbers.
 
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:
@@ -460,11 +471,17 @@ the contradiction will be invisible from inside the repo.
 ## Current state
 
 Phases 1–4 complete. Phase 5 M1 (position sizing), M2 (protective exit rules) and
-M3 (risk manager + `Portfolio`) complete. Tooling cleanup complete.
+M3 (risk manager + `Portfolio`) complete, followed by a **pre-M4 hardening pass**
+(see `docs/PHASE_HISTORY.md`) that moved the quality gate into
+`scripts/check.py`, pinned every direct dependency, deleted six unused ones, made
+`extra=` fields reach the text log sink, and closed the last three
+convention-only guards — `Position` assignment, config immutability, and
+`Signal.metadata`.
 
 The decision path is complete **as a library**: `RiskManager.evaluate` turns a
 signal into an approved, sized, protected `TradeIntent`. It is **not wired** —
 `main.py` registers no `on_signal` handler, so `python -m trading_bot run` still
 only logs signals, and nothing constructs a `Portfolio` or primes a
 `PairContext`. Building that composition root and making the intent stream
-observable is M4; placing an order is M5. See `docs/NEXT_MILESTONE.md`.
+observable is **M4a**; the per-handler failure counter is M4b; placing an order
+is M5. See `docs/NEXT_MILESTONE.md`.

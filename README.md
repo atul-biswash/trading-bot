@@ -15,34 +15,75 @@ architecture and SOLID principles.
 
 ## Status
 
-**Version 0.1.0 — Phases 1–4 complete; Phase 5 (risk) through M3.** Python **3.12+**.
+**Version 0.1.0 — Phases 1–4 complete; Phase 5 (risk) through M3, plus a
+hardening pass.** Python **3.12+**.
 
-What works today, verified against Binance **Testnet**:
+### What is built
 
-- Typed configuration (`.env` + `config.yaml`) and the `Decimal`-safe domain model.
+Verified against Binance **Testnet**:
+
+- **Configuration & domain** — typed `.env` + `config.yaml`, and a `Decimal`-safe
+  domain in which money can never be built from, or assigned, a binary float.
 - **Async Binance Spot REST adapter** — balances, symbol info, ticker, klines,
   create/cancel/query orders — with retry, rate-limit handling, and
   exchange-filter compliance.
-- **Live WebSocket kline streaming** that delivers closed candles 24/7, with
+- **Live WebSocket kline streaming** delivering closed candles 24/7, with
   capped-exponential backoff and unbounded reconnection.
-- **Market-data provider** that seeds REST history, maintains a bounded rolling
-  buffer per pair, and exposes a time-ordered `float64` OHLCV DataFrame.
-- **Trading engine** that evaluates a strategy on every bar close, gated by the
-  strategy's warmup period, with per-pair failure containment.
-- **Hand-written indicators** (SMA, EMA, RSI, MACD, Bollinger, ATR) and two real
-  strategies (SMA crossover, RSI), edge-triggered and stateless.
+- **Market-data provider** that seeds REST history, keeps a bounded rolling
+  buffer per pair, and exposes a time-ordered `float64` OHLCV DataFrame while
+  preserving full `Decimal` precision behind it.
+- **Trading engine** evaluating a strategy on every bar close, gated by warmup,
+  with per-pair failure containment and isolated signal handlers.
+- **Indicators & strategies** — hand-written SMA, EMA, RSI, MACD, Bollinger and
+  ATR (warmup expressed as leading `NaN`), plus edge-triggered, stateless
+  SMA-crossover and RSI strategies.
 - **Risk management** — position sizing, protective stop-loss / take-profit /
-  trailing-stop levels, and a risk manager that turns a signal into an approved,
-  sized, protected `TradeIntent` against portfolio limits.
+  trailing-stop levels, and a `RiskManager` that turns a signal into an approved,
+  sized, protected `TradeIntent` against portfolio limits. Performs no I/O.
+- **Structured logging** — `extra=` fields reach both the JSON and the text sink,
+  with `Decimal` rendered exactly and identically in each.
+
+### What is still a stub
+
+Thirteen files are docstring-only placeholders: `execution/` (executor, order
+manager), `paper/simulator`, `persistence/` (database, models), `notifications/`
+(base, telegram), `backtesting/` (engine, portfolio, metrics),
+`data/historical`, `data/repository`, and `engine/modes`. Check before assuming
+behaviour — `make backtest` exits with "not implemented yet".
 
 `python -m trading_bot run` connects to Testnet and exercises the whole
 data → strategy → signal path end to end, emitting real signals.
 
 > **The bot cannot place an order yet.** The risk layer produces a complete
 > `TradeIntent`, but nothing dispatches it: order execution, persistence and
-> notifications are still stubs, and the risk manager is not yet wired into the
-> engine's signal handler. That wiring is Phase 5 M4, and order dispatch is M5.
-> Per-feature status is tracked in the [Roadmap](#roadmap-build-phases).
+> notifications are stubs, and the risk manager is not yet wired into the
+> engine's signal handler. That wiring is Phase 5 **M4a**; order dispatch is
+> **M5**. Per-feature status is in the [Roadmap](#roadmap-build-phases).
+
+### The quality gate
+
+```bash
+python scripts/check.py          # ruff check -> ruff format -> mypy -> pytest
+```
+
+`scripts/check.py` **is** the gate; `make check` delegates to it. **Never pipe
+it** — a shell pipeline's exit status is the last stage's, so `| tail` reports
+success regardless of what the gate did, and truncates the diagnostic naming the
+failure. Run it bare and read its own exit code.
+
+```
+ruff check src tests scripts           All checks passed!
+ruff format --check src tests scripts  82 files already formatted
+mypy                                   Success: no issues found in 58 source files
+pytest                                 566 passed, 3 skipped
+                                       (569 = 566 + 3 with Testnet credentials)
+```
+
+**The gate's output is not a function of the tree alone.** It varies by
+**credentials** — the three integration tests skip without Binance Testnet keys,
+so `566 passed, 3 skipped` and `569 passed` are both green — and by **network
+state**, since those tests make live calls and two wait on a real 1-minute bar.
+A fresh clone seeing 566 is not looking at a regression.
 
 ## Features
 
@@ -292,7 +333,7 @@ async def main() -> None:
     async def on_signal(signal) -> None:
         print("signal:", signal.action.value, signal.symbol, signal.reason)
 
-    engine.on_signal(on_signal)  # RiskManager.evaluate attaches here in M4
+    engine.on_signal(on_signal)  # RiskManager.evaluate attaches here in M4a
     await engine.run()  # runs until SIGINT/SIGTERM or engine.request_stop()
 
 
@@ -369,7 +410,7 @@ python -m trading_bot strategies          # list registered strategies
 > **What `run` does today.** It connects to Testnet, seeds history, streams live
 > candles, evaluates strategies on each bar close, and **logs the signals they
 > produce**. It does not size, vet or place anything: the risk manager is built
-> and tested but not yet attached to `engine.on_signal`, which is Phase 5 M4.
+> and tested but not yet attached to `engine.on_signal`, which is Phase 5 M4a.
 > Stop with Ctrl-C; SIGINT/SIGTERM both trigger a graceful shutdown that closes
 > the WebSocket and REST connections. `backtest` remains unimplemented.
 
@@ -414,19 +455,15 @@ make format    # ruff format + ruff check --fix (native)
 ```
 
 **All four steps report a hard zero.** This is a gate, not a baseline to diff
-against — any new finding is a regression:
+against — any new finding is a regression. The expected output, and why the test
+count is not a function of the tree alone, are given once under
+[the quality gate](#the-quality-gate); they are deliberately not repeated here,
+because a number kept in two places drifts.
 
-```
-ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  82 files already formatted
-mypy                                   Success: no issues found in 58 source files
-pytest                                 566 passed, 3 skipped
-                                       (569 passed with Testnet credentials present)
-```
-
-**The test count depends on your environment, not just the tree.** The three
-integration tests skip without Binance Testnet credentials, so `566 passed,
-3 skipped` and `569 passed` are both green — see [Tests](#tests).
+**Never pipe it.** A shell pipeline's exit status is the last stage's unless
+`set -o pipefail`, so `python scripts/check.py | tail` reports `tail`'s success
+no matter what the gate did — and truncates the summary naming the failure. This
+has masked a non-zero exit twice in this project.
 
 Zero is not reached by suppression: `type: ignore` appears nowhere in `src/`.
 The two project-wide `ruff` ignores that do exist (`UP017` for `timezone.utc`,
@@ -470,7 +507,7 @@ The two streaming tests wait on a 1-minute bar, so each can take up to a minute.
 2. **Binance connectivity** — async REST adapter (balances, symbol info, ticker, klines, orders), `Decimal`-safe response mapping, retry + rate-limit handling, exchange-filter compliance, Testnet/Live. ✅
 3. **Market data + engine skeleton** — WebSocket kline streaming with auto-reconnect, the rolling-buffer market-data provider (`Decimal`→`float` boundary), and the bar-close trading engine with warmup gating and failure containment. ✅
 4. **Indicators + concrete strategies** — hand-written SMA, EMA, RSI, MACD, Bollinger and ATR (warmup expressed as leading `NaN`), plus edge-triggered SMA-crossover and RSI strategies. ✅
-5. **Risk management** — position sizing (M1 ✅), protective stop-loss / take-profit / trailing-stop rules (M2 ✅), the risk manager + portfolio that compose them into a `TradeIntent` (M3 ✅), then the composition root that wires it into the engine behind a log-only executor (M4 ⬅️ *next*), then order execution + lifecycle (M5) — the milestone in which the bot can first place an order.
+5. **Risk management** — position sizing (M1 ✅), protective stop-loss / take-profit / trailing-stop rules (M2 ✅), the risk manager + portfolio that compose them into a `TradeIntent` (M3 ✅), then the composition root that wires it into the engine behind a log-only executor (M4a ⬅️ *next*), the per-handler failure counter (M4b), then order execution + lifecycle (M5) — the milestone in which the bot can first place an order.
 6. Engine completion: wire risk + execution into the loop, paper-trading mode.
 7. Backtesting engine + metrics.
 8. Persistence (SQLAlchemy) + Telegram notifications.
@@ -478,7 +515,7 @@ The two streaming tests wait on a 1-minute bar, so each can take up to a minute.
 
 Phase 3 delivered the orchestration skeleton earlier than originally planned
 (it was a later item), because the market-data provider needed a consumer to be
-verifiable end to end. Phase 5 M4 is now about filling that skeleton in.
+verifiable end to end. Phase 5 M4a is now about filling that skeleton in.
 
 ## License
 
