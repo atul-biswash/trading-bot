@@ -106,13 +106,21 @@ def _install_shutdown_handlers(engine: TradingEngine) -> None:
 
 
 async def _run_engine(settings: Settings) -> int:
-    """Build, run, and shut down the trading engine."""
-    # Deferred import: the engine (and its heavy deps) load only when running.
-    from trading_bot.engine.live_engine import TradingEngine
+    """Build, run, and shut down the whole live system.
 
-    engine = await TradingEngine.create(settings)
-    _install_shutdown_handlers(engine)
-    await engine.run()
+    The composition root owns assembly and teardown order; this function only
+    says *when*. ``live_system``'s ``finally`` closes the REST client after the
+    engine (and through it the provider and stream) has stopped, so a
+    ``KeyboardInterrupt`` mid-run still releases every connection.
+    """
+    # Deferred import: the composition root pulls in pandas/NumPy and the
+    # Binance adapters, so it loads only when actually running. `modes` is
+    # deliberately not re-exported from `trading_bot.engine` for the same reason.
+    from trading_bot.engine.modes import live_system
+
+    async with live_system(settings) as system:
+        _install_shutdown_handlers(system.engine)
+        await system.engine.run()
     return 0
 
 
