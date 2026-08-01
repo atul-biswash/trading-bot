@@ -16,7 +16,14 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    model_validator,
+)
 
 from trading_bot.core.enums import (
     OrderSide,
@@ -61,6 +68,55 @@ def _reject_float(value: object) -> object:
 #: A ``Decimal`` money field that refuses to be constructed from a ``float``.
 #: Used for every price, quantity and balance in the domain.
 Money = Annotated[Decimal, BeforeValidator(_reject_float)]
+
+#: Types ``Signal.metadata`` may carry. Matched by **exact type**, not
+#: ``isinstance`` -- see :func:`_reject_exotic_metadata`. ``bool`` is listed
+#: explicitly because ``type(True) is int`` is ``False``; it is admitted because
+#: it serialises cleanly in both log sinks and in JSON.
+_METADATA_SCALARS: tuple[type, ...] = (str, int, float, bool)
+
+
+def _reject_exotic_metadata(value: dict[str, object]) -> dict[str, object]:
+    """Keep ``Signal.metadata`` to plain scalars, rejecting NumPy lookalikes.
+
+    Metadata is persisted and logged, so a value that merely *looks* like a
+    number is a durable problem. It is checked by **exact type** rather than
+    ``isinstance``, which is a deliberate departure from :func:`_reject_float`
+    and worth explaining, because the two guards need opposite discriminations:
+
+    * ``_reject_float`` rejects the whole ``float`` family, so ``isinstance``
+      is exactly right -- ``numpy.float64`` is a ``float`` subclass and is
+      caught for free.
+    * Here ``float`` is *allowed* and ``numpy.float64`` is not, and no
+      ``isinstance`` test can separate them. ``type(x) is float`` can.
+
+    The pleasant consequence is that this rejects every NumPy scalar without
+    ``core/`` importing, or even naming, NumPy -- which is what keeps the
+    innermost layer free of the data stack. It costs the ability to accept
+    deliberate subclasses (a ``str``-based ``Enum`` member, say), and that is the
+    right trade: the fix at such a call site is to pass ``.value``, which is what
+    lands in the log anyway.
+
+    ``None`` is permitted so a field can be present and empty rather than
+    absent, which keeps a structured log line's shape stable across records.
+    """
+    for key, item in value.items():
+        if item is None or type(item) in _METADATA_SCALARS:
+            continue
+        raise ValueError(
+            f"metadata[{key!r}] must be a plain int/float/str/bool or None, got "
+            f"{type(item).__name__} ({item!r}). NumPy scalars are the usual cause: "
+            "they reach here from indicator maths and would be persisted, and "
+            "serialised into logs, as a repr like 'np.float64(1.5)' rather than "
+            "failing. Convert with float(x) / int(x) at the strategy boundary."
+        )
+    return value
+
+
+#: ``Signal.metadata``: a str-keyed mapping of plain scalars. Keys are enforced
+#: by pydantic from the ``dict[str, object]`` annotation; the values are what
+#: this guard covers. ``AfterValidator`` so the dict shape is already validated.
+Metadata = Annotated[dict[str, object], AfterValidator(_reject_exotic_metadata)]
 
 
 class _Frozen(BaseModel):
@@ -309,4 +365,4 @@ class Signal(_Frozen):
     price: Money | None = None  # reference price at signal time
     strength: float = 1.0  # 0..1 confidence, strategy-defined
     reason: str = ""  # human-readable explanation for logs
-    metadata: dict[str, object] = Field(default_factory=dict)
+    metadata: Metadata = Field(default_factory=dict)

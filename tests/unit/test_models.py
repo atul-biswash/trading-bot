@@ -199,3 +199,93 @@ def test_clearing_a_level_to_none_is_still_allowed() -> None:
     position.trailing_stop = None
 
     assert position.trailing_stop is None
+
+
+# --------------------------------------------------------------------------
+# Signal.metadata carries plain scalars only
+# --------------------------------------------------------------------------
+def _signal(**metadata: object) -> Signal:
+    return Signal(symbol="BTCUSDT", action=SignalAction.BUY, metadata=metadata)
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [
+        ("str", "sma_crossover"),
+        ("int", 20),
+        ("float", 1.5),
+        ("bool", True),
+        ("none", None),
+    ],
+)
+def test_metadata_accepts_plain_scalars(label: str, value: object) -> None:
+    """``bool`` is admitted deliberately: ``type(True) is int`` is False, so it
+    had to be listed explicitly rather than arriving via ``int``."""
+    assert _signal(**{label: value}).metadata[label] == value
+
+
+def test_metadata_rejects_numpy_float() -> None:
+    """The realistic leak: ``Series.iloc`` yields ``np.float64``, and it is a
+    ``float`` subclass, so an ``isinstance`` check would let it through. Exact
+    type matching is what stops it -- without ``core/`` importing numpy."""
+    numpy = pytest.importorskip("numpy")
+
+    with pytest.raises(ValidationError, match="must be a plain int/float/str/bool"):
+        _signal(rsi=numpy.float64(71.5))
+
+
+def test_metadata_rejects_numpy_int() -> None:
+    numpy = pytest.importorskip("numpy")
+
+    with pytest.raises(ValidationError, match="must be a plain int/float/str/bool"):
+        _signal(period=numpy.int64(14))
+
+
+def test_numpy_float_would_otherwise_pass_an_isinstance_check() -> None:
+    """Pins the reason the guard cannot reuse ``_reject_float``'s mechanism.
+
+    ``_reject_float`` rejects the whole float family, so ``isinstance`` is right
+    there. Here ``float`` is allowed and ``np.float64`` is not, and no
+    ``isinstance`` test separates them -- if this assertion ever flips, the
+    metadata guard could be simplified.
+    """
+    numpy = pytest.importorskip("numpy")
+
+    assert isinstance(numpy.float64(1.5), float)  # the trap
+    assert type(numpy.float64(1.5)) is not float  # the way out
+
+
+@pytest.mark.parametrize(
+    ("label", "value"),
+    [
+        ("nested_dict", {"a": 1}),
+        ("nested_list", [1, 2]),
+        ("decimal", Decimal("1.5")),
+        ("tuple", (1, 2)),
+    ],
+)
+def test_metadata_rejects_containers_and_decimals(label: str, value: object) -> None:
+    """These serialise through ``json.dumps(default=str)`` to a repr rather than
+    failing, which is the same silent-corruption path as a NumPy scalar. A
+    ``Decimal`` is rejected too: money belongs in typed fields, not diagnostics."""
+    with pytest.raises(ValidationError, match="must be a plain int/float/str/bool"):
+        _signal(**{label: value})
+
+
+def test_metadata_keys_are_enforced_by_pydantic_not_this_guard() -> None:
+    """Keys need no check of ours -- ``dict[str, object]`` already rejects a
+    non-str key at construction, so the validator covers values only."""
+    with pytest.raises(ValidationError):
+        Signal(symbol="BTCUSDT", action=SignalAction.BUY, metadata={1: "a"})
+
+
+def test_metadata_error_names_the_offending_key() -> None:
+    """An operator needs to know *which* field leaked, not just that one did."""
+    numpy = pytest.importorskip("numpy")
+
+    with pytest.raises(ValidationError, match=r"metadata\['rsi'\]"):
+        _signal(strategy="rsi_strategy", rsi=numpy.float64(71.5))
+
+
+def test_empty_metadata_is_still_the_default() -> None:
+    assert Signal(symbol="BTCUSDT", action=SignalAction.BUY).metadata == {}
