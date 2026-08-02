@@ -1076,6 +1076,17 @@ deliberately not addressed: the second is the one where a swap crashes rather
 than mislabels, so a test there would assert on an exception type and prove
 something other than ordering.
 
+### Shipped, and what follows it
+
+M4b and its follow-up are pushed. The gate closes the milestone at **639 passed
+with Testnet credentials present** (636 + the three `skipif`-gated integration
+tests), `ruff` clean, `ruff format` 83, `mypy` 58.
+
+**The next milestone is Q-C, not Q-A.** Q-A was the obvious successor and cannot
+be taken: its thresholds must come from soak data that cannot exist until
+something dispatches an order, so it is blocked behind M5 — while Q-C, which
+decides where the protective levels actually rest, blocks M5 in turn.
+
 ---
 
 ## Known open items

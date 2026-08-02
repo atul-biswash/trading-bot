@@ -1,56 +1,107 @@
-# Current milestone — Q-A: the per-collaborator failure counter
+# Current milestone — Q-C: where the protective levels actually live
 
-**UNSCHEDULED, and that is the finding, not a scheduling accident.**
+**This is an open design question, not a scoped task.** There is no plan below,
+no file list and no acceptance criteria, because none of those can be written
+until the question is answered. The design conversation happens first.
 
-Q-A was deferred from M4a with a reason that has not moved: a
-consecutive-failure threshold should be set from soak data rather than guessed.
-M4a was supposed to produce that data — `collaborator_failed` lines, named per
-collaborator, structured. It has not, and it cannot yet: **nothing dispatches an
-order**, so the only collaborator that can fail is `IntentLogger`, whose failure
-mode is "logging broke". A threshold calibrated against that number would be
-calibrated against the wrong population entirely.
+## The question
 
-So Q-A stays open and stays unscheduled until M5 gives it a collaborator that
-touches the network. Writing it now would produce a constant wearing a
-guess's clothing, which is the exact thing the deferral existed to prevent.
+**Which protective levels rest as live orders at the exchange, and which stay
+client-side — and how are the two views reconciled when they disagree?**
 
-**Automatic removal of a failing handler stays REJECTED.** Disabling a broken
-executor converts "orders are failing" into "orders are not being attempted"
-while positions are open. Whatever the counter does, it must not do that.
+Both halves matter. The first is a placement decision; the second is what makes
+the first survivable.
 
-**The shape M4a left, unchanged by M4b.** `TradingEngine._emit` catches per
-handler and logs, but the engine's consecutive-failure counter is fed only from
-`_evaluate` — so a permanently broken handler produces a traceback every bar
-forever and no pair is ever quarantined. M4a's chained handler mitigates this by
-never raising, catching per collaborator inside itself. The counter is what
-makes it visible rather than merely contained.
+## Why it comes before `executor.py`
+
+Every executor design assumes an answer to this, whether or not it says so. The
+answer decides what `create_order` is called with and how many times, what the
+unprotected window between an entry fill and its stop actually *is* (or whether
+it exists at all), what order-status tracking has to track, and what `Portfolio`
+write-back reconciles against. Settle it afterwards and the executor gets
+rewritten rather than extended.
+
+That is the whole reason this is a milestone and not a footnote inside M5.
+
+## The current position, stated honestly
+
+`risk/manager.py` implements and documents client-side stops evaluated on the
+**closed bar's `close`**, never its high or low. That is **correct as policy**:
+triggering on a price the bar has already left is optimistic in backtest and
+dishonest live, so feeding the close makes a stop fire late rather than early,
+which is the safe direction to be wrong in.
+
+It is **incomplete as survival**. A client-side stop needs a live process to
+act. A crashed bot, a lost WebSocket, a host reboot, a deploy — in every one of
+those the position is open and nothing is watching it. The module docstring
+already calls this path "the fallback"; what it does not say is what the primary
+is, because there is no primary yet.
+
+## The reconciliation problem
+
+An exchange-resting stop and the client-side view are two records of one fact,
+and they drift:
+
+- The exchange can fill or cancel a resting order while the client still
+  believes it rests. The client then holds a position it thinks is protected and
+  is not, or thinks it holds a position it no longer has.
+- A trailing stop that moves client-side has to be cancelled and replaced at the
+  exchange. Between the cancel and the replace there is a gap, and a crash
+  inside that gap leaves no stop at all.
+- After a restart the client-side view is rebuilt from whatever was persisted
+  while the exchange view is authoritative and current. Which one wins, and how
+  is the difference detected rather than assumed away?
+
+**Which record is authoritative, and at what moment**, is the part that has to be
+decided rather than discovered later from a reconciliation bug.
 
 ---
 
-## Recommended next: M5 — order dispatch
+## Carried forward — still open, none of them scheduled
 
-`OrderExecutor` over `BinanceClient.create_order`, the unprotected window
-between an entry fill and its stop, idempotency via `client_order_id`,
-order-status tracking, and `Portfolio` write-back — the last of which retires
-M4a's boot-snapshot portfolio, which nothing mutates today.
+**Q-A — the per-collaborator failure counter. UNSCHEDULABLE, and that is the
+finding rather than a scheduling accident.** Deferred from M4a on the grounds
+that a consecutive-failure threshold should come from soak data rather than a
+guess. M4a was supposed to produce that data — `collaborator_failed` lines,
+named per collaborator, structured. It has not and it **cannot yet**: nothing
+dispatches an order, so the only collaborator that can fail is `IntentLogger`,
+whose failure mode is "logging broke". A threshold calibrated against that
+population would be calibrated against the wrong one. It cannot be scheduled
+until M5 gives it a collaborator that touches the network.
 
-**Q-B** (escalation policy) and **Q-C** (which protective levels rest at the
-exchange, and how they reconcile with the client-side view after a restart) are
-settled at the start of that milestone, not during it.
+*Two things about it that are already settled.* **Automatic removal of a failing
+handler stays REJECTED** — disabling a broken executor converts "orders are
+failing" into "orders are not being attempted" while positions are open, and
+whatever the counter does it must not do that. And the shape M4a left is
+unchanged by M4b: `TradingEngine._emit` catches per handler and logs, but the
+engine's consecutive-failure counter is fed only from `_evaluate`, so a
+permanently broken handler produces a traceback every bar forever and no pair is
+ever quarantined. M4a's chained handler mitigates this by never raising. The
+counter is what would make it visible rather than merely contained.
 
-**Q-D — the `RiskManager` port.** M5 is when widening it becomes a real question
-rather than a deferred one, because execution becomes its second consumer.
-`evaluate`, `check_exit` and `advance_trailing_stop` are still class-only; the
-port declares `size_position` and `approve`. M4b deliberately did **not** touch
-this, and deliberately did not move `RiskAssessment` out of `risk/manager.py`
-either — the two decisions are the same decision and should be made once, with
-all consumers visible.
+**Q-B — escalation policy.** Settled at the start of M5, not during it.
+
+**Q-D — the `RiskManager` port.** `evaluate`, `check_exit` and
+`advance_trailing_stop` are class-only; the port declares `size_position` and
+`approve`. Widening it becomes a real question when execution becomes its second
+consumer. M4b deliberately did not touch it, and deliberately did not move
+`RiskAssessment` out of `risk/manager.py` either — the two are the same decision
+and should be made once, with all consumers visible.
 
 Note for the record: M4b's brief said `RefusalStage` would move "into the
 domain", and that phrase resolved to **two** destinations once the tree was
 read. The enum moved to `core/enums.py` (forced: `engine/` imports `risk/`, so
 `risk/` cannot import `engine/`). `RiskAssessment` did not move, and defers to
 Q-D.
+
+---
+
+## After Q-C: M5 — order dispatch
+
+`OrderExecutor` over `BinanceClient.create_order`, the unprotected window
+between an entry fill and its stop, idempotency via `client_order_id`,
+order-status tracking, and `Portfolio` write-back — the last of which retires
+M4a's boot-snapshot portfolio, which nothing mutates today.
 
 ---
 
@@ -72,12 +123,43 @@ Q-D.
   then `_approve` directly. Collapsing them is a decision about the port, so it
   belongs with Q-D.
 
+- **`_exit_assessment`'s approval site passes `stage=None` and is pinned by no
+  test.** It is the second of the two approval constructions — the entry
+  approval in `evaluate` is covered by `test_an_approval_reports_no_stage`, this
+  one is not — and it can drift alone. Left uncovered in the M4b follow-up
+  because its fixture shape differs enough (an open position, a `CLOSE` signal)
+  to be separate work rather than a rider. Recorded so it is not mistaken for
+  covered by the entry-path test.
+
 - **Two adjacent refusal-guard pairs remain unpinned by an ordering test:**
   `unsupported_action ↔ no_mark_price` and `no_mark_price ↔ limit_refused`. The
   second is the one where a swap crashes rather than mislabels — equity is
   computed between the guards — so a test there would assert on an exception
   type and prove something other than ordering. Pre-existing debt that M4b
   illuminated rather than created.
+
+- **`size_not_tradeable ↔ unaffordable` is order-INDEPENDENT, which is a
+  different claim from the entry above and must not be collapsed into it.**
+  Those two are *unpinned*; this one is *unpinnable*. `is_tradeable` is
+  `quantity > 0` and a negative quantity is forbidden, so `not is_tradeable`
+  implies `cost == 0`, and the affordability guard is `cost > free_quote` — for
+  any non-negative balance the two conditions are **mutually exclusive** and
+  swapping the guards is unobservable in every reachable state. A test that bit
+  would need a negative `free_quote` and would then fail on a harmless
+  refactor while pinning nothing real. Recorded because the reasoning is not
+  obvious and was re-derived once already; see M4b findings (iii) and (iv) in
+  `docs/PHASE_HISTORY.md`.
+
+- **This document's own open items cite roughly ten line references** —
+  `config/settings.py`, `binance_client.py`, `main.py`, `websocket_client.py`
+  and `market_data.py` all appear below with `:NNN` suffixes. M4b established
+  that a line number in prose is an unaudited drift surface and deleted three
+  such references from test docstrings rather than correcting them, on the
+  grounds that the prose was already right about the ordering and the numbers
+  were not. These are the same hazard in a document instead of a docstring, and
+  nothing checks them. **Carried verbatim for now**: verifying or stripping them
+  is its own small pass, and doing it silently inside a milestone rotation would
+  bury a change nobody asked for.
 
 - **PAPER mode reaches Binance *mainnet* with empty credentials. Contained by
   M4a, not fixed.** This contradicts "Testnet is the default everywhere", so it
