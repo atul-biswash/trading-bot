@@ -44,6 +44,7 @@ from trading_bot.config.models import StopLossConfig, TakeProfitConfig
 from trading_bot.core.enums import (
     OrderSide,
     PositionSizingMethod,
+    RefusalStage,
     SignalAction,
     StopType,
 )
@@ -72,7 +73,6 @@ from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.engine.modes import (
     IntentLogger,
     LiveSystem,
-    RefusalStage,
     _build_signal_handler,
     _pair_timeframes,
     _refusal_stage,

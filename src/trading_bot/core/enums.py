@@ -112,6 +112,36 @@ class RiskRule(str, Enum):
     MAX_OPEN_POSITIONS = "max_open_positions"
 
 
+class RefusalStage(str, Enum):
+    """Where in ``RiskManager.evaluate`` a signal stopped.
+
+    One value per refusal path, in the order ``evaluate`` reaches them. The
+    label is derived by :func:`_refusal_stage` rather than reported by the
+    manager, because the manager has no stage vocabulary yet -- choosing one
+    before an operator has read any of these lines would be designing the enum
+    backwards. M4b moves it inward as ``RiskAssessment.stage`` and this ladder
+    collapses to reading that field.
+
+    :attr:`UNCLASSIFIED` is a **defect signal, not a category.** It can only be
+    reached if :func:`_refusal_stage` has desynchronised from ``evaluate`` -- a
+    new refusal path, or two checks reordered. It is therefore logged at
+    ``ERROR`` while ordinary refusals log at ``INFO``: an operator seeing it has
+    found a bug in this module, not a market condition.
+    """
+
+    UNKNOWN_PAIR = "unknown_pair"
+    NO_REFERENCE_PRICE = "no_reference_price"
+    NOTHING_TO_CLOSE = "nothing_to_close"
+    UNSUPPORTED_ACTION = "unsupported_action"
+    NO_MARK_PRICE = "no_mark_price"
+    LIMIT_REFUSED = "limit_refused"
+    ATR_UNAVAILABLE = "atr_unavailable"
+    STOP_UNPLACEABLE = "stop_unplaceable"
+    SIZE_NOT_TRADEABLE = "size_not_tradeable"
+    UNAFFORDABLE = "unaffordable"
+    UNCLASSIFIED = "unclassified"
+
+
 class PositionSizingMethod(str, Enum):
     FIXED_FRACTION = "fixed_fraction"
     FIXED_AMOUNT = "fixed_amount"
