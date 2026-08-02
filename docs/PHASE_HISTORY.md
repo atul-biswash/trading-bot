@@ -663,6 +663,193 @@ reads an indicator.
 
 ---
 
+## Phase 5 M4a — the composition root and the observable intent stream
+
+`RiskManager.evaluate` had been complete as a library since M3 and was reachable
+from nothing: `main.py` registered no `on_signal` handler, and no `Portfolio` or
+`PairContext` was constructed anywhere outside tests. This milestone fills
+`engine/modes.py` — a docstring-only stub since Phase 1 — with `live_system()`,
+the async context manager that assembles the LIVE/TESTNET collaborators.
+
+Nothing dispatches an order. The terminal collaborator is `IntentLogger`, named
+for what it does. Calling it `Executor`, or putting it in `execution/`, would
+have made the stub inventory claim something that does not exist.
+
+### The provider-ownership fork
+
+Three options were on the table for who builds the `MarketDataProvider` that
+both the engine and the risk manager need.
+
+**A — take it back off the engine after `TradingEngine.create`.** Dead twice
+over. `_provider` is private (`live_engine.py:84`) with no property and no
+accessor; and even granted one, the provider cannot supply what the root
+actually needs, because priming `PairContext` requires `get_symbol_info` on the
+*client*, which the provider holds privately one level further down.
+
+**B — build the provider in the root and inject it.** Chosen. The seams already
+existed: `TradingEngine.create(settings, *, provider=...)` and
+`BufferedMarketDataProvider.create(settings, *, client=...)`. **B changed zero
+production signatures** — the only new parameter anywhere is `stream=` on the
+root's own new function, and that is new API, not a modification.
+
+**C — bypass `create` and construct `TradingEngine(...)` directly.** Rejected:
+`create` is where one strategy instance per pair is built from the registry, so
+bypassing it duplicates that assembly in a second place. The one-instance-per-
+pair decision would then have two homes and could drift in one.
+
+### The ownership rule this settled
+
+**The root owns anything shared between two collaborators, or requiring
+teardown.** Applied:
+
+- **Provider — shared** (engine and `RiskManager`), so the root owns it.
+- **Client — shared** (boot-time priming and the provider) **and** needs
+  `close()`, so the root owns it on both counts.
+- **Stream — provider-only, no independent teardown**, so it stays inside
+  `provider.create` and is never named in the root except as an injection seam
+  for tests.
+
+### Teardown, and why three scopes rather than two
+
+`owns_client = client is None` (`market_data.py:203`), so under injection the
+provider closes the client on **neither** path: not on success (`:293`) and not
+when the stream fails to build (`:211`). The root's `finally` is therefore the
+only close, and it closes **unconditionally** — inverting the `owns_client`
+convention deliberately. That convention protects a *caller* holding a
+long-lived client; this root has no caller. `close()` is idempotent, and has to
+be already: `AsyncClient.create` calls `close_connection()` in its own `except`
+before re-raising, so an existing path already depends on it.
+
+Nesting rather than one `finally`, because a single `finally` naming `engine`
+raises `UnboundLocalError` when the boot fails at step 2, 3 or 4 — masking the
+real error with a bookkeeping one. Two scopes were specified; **three were
+built.** `TradingEngine.create` can still raise on a bad strategy name, and by
+that point the provider's stream owns a second `AsyncClient`
+(`websocket_client.py:122`) that nothing else on that path would close. The
+middle scope exists for that window alone.
+
+### Checked, not a defect: the stream's second `AsyncClient` does not leak
+
+The window above prompted a full trace of that client's lifecycle, and the
+answer is that it is closed. `BinanceMarketDataStream.stop()` calls
+`self._source.aclose()` at `websocket_client.py:250` **unconditionally** —
+outside the `if task is not None` guard — and `aclose` is
+`self._client.close_connection()` (`:137`). So `stop()` releases it whether or
+not `start()` was ever called.
+
+Verified rather than read: a counting fake `AsyncClient` driven through the real
+chain (`engine.stop -> provider.stop -> stream.stop -> source.aclose ->
+close_connection`) shows one close, and a step-5 boot failure driven through
+`live_system` with a *real* stream shows one close of the stream's client and
+one of the REST client. **The provider-scope `finally` is what closes that
+window** — without it the source would be dropped with a live aiohttp session.
+
+One genuine window remains and is unreachable; it is recorded in
+`NEXT_MILESTONE.md` rather than here, because its guard lives in another file.
+
+### The portfolio seeds from the exchange
+
+`get_balances()`, not config. `Balance.free` is already `Money`, parsed by
+`_dec` as `Decimal(str(...))` over the wire *string*, so no new float boundary
+opens. The config route is dead twice over: both `initial_balance` fields are
+`float`, **and** both belong to backtest/paper rather than to a live account.
+
+`Portfolio()` at zero was not an option. `_approve` refuses `NO_EQUITY` at
+`manager.py:279` when equity is not strictly positive, so a zero-seeded
+portfolio would have shipped an observable path only ever observed refusing —
+the milestone would have demonstrated nothing but its own first guard.
+
+Both sides of the quote-asset match are upper-cased in the root, and the
+normalised form is what lands on `Portfolio.quote_asset` because refusal
+messages interpolate it (`manager.py:464`). A mirroring validator was added to
+`TradingConfig.base_currency` in a separate commit — defence in depth, not the
+fix: `_seed_portfolio` has to be correct standing alone.
+
+### The duplicate-symbol defect
+
+`RiskManager` keys its pair contexts by **symbol alone**, with the timeframe
+inside the value; the engine keys by `(symbol, timeframe)`. Config permits
+`BTCUSDT/1m` and `BTCUSDT/5m` together, and the obvious dict comprehension drops
+one — last write wins, no error. The manager would then compute ATR for *both*
+engine pairs off whichever timeframe survived: wrong stops, silently, on a green
+gate. It cannot fire on today's `config.yaml`; nothing prevented the edit that
+fires it.
+
+Refused at boot, naming the symbol and both timeframes. The check is pure and
+runs before any network call, so a config mistake costs no round trip.
+
+Three further boot refusals were built on the same principle — an unprimeable
+symbol, a quote asset absent from `get_balances` (absent, not zero: that call
+returns every asset including zeros, so zero is a valid non-refusing state), and
+a mode with no composition root. A fifth was added afterwards for an empty
+enabled-pair set; `TradingEngine.start` already rejected it, but with a bare
+`ValueError` — not a `TradingBotError` — several steps later, with a client and
+a socket already open. That guard was left in place; the root simply refuses
+earlier and names `config.yaml`.
+
+### Why a stage vocabulary exists at all
+
+`RiskAssessment` has no `rule` field. The rule is reached through
+`assessment.decision.rule`, and it is **doubly optional**: `decision` may be
+`None`, and even when present `rule` may be `None`.
+
+The trap: **four refusal paths carry a decision whose `approved` is `True` and
+whose `rule` is `None`** — the ATR bridge, the unplaceable stop, the sizer, and
+affordability, all of which refuse *after* the limits passed. Branching on rule
+presence reads all four as approvals. `RiskAssessment.approved` is the only
+authoritative field, bound to `intent is not None` by its validator.
+
+`RefusalStage` therefore lives in `modes.py` rather than in the domain. The
+manager has no stage vocabulary yet, and choosing one before an operator has
+read any of these labels would be designing the enum backwards. M4a proves the
+vocabulary; M4b moves it inward.
+
+`UNCLASSIFIED` is a **defect signal, not a category** — reachable only once the
+ladder has drifted from `evaluate` — so it logs at `ERROR` while ordinary
+refusals log at `INFO`.
+
+### The two log sinks disagree about enums
+
+Found while designing the schema, and it is the same shape as the asymmetry the
+pre-M4 pass closed for structured fields generally. `json.dumps` sees a
+`str, Enum` member as a `str` subclass and emits the underlying value (`"BUY"`);
+`PlainFormatter` calls `str()` and gets `"SignalAction.BUY"`. **Same call site,
+same field, two answers, no error either side.** It is a direct consequence of
+the `str, Enum` decision (`UP042`) that keeps `str(member)` qualified.
+
+So `extra=` takes `.value`, never the member — and a `datetime` takes an
+explicit `.isoformat()` rather than leaning on `default=str`. The rule
+generalises: only `Decimal`, `str`, `int`, `float`, `bool` and `None` may cross
+unconverted.
+
+### Two test findings, both of which cost something
+
+**A passing test is not a biting test.** The ten-path stage test drives the real
+`evaluate` down each refusal branch — but it proves each branch is *reachable*,
+not that the ladder is *ordered*. A mutation that reordered two checks passed
+all ten cases, because each case satisfies exactly one row's condition; pinning
+an ordering needs an input that trips two rows at once.
+
+A full adjacent-pair sweep followed, all ten constraints swapped in turn. Two
+needed new tests (an unknown symbol *with no price*; a `CLOSE` *with no price*).
+**Six were already pinned by implication** — where the earlier condition
+strictly implies the later one, the ordinary case *is* the ordering test: a
+`CLOSE` is necessarily "not BUY", a `RiskDecision` carrying a rule is
+necessarily `approved=False` (its own validator forces it), a limit refusal
+necessarily has `levels=None`. **Two are enforced by Python, not by tests**: the
+`decision`/`sizing` null-guards also bind those names, so swapping them yields
+`NameError`. Real coverage, different mechanism, and worth distinguishing.
+
+**A test green alone and red in the suite.** `_emit_one` asserted
+`len(caplog.records) == 1`. `caplog.at_level` lowers the capture *handler*'s
+level globally, so `RiskManager.evaluate`'s own "Risk approved" `INFO` line
+landed in the same buffer whenever an earlier test had left the root level low.
+Two tests passed in isolation and failed in the full run. Records are now
+selected by logger name. This is the "a green run only proves the path it took"
+rule applying to the test harness itself.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**

@@ -100,8 +100,17 @@ which asserts against both formatters rather than trusting either.
 
 The same reasoning applies to a `datetime`: `default=str` would carry it, but
 `extra=` passes an explicit `.isoformat()` rather than leaning on the catch-all.
-The rule generalises — **only `Decimal`, `str`, `int`, `bool` and `None` may
-reach `extra=` unconverted.**
+
+**The rule, stated positively rather than as a list of patched cases: only
+`str`, `int`, `float`, `bool`, `None` and `Decimal` may cross `extra=`
+unconverted.** Everything else is converted at the call site — an enum by
+`.value`, a `datetime` by `.isoformat()`, an exception by `type(exc).__name__`
+and `str(exc)`. The whitelist is the point: `default=str` is a catch-all, so an
+unlisted type produces a plausible line rather than an error, and the *only*
+signal that something is wrong is the two sinks quietly disagreeing. Note this
+is the same admissible set as `Signal.metadata` minus the reason they differ —
+`metadata` forbids `Decimal` because it is persisted, `extra=` requires it
+because it is money.
 
 **`extra=` field names are validated — enforced, not convention.**
 `Logger.makeRecord` raises at the *call site*:
@@ -132,7 +141,7 @@ src/trading_bot/
   data/          market_data · historical† · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
-  engine/        live_engine · modes†
+  engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
   execution/     executor† · order_manager†
   backtesting/   engine† · portfolio† · metrics†
@@ -245,6 +254,15 @@ scripts/         check_testnet.py · download_data.py
 - **`TradeIntent` is not an `OrderRequest`** — no take-profit field, and
   `stop_price` there means "this order's trigger". Mapping intent → orders is
   execution's job.
+- **`assessment.decision.rule is None` means "the limits passed", NOT
+  "approved".** `RiskAssessment` has no `rule` field at all; the rule is reached
+  through `decision`, and is doubly optional — `decision` may be `None`, and
+  even when present `rule` may be. **Four refusal paths carry a decision with
+  `approved=True` and `rule=None`**: the ATR bridge, an unplaceable stop, the
+  sizer, and affordability, all of which refuse *after* the limits passed.
+  Branching on rule presence reads all four as approvals. **`RiskAssessment.
+  approved` is the only authoritative field** — its validator binds it to
+  `intent is not None`, so the two cannot drift.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -351,10 +369,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  82 files already formatted
+ruff format --check src tests scripts  83 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 566 passed, 3 skipped
-                                       (569 passed with Testnet credentials present)
+pytest                                 635 passed, 3 skipped
+                                       (638 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -363,12 +381,12 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `569 passed` on a machine with Binance Testnet credentials in `.env`
-- `566 passed, 3 skipped` on a machine without them
+- `638 passed` on a machine with Binance Testnet credentials in `.env`
+- `635 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 566 and must not read it as a regression against a documented
-569. Quote the count with its condition, never bare.
+runner will see 635 and must not read it as a regression against a documented
+638. Quote the count with its condition, never bare.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
@@ -382,7 +400,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 566, so **treat a lone
+output was read. The unit suite is deterministic at 635, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -399,18 +417,28 @@ the commit is:
 | `src/` file **modified** | no | no | no |
 
 In practice a `src/` file never arrives alone here — it arrives with its tests —
-so a typical `src/` commit moves all three. The counter-example worth knowing is
-**D3**: one `src/` file *modified*, so `ruff format` held at 82 and `mypy` at 58
-while `pytest` moved 554 → 569.
+so a typical `src/` commit moves all three. Two counter-examples worth knowing,
+both **historical illustrations whose figures are deliberately not updated**:
+**D3**, one `src/` file *modified*, so `ruff format` held at 82 and `mypy` at 58
+while `pytest` moved 554 → 569; and **M4a**, which filled the pre-existing
+`engine/modes.py` stub — already counted by both gates — so `mypy` held at 58
+and `ruff format` moved only for the one new test file.
 
-Before committing, grep both documents for the old numbers.
+**Grep for the NUMBER, not for the lines you remember.** `ruff format` and
+`mypy` each appear in **three** places, not two: the fenced gate output above,
+the gate-scope table below, and `README.md`. A pre-commit pass that checks the
+two obvious ones leaves the scope table stale — the exact drift this section
+exists to prevent. Searching for the digits also surfaces the historical
+examples in the paragraph above; those are prose about a past commit and must be
+left alone, which is easy to tell apart and impossible to notice if the grep
+never ran.
 
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 82 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 83 |
 | `mypy` | `files = ["src/trading_bot", "scripts"]` | 58 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
@@ -449,6 +477,45 @@ time-dependent risk rules (daily-loss roll, cooldown expiry). `asyncio_mode=auto
 Exact `Decimal` assertions in money code — no float tolerance, because a result
 that is merely *close* is a bug and a tolerant test cannot detect the float leak
 the domain exists to prevent.
+
+**Select log records by logger name, never by position.** `caplog.at_level`
+lowers the capture *handler*'s level globally, not just the named logger's, so
+any collaborator that logs on its own lands in the same buffer whenever an
+earlier test has left the root level low. `assert len(caplog.records) == 1`
+therefore passes for a file run alone and fails in the full suite — it did, for
+two tests, because `RiskManager.evaluate` emits its own `INFO` line. Filter with
+`[r for r in caplog.records if r.name == ...]`.
+
+### Mutation-testing an anti-rot test
+
+**"The test passes" and "the test bites" are different claims, and only the
+second is worth anything for a test whose job is to catch drift.** Where a test
+exists because two places must stay in agreement — the stage ladder against
+`RiskManager.evaluate` is the worked example — prove it by breaking the code and
+watching the *intended* test fail:
+
+1. Apply one mutation. Run the suite.
+2. Confirm the test that fails is the one meant to, **and that it reports the
+   wrong value** — a wrong stage, not an `AttributeError` or a collection error.
+   A crash means the mutation broke something else on the way and the assertion
+   was never reached; that is not coverage.
+3. **Restore in a `finally`, from a `shutil.copy2` byte copy, and verify by
+   md5.**
+
+Step 3 is written that emphatically because both halves failed here. A sweep
+script that restored *after* printing crashed mid-run on a console encoding
+error and **left `src/` mutated on disk**; it was caught only by the next
+command's checksum. Its replacement restored via `read_text`/`write_text`, which
+round-trips newlines and produced a byte mismatch against this LF-pinned tree —
+content-identical, checksum-different, and indistinguishable from a real
+corruption until diffed. Never restore by re-reading and re-writing.
+
+Coverage found this way comes in three kinds, and they are not equivalent: an
+assertion that catches the mutation; an *implication* that makes an ordinary
+case double as the check (where one condition strictly implies another, the
+normal test already pins the order); and enforcement by Python itself (swapping
+a null-guard that also binds the name yields `NameError`). Only the first is
+something a future edit can delete by accident.
 
 ---
 
@@ -495,10 +562,24 @@ M3 (risk manager + `Portfolio`) complete, followed by a **pre-M4 hardening pass*
 convention-only guards — `Position` assignment, config immutability, and
 `Signal.metadata`.
 
-The decision path is complete **as a library**: `RiskManager.evaluate` turns a
-signal into an approved, sized, protected `TradeIntent`. It is **not wired** —
-`main.py` registers no `on_signal` handler, so `python -m trading_bot run` still
-only logs signals, and nothing constructs a `Portfolio` or primes a
-`PairContext`. Building that composition root and making the intent stream
-observable is **M4a**; the per-handler failure counter is M4b; placing an order
-is M5. See `docs/NEXT_MILESTONE.md`.
+**M4a is complete: the decision path is wired.** `engine/modes.py` — a
+docstring-only stub since Phase 1 — is now the composition root.
+`live_system(settings)` is an `@asynccontextmanager` that builds the REST
+client, primes a `PairContext` per distinct symbol, seeds a `Portfolio` from
+`get_balances()`, then the provider, engine, `RiskManager` and `IntentLogger`,
+registers **one** signal handler, and tears the whole thing down in three nested
+scopes. `main.py` drives it with `async with`; that is the only production call
+site. Four conditions refuse the boot before any socket exists — a duplicate
+symbol, an unprimeable symbol, a missing quote asset, and a mode with no
+composition root — plus an empty enabled-pair set.
+
+**Nothing places an order.** `IntentLogger` is the terminal collaborator and it
+logs: three events (`risk_refused`, `intent_dispatched`, `collaborator_failed`)
+with a fixed field set each, absent fields absent rather than null. It is
+deliberately not called `Executor` and not in `execution/` — claiming that stub
+would make the stub inventory lie.
+
+Next: **M4b** — move `stage` into `RiskAssessment` (M4a proved the vocabulary;
+the ladder in `modes.py` then collapses to reading a field) and the per-handler
+failure counter, thresholds from M4a soak data. **M5** places an order. See
+`docs/NEXT_MILESTONE.md`.

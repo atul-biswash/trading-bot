@@ -45,20 +45,23 @@ Verified against Binance **Testnet**:
 
 ### What is still a stub
 
-Thirteen files are docstring-only placeholders: `execution/` (executor, order
+Twelve files are docstring-only placeholders: `execution/` (executor, order
 manager), `paper/simulator`, `persistence/` (database, models), `notifications/`
 (base, telegram), `backtesting/` (engine, portfolio, metrics),
-`data/historical`, `data/repository`, and `engine/modes`. Check before assuming
-behaviour — `make backtest` exits with "not implemented yet".
+`data/historical`, and `data/repository`. Check before assuming behaviour —
+`make backtest` exits with "not implemented yet". `engine/modes` was one of them
+until Phase 5 M4a and is now the composition root.
 
 `python -m trading_bot run` connects to Testnet and exercises the whole
-data → strategy → signal path end to end, emitting real signals.
+data → strategy → **risk** path end to end: it seeds a portfolio from your
+account balance, primes each pair's exchange filters, and logs every signal's
+outcome as a structured `risk_refused` or `intent_dispatched` line.
 
 > **The bot cannot place an order yet.** The risk layer produces a complete
-> `TradeIntent`, but nothing dispatches it: order execution, persistence and
-> notifications are stubs, and the risk manager is not yet wired into the
-> engine's signal handler. That wiring is Phase 5 **M4a**; order dispatch is
-> **M5**. Per-feature status is in the [Roadmap](#roadmap-build-phases).
+> `TradeIntent` and the composition root now hands it to a collaborator — but
+> that collaborator *logs* it. `IntentLogger` dispatches nothing, and order
+> execution, persistence and notifications remain stubs. Order dispatch is Phase
+> 5 **M5**. Per-feature status is in the [Roadmap](#roadmap-build-phases).
 
 ### The quality gate
 
@@ -73,17 +76,17 @@ failure. Run it bare and read its own exit code.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  82 files already formatted
+ruff format --check src tests scripts  83 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 566 passed, 3 skipped
-                                       (569 = 566 + 3 with Testnet credentials)
+pytest                                 635 passed, 3 skipped
+                                       (638 = 635 + 3 with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone.** It varies by
 **credentials** — the three integration tests skip without Binance Testnet keys,
-so `566 passed, 3 skipped` and `569 passed` are both green — and by **network
+so `635 passed, 3 skipped` and `638 passed` are both green — and by **network
 state**, since those tests make live calls and two wait on a real 1-minute bar.
-A fresh clone seeing 566 is not looking at a regression.
+A fresh clone seeing 635 is not looking at a regression.
 
 ## Features
 

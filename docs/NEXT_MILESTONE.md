@@ -1,180 +1,85 @@
-# Current milestone — Phase 5 M4a: composition root and the observable intent stream
+# Current milestone — Phase 5 M4b: move `stage` inward, then count failures
 
-**Status:** not started
-**Baseline to confirm first:** `python scripts/check.py` → 569 passed
-(566 unit + 3 integration) · ruff 0 · ruff format clean over 82 files · mypy 0
-across 58 files. Run it **bare** — never piped.
+M4a wired the composition root and made the intent stream observable. Two things
+it deliberately left in a provisional shape now come due, and both were deferred
+for the same reason: **neither could be designed before the path had run.**
 
-Scope is the **composition root**: the component that owns a `Portfolio`, primes
-the per-pair exchange filters a `RiskManager` needs, attaches the risk decision
-to `TradingEngine.on_signal`, and emits one structured log line per outcome.
-
-**Nothing is dispatched.** The executor at the end of the chain writes a log line
-and returns. Order placement is M5.
-
-The decision path has never run against live market data — only against scripted
-fakes. Wiring it behind a log-only executor makes it observable on Testnet for
-days at zero risk, and turns M5's hardest questions (what does `Portfolio` look
-like after eight hours? how often does the sub-tick stop gate actually fire?)
-into things there is *data* about.
-
-Read `CLAUDE.md` for the rules and locked decisions, and `docs/PHASE_HISTORY.md`
-for why M1–M3 and the hardening pass are shaped the way they are.
+Everything below assumes M4a as built — read `engine/modes.py` and the M4a entry
+in `docs/PHASE_HISTORY.md` before designing.
 
 ---
 
-## Contracts to verify empirically before designing
+## Item 1 — `RiskAssessment.stage`, set by `evaluate`
 
-Do not take these from this document — confirm them in the code.
+**The problem M4a shipped with, knowingly.** `modes._refusal_stage` labels each
+refusal for the log schema by **re-deriving `RiskManager.evaluate`'s control
+flow** in a second file. Four of `evaluate`'s ten refusals return every
+component as `None` — unknown pair, unusable price, `SELL`, nothing-to-close —
+so they are separable only by position in that sequence, plus the `Signal` and
+the root's own `pairs` mapping. Adding a refusal path, or reordering two checks,
+mislabels a log line with nothing else failing.
 
-- `engine/modes.py` — currently a docstring-only stub. Its docstring already
-  describes this milestone's job: *"Assembles the right set of collaborators …
-  for the active TradingMode, so `live_engine` stays mode-agnostic."*
-- `TradingEngine.create` in `engine/live_engine.py` — **it builds the provider
-  itself.** This is the open fork below; read it before designing around it.
-- `TradingEngine.on_signal` and `_emit` — handlers run in registration order and
-  are isolated. Confirm what `_emit` does with an exception, because the error
-  path depends on it.
-- `RiskManager.__init__` in `risk/manager.py` — four keyword-only collaborators:
-  `config`, `provider`, `pairs: Mapping[str, PairContext]`, `clock`. `pairs` is
-  **not** `Optional` and is copied into a `dict`; nothing refreshes it after
-  construction.
-- `RiskAssessment` / `TradeIntent` in `risk/manager.py` — every field available
-  to log, and which components are `None` on which refusal.
-- `RiskDecision.rule` — reachable as `assessment.decision.rule`, **two levels
-  down**, and `decision` is `None` for refusals that never reach `approve`.
-- `Portfolio` in `core/portfolio.py` — `record_realised_pnl`, `start_cooldown`,
-  `positions`, `free_quote`. M3 defined these and calls **none** of them.
-- `BaseExchangeClient.get_symbol_info` in `exchange/base.py` — a coroutine, and
-  it memoises. This is why filters are primed once at startup.
-- `utils/logger.py` — `PlainFormatter`, `JsonFormatter` and `surplus_fields`.
-  Structured fields now reach **both** sinks; confirm before designing a schema.
-- `main.py` — the current wiring, which registers no signal handler at all.
+**Why it was not done in M4a.** `RiskAssessment.stage` needs a stage vocabulary
+*in the domain*, and choosing that vocabulary before an operator had read a
+single one of these labels would have been designing the enum backwards. M4a's
+job was to prove the vocabulary against real refusals. It has.
 
----
+**The change.** `evaluate` sets `stage` at each `refuse(...)` call site and on
+approval; `RefusalStage` (or its successor) moves from `engine/modes.py` into
+the domain; `_refusal_stage` collapses to reading `assessment.stage`; the
+`TestStageLadder` ordering sweep loses its reason to exist and most of it can be
+deleted rather than ported.
 
-## The config conversion M4a owns
+**Decide, do not assume:**
 
-**None — confirm rather than assume.** A log-only executor performs no money
-arithmetic. If the design proves otherwise, convert the field in its own commit
-under the amended rule (*multiplies **or compares***).
+- Does `stage` belong on `RiskAssessment` or on `RiskDecision`? `RiskDecision`
+  already carries `rule`, and the two vocabularies overlap at `no_mark_price`.
+  Overlapping-but-not-identical enums in one object is a smell; so is a second
+  `rule`-shaped field.
+- Is `stage` optional or required? Required is stronger — a refusal that cannot
+  say where it stopped is the condition this item exists to remove — but it
+  makes every `RiskAssessment(...)` construction site say something.
+- Approval: one `approved` stage, or no stage at all? The log schema currently
+  omits `stage` from `intent_dispatched` entirely.
 
----
-
-## The open fork — settle this first
-
-**`TradingEngine.create` owns provider construction, and the root needs the same
-provider instance for `RiskManager`.** Two ways, and they lead to different
-shapes:
-
-1. **Take it from the engine post-construction** — build the engine as today,
-   then read its provider back out. Smallest change; requires exposing the
-   provider, and leaves construction order implicit.
-2. **The root builds the provider and injects it** — `TradingEngine.create`
-   already accepts an optional `provider`, so this uses an existing seam. The
-   root then owns the object graph explicitly, which is what a composition root
-   is *for*, at the cost of moving startup sequencing out of the engine.
-
-Nothing else in M4a can be designed until this is chosen. Decide it, record the
-reasoning, and do not let it be settled implicitly by whichever code is written
-first.
+**Do not** widen the `RiskManager` **port** as part of this. `evaluate`,
+`check_exit` and `advance_trailing_stop` are still class-only; the port declares
+`size_position` and `approve` (`core/interfaces.py:181`). That is a separate
+decision belonging to M5, when execution becomes a second consumer.
 
 ---
 
-## Design questions to resolve before writing code
+## Item 2 — Q-A, the per-collaborator failure counter
 
-**1. Named collaborators, not anonymous handlers.**
+**Deferred from M4a with a reason that still holds:** a consecutive-failure
+threshold should be set from soak data, not guessed. M4a produces exactly that
+data — `collaborator_failed` lines, named per collaborator, structured.
 
-`RiskManager` and the log-only executor are **named collaborators of the root**,
-composed into **one chained handler** registered on `on_signal` — not two
-independent registrations. The chain catches **per collaborator** and emits a
-structured error line naming which one failed, so a failure is attributable
-rather than merely contained. `_emit`'s isolation is the outer net, not the
-mechanism.
+**Soak first.** Run the composition root against Testnet long enough to see
+whether `collaborator_failed` ever fires in normal operation, and at what rate.
+A threshold chosen before that number exists is a guess wearing a constant's
+clothing.
 
-**2. Boot-time `PairContext` priming, and failing fast.**
+**Automatic removal of a failing handler stays REJECTED.** Disabling a broken
+executor converts "orders are failing" into "orders are not being attempted"
+while positions are open. Whatever the counter does, it must not do that.
 
-Filters come from `get_symbol_info` per enabled pair at startup. **This is M4a's
-only I/O**, and it stays in the root: `RiskManager` remains I/O-free, which is
-what keeps it testable with a plain dict.
-
-**Refuse to start on an unprimeable symbol.** One bad pair out of five is a
-configuration error, and a bot that silently trades four of them is worse than
-one that will not start. Note the "fails at boot" property M3 designed for is
-worth nothing if the failure is a warning nobody reads.
-
-**3. The log schema.**
-
-One fixed field set with an **`event=` discriminator** — `event=risk_refused`,
-`event=intent_dispatched`. Absent fields are **absent, not null**: a field that
-is missing means "not reached", which is information, and null-padding destroys
-it.
-
-`rule_fired` is **nullable and legitimately absent**. `RiskAssessment.decision`
-is `None` for every refusal that never reaches `approve` — unknown pair, no
-signal price, non-BUY action — so a schema requiring it would be wrong for a
-whole class of outcomes.
-
-**Open question, not yet decided:** whether an eighth field, `stage`, should name
-where evaluation stopped (`preconditions` / `limits` / `atr` / `levels` /
-`sizing` / `affordability`). Today that is inferable only from which component is
-non-`None`, which is an awkward thing to ask of a log consumer. Decide it as part
-of the schema, not after.
-
-**4. What "observable" has to mean.**
-
-Structured, fixed-field, machine-parseable — the Testnet output must be
-analysable after the fact, ideally loadable into a frame. Free text does not
-count. Note `logging.file.json` defaults to **false**, so the JSON sink is off
-out of the box; the plain sink now carries the same fields as logfmt, but the
-run's configuration is a deliberate choice, not a default to inherit.
+**Note the shape M4a left.** `TradingEngine._emit` catches per handler and logs
+(`live_engine.py:325`), but the engine's consecutive-failure counter is fed only
+from `_evaluate` (`:275`) — so a permanently broken handler produces a traceback
+every bar forever and no pair is ever quarantined. M4a's chained handler mitigates
+this by never raising, catching per collaborator inside itself. The counter is
+what makes it visible rather than merely contained.
 
 ---
 
 ## Scope constraints
 
-- The log-only executor sits at the same seam the real executor will occupy and
-  consumes `TradeIntent` **unmodified**. If it needs something the intent does
-  not carry, that is a finding about `TradeIntent`, not a licence to reach around
-  the seam.
-- Do not touch `risk/` behaviour. A wanted change there is a finding to report.
-- **Q-A (per-handler failure counter) is deferred to M4b**, deliberately. A
-  consecutive-failure threshold should be set from soak data, not guessed before
-  the path has ever run. M4a produces exactly the data that sets it.
-
----
-
-## Tests
-
-Hermetic, no network, no real time. Cover:
-
-- the root builds a manager whose `pairs` covers every enabled pair
-- an unprimeable symbol refuses startup, with the reason visible
-- the chained handler catches per collaborator and names the failing one
-- the log line carries every fixed field for an approved intent **and** for a
-  refusal, asserted on the structured record rather than a message string
-- a refusal with no `decision` omits `rule_fired` rather than nulling it
-- an exit intent (`levels is None`) logs coherently
-- no money value built from a float — structural, via the `Money` guard
-
----
-
-## Definition of done
-
-- `python scripts/check.py` green, run **bare**; test count stated with its
-  condition (see below)
-- `mypy` zero; `ruff check` and `ruff format --check` zero
-- No `type: ignore` added to `src/`
-- Design presented and confirmed **before** implementation
-- **A Testnet run of at least one full session, with the structured intent log
-  retained and read.** This milestone's deliverable is observability; a green
-  suite does not demonstrate it.
-
-⚠️ **Retention will bite this run.** At `max_bytes` 10 MB and `backup_count` 5,
-ten pairs on 1m bars gives roughly **4–12 days** before rotation, and the
-**oldest file is discarded first** — which is where warmup behaviour lives, i.e.
-exactly what a first observation run wants to inspect. Raise `backup_count`, or
-copy the log aside, before starting a long run.
+- **No order dispatch.** That is M5.
+- **No new collaborator.** `IntentLogger` stays the terminal one.
+- **Do not touch `live_engine.py:160`.** The empty-strategy guard is correct for
+  a directly-constructed engine; the root refuses earlier with a better message,
+  and both are wanted.
 
 ---
 
@@ -207,50 +112,84 @@ copy the log aside, before starting a long run.
   constructs a client. Belongs with `paper/simulator.py`, which is the milestone
   that gives PAPER a composition root of its own.
 
-- ~~A flaky integration test.~~ **Closed — and worth keeping as a worked
-  example of a test asserting more than its contract promised.**
+- **A leak window in `BinanceMarketDataStream.create` that is unreachable only
+  because another file forbids it.** Checked during M4a, not a live defect, and
+  recorded because the reason it is safe lives nowhere near the code that is
+  safe.
 
-  `test_testnet_provider_seeds_history_and_extends_it_live` asserted
-  `len(extended) == len(seeded) + 1`: that the first live candle is always a
-  *new* bar. It is not. When the REST seed's last bar is the same bar the
-  WebSocket then closes, `BufferedMarketDataProvider._append` **replaces it in
-  place** (`market_data.py:378`, *"same bar re-delivered, possibly corrected"*)
-  and the frame grows by **zero**. Which path occurs is a race with the minute
-  boundary.
+  `create` (`websocket_client.py:184-206`) awaits `_BinanceSocketSource.create`
+  — which builds a **second** `AsyncClient` (`:122`) — and *then* calls
+  `cls(...)`. If that constructor raises, `source` is dropped without
+  `aclose()`, leaking a live aiohttp session. Its three `ValueError`s
+  (`websocket_client.py:164-169`) are unreachable **only** because
+  `config/models.py` rejects those values at load: `reconnect_backoff_s`
+  `Field(gt=0)`, `reconnect_max_retries` `Field(ge=0)`, and
+  `_check_backoff_bounds` for `max < base` — with `validate_assignment=True`
+  closing the assignment path too. All four verified.
 
-  The production code was correct throughout — replace-on-equal-`open_time` is a
-  locked decision and is what makes a corrected bar safe after a reconnect.
-  The test now asserts the invariant common to both paths: growth ∈ {0, 1}, last
-  index equals `live.open_time`, index monotonic and unique; on the replace path
-  the final row must have *changed* and match the delivered candle; on the append
-  path the seeded rows must be undisturbed.
+  **The coupling is cross-module and nothing links the two files.** Relaxing a
+  config constraint — or constructing the stream from anything other than
+  `EngineConfig` — opens the window silently. Smallest correct fix, in
+  `websocket_client.py` rather than the root (which cannot see `source`), and
+  the same shape as `market_data.py:205-213`:
 
-  The changed-row assertion is the load-bearing one: "grew by 0" is equally
-  satisfied by a provider that **dropped** the bar, which is a real failure
-  wearing the same shape. Both branches and three illegal shapes (drop, grow-by-2,
-  wrong final index) were exercised against a fake before trusting a live run.
+  ```python
+  source = await _BinanceSocketSource.create(settings)
+  try:
+      return cls(source, ...)
+  except Exception:
+      await source.aclose()
+      raise
+  ```
 
-  **Two rules paid for themselves here.** It went unidentified for several
-  sessions because the run that first hit it was piped through `tail`, which
-  discarded pytest's summary; it was named the moment a run was made **bare**.
-  And no retry decorator was ever added — retrying would have hidden a genuine
-  gap between a test's assumption and a documented contract rather than exposing
-  it.
+  Note for contrast what is **not** a problem: that second `AsyncClient` is
+  otherwise closed correctly. `stream.stop()` calls `source.aclose()`
+  unconditionally at `websocket_client.py:250`, outside the task guard, so it
+  releases whether or not `start()` was ever called — verified through the real
+  chain with a counting fake, and on a step-5 boot failure.
+
+- **`main.py`'s two error paths disagree about which stream they write to.**
+  `:177` uses `log.error`, which reaches the console handler — **stdout** via
+  `RichHandler`. `:162` uses `print(..., file=sys.stderr)`. So a configuration
+  file that fails to *load* reports on stderr, while every `TradingBotError`
+  after that — including all five M4a boot refusals — reports on stdout. An
+  operator running `bot run 2>errors.log` captures nothing; one running
+  `1>/dev/null` loses every refusal message. Also means the refusal text
+  disappears entirely under `logging.console: false`.
+
+  Small and self-contained, but it is a behaviour change to the CLI's contract
+  and wants its own commit rather than riding along with a milestone.
+
+- **Empty `enabled_pairs` is now refused at the root** (`_pair_timeframes`),
+  distinguishing "`trading.pairs` is empty" from "all N configured pair(s) have
+  `enabled: false`". `live_engine.py:160` was **not** touched and remains
+  correct for direct construction — the root simply refuses earlier, before a
+  client and a socket exist, and with a `TradingBotError` rather than a bare
+  `ValueError` that escapes `main`'s handler as a traceback.
+
 - **`make check` has never been executed through `make` on this machine.** `make`
   is not installed. The four delegating recipes are tab-indented (verified) and
   the gate itself no longer depends on `make`, but `$(PYTHON)` expansion and
   recipe execution remain unexercised. Needs one run where `make` exists.
+
 - **`make cov` and `make format` do not honour `$(PYTHON)`.** They call bare
   `pytest` / `ruff`, so `make PYTHON=... cov` silently uses a different
   interpreter than `make PYTHON=... check` would. Outside the gate, so left
   alone; inconsistent, so recorded.
+
 - **The `logging.file.json` flag controls console *and* file together.** There is
   no way to have a pretty console and a JSON file. ~3 lines in
   `_console_handler` to separate; deliberately out of scope so far.
-- **Nothing enforces the documented counts.** They are updated by hand in two
-  files and have drifted within a single session more than once. Worth a check
-  that reads them from a live run, but it must not become a gate that fails for
-  a reason unrelated to the code.
+
+- **Nothing enforces the documented counts.** They are updated by hand and have
+  drifted within a single session more than once. M4a sharpened the hazard
+  rather than removing it: `ruff format` and `mypy` each appear in **three**
+  places, not two — the fenced gate output in `CLAUDE.md`, the gate-scope table
+  in `CLAUDE.md`, and `README.md` — so a pre-commit pass that checks the two
+  obvious ones leaves the scope table stale. Worth a check that reads the
+  numbers from a live run, but it must not become a gate that fails for a reason
+  unrelated to the code.
+
 - **Transitive dependencies still float.** The direct layer is pinned exactly;
   `websockets`/`aiohttp` under `python-binance` and friends resolve freely.
   `pydantic` pins `pydantic-core==2.46.4` exactly, so the `Money` guard's engine
@@ -262,16 +201,16 @@ copy the log aside, before starting a long run.
 
 ---
 
-## After this: Phase 5 M4b, then M5
-
-**M4b** — the per-handler failure counter (Q-A), thresholds set from M4a's soak
-data. Automatic removal of a failing handler stays **rejected**: disabling a
-broken executor converts "orders are failing" into "orders are not being
-attempted" while positions are open.
+## After this: M5
 
 **M5** — order dispatch. `OrderExecutor` over `BinanceClient.create_order`, the
 unprotected window between an entry fill and its stop, idempotency via
-`client_order_id`, order-status tracking, and `Portfolio` write-back. Q-B
-(escalation policy) and Q-C (which protective levels rest at the exchange, and
-how they reconcile with the client-side view after a restart) are settled at the
-start of that milestone, not during it.
+`client_order_id`, order-status tracking, and `Portfolio` write-back — the last
+of which retires M4a's boot-snapshot portfolio, which nothing mutates today.
+
+**Q-B** (escalation policy) and **Q-C** (which protective levels rest at the
+exchange, and how they reconcile with the client-side view after a restart) are
+settled at the start of that milestone, not during it.
+
+M5 is also when widening the `RiskManager` port becomes a real question rather
+than a deferred one, because execution becomes its second consumer.
