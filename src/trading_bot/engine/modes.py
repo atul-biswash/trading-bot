@@ -405,11 +405,40 @@ def _pair_timeframes(settings: Settings) -> dict[str, str]:
     would then compute ATR for both engine pairs off whichever timeframe
     survived. Wrong stops, silently, on a green gate.
 
+    An empty result is refused here too. ``TradingEngine.start`` already rejects
+    it -- correctly, since a directly-constructed engine with no strategies is a
+    programming error -- but it does so with a bare ``ValueError``, several steps
+    later, after a REST client and a WebSocket are already open. ``ValueError``
+    is not a :class:`~trading_bot.core.exceptions.TradingBotError`, so it escapes
+    ``main``'s handler as a traceback rather than a message. Refusing at the root
+    is the same answer delivered earlier, in the vocabulary the operator can act
+    on: it names ``config.yaml``. That guard stays where it is; this one is not a
+    replacement for it.
+
     Pure, and run before any network call, so a config mistake costs no round
     trip.
     """
+    configured = settings.config.trading.pairs
+    enabled = settings.config.trading.enabled_pairs
+    if not enabled:
+        # Worth distinguishing: "you wrote no pairs" and "you disabled the ones
+        # you wrote" look identical from the engine but need opposite fixes, and
+        # the second is the one an operator hits after toggling a pair off to
+        # debug something and forgetting to toggle it back.
+        detail = (
+            f"all {len(configured)} configured pair(s) have enabled: false"
+            if configured
+            else "trading.pairs is empty"
+        )
+        raise ConfigError(
+            f"No enabled trading pairs: {detail}. The bot would connect to the "
+            "exchange, seed nothing, and sit silent. Add a pair under "
+            "trading.pairs in config.yaml, or set enabled: true on one that is "
+            "already there."
+        )
+
     timeframes: dict[str, str] = {}
-    for pair in settings.config.trading.enabled_pairs:
+    for pair in enabled:
         existing = timeframes.get(pair.symbol)
         if existing is not None:
             raise ConfigError(

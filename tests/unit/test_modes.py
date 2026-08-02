@@ -210,17 +210,24 @@ def write_settings(
     """Write a minimal config.yaml and load it through the real settings path."""
     from trading_bot.config.settings import get_settings
 
-    body = "".join(
-        _PAIRS_BLOCK.format(symbol=symbol, timeframe=timeframe, enabled=str(enabled).lower())
-        for symbol, timeframe, enabled in pairs
+    # An empty tuple has to render as an explicit `[]`: a bare `pairs:` with no
+    # block under it parses as None, which pydantic rejects for a list field --
+    # so the test would fail at config load rather than reaching the guard.
+    block = (
+        "  pairs: []\n"
+        if not pairs
+        else "  pairs:\n"
+        + "".join(
+            _PAIRS_BLOCK.format(symbol=symbol, timeframe=timeframe, enabled=str(enabled).lower())
+            for symbol, timeframe, enabled in pairs
+        )
     )
     path = tmp_path / "modes_config.yaml"
     path.write_text(
         f"mode: {mode}\n"
         "trading:\n"
         f"  base_currency: {base_currency}\n"
-        "  pairs:\n"
-        f"{body}"
+        f"{block}"
         f"strategy:\n  name: {strategy}\n"
         "backtesting:\n  start_date: '2024-01-01'\n  end_date: '2024-02-01'\n"
         "logging:\n  console: false\n  file:\n    enabled: false\n",
@@ -390,6 +397,36 @@ class TestStageLadder:
 
         assert (
             _refusal_stage(signal, assessment, pairs=default_pairs()) is RefusalStage.UNKNOWN_PAIR
+        )
+
+    def test_an_unknown_symbol_without_a_price_is_unknown_pair(self) -> None:
+        """Rows 1 and 2 both fire on this input, so it is the only one that
+        pins their relative order.
+
+        The ten parametrized cases each satisfy exactly one row's condition, so
+        none of them can detect a swap -- a case that trips two rows at once is
+        what an ordering constraint needs. `evaluate` resolves the pair context
+        at :382 before reading the price at :390, so the pair check wins.
+        """
+        manager, _ = build_manager()
+        signal = Signal(symbol="DOGEUSDT", action=SignalAction.BUY, timestamp=NOW)
+        assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
+
+        assert (
+            _refusal_stage(signal, assessment, pairs=default_pairs()) is RefusalStage.UNKNOWN_PAIR
+        )
+
+    def test_a_close_without_a_price_is_no_reference_price(self) -> None:
+        """Rows 2 and 3 both fire. `evaluate` refuses on the missing price at
+        :390 before it dispatches CLOSE at :396, so the price check wins --
+        which is right: an exit still needs a price to be priced at."""
+        manager, _ = build_manager()
+        signal = Signal(symbol=SYMBOL, action=SignalAction.CLOSE, timestamp=NOW)
+        assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
+
+        assert (
+            _refusal_stage(signal, assessment, pairs=default_pairs())
+            is RefusalStage.NO_REFERENCE_PRICE
         )
 
     def test_an_assessment_with_no_decision_past_the_preconditions_is_a_defect(self) -> None:
@@ -739,6 +776,59 @@ class TestBootRefusals:
         """`enabled_pairs` filters first, so a disabled second entry is not a clash."""
         settings = write_settings(tmp_path, pairs=((SYMBOL, "1m", True), (SYMBOL, "5m", False)))
         assert _pair_timeframes(settings) == {SYMBOL: "1m"}
+
+    def test_no_pairs_at_all_refuses_and_says_the_list_is_empty(self, tmp_path: Path) -> None:
+        """`TradingEngine.start` already rejects this, but with a bare ValueError
+        -- not a TradingBotError -- several steps later, with a REST client and a
+        WebSocket already open. Refusing here is the same answer, earlier, in a
+        vocabulary that names config.yaml."""
+        settings = write_settings(tmp_path, pairs=())
+
+        with pytest.raises(ConfigError) as exc_info:
+            _pair_timeframes(settings)
+
+        message = str(exc_info.value)
+        assert "trading.pairs is empty" in message
+        assert "config.yaml" in message
+
+    def test_all_pairs_disabled_refuses_and_says_so_distinctly(self, tmp_path: Path) -> None:
+        """The two empty cases need opposite fixes, so they must not share a
+        message. This is the one an operator hits after toggling a pair off to
+        debug something and forgetting to toggle it back."""
+        settings = write_settings(tmp_path, pairs=((SYMBOL, "1m", False), ("ETHUSDT", "5m", False)))
+
+        with pytest.raises(ConfigError) as exc_info:
+            _pair_timeframes(settings)
+
+        message = str(exc_info.value)
+        assert "all 2 configured pair(s) have enabled: false" in message
+        assert "trading.pairs is empty" not in message
+
+    def test_one_enabled_pair_is_enough(self, tmp_path: Path) -> None:
+        settings = write_settings(tmp_path, pairs=((SYMBOL, "1m", True), ("ETHUSDT", "5m", False)))
+        assert _pair_timeframes(settings) == {SYMBOL: "1m"}
+
+    @pytest.mark.parametrize(
+        ("pairs", "expected"),
+        [
+            ((), "trading.pairs is empty"),
+            (((SYMBOL, "1m", False),), "have enabled: false"),
+        ],
+        ids=["empty", "all-disabled"],
+    )
+    async def test_an_empty_pair_set_refuses_the_boot(
+        self, tmp_path: Path, pairs: Any, expected: str
+    ) -> None:
+        settings = write_settings(tmp_path, pairs=pairs)
+        client = FakeRootClient()
+
+        with pytest.raises(ConfigError, match=expected):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the refusal precedes the body
+
+        # Pure check: refused before any round trip, and the client still closes.
+        assert client.symbol_info_calls == []
+        assert client.close_calls == 1
 
     async def test_an_unprimeable_symbol_refuses_the_boot(self, tmp_path: Path) -> None:
         settings = write_settings(tmp_path, pairs=(("DOGEUSDT", "1m", True),))
