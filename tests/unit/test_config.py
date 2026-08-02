@@ -9,10 +9,12 @@ import pytest
 from pydantic import ValidationError
 
 from trading_bot.config.models import (
+    PairConfig,
     PositionSizingConfig,
     RiskConfig,
     StopLossConfig,
     TakeProfitConfig,
+    TradingConfig,
     TrailingStopConfig,
 )
 from trading_bot.config.settings import get_settings
@@ -25,6 +27,31 @@ def test_loads_minimal_config(config_path: Path) -> None:
     assert settings.mode is TradingMode.TESTNET
     assert settings.config.strategy.name == "sma_crossover"
     assert settings.config.backtesting.initial_balance == 5000
+
+
+class TestAssetNamesAreNormalised:
+    """Both asset-naming fields upper-case at parse, not just one.
+
+    ``PairConfig.symbol`` has done this since Phase 1; ``base_currency`` sat
+    three lines below it unnormalised and unread until the composition root
+    started matching it against ``Balance.asset``. The root normalises both
+    sides itself, so this is defence in depth -- but the pair of them should
+    behave the same way, and a test is what says so.
+    """
+
+    def test_base_currency_is_upper_cased(self) -> None:
+        assert TradingConfig(base_currency="usdt").base_currency == "USDT"
+
+    def test_base_currency_default_is_already_normalised(self) -> None:
+        assert TradingConfig().base_currency == "USDT"
+
+    def test_pair_symbol_is_upper_cased(self) -> None:
+        assert PairConfig(symbol="btcusdt", timeframe="1m").symbol == "BTCUSDT"
+
+    def test_a_timeframe_is_deliberately_not_case_folded(self) -> None:
+        """``1M`` is one *month* on Binance and ``1m`` is one minute, so folding
+        the case here would silently merge two different intervals."""
+        assert PairConfig(symbol="BTCUSDT", timeframe="1M").timeframe == "1M"
 
 
 def test_missing_config_file_raises() -> None:

@@ -82,6 +82,21 @@ class TradingConfig(_Model):
     default_timeframe: str = "1m"
     pairs: list[PairConfig] = Field(default_factory=list)
 
+    @field_validator("base_currency")
+    @classmethod
+    def _upper(cls, v: str) -> str:
+        """Normalise the quote asset, mirroring ``PairConfig.symbol`` above.
+
+        Exchange payloads name assets in upper case, so anything that compares
+        this value against a ``Balance.asset`` or a ``SymbolInfo.quote_asset``
+        is comparing an operator-typed string against an exchange-supplied one.
+        The composition root normalises both sides itself and does not depend on
+        this -- correctness there must not rest on a validator two layers away --
+        but leaving the only *un*normalised asset field in the config next to a
+        normalised one is an asymmetry the next reader would have to rediscover.
+        """
+        return v.upper()
+
     @property
     def enabled_pairs(self) -> list[PairConfig]:
         return [p for p in self.pairs if p.enabled]
