@@ -381,6 +381,7 @@ class TestStageLadder:
         signal, assessment, pairs = build()
 
         assert not assessment.approved
+        assert assessment.stage is expected
         assert _refusal_stage(signal, assessment, pairs=pairs) is expected
 
     def test_the_ladder_covers_every_stage_except_the_defect_signal(self) -> None:
@@ -431,7 +432,12 @@ class TestStageLadder:
 
     def test_an_assessment_with_no_decision_past_the_preconditions_is_a_defect(self) -> None:
         """The defect signal fires only when the ladder has drifted from evaluate."""
-        assessment = RiskAssessment(symbol=SYMBOL, approved=False, reason="synthetic drift")
+        assessment = RiskAssessment(
+            symbol=SYMBOL,
+            approved=False,
+            reason="synthetic drift",
+            stage=RefusalStage.UNCLASSIFIED,
+        )
 
         stage = _refusal_stage(buy(), assessment, pairs=default_pairs())
 
@@ -629,7 +635,12 @@ class TestLogSchema:
     ) -> None:
         """UNCLASSIFIED means this module drifted from evaluate(), not that the
         market said no."""
-        drifted = RiskAssessment(symbol=SYMBOL, approved=False, reason="synthetic drift")
+        drifted = RiskAssessment(
+            symbol=SYMBOL,
+            approved=False,
+            reason="synthetic drift",
+            stage=RefusalStage.UNCLASSIFIED,
+        )
         record = await _emit_one(caplog, buy(), drifted, default_pairs())
         assert record.levelno == logging.ERROR
 

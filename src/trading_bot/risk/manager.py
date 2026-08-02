@@ -77,6 +77,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 from trading_bot.core.enums import (
     OrderSide,
     PositionSide,
+    RefusalStage,
     RiskRule,
     SignalAction,
     StopType,
@@ -196,11 +197,26 @@ class RiskAssessment(_Frozen):
     settled, so an operator (and a test) can see *where* a signal stopped --
     limits, protective levels or sizing -- without parsing the reason string.
     Components are ``None`` when evaluation refused before computing them.
+
+    :attr:`stage` names that stopping point directly, reported by
+    :meth:`RiskManager.evaluate` at the site that refuses rather than inferred
+    afterwards from which components are populated. Four of the refusals return
+    every component as ``None`` and are separable only by position in
+    ``evaluate``'s sequence, so an outside observer could label them only by
+    re-deriving that control flow -- which is what ``engine.modes`` did until
+    M4b, and what adding a refusal path or reordering two checks silently
+    invalidated.
+
+    It is **required but nullable**: there is no default, so every construction
+    site has to say something, and an approval says ``None`` deliberately rather
+    than by omission.
     """
 
     symbol: str
     approved: bool
     reason: str
+    #: Where evaluation stopped; ``None`` on an approval, which stopped nowhere.
+    stage: RefusalStage | None
     intent: TradeIntent | None = None
     decision: RiskDecision | None = None
     levels: ProtectiveLevels | None = None
@@ -214,6 +230,14 @@ class RiskAssessment(_Frozen):
             raise ValueError(
                 f"approved={self.approved} contradicts intent={self.intent!r}; an "
                 "approval carries the intent it approved and a refusal carries none"
+            )
+        # Note the polarity: `stage` follows RiskDecision.rule's axis -- present
+        # on a refusal, absent on an approval -- and therefore reads inverted
+        # against `intent` two lines above, which is present on an approval.
+        if self.approved != (self.stage is None):
+            raise ValueError(
+                f"approved={self.approved} contradicts stage={self.stage!r}; a refusal "
+                "must name the stage it stopped at and an approval must name none"
             )
         return self
 
@@ -382,6 +406,7 @@ class RiskManager(RiskManagerPort):
         def refuse(
             detail: str,
             *,
+            stage: RefusalStage,
             decision: RiskDecision | None = None,
             levels: ProtectiveLevels | None = None,
             sizing: SizingDecision | None = None,
@@ -390,6 +415,7 @@ class RiskManager(RiskManagerPort):
                 symbol=symbol,
                 approved=False,
                 reason=detail,
+                stage=stage,
                 decision=decision,
                 levels=levels,
                 sizing=sizing,
@@ -399,14 +425,16 @@ class RiskManager(RiskManagerPort):
         if context is None:
             return refuse(
                 f"{symbol} has no exchange filters loaded; it is not in the manager's "
-                "configured pairs"
+                "configured pairs",
+                stage=RefusalStage.UNKNOWN_PAIR,
             )
 
         price = signal.price
         if price is None or price <= 0:
             return refuse(
                 f"signal carries no usable reference price ({price}); every level and "
-                "size is derived from it"
+                "size is derived from it",
+                stage=RefusalStage.NO_REFERENCE_PRICE,
             )
 
         if signal.action is SignalAction.CLOSE:
@@ -415,7 +443,8 @@ class RiskManager(RiskManagerPort):
         if signal.action is not SignalAction.BUY:
             return refuse(
                 f"{signal.action.value} opens a short, which is unreachable on spot; "
-                "only BUY and CLOSE are actionable"
+                "only BUY and CLOSE are actionable",
+                stage=RefusalStage.UNSUPPORTED_ACTION,
             )
 
         marks, unpriced = self._mark_prices(portfolio)
@@ -426,12 +455,12 @@ class RiskManager(RiskManagerPort):
                 rule=RiskRule.NO_MARK_PRICE,
                 reason=f"cannot value open position(s) {', '.join(unpriced)}",
             )
-            return refuse(decision.reason, decision=decision)
+            return refuse(decision.reason, stage=RefusalStage.NO_MARK_PRICE, decision=decision)
 
         equity = portfolio.equity(marks)
         decision = self._approve(signal, portfolio=portfolio, equity=equity)
         if not decision.approved:
-            return refuse(decision.reason, decision=decision)
+            return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 
         stop_loss = self._config.stop_loss
         atr_value: float | None = None
@@ -442,6 +471,7 @@ class RiskManager(RiskManagerPort):
                     f"stop_loss.type='atr' needs an ATR value and none is available for "
                     f"{symbol}/{context.timeframe} (warming up, or the window contains a "
                     f"gap); ATR needs {stop_loss.atr_period + 1} clean bars",
+                    stage=RefusalStage.ATR_UNAVAILABLE,
                     decision=decision,
                 )
 
@@ -463,13 +493,20 @@ class RiskManager(RiskManagerPort):
             return refuse(
                 f"stop-loss is enabled but no level is placeable this bar ({levels.basis}); "
                 "not entering unprotected",
+                stage=RefusalStage.STOP_UNPLACEABLE,
                 decision=decision,
                 levels=levels,
             )
 
         sizing = self.size_position(signal, equity=equity, price=price, stop_price=levels.stop_loss)
         if not sizing.is_tradeable:
-            return refuse(sizing.reason, decision=decision, levels=levels, sizing=sizing)
+            return refuse(
+                sizing.reason,
+                stage=RefusalStage.SIZE_NOT_TRADEABLE,
+                decision=decision,
+                levels=levels,
+                sizing=sizing,
+            )
 
         # Equity is total portfolio value; free balance is what can actually be
         # spent. The sizer documents that this check is the caller's job. Fees
@@ -479,6 +516,7 @@ class RiskManager(RiskManagerPort):
             return refuse(
                 f"{sizing.quantity} at {price} costs {cost} {portfolio.quote_asset} but "
                 f"only {portfolio.free_quote} is free",
+                stage=RefusalStage.UNAFFORDABLE,
                 decision=decision,
                 levels=levels,
                 sizing=sizing,
@@ -502,6 +540,7 @@ class RiskManager(RiskManagerPort):
             symbol=symbol,
             approved=True,
             reason=f"{decision.reason}; {sizing.reason}",
+            stage=None,
             intent=intent,
             decision=decision,
             levels=levels,
@@ -523,6 +562,7 @@ class RiskManager(RiskManagerPort):
                 symbol=signal.symbol,
                 approved=False,
                 reason=f"nothing to close: no open position in {signal.symbol}",
+                stage=RefusalStage.NOTHING_TO_CLOSE,
             )
         intent = TradeIntent(
             symbol=signal.symbol,
@@ -534,6 +574,7 @@ class RiskManager(RiskManagerPort):
             symbol=signal.symbol,
             approved=True,
             reason=f"closing {position.quantity} {signal.symbol} at {price}",
+            stage=None,
             intent=intent,
         )
 
