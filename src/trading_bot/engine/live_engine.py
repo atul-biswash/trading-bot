@@ -112,6 +112,11 @@ class TradingEngine:
         and that bug is invisible until it costs money. Separate instances make
         it impossible; the cost is one small object per pair.
         """
+        # Imported lazily, mirroring BufferedMarketDataProvider.create: keeps
+        # pandas/NumPy off the import path of anything that only needs the
+        # engine's types -- `main.py` annotates against TradingEngine under
+        # TYPE_CHECKING and would otherwise pay for the whole data stack to
+        # print `--help`.
         from trading_bot.data.market_data import BufferedMarketDataProvider
         from trading_bot.strategies.registry import create_strategy
 

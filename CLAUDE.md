@@ -87,6 +87,22 @@ them: same call site, lossy output, no error. There are **three** plain sinks,
 not two — `RichHandler`, the `StreamHandler` used when `rich` is missing, and
 the file handler.
 
+**The `Decimal` agreement does not extend to enums — pass `.value`.** The two
+sinks render a `str, Enum` member *differently*, and neither one errors:
+`json.dumps` sees a `str` subclass and emits the underlying value (`"BUY"`),
+while `PlainFormatter` calls `str()` and gets `"SignalAction.BUY"`. Same call
+site, same field, two answers — the exact asymmetry the `PlainFormatter` work
+above closed for the general case, reopened by the `str, Enum` decision (`UP042`)
+that keeps `str(member)` qualified. So `extra=` takes `signal.action.value`,
+never `signal.action`. Verified in
+`tests/unit/test_modes.py::TestLogSchema::test_enums_cross_as_values_so_both_sinks_agree`,
+which asserts against both formatters rather than trusting either.
+
+The same reasoning applies to a `datetime`: `default=str` would carry it, but
+`extra=` passes an explicit `.isoformat()` rather than leaning on the catch-all.
+The rule generalises — **only `Decimal`, `str`, `int`, `bool` and `None` may
+reach `extra=` unconverted.**
+
 **`extra=` field names are validated — enforced, not convention.**
 `Logger.makeRecord` raises at the *call site*:
 `KeyError: "Attempt to overwrite 'name' in LogRecord"`. The reserved set is every

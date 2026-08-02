@@ -190,8 +190,15 @@ class BufferedMarketDataProvider(MarketDataProvider):
         repeat the pair list. Both adapters honour ``settings.mode``, so the
         default is Testnet and live trading requires an explicit mode change.
 
-        Passing ``client``/``stream`` injects pre-built ports instead (used by
-        the engine when it already owns a client, and by integration tests).
+        Passing ``client``/``stream`` injects pre-built ports instead. The
+        composition root (``engine.modes.live_system``) uses ``client``, because
+        it builds the REST client first to prime exchange filters and seed the
+        portfolio before any socket exists; tests use both to stay hermetic.
+
+        **An injected port is not closed here.** ``owns_client`` is
+        ``client is None``, so under injection :meth:`stop` closes nothing and
+        neither does the failure path below -- the caller that supplied the
+        client is the one that must close it.
         """
         # Imported lazily, mirroring BinanceClient.create: keeps python-binance
         # and aiohttp off the import path of anything that only needs the

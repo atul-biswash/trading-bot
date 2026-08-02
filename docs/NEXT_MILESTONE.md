@@ -180,6 +180,33 @@ copy the log aside, before starting a long run.
 
 ## Open items — not scoped to this milestone
 
+- **PAPER mode reaches Binance *mainnet* with empty credentials. Contained by
+  M4a, not fixed.** This contradicts "Testnet is the default everywhere", so it
+  is recorded rather than left in the code to be rediscovered.
+
+  Two lines make it happen, and each is defensible alone:
+  `config/settings.py:83` raises only when `mode.is_live_connection`, so PAPER
+  and BACKTEST get `("", "")` back instead of an error; `binance_client.py:112`
+  sets `testnet = settings.mode is TradingMode.TESTNET`, which is `False` for
+  PAPER — so the adapter points at `api.binance.com`. `main.py:129` gates its
+  own credential check on the same property, so nothing upstream catches it
+  either. Before M4a, `run --mode paper` therefore opened an *unauthenticated
+  mainnet* connection and streamed live production prices. Read-only, no order
+  path — but it is a live-environment connection that the mode name says should
+  not exist.
+
+  **M4a contains it**: `live_system` refuses a non-`is_live_connection` mode as
+  its very first statement, before any client is constructed, so the CLI now
+  exits 1 with a message naming the missing simulator. The underlying defect is
+  untouched — anything that builds a `BinanceClient` outside the composition
+  root still gets a mainnet client in PAPER mode.
+
+  The real fix is a decision, not a patch: either PAPER resolves `testnet=True`
+  (live prices from Testnet, which is what "live prices, no orders sent" almost
+  certainly meant), or `binance_credentials()` refuses every mode that
+  constructs a client. Belongs with `paper/simulator.py`, which is the milestone
+  that gives PAPER a composition root of its own.
+
 - ~~A flaky integration test.~~ **Closed — and worth keeping as a worked
   example of a test asserting more than its contract promised.**
 

@@ -360,6 +360,22 @@ class RiskManager(RiskManagerPort):
 
         The fixed sequence documented in the module docstring. Every refusal is
         a returned value; nothing on this path raises for a market condition.
+
+        .. warning::
+           The **order and identity** of the refusals below is mirrored outside
+           this module. ``engine.modes._refusal_stage`` labels each one for the
+           log schema by re-deriving this control flow, because
+           :class:`RiskAssessment` carries no stage of its own yet (M4b moves it
+           inward). Four of the refusals are indistinguishable from the
+           assessment alone -- unknown pair, unusable price, ``SELL`` and
+           nothing-to-close all return every component as ``None`` -- so that
+           labelling depends on these checks staying in this order.
+
+           Adding a refusal path, or reordering two of them, therefore silently
+           mislabels a log line unless ``_refusal_stage`` moves with it.
+           ``tests/unit/test_modes.py::TestStageLadder`` drives the real
+           ``evaluate`` down each branch and is what makes that drift fail
+           loudly instead.
         """
         symbol = signal.symbol
 
