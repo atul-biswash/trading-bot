@@ -850,6 +850,195 @@ rule applying to the test harness itself.
 
 ---
 
+## Phase 5 M4b — the stage moves into the domain
+
+M4a shipped knowingly with the refusal label produced *outside* the code that
+refuses: `modes._refusal_stage` re-derived `RiskManager.evaluate`'s control flow
+in a second file. Four of the ten refusals return every component as `None` —
+unknown pair, unusable price, `SELL`, nothing-to-close — so they were separable
+only by their position in that sequence, plus the `Signal` and the root's own
+`pairs` mapping. Adding a refusal path, or reordering two checks, mislabelled a
+log line with nothing else failing anywhere.
+
+That was the right call for M4a and the wrong state to keep. Choosing a stage
+vocabulary before an operator had read a single one of these labels would have
+been designing the enum backwards; M4a's job was to prove the vocabulary against
+real refusals, and it did. M4b moves it inward.
+
+### Done in three commits, deliberately
+
+The move, the field, and the deletion are three separate commits because the
+first is mechanical and the other two are not. `git diff` is the review surface
+here, and a semantic change buried in a 30-line transplant is a change nobody
+reviews. The mechanical commit carries the docstring **byte-identically**,
+forward reference to `_refusal_stage` and all, so it reads as a pure move; the
+docstring is rewritten two commits later when the thing it refers to is gone.
+Each commit was independently green.
+
+### Where the enum went, and why the direction was forced
+
+`core/enums.py`, beside `RiskRule`. Not a preference: `engine/` imports `risk/`,
+so `risk/` cannot import `engine/`, and once `RiskAssessment` carries a field of
+this type the enum cannot stay in `modes.py`. `core/` is the only place both
+layers already see.
+
+**`RiskAssessment` itself did not move.** It stays in `risk/manager.py`. Moving
+it collides with the port question — `evaluate` is still class-only while the
+port declares `size_position` and `approve` — and that should be settled once,
+with execution visible as a second consumer, rather than twice. So M4b's "into
+the domain" resolved to *two different destinations*: the enum moved, the model
+did not.
+
+### All ten labels survived, one-to-one
+
+No merges and no splits. Two looked mergeable and are not:
+
+**`limit_refused` stays coarse over its five `RiskRule` values.** The stage says
+*where* evaluation stopped; `decision.rule` says *which* limit fired, and the
+decision is populated at that exact site, so nothing is lost by not splitting.
+Splitting would duplicate `RiskRule` into a second vocabulary kept in sync by
+hand — the precise failure mode this milestone exists to remove, reintroduced
+one layer down.
+
+**`no_mark_price` stays separate from `limit_refused`.** It refuses
+structurally *before* `_approve` is called: it is an inability to compute
+equity, not a limit's verdict. It is also the one point where the stage and rule
+vocabularies genuinely coincide, which is what makes it look mergeable.
+
+### `UNCLASSIFIED` did not enter the domain
+
+It was moved in the mechanical commit — a verbatim move means verbatim — and
+deleted in the third. Once the stage is set at the site that refuses, it is
+unreachable: `RiskAssessment`'s validator binds a refusal to naming a stage, so
+there is no valid object that lacks one. An unreachable enum member is not free.
+It invites defensive branching on a state the domain forbids, and it sits there
+as a plausible default for whoever adds the next refusal path — which is exactly
+how a vocabulary stops meaning anything.
+
+The `ERROR`-level signal it carried survives as a **local guard in the logger**,
+not a category: `stage is None` on a refusal logs at `ERROR` against a fixed
+literal (`_STAGE_UNSET`), with no enum member behind it. mypy needs the branch
+regardless — it cannot derive `stage is not None` from `intent is None`, because
+that link is a runtime validator — so the narrowing and the health check are the
+same three lines. It is logged rather than raised or asserted, and the code says
+why: `IntentLogger` runs inside the signal handler, which must never raise, and
+`assert` would additionally vanish under `-O`. Without that comment the next
+reader "simplifies" it into a raise.
+
+### The invariant mirrors `RiskDecision`, on the opposite axis
+
+`stage: RefusalStage | None`, **required but nullable** — no default, so every
+construction site says something and an approval says `None` deliberately rather
+than by omission. The check extends the existing `_check_invariants` rather than
+adding a second validator:
+
+```python
+if self.approved != (self.stage is None):
+```
+
+Note the polarity. `stage` follows `rule`'s axis — present on a refusal — and so
+reads *inverted* against `intent` two lines above it, which is present on an
+approval. Getting this backwards inverts the invariant while leaving most tests
+green, so it was checked directly rather than inferred: both illegal
+combinations raise, and an omitted `stage` is a pydantic `missing`, not a
+silent `None`.
+
+Twelve sites name a stage: the nine `refuse()` calls, the direct
+`RiskAssessment(...)` construction in `_exit_assessment` that sits outside
+`evaluate`'s scope *and* outside its local helper, and the two approvals. A
+second nested helper also named `refuse`, inside `_approve` and returning
+`RiskDecision`, is not on this path and was left alone.
+
+### The redundant ladder was kept for exactly one commit
+
+Commit 2 left `_refusal_stage` in place and added
+`assert assessment.stage is expected` **alongside** its existing assertion, so
+the derived label and the reported one were compared across all ten paths. They
+agreed. That is what licensed the deletion: without the added line, a green
+commit 2 would have corroborated nothing, because the ladder test never read the
+new field.
+
+### The ordering tests, and one that was withdrawn
+
+The order of the checks is still load-bearing — it decides which stage an input
+satisfying two guards reports — it is simply no longer duplicated. A single-guard
+input cannot detect a reorder, so each ordering test supplies an input that trips
+two.
+
+Three carried over from M4a and gained a fourth: **`limit_refused` ahead of
+`atr_unavailable`**, witnessed by a BUY on a symbol already held (tripping
+`ALREADY_IN_POSITION`) whose ATR window is one bar short. `decision` is assigned
+before both guards, so the swapped source still compiles and the test reports a
+wrong *value* rather than crashing — which is why this pair and not
+`no_mark_price ↔ limit_refused`, where equity is computed between the guards and
+the mutation would crash on the way.
+
+Mutation-proved rather than assumed: one guard swap, full suite, **exactly one
+failure — the intended test, reporting
+`<RefusalStage.ATR_UNAVAILABLE> is <RefusalStage.LIMIT_REFUSED>`** — 636 others
+passing, restored from a `shutil.copy2` byte copy in a `finally` and verified by
+md5. The failure repr also showed `decision` still carrying
+`rule=ALREADY_IN_POSITION`, confirming both guards genuinely held rather than
+the test passing for an unrelated reason.
+
+**A fifth ordering test was planned, written into the milestone brief, and then
+withdrawn** — see finding (iii).
+
+### One test legitimately died
+
+`test_an_assessment_with_no_decision_past_the_preconditions_is_a_defect` and
+`test_the_defect_signal_logs_louder_than_an_ordinary_refusal` were the only two
+that hand-built an assessment rather than driving `evaluate`, and their subject
+was the ladder's desync with `evaluate`. That subject has no referent once the
+stage is set at source. Deleting them removes the **only** test of the `ERROR`
+path — recorded here as honest rather than as a gap: the path is unreachable
+from any valid `RiskAssessment`, so a test for it would have to construct an
+object the validator forbids, which tests the test and not the code.
+
+### Findings recorded, not fixed
+
+**(i) `NO_MARK_PRICE` is constructed twice, with different reason text.**
+`approve` (`manager.py`) says "…; equity is unknown, so no limit can be checked";
+`evaluate` says only "cannot value open position(s) …". The two never meet at
+runtime because `evaluate` bypasses the public `approve` entirely — it calls
+`_mark_prices` then `_approve` directly. Not fixed in M4b: it is the one place
+the stage and rule vocabularies coincide, and collapsing it is a decision about
+the port, which belongs with M5.
+
+**(ii) The deleted ladder read the *root's* `pairs` mapping while `evaluate`
+reads `self._pairs`.** `live_system` passes the same object to both, so they
+agreed — but that agreement was a wiring fact, not a type-level one, and nothing
+linked the two files. Deleting the ladder removed the coupling rather than
+documenting it.
+
+**(iii) `size_not_tradeable ↔ unaffordable` is order-INDEPENDENT, not merely
+unpinned.** This was going to be the ordering test, and the reasoning that
+killed it is worth keeping so nobody re-derives it. `is_tradeable` is
+`quantity > 0` and the validator forbids a negative quantity, so
+`not is_tradeable` implies `quantity == 0` implies `cost == 0`; the affordability
+guard is `cost > free_quote`. For any `free_quote >= 0` the two conditions are
+**mutually exclusive** — guard 9 firing means guard 10 cannot. Swapping them is
+not merely hard to observe, it is unobservable in every reachable state. A test
+that bit would need a negative `free_quote`, and would then fail on a harmless
+refactor while pinning nothing real. Not written.
+
+**(iv) That independence rests on an unenforced domain invariant.**
+`Portfolio.free_quote` carries no `ge=0` constraint (`core/portfolio.py`). A
+negative free quote is nonsense for spot, and is unreachable today only because
+the portfolio is seeded from exchange balance strings. The constraint was
+deliberately **not** added in M4b — it is a domain change with its own blast
+radius, not a rider on an observability milestone.
+
+### Two adjacent pairs remain unpinned
+
+`unsupported_action ↔ no_mark_price` and `no_mark_price ↔ limit_refused`.
+Pre-existing debt that this milestone illuminates rather than creates, and
+deliberately not addressed: the second is the one where a swap crashes rather
+than mislabels, so a test there would assert on an exception type and prove
+something other than ordering.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**

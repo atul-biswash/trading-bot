@@ -115,18 +115,30 @@ class RiskRule(str, Enum):
 class RefusalStage(str, Enum):
     """Where in ``RiskManager.evaluate`` a signal stopped.
 
-    One value per refusal path, in the order ``evaluate`` reaches them. The
-    label is derived by :func:`_refusal_stage` rather than reported by the
-    manager, because the manager has no stage vocabulary yet -- choosing one
-    before an operator has read any of these lines would be designing the enum
-    backwards. M4b moves it inward as ``RiskAssessment.stage`` and this ladder
-    collapses to reading that field.
+    One value per refusal path, in the order ``evaluate`` reaches them, and
+    reported by ``evaluate`` itself on
+    :attr:`~trading_bot.risk.manager.RiskAssessment.stage`. Nothing infers it:
+    four of the refusals return every component as ``None`` -- unknown pair,
+    unusable price, ``SELL``, nothing-to-close -- so an outside observer could
+    tell them apart only by re-deriving ``evaluate``'s control flow, which is
+    exactly what a new refusal path or a reordered pair of checks would
+    invalidate in silence.
 
-    :attr:`UNCLASSIFIED` is a **defect signal, not a category.** It can only be
-    reached if :func:`_refusal_stage` has desynchronised from ``evaluate`` -- a
-    new refusal path, or two checks reordered. It is therefore logged at
-    ``ERROR`` while ordinary refusals log at ``INFO``: an operator seeing it has
-    found a bug in this module, not a market condition.
+    **Coarser than :class:`RiskRule`, and deliberately so.**
+    :attr:`LIMIT_REFUSED` covers all five limit rules, because a stage says
+    *where* evaluation stopped while ``RiskDecision.rule`` says *which* limit
+    fired -- and the decision is populated at that site, so nothing is lost.
+    Splitting it would duplicate ``RiskRule`` into a second vocabulary that has
+    to be kept in sync by hand. :attr:`NO_MARK_PRICE` looks like the exception
+    but is not: it refuses structurally *before* the limits are consulted at
+    all, so it is an inability to compute equity rather than a limit's verdict,
+    and it is the one place the two vocabularies genuinely coincide.
+
+    There is no ``UNCLASSIFIED``. Every member here is reachable, because
+    ``RiskAssessment``'s validator binds a refusal to naming one; an
+    unreachable member would invite defensive branching on a state the domain
+    forbids, and would sit there as a tempting default for the next refusal
+    path somebody adds.
     """
 
     UNKNOWN_PAIR = "unknown_pair"
@@ -139,7 +151,6 @@ class RefusalStage(str, Enum):
     STOP_UNPLACEABLE = "stop_unplaceable"
     SIZE_NOT_TRADEABLE = "size_not_tradeable"
     UNAFFORDABLE = "unaffordable"
-    UNCLASSIFIED = "unclassified"
 
 
 class PositionSizingMethod(str, Enum):

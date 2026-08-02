@@ -8,11 +8,12 @@ the provider to the client, and that step is exactly what the ownership
 behaviour depends on.
 
 The ten refusal stages are driven through the **real** ``RiskManager.evaluate``
-rather than hand-built assessments. That is the point of the test: the stage
-ladder in ``modes.py`` re-derives ``evaluate``'s control flow, so only a test
-that makes ``evaluate`` actually produce each path can catch the two drifting
-apart. Its fixtures are borrowed from ``test_risk_manager`` for the same reason
--- they are the setups already proven to reach those branches.
+rather than hand-built assessments, and that stays the point of the test even
+now that ``evaluate`` reports the stage itself. A hand-built assessment asserts
+only that pydantic stored what it was handed; making ``evaluate`` actually take
+each branch is what pins the label to the code path. Its fixtures are borrowed
+from ``test_risk_manager`` for the same reason -- they are the setups already
+proven to reach those branches.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from trading_bot.core.enums import (
     OrderSide,
     PositionSizingMethod,
     RefusalStage,
+    RiskRule,
     SignalAction,
     StopType,
 )
@@ -75,7 +77,6 @@ from trading_bot.engine.modes import (
     LiveSystem,
     _build_signal_handler,
     _pair_timeframes,
-    _refusal_stage,
     _seed_portfolio,
     live_system,
 )
@@ -372,76 +373,103 @@ _STAGE_CASES = [
 ]
 
 
-class TestStageLadder:
+class TestRefusalStages:
+    """What `evaluate` reports, and -- for inputs that trip two guards -- which
+    guard it reports.
+
+    The stage is now read off the assessment rather than inferred from it, so
+    these tests assert `evaluate`'s own answer. What they still have to pin is
+    its **guard order**: an input satisfying one guard cannot detect a reorder,
+    because whichever guard runs first is the one that fires either way. Only an
+    input satisfying *two* guards distinguishes the orderings, and each ordering
+    test below supplies one.
+    """
+
     @pytest.mark.parametrize(
         ("expected", "build"), _STAGE_CASES, ids=[stage.value for stage, _ in _STAGE_CASES]
     )
-    def test_every_refusal_path_maps_to_its_stage(self, expected: RefusalStage, build: Any) -> None:
+    def test_every_refusal_path_reports_its_stage(self, expected: RefusalStage, build: Any) -> None:
         """The anti-rot test: each case makes the real evaluate() take one branch."""
-        signal, assessment, pairs = build()
+        _signal, assessment, _pairs = build()
 
         assert not assessment.approved
         assert assessment.stage is expected
-        assert _refusal_stage(signal, assessment, pairs=pairs) is expected
 
-    def test_the_ladder_covers_every_stage_except_the_defect_signal(self) -> None:
-        """UNCLASSIFIED is unreachable by construction; every other value is a path."""
+    def test_the_cases_cover_every_stage(self) -> None:
+        """Every member is a reachable path -- there is no unreachable value
+        left in the enum for a future refusal to default into."""
         covered = {stage for stage, _ in _STAGE_CASES}
-        assert covered == set(RefusalStage) - {RefusalStage.UNCLASSIFIED}
+        assert covered == set(RefusalStage)
 
     def test_a_close_for_an_unknown_symbol_is_unknown_pair_not_nothing_to_close(self) -> None:
-        """evaluate() checks the pair context before dispatching CLOSE, so the
-        ladder must too. Swapping those two lines breaks only this assertion."""
+        """Pins the pair-context check ahead of the CLOSE dispatch.
+
+        Both guards hold for this input. `evaluate` resolves the pair context
+        first, which is right: a CLOSE for a symbol it has no filters for cannot
+        be priced or sized, so "we do not know this pair" is the more
+        fundamental answer than "there is nothing open in it".
+        """
         manager, _ = build_manager()
         signal = Signal(symbol="DOGEUSDT", action=SignalAction.CLOSE, price=D("100"), timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("1000")))
 
-        assert (
-            _refusal_stage(signal, assessment, pairs=default_pairs()) is RefusalStage.UNKNOWN_PAIR
-        )
+        assert assessment.stage is RefusalStage.UNKNOWN_PAIR
 
     def test_an_unknown_symbol_without_a_price_is_unknown_pair(self) -> None:
-        """Rows 1 and 2 both fire on this input, so it is the only one that
-        pins their relative order.
+        """Pins the pair-context check ahead of the reference-price check.
 
-        The ten parametrized cases each satisfy exactly one row's condition, so
-        none of them can detect a swap -- a case that trips two rows at once is
-        what an ordering constraint needs. `evaluate` resolves the pair context
-        at :382 before reading the price at :390, so the pair check wins.
+        Both guards hold for this input. The ten parametrized cases each satisfy
+        exactly one guard, so none of them can detect this swap.
         """
         manager, _ = build_manager()
         signal = Signal(symbol="DOGEUSDT", action=SignalAction.BUY, timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
 
-        assert (
-            _refusal_stage(signal, assessment, pairs=default_pairs()) is RefusalStage.UNKNOWN_PAIR
-        )
+        assert assessment.stage is RefusalStage.UNKNOWN_PAIR
 
     def test_a_close_without_a_price_is_no_reference_price(self) -> None:
-        """Rows 2 and 3 both fire. `evaluate` refuses on the missing price at
-        :390 before it dispatches CLOSE at :396, so the price check wins --
-        which is right: an exit still needs a price to be priced at."""
+        """Pins the reference-price check ahead of the CLOSE dispatch.
+
+        Both guards hold for this input, and the price check winning is right:
+        an exit still needs a price to be priced at.
+        """
         manager, _ = build_manager()
         signal = Signal(symbol=SYMBOL, action=SignalAction.CLOSE, timestamp=NOW)
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
 
-        assert (
-            _refusal_stage(signal, assessment, pairs=default_pairs())
-            is RefusalStage.NO_REFERENCE_PRICE
+        assert assessment.stage is RefusalStage.NO_REFERENCE_PRICE
+
+    def test_a_limit_refusal_beats_an_unavailable_atr(self) -> None:
+        """Pins the limit check ahead of the ATR bridge.
+
+        Both guards hold: the portfolio already holds BTCUSDT, which trips
+        ALREADY_IN_POSITION in `_approve`, *and* the buffer is one bar short of
+        what a 14-period ATR needs, so `_atr_value` returns None. The limits win,
+        which is right -- there is no point pricing a stop for an entry that is
+        refused outright, and the ATR bridge is the more expensive check.
+
+        This is the only adjacent pair on the approved path that is separately
+        satisfiable; `decision` is bound before both guards, so a swap still
+        compiles and reports the wrong stage rather than crashing. See the M4b
+        entry in docs/PHASE_HISTORY.md for the pairs left unpinned and why.
+        """
+        pairs = {SYMBOL: PairContext(timeframe=TIMEFRAME, symbol_info=symbol_info())}
+        manager, _ = build_manager(
+            config=risk_config(
+                stop_loss=StopLossConfig(type=StopType.ATR, atr_period=14),
+                take_profit=TakeProfitConfig(enabled=False),
+            ),
+            # 14 bars is one short of the atr_period + 1 the bridge demands.
+            provider=FakeProvider(frames={SYMBOL: ohlcv(14)}, candles={SYMBOL: candle()}),
+            pairs=pairs,
         )
+        portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: long_position()})
 
-    def test_an_assessment_with_no_decision_past_the_preconditions_is_a_defect(self) -> None:
-        """The defect signal fires only when the ladder has drifted from evaluate."""
-        assessment = RiskAssessment(
-            symbol=SYMBOL,
-            approved=False,
-            reason="synthetic drift",
-            stage=RefusalStage.UNCLASSIFIED,
-        )
+        assessment = manager.evaluate(buy(), portfolio=portfolio)
 
-        stage = _refusal_stage(buy(), assessment, pairs=default_pairs())
-
-        assert stage is RefusalStage.UNCLASSIFIED
+        assert assessment.stage is RefusalStage.LIMIT_REFUSED
+        assert assessment.decision is not None
+        assert assessment.decision.rule is RiskRule.ALREADY_IN_POSITION
 
 
 # --------------------------------------------------------------------------
@@ -629,25 +657,6 @@ class TestLogSchema:
             "asctime",
         }
         assert emitted & reserved == set()
-
-    async def test_the_defect_signal_logs_louder_than_an_ordinary_refusal(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        """UNCLASSIFIED means this module drifted from evaluate(), not that the
-        market said no."""
-        drifted = RiskAssessment(
-            symbol=SYMBOL,
-            approved=False,
-            reason="synthetic drift",
-            stage=RefusalStage.UNCLASSIFIED,
-        )
-        record = await _emit_one(caplog, buy(), drifted, default_pairs())
-        assert record.levelno == logging.ERROR
-
-        caplog.clear()
-        signal, assessment, pairs = _case_limit_refused()
-        ordinary = await _emit_one(caplog, signal, assessment, pairs)
-        assert ordinary.levelno == logging.INFO
 
 
 # --------------------------------------------------------------------------

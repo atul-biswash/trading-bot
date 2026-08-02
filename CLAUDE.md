@@ -263,6 +263,25 @@ scripts/         check_testnet.py · download_data.py
   Branching on rule presence reads all four as approvals. **`RiskAssessment.
   approved` is the only authoritative field** — its validator binds it to
   `intent is not None`, so the two cannot drift.
+- **`evaluate` reports where it stopped; nothing infers it.**
+  `RiskAssessment.stage` is a `RefusalStage` (in `core/enums.py`, beside
+  `RiskRule`), set at the site that refuses. **Required but nullable** — no
+  default, so every construction site says something and an approval says `None`
+  deliberately. The validator mirrors `RiskDecision`'s, on the **opposite axis**:
+  `approved != (stage is None)` — present on a refusal, like `rule`, and
+  therefore inverted against `intent` directly above it. Adding a refusal path
+  cannot forget a stage, because the parameter is required.
+- **The stage vocabulary is deliberately coarser than `RiskRule`.**
+  `LIMIT_REFUSED` covers all five limit rules: the stage says *where* evaluation
+  stopped, `decision.rule` says *which* limit fired, and the decision is
+  populated at that site. Splitting it would duplicate `RiskRule` into a second
+  hand-synced vocabulary. `NO_MARK_PRICE` is separate because it refuses
+  *before* the limits are consulted — an inability to compute equity, not a
+  verdict. **There is no `UNCLASSIFIED`**: every member is reachable, and an
+  unreachable one invites defensive branching and becomes a lazy default for the
+  next refusal added. The logger's `stage is None` branch is mypy narrowing plus
+  a health check, logged at `ERROR` against a fixed literal — never raised or
+  asserted, because `IntentLogger` runs inside the handler that must not raise.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -371,8 +390,8 @@ The four steps, and what each reports when green:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  83 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 635 passed, 3 skipped
-                                       (638 passed with Testnet credentials present)
+pytest                                 634 passed, 3 skipped
+                                       (637 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -381,12 +400,15 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `638 passed` on a machine with Binance Testnet credentials in `.env`
-- `635 passed, 3 skipped` on a machine without them
+- `637 passed` on a machine with Binance Testnet credentials in `.env`
+- `634 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 635 and must not read it as a regression against a documented
-638. Quote the count with its condition, never bare.
+runner will see 634 and must not read it as a regression against a documented
+637. Quote the count with its condition, never bare.
+
+Only the `637` is measured here; `634` is `637` minus the three `skipif`-gated
+integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
@@ -400,7 +422,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 635, so **treat a lone
+output was read. The unit suite is deterministic at 634, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -517,6 +539,17 @@ normal test already pins the order); and enforcement by Python itself (swapping
 a null-guard that also binds the name yields `NameError`). Only the first is
 something a future edit can delete by accident.
 
+**There is a fourth answer, and it is "do not write the test":
+order-independence.** Before pinning an order, check that the two conditions can
+both hold. `size_not_tradeable` and `unaffordable` look like an obvious adjacent
+pair, and are not: `not is_tradeable` implies `quantity == 0` implies
+`cost == 0`, so for any non-negative balance the two guards are **mutually
+exclusive** and swapping them is unobservable rather than merely hard to
+observe. A test that bit would need a state the exchange cannot produce, and
+would then fail on a harmless refactor while pinning nothing. Recorded in
+`docs/PHASE_HISTORY.md` (M4b, findings iii/iv) so it is not re-derived and
+written next time.
+
 ---
 
 ## Git workflow
@@ -579,7 +612,21 @@ with a fixed field set each, absent fields absent rather than null. It is
 deliberately not called `Executor` and not in `execution/` — claiming that stub
 would make the stub inventory lie.
 
-Next: **M4b** — move `stage` into `RiskAssessment` (M4a proved the vocabulary;
-the ladder in `modes.py` then collapses to reading a field) and the per-handler
-failure counter, thresholds from M4a soak data. **M5** places an order. See
-`docs/NEXT_MILESTONE.md`.
+**M4b is complete: the stage moved into the domain.** `RefusalStage` now lives
+in `core/enums.py` beside `RiskRule` — the direction was forced, since `engine/`
+imports `risk/` and so `risk/` cannot import `engine/`. `RiskManager.evaluate`
+sets `RiskAssessment.stage` at each of the twelve construction sites, and
+`modes._refusal_stage` — which re-derived `evaluate`'s control flow in a second
+file to label the log line — is deleted. `UNCLASSIFIED` left with it.
+`RiskAssessment` itself did **not** move; that collides with the port question
+and is settled once, in M5, with execution visible as a second consumer.
+
+Done in three commits: a byte-identical mechanical move, then the field and its
+invariant, then the deletion. The redundant ladder was kept for exactly one
+commit so its answer could be compared against the new field across all ten
+paths before being removed. The new ordering test is mutation-proved.
+
+Next: **Q-A**, the per-collaborator failure counter — **unscheduled**, because
+its thresholds need soak data and nothing has dispatched an order yet, so the
+`collaborator_failed` lines it would be calibrated from do not exist. **M5**
+places an order. See `docs/NEXT_MILESTONE.md`.

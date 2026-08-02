@@ -385,21 +385,25 @@ class RiskManager(RiskManagerPort):
         The fixed sequence documented in the module docstring. Every refusal is
         a returned value; nothing on this path raises for a market condition.
 
-        .. warning::
-           The **order and identity** of the refusals below is mirrored outside
-           this module. ``engine.modes._refusal_stage`` labels each one for the
-           log schema by re-deriving this control flow, because
-           :class:`RiskAssessment` carries no stage of its own yet (M4b moves it
-           inward). Four of the refusals are indistinguishable from the
-           assessment alone -- unknown pair, unusable price, ``SELL`` and
-           nothing-to-close all return every component as ``None`` -- so that
-           labelling depends on these checks staying in this order.
+        Every refusal names the :class:`~trading_bot.core.enums.RefusalStage` it
+        stopped at, at the site that refuses. That is the whole reason the stage
+        lives on :class:`RiskAssessment`: until M4b it was re-derived from this
+        control flow in ``engine.modes``, and four of the refusals -- unknown
+        pair, unusable price, ``SELL``, nothing-to-close -- return every
+        component as ``None``, so they were separable only by their position in
+        this sequence. Adding a path or reordering two checks mislabelled a log
+        line with nothing else failing. Now a new refusal cannot be added
+        without naming a stage, because the parameter is required.
 
-           Adding a refusal path, or reordering two of them, therefore silently
-           mislabels a log line unless ``_refusal_stage`` moves with it.
-           ``tests/unit/test_modes.py::TestStageLadder`` drives the real
-           ``evaluate`` down each branch and is what makes that drift fail
-           loudly instead.
+        .. note::
+           The **order** of the checks below is still load-bearing, just no
+           longer duplicated: it is what decides which stage an input
+           satisfying two guards at once reports.
+           ``tests/unit/test_modes.py::TestRefusalStages`` drives the real
+           ``evaluate`` down every branch and pins four adjacent pairs by
+           supplying an input that trips both. Not every pair is pinned -- some
+           are order-independent and some are not separately satisfiable; see
+           the M4b entry in ``docs/PHASE_HISTORY.md``.
         """
         symbol = signal.symbol
 

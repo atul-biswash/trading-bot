@@ -89,7 +89,6 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from trading_bot.core.enums import RefusalStage, RiskRule, SignalAction
 from trading_bot.core.exceptions import ConfigError
 from trading_bot.core.interfaces import (
     ExchangeClient,
@@ -154,62 +153,10 @@ class LiveSystem:
 # --------------------------------------------------------------------------
 # Observability
 # --------------------------------------------------------------------------
-def _refusal_stage(
-    signal: Signal, assessment: RiskAssessment, *, pairs: Mapping[str, PairContext]
-) -> RefusalStage:
-    """Which of ``evaluate``'s refusal paths produced ``assessment``.
-
-    Pure and **total**: it never raises and always returns a value, because it
-    runs inside a signal handler that must not raise.
-
-    The order below mirrors ``RiskManager.evaluate``'s own control flow and is
-    not free to change. ``evaluate`` checks the pair context before the price and
-    both before dispatching a ``CLOSE``, so a ``CLOSE`` for an unknown symbol is
-    :attr:`RefusalStage.UNKNOWN_PAIR` rather than
-    :attr:`RefusalStage.NOTHING_TO_CLOSE`; reordering these two lines would
-    mislabel it with no test failing anywhere else.
-
-    Four refusals carry no components at all -- unknown pair, unusable price,
-    ``SELL``, and nothing-to-close all produce ``decision``/``levels``/``sizing``
-    of ``None`` -- so they are separated by the ``Signal`` itself plus the
-    ``pairs`` mapping this root built, never by parsing ``reason``.
-
-    The last three are separated by which component evaluation reached:
-    ``levels is None`` means it stopped at the ATR bridge, ``sizing is None``
-    means it stopped at the stop gate, and past both, ``sizing.is_tradeable``
-    is a guard-derived invariant -- the affordability check at the end of
-    ``evaluate`` is reachable only after the sizer's own guard has passed.
-    """
-    if signal.symbol not in pairs:
-        return RefusalStage.UNKNOWN_PAIR
-
-    price = signal.price
-    if price is None or price <= 0:
-        return RefusalStage.NO_REFERENCE_PRICE
-
-    if signal.action is SignalAction.CLOSE:
-        return RefusalStage.NOTHING_TO_CLOSE
-    if signal.action is not SignalAction.BUY:
-        return RefusalStage.UNSUPPORTED_ACTION
-
-    decision = assessment.decision
-    if decision is None:
-        # Unreachable: every refusal past this point carries a decision. Kept so
-        # the function stays total, and loud (see RefusalStage.UNCLASSIFIED).
-        return RefusalStage.UNCLASSIFIED
-    if decision.rule is RiskRule.NO_MARK_PRICE:
-        return RefusalStage.NO_MARK_PRICE
-    if not decision.approved:
-        return RefusalStage.LIMIT_REFUSED
-
-    if assessment.levels is None:
-        return RefusalStage.ATR_UNAVAILABLE
-    sizing = assessment.sizing
-    if sizing is None:
-        return RefusalStage.STOP_UNPLACEABLE
-    if not sizing.is_tradeable:
-        return RefusalStage.SIZE_NOT_TRADEABLE
-    return RefusalStage.UNAFFORDABLE
+#: Written into ``stage`` when a refusal reaches the logger without one. The
+#: value is a fixed literal rather than a :class:`RefusalStage` member because
+#: it is not a category of refusal -- it is this pipeline reporting on itself.
+_STAGE_UNSET = "unset"
 
 
 def _common_fields(signal: Signal, pairs: Mapping[str, PairContext]) -> dict[str, object]:
@@ -217,9 +164,9 @@ def _common_fields(signal: Signal, pairs: Mapping[str, PairContext]) -> dict[str
 
     ``timeframe`` is the one field that can be absent: ``Signal`` has no
     timeframe, so it is resolved through ``pairs`` -- and a signal refused for
-    :attr:`RefusalStage.UNKNOWN_PAIR` is by definition not in ``pairs``. That
-    resolution is single-valued only because a duplicate symbol refuses the boot
-    (see :func:`_pair_timeframes`).
+    :attr:`~trading_bot.core.enums.RefusalStage.UNKNOWN_PAIR` is by definition
+    not in ``pairs``. That resolution is single-valued only because a duplicate
+    symbol refuses the boot (see :func:`_pair_timeframes`).
 
     ``action`` crosses as ``.value`` and ``signal_ts`` as an explicit
     ``isoformat()`` rather than leaning on the JSON sink's ``default=str``
@@ -274,19 +221,32 @@ class IntentLogger:
             )
             return
 
-        stage = _refusal_stage(signal, assessment, pairs=self._pairs)
+        # RiskAssessment's validator binds `stage` to `approved`, so a refusal
+        # always carries one -- but that link is a runtime invariant and mypy
+        # cannot derive it from `intent is None` above. Hence a real branch
+        # rather than an assert.
+        #
+        # Deliberately logged, not raised, and NOT an `assert`. This method runs
+        # inside the signal handler, which must never raise: an exception here
+        # becomes an unstructured traceback once per bar forever, because the
+        # engine's consecutive-failure counter is fed from _evaluate and never
+        # from _emit. `assert` is doubly wrong -- it also vanishes under -O. The
+        # state is unreachable through the domain; if it ever happens the
+        # pipeline is broken, and the honest response is a loud line, not a
+        # crash in the one component whose job is to report.
+        stage = assessment.stage
+        label = stage.value if stage is not None else _STAGE_UNSET
+        level = logging.INFO if stage is not None else logging.ERROR
+
         extra = {"event": _EVENT_RISK_REFUSED}
         extra.update(_common_fields(signal, self._pairs))
-        extra["stage"] = stage.value
+        extra["stage"] = label
         decision = assessment.decision
         rule = decision.rule if decision is not None else None
         if rule is not None:
             extra["rule_fired"] = rule.value
         extra["reason"] = assessment.reason
-        # UNCLASSIFIED means this module has drifted from evaluate(), not that
-        # the market said no. It is the one refusal worth waking someone for.
-        level = logging.ERROR if stage is RefusalStage.UNCLASSIFIED else logging.INFO
-        _log.log(level, "Risk refused %s at %s", signal.symbol, stage.value, extra=extra)
+        _log.log(level, "Risk refused %s at %s", signal.symbol, label, extra=extra)
 
 
 def _log_collaborator_failure(

@@ -1,89 +1,83 @@
-# Current milestone — Phase 5 M4b: move `stage` inward, then count failures
+# Current milestone — Q-A: the per-collaborator failure counter
 
-M4a wired the composition root and made the intent stream observable. Two things
-it deliberately left in a provisional shape now come due, and both were deferred
-for the same reason: **neither could be designed before the path had run.**
+**UNSCHEDULED, and that is the finding, not a scheduling accident.**
 
-Everything below assumes M4a as built — read `engine/modes.py` and the M4a entry
-in `docs/PHASE_HISTORY.md` before designing.
+Q-A was deferred from M4a with a reason that has not moved: a
+consecutive-failure threshold should be set from soak data rather than guessed.
+M4a was supposed to produce that data — `collaborator_failed` lines, named per
+collaborator, structured. It has not, and it cannot yet: **nothing dispatches an
+order**, so the only collaborator that can fail is `IntentLogger`, whose failure
+mode is "logging broke". A threshold calibrated against that number would be
+calibrated against the wrong population entirely.
 
----
-
-## Item 1 — `RiskAssessment.stage`, set by `evaluate`
-
-**The problem M4a shipped with, knowingly.** `modes._refusal_stage` labels each
-refusal for the log schema by **re-deriving `RiskManager.evaluate`'s control
-flow** in a second file. Four of `evaluate`'s ten refusals return every
-component as `None` — unknown pair, unusable price, `SELL`, nothing-to-close —
-so they are separable only by position in that sequence, plus the `Signal` and
-the root's own `pairs` mapping. Adding a refusal path, or reordering two checks,
-mislabels a log line with nothing else failing.
-
-**Why it was not done in M4a.** `RiskAssessment.stage` needs a stage vocabulary
-*in the domain*, and choosing that vocabulary before an operator had read a
-single one of these labels would have been designing the enum backwards. M4a's
-job was to prove the vocabulary against real refusals. It has.
-
-**The change.** `evaluate` sets `stage` at each `refuse(...)` call site and on
-approval; `RefusalStage` (or its successor) moves from `engine/modes.py` into
-the domain; `_refusal_stage` collapses to reading `assessment.stage`; the
-`TestStageLadder` ordering sweep loses its reason to exist and most of it can be
-deleted rather than ported.
-
-**Decide, do not assume:**
-
-- Does `stage` belong on `RiskAssessment` or on `RiskDecision`? `RiskDecision`
-  already carries `rule`, and the two vocabularies overlap at `no_mark_price`.
-  Overlapping-but-not-identical enums in one object is a smell; so is a second
-  `rule`-shaped field.
-- Is `stage` optional or required? Required is stronger — a refusal that cannot
-  say where it stopped is the condition this item exists to remove — but it
-  makes every `RiskAssessment(...)` construction site say something.
-- Approval: one `approved` stage, or no stage at all? The log schema currently
-  omits `stage` from `intent_dispatched` entirely.
-
-**Do not** widen the `RiskManager` **port** as part of this. `evaluate`,
-`check_exit` and `advance_trailing_stop` are still class-only; the port declares
-`size_position` and `approve` (`core/interfaces.py:181`). That is a separate
-decision belonging to M5, when execution becomes a second consumer.
-
----
-
-## Item 2 — Q-A, the per-collaborator failure counter
-
-**Deferred from M4a with a reason that still holds:** a consecutive-failure
-threshold should be set from soak data, not guessed. M4a produces exactly that
-data — `collaborator_failed` lines, named per collaborator, structured.
-
-**Soak first.** Run the composition root against Testnet long enough to see
-whether `collaborator_failed` ever fires in normal operation, and at what rate.
-A threshold chosen before that number exists is a guess wearing a constant's
-clothing.
+So Q-A stays open and stays unscheduled until M5 gives it a collaborator that
+touches the network. Writing it now would produce a constant wearing a
+guess's clothing, which is the exact thing the deferral existed to prevent.
 
 **Automatic removal of a failing handler stays REJECTED.** Disabling a broken
 executor converts "orders are failing" into "orders are not being attempted"
 while positions are open. Whatever the counter does, it must not do that.
 
-**Note the shape M4a left.** `TradingEngine._emit` catches per handler and logs
-(`live_engine.py:325`), but the engine's consecutive-failure counter is fed only
-from `_evaluate` (`:275`) — so a permanently broken handler produces a traceback
-every bar forever and no pair is ever quarantined. M4a's chained handler mitigates
-this by never raising, catching per collaborator inside itself. The counter is
-what makes it visible rather than merely contained.
+**The shape M4a left, unchanged by M4b.** `TradingEngine._emit` catches per
+handler and logs, but the engine's consecutive-failure counter is fed only from
+`_evaluate` — so a permanently broken handler produces a traceback every bar
+forever and no pair is ever quarantined. M4a's chained handler mitigates this by
+never raising, catching per collaborator inside itself. The counter is what
+makes it visible rather than merely contained.
 
 ---
 
-## Scope constraints
+## Recommended next: M5 — order dispatch
 
-- **No order dispatch.** That is M5.
-- **No new collaborator.** `IntentLogger` stays the terminal one.
-- **Do not touch `live_engine.py:160`.** The empty-strategy guard is correct for
-  a directly-constructed engine; the root refuses earlier with a better message,
-  and both are wanted.
+`OrderExecutor` over `BinanceClient.create_order`, the unprotected window
+between an entry fill and its stop, idempotency via `client_order_id`,
+order-status tracking, and `Portfolio` write-back — the last of which retires
+M4a's boot-snapshot portfolio, which nothing mutates today.
+
+**Q-B** (escalation policy) and **Q-C** (which protective levels rest at the
+exchange, and how they reconcile with the client-side view after a restart) are
+settled at the start of that milestone, not during it.
+
+**Q-D — the `RiskManager` port.** M5 is when widening it becomes a real question
+rather than a deferred one, because execution becomes its second consumer.
+`evaluate`, `check_exit` and `advance_trailing_stop` are still class-only; the
+port declares `size_position` and `approve`. M4b deliberately did **not** touch
+this, and deliberately did not move `RiskAssessment` out of `risk/manager.py`
+either — the two decisions are the same decision and should be made once, with
+all consumers visible.
+
+Note for the record: M4b's brief said `RefusalStage` would move "into the
+domain", and that phrase resolved to **two** destinations once the tree was
+read. The enum moved to `core/enums.py` (forced: `engine/` imports `risk/`, so
+`risk/` cannot import `engine/`). `RiskAssessment` did not move, and defers to
+Q-D.
 
 ---
 
-## Open items — not scoped to this milestone
+## Open items — not scoped to any milestone
+
+- **`Portfolio.free_quote` has no `ge=0` constraint** (`core/portfolio.py`). A
+  negative free quote is nonsense for spot and is unreachable today only because
+  the portfolio is seeded from exchange balance strings — an unenforced domain
+  invariant held up by its one caller. Surfaced by M4b while checking whether
+  the `size_not_tradeable` / `unaffordable` guard pair was separately
+  satisfiable (it is not; see M4b finding iii). **Deliberately not added in
+  M4b**: it is a domain change with its own blast radius, not a rider on an
+  observability milestone.
+
+- **`NO_MARK_PRICE` is constructed twice with different reason text.** `approve`
+  says "…; equity is unknown, so no limit can be checked"; `evaluate` says only
+  "cannot value open position(s) …". The two never meet at runtime because
+  `evaluate` bypasses the public `approve` entirely — it calls `_mark_prices`
+  then `_approve` directly. Collapsing them is a decision about the port, so it
+  belongs with Q-D.
+
+- **Two adjacent refusal-guard pairs remain unpinned by an ordering test:**
+  `unsupported_action ↔ no_mark_price` and `no_mark_price ↔ limit_refused`. The
+  second is the one where a swap crashes rather than mislabels — equity is
+  computed between the guards — so a test there would assert on an exception
+  type and prove something other than ordering. Pre-existing debt that M4b
+  illuminated rather than created.
 
 - **PAPER mode reaches Binance *mainnet* with empty credentials. Contained by
   M4a, not fixed.** This contradicts "Testnet is the default everywhere", so it
@@ -160,7 +154,7 @@ what makes it visible rather than merely contained.
   Small and self-contained, but it is a behaviour change to the CLI's contract
   and wants its own commit rather than riding along with a milestone.
 
-- **Empty `enabled_pairs` is now refused at the root** (`_pair_timeframes`),
+- **Empty `enabled_pairs` is refused at the root** (`_pair_timeframes`),
   distinguishing "`trading.pairs` is empty" from "all N configured pair(s) have
   `enabled: false`". `live_engine.py:160` was **not** touched and remains
   correct for direct construction — the root simply refuses earlier, before a
@@ -182,13 +176,14 @@ what makes it visible rather than merely contained.
   `_console_handler` to separate; deliberately out of scope so far.
 
 - **Nothing enforces the documented counts.** They are updated by hand and have
-  drifted within a single session more than once. M4a sharpened the hazard
-  rather than removing it: `ruff format` and `mypy` each appear in **three**
-  places, not two — the fenced gate output in `CLAUDE.md`, the gate-scope table
-  in `CLAUDE.md`, and `README.md` — so a pre-commit pass that checks the two
-  obvious ones leaves the scope table stale. Worth a check that reads the
-  numbers from a live run, but it must not become a gate that fails for a reason
-  unrelated to the code.
+  drifted within a single session more than once. M4b moved only the `pytest`
+  numbers — no `src/`, `tests/` or `scripts/` file was added or deleted, so
+  `ruff format` held at 83 and `mypy` at 58 — which is exactly the case where a
+  hurried pass updates the fenced gate output and leaves the scope table alone.
+  `ruff format` and `mypy` each appear in **three** places: the fenced gate
+  output in `CLAUDE.md`, the gate-scope table in `CLAUDE.md`, and `README.md`.
+  Worth a check that reads the numbers from a live run, but it must not become a
+  gate that fails for a reason unrelated to the code.
 
 - **Transitive dependencies still float.** The direct layer is pinned exactly;
   `websockets`/`aiohttp` under `python-binance` and friends resolve freely.
@@ -198,19 +193,3 @@ what makes it visible rather than merely contained.
   were relaxed. Proper fix is `pip-compile` with hashes over a `requirements.in`
   — deferred because it changes the install procedure for every contributor and
   the Docker build, and wants its own decision.
-
----
-
-## After this: M5
-
-**M5** — order dispatch. `OrderExecutor` over `BinanceClient.create_order`, the
-unprotected window between an entry fill and its stop, idempotency via
-`client_order_id`, order-status tracking, and `Portfolio` write-back — the last
-of which retires M4a's boot-snapshot portfolio, which nothing mutates today.
-
-**Q-B** (escalation policy) and **Q-C** (which protective levels rest at the
-exchange, and how they reconcile with the client-side view after a restart) are
-settled at the start of that milestone, not during it.
-
-M5 is also when widening the `RiskManager` port becomes a real question rather
-than a deferred one, because execution becomes its second consumer.
