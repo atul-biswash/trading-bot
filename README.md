@@ -78,15 +78,15 @@ failure. Run it bare and read its own exit code.
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  83 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 634 passed, 3 skipped
-                                       (637 = 634 + 3 with Testnet credentials)
+pytest                                 636 passed, 3 skipped
+                                       (639 = 636 + 3 with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone.** It varies by
 **credentials** — the three integration tests skip without Binance Testnet keys,
-so `634 passed, 3 skipped` and `637 passed` are both green — and by **network
+so `636 passed, 3 skipped` and `639 passed` are both green — and by **network
 state**, since those tests make live calls and two wait on a real 1-minute bar.
-A fresh clone seeing 634 is not looking at a regression.
+A fresh clone seeing 636 is not looking at a regression.
 
 ## Features
 

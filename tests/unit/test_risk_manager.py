@@ -33,6 +33,7 @@ from trading_bot.core.enums import (
     OrderSide,
     PositionSide,
     PositionSizingMethod,
+    RefusalStage,
     RiskRule,
     SignalAction,
     StopType,
@@ -41,7 +42,7 @@ from trading_bot.core.enums import (
 from trading_bot.core.interfaces import MarketDataProvider
 from trading_bot.core.models import Candle, Position, RiskDecision, Signal, SymbolInfo
 from trading_bot.core.portfolio import Portfolio
-from trading_bot.risk.manager import PairContext, RiskManager, TradeIntent
+from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager, TradeIntent
 from trading_bot.risk.rules import ExitReason
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -695,6 +696,22 @@ class TestEvaluate:
         assert not assessment.approved
         assert "nothing to close" in assessment.reason
 
+    def test_an_approval_reports_no_stage(self) -> None:
+        """The approval half of the stage invariant, through the real path.
+
+        The log-schema test asserting `"stage" not in fields` sits downstream of
+        IntentLogger's early return, which never reads `stage` -- it passes
+        whatever the domain does. This one goes through evaluate.
+
+        Pins evaluate's *behaviour*. The validator's raise is a separate claim
+        with its own test in TestMoneyGuard; neither implies the other.
+        """
+        manager, _ = build_manager()
+        assessment = manager.evaluate(buy("100.00"), portfolio=Portfolio(free_quote=D("10000")))
+
+        assert assessment.approved
+        assert assessment.stage is None
+
 
 # --------------------------------------------------------------------------
 # Exits: the pure predicate, driven with a deliberate price
@@ -872,3 +889,30 @@ class TestMoneyGuard:
     def test_a_risk_decision_approval_must_not_name_a_rule(self) -> None:
         with pytest.raises(ValidationError, match="must name the rule"):
             RiskDecision(symbol=SYMBOL, approved=True, reason="fine", rule=RiskRule.COOLDOWN)
+
+    def test_a_risk_assessment_stage_must_agree_with_its_verdict(self) -> None:
+        """Both directions of the invariant mirroring `rule` two tests above --
+        and the two places RiskAssessment cannot mirror RiskDecision's shape.
+
+        `stage` is **required**, so the refusal direction passes ``None``
+        explicitly: omitting it raises pydantic's own ``missing`` and never
+        reaches this validator, where `rule`'s default of ``None`` lets the
+        sibling above omit it.
+
+        The approval direction needs a real intent, because `_check_invariants`
+        binds `intent` to `approved` *first* -- without one it refuses for the
+        wrong reason and this test would pass on the wrong error.
+        """
+        with pytest.raises(ValidationError, match="must name the stage"):
+            RiskAssessment(symbol=SYMBOL, approved=False, reason="because", stage=None)
+
+        with pytest.raises(ValidationError, match="must name the stage"):
+            RiskAssessment(
+                symbol=SYMBOL,
+                approved=True,
+                reason="fine",
+                stage=RefusalStage.LIMIT_REFUSED,
+                intent=TradeIntent(
+                    symbol=SYMBOL, side=OrderSide.BUY, quantity=D("1"), price=D("100")
+                ),
+            )

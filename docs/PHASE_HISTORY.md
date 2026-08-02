@@ -984,6 +984,45 @@ the test passing for an unrelated reason.
 **A fifth ordering test was planned, written into the milestone brief, and then
 withdrawn** — see finding (iii).
 
+### The approval half was pinned in a follow-up, not during M4b
+
+M4b pinned the refusal half ten ways and the approval half not at all. The
+omission was deliberate at the time and wrong: a test asserting an approval
+reports no stage was written during the milestone and withdrawn to hold the
+agreed count, on the reasoning that `TestLogSchema` already asserted
+`"stage" not in fields` for an approved entry.
+
+That reasoning does not survive inspection. **That assertion is downstream of
+`IntentLogger`'s early return**, which handles the approval branch without ever
+reading `stage`, so it passes regardless of what the domain does. It cannot fail
+if the approval half of the invariant breaks. The follow-up added the test back.
+
+It also took **two** tests, not one, because there were two claims hiding behind
+one sentence:
+
+* `test_an_approval_reports_no_stage` (`TestEvaluate`) drives a real `evaluate`
+  approval and asserts `stage is None`. This pins **`evaluate`'s behaviour**.
+* `test_a_risk_assessment_stage_must_agree_with_its_verdict` (`TestMoneyGuard`,
+  beside the two `RiskDecision` siblings it mirrors) constructs directly and
+  asserts both illegal combinations raise. This pins **the validator**.
+
+Neither implies the other, and the first alone leaves the validator deletable
+with a green suite — verified by deleting the clause and watching exactly the
+second test fail while the first passed.
+
+The direct-construction test could not quite mirror its `RiskDecision` siblings,
+for two reasons worth recording. `stage` is **required** while `rule` carries a
+default, so the refusal direction must pass `None` explicitly — omitting it
+raises pydantic's own `missing` and never reaches the validator. And the
+approval direction needs a real `TradeIntent`, because `_check_invariants` binds
+`intent` to `approved` first and would otherwise refuse for the wrong reason,
+passing the test on the wrong error.
+
+**`_exit_assessment`'s approval site remains unpinned.** It is a second,
+independent `stage=None` construction and can drift alone; its fixture shape
+differs enough that covering it is a separate piece of work rather than a rider.
+Recorded rather than covered.
+
 ### One test legitimately died
 
 `test_an_assessment_with_no_decision_past_the_preconditions_is_a_defect` and
