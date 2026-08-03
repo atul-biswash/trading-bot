@@ -30,6 +30,17 @@ rounding itself. Both operations only ever reduce, which is what lets
 :class:`~trading_bot.core.models.SizingDecision` assert
 ``quantity <= requested_quantity``.
 
+**Lot filters are taken at their strictest.** ``LOT_SIZE`` always applies;
+``MARKET_LOT_SIZE`` applies to orders that execute at market, and whether it
+also binds an order that *becomes* a market order on trigger -- a protective
+``STOP_LOSS`` -- is stated by neither the exchange response nor
+``python-binance``. Rather than guess, sizing rounds to
+:attr:`~trading_bot.core.models.SymbolInfo.effective_step_size` and checks
+:attr:`~trading_bot.core.models.SymbolInfo.effective_min_qty`, each the coarser
+of the two filters. On BTCUSDT and ETHUSDT -- Testnet and mainnet alike --
+``MARKET_LOT_SIZE`` reports zeroed min/step, so the conservative choice
+currently costs nothing; it is made for the symbol that has not been checked.
+
 **Exchange filters are applied here, not deferred to execution.** Sizing takes
 :class:`~trading_bot.core.models.SymbolInfo` and returns a quantity that already
 satisfies ``step_size``, ``min_qty`` and ``min_notional``. The alternative --
@@ -238,7 +249,8 @@ def calculate_position_size(
     quantity = min(requested, max_quantity)
 
     # Down to a whole number of lots. Never up: see the module docstring.
-    quantity = round_step_size(quantity, symbol_info.step_size)
+    # The *effective* step is the coarser of LOT_SIZE and MARKET_LOT_SIZE.
+    quantity = round_step_size(quantity, symbol_info.effective_step_size)
 
     basis = sizing.method.value
     if capped:
@@ -253,9 +265,11 @@ def calculate_position_size(
         )
 
     if quantity <= 0:
-        return reject(f"size {requested} rounds to zero at step_size {symbol_info.step_size}")
-    if quantity < symbol_info.min_qty:
-        return reject(f"quantity {quantity} below min_qty {symbol_info.min_qty}")
+        return reject(
+            f"size {requested} rounds to zero at step_size {symbol_info.effective_step_size}"
+        )
+    if quantity < symbol_info.effective_min_qty:
+        return reject(f"quantity {quantity} below min_qty {symbol_info.effective_min_qty}")
 
     # The stop rests below the entry on a long, so its notional is the smaller
     # one and it is the one the exchange rejects. See the module docstring.

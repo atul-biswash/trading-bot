@@ -164,6 +164,34 @@ class Balance(_Frozen):
         return self.free + self.locked
 
 
+class MarketLotSize(_Frozen):
+    """The ``MARKET_LOT_SIZE`` filter. Optional -- not every symbol reports it.
+
+    Binance applies this filter to orders that execute *at market*. Whether it
+    also binds an order that becomes a market order on trigger -- a
+    ``STOP_LOSS`` -- is **not stated** by the exchange response or by
+    ``python-binance``, both of which carry the values and no semantics. Sizing
+    therefore takes the stricter of this and ``LOT_SIZE`` rather than guessing;
+    see :attr:`SymbolInfo.effective_step_size`.
+
+    **The "0 means no constraint" convention is per-field, not filter-wide.**
+    ``min_qty`` and ``step_size`` follow it. ``max_qty`` does **not**: a symbol
+    can report a real maximum alongside zeroed min/step, and both Binance Spot
+    Testnet and mainnet do exactly that for BTCUSDT. Applying one rule to all
+    three would either discard a live maximum or refuse every trade.
+
+    ``max_qty`` is therefore parsed for fidelity to the wire and deliberately
+    **not read**: nothing in this system enforces a maximum quantity today, and
+    ``limits.max_position_size_percent`` already bounds size from above. It is
+    here so the mapper is tested against the whole filter rather than a
+    convenient subset.
+    """
+
+    min_qty: Money  # MARKET_LOT_SIZE minQty; 0 means unconstrained
+    max_qty: Money  # MARKET_LOT_SIZE maxQty; parsed, not read -- see above
+    step_size: Money  # MARKET_LOT_SIZE stepSize; 0 means unconstrained
+
+
 class SymbolInfo(_Frozen):
     """Trading rules (filters) for a symbol, needed to size and round orders."""
 
@@ -174,6 +202,30 @@ class SymbolInfo(_Frozen):
     step_size: Money  # LOT_SIZE stepSize
     min_qty: Money  # LOT_SIZE minQty
     min_notional: Money  # MIN_NOTIONAL / NOTIONAL
+    #: ``MARKET_LOT_SIZE``, when the symbol reports it. ``None`` is normal.
+    market_lot: MarketLotSize | None = None
+
+    @property
+    def effective_step_size(self) -> Decimal:
+        """The coarser of the two lot steps -- the conservative one.
+
+        A larger step is stricter, and ``max`` also disposes of the "0 means
+        unconstrained" case for free: a zeroed market step can never win.
+        """
+        if self.market_lot is None:
+            return self.step_size
+        return max(self.step_size, self.market_lot.step_size)
+
+    @property
+    def effective_min_qty(self) -> Decimal:
+        """The higher of the two minimum quantities -- the conservative one.
+
+        Same reasoning as :attr:`effective_step_size`: a higher floor is
+        stricter, and a zeroed market minimum cannot win.
+        """
+        if self.market_lot is None:
+            return self.min_qty
+        return max(self.min_qty, self.market_lot.min_qty)
 
 
 class OrderRequest(_Frozen):

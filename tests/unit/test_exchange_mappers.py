@@ -62,6 +62,44 @@ SYMBOL_MIN_NOTIONAL = {  # legacy MIN_NOTIONAL spelling
     ],
 }
 
+# MARKET_LOT_SIZE comes in three shapes and all three are live. Absent is a
+# normal symbol; the zeroed shape is what Binance Spot Testnet *and* mainnet
+# both return for BTCUSDT (a real maxQty beside zeroed min/step); the populated
+# shape is the one where the filter actually binds.
+SYMBOL_MARKET_LOT_ZEROED = {
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00001000"},
+        {"filterType": "NOTIONAL", "minNotional": "5.00000000"},
+        {
+            "filterType": "MARKET_LOT_SIZE",
+            "minQty": "0.00000000",
+            "maxQty": "146.30917125",
+            "stepSize": "0.00000000",
+        },
+    ],
+}
+
+SYMBOL_MARKET_LOT_POPULATED = {
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00001000"},
+        {"filterType": "NOTIONAL", "minNotional": "5.00000000"},
+        {
+            "filterType": "MARKET_LOT_SIZE",
+            "minQty": "0.00100000",
+            "maxQty": "100.00000000",
+            "stepSize": "0.00100000",
+        },
+    ],
+}
+
 TICKER_24H = {
     "symbol": "BTCUSDT",
     "lastPrice": "65000.50000000",
@@ -236,6 +274,46 @@ def test_to_symbol_info_missing_required_filter_raises() -> None:
     }
     with pytest.raises(ExchangeAPIError):
         m.to_symbol_info(broken)
+
+
+# --------------------------------------------------------------------------
+# MARKET_LOT_SIZE: optional, and its three live shapes
+# --------------------------------------------------------------------------
+def test_market_lot_size_absent_is_normal_not_malformed() -> None:
+    """An absent MARKET_LOT_SIZE must not raise the way a missing LOT_SIZE does."""
+    info = m.to_symbol_info(SYMBOL_NOTIONAL)
+    assert info.market_lot is None
+    # With no market filter, effective == LOT_SIZE.
+    assert info.effective_step_size == Decimal("0.00001")
+    assert info.effective_min_qty == Decimal("0.00001")
+
+
+def test_market_lot_size_zeroed_keeps_a_real_max_qty() -> None:
+    """The shape Testnet and mainnet both return: zeroed min/step, live maxQty.
+
+    A uniform "0 means absent" rule would discard the maximum; the per-field
+    convention is why ``max_qty`` is parsed rather than folded into the
+    effective values.
+    """
+    info = m.to_symbol_info(SYMBOL_MARKET_LOT_ZEROED)
+    assert info.market_lot is not None
+    assert info.market_lot.min_qty == Decimal("0")
+    assert info.market_lot.step_size == Decimal("0")
+    assert info.market_lot.max_qty == Decimal("146.30917125")
+    # Zeroed market values can never win the max(), so LOT_SIZE stands.
+    assert info.effective_step_size == Decimal("0.00001")
+    assert info.effective_min_qty == Decimal("0.00001")
+
+
+def test_market_lot_size_populated_wins_when_stricter() -> None:
+    """The case the conservative rule exists for."""
+    info = m.to_symbol_info(SYMBOL_MARKET_LOT_POPULATED)
+    assert info.market_lot is not None
+    assert info.effective_step_size == Decimal("0.001")  # market step is coarser
+    assert info.effective_min_qty == Decimal("0.001")  # market floor is higher
+    # The raw LOT_SIZE values are untouched -- effective is derived, not stored.
+    assert info.step_size == Decimal("0.00001")
+    assert info.min_qty == Decimal("0.00001")
 
 
 # --------------------------------------------------------------------------

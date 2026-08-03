@@ -43,6 +43,7 @@ from trading_bot.core.exceptions import (
 from trading_bot.core.models import (
     Balance,
     Candle,
+    MarketLotSize,
     Order,
     OrderRequest,
     SymbolInfo,
@@ -138,6 +139,10 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
     Extracts the trading filters needed to size and round orders. Binance
     renamed ``MIN_NOTIONAL`` to ``NOTIONAL``; both spellings are accepted.
     Raises :class:`ExchangeAPIError` if a mandatory filter is missing.
+
+    ``MARKET_LOT_SIZE`` is **optional**, and its absence is a normal symbol
+    rather than a malformed payload -- so it is fetched with ``get`` and left as
+    ``None``, while ``PRICE_FILTER`` and ``LOT_SIZE`` keep raising.
     """
     filters = _filters_by_type(raw)
     try:
@@ -149,6 +154,16 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
         ) from exc
 
     notional = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
+    raw_market_lot = filters.get("MARKET_LOT_SIZE")
+    market_lot = (
+        MarketLotSize(
+            min_qty=_dec(raw_market_lot["minQty"]),
+            max_qty=_dec(raw_market_lot["maxQty"]),
+            step_size=_dec(raw_market_lot["stepSize"]),
+        )
+        if raw_market_lot is not None
+        else None
+    )
     return SymbolInfo(
         symbol=raw["symbol"],
         base_asset=raw["baseAsset"],
@@ -157,6 +172,7 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
         step_size=_dec(lot_size["stepSize"]),
         min_qty=_dec(lot_size["minQty"]),
         min_notional=_dec(notional.get("minNotional", "0")),
+        market_lot=market_lot,
     )
 
 

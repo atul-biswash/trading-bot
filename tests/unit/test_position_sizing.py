@@ -17,7 +17,7 @@ import pytest
 
 from trading_bot.config.models import PositionSizingConfig, RiskLimitsConfig
 from trading_bot.core.enums import OrderSide, OrderType, PositionSizingMethod
-from trading_bot.core.models import OrderRequest, SizingDecision, SymbolInfo
+from trading_bot.core.models import MarketLotSize, OrderRequest, SizingDecision, SymbolInfo
 from trading_bot.risk.position_sizing import (
     calculate_position_size,
     size_by_fixed_amount,
@@ -651,3 +651,95 @@ class TestNoFloatLeaks:
         for value in results:
             assert isinstance(value, Decimal)
             assert not isinstance(value, float)
+
+
+# --------------------------------------------------------------------------
+# Lot filters are taken at their strictest
+# --------------------------------------------------------------------------
+class TestEffectiveLotFilters:
+    """MARKET_LOT_SIZE binds sizing when it is coarser than LOT_SIZE.
+
+    Whether it binds a *triggered* STOP_LOSS is stated nowhere, so sizing takes
+    the stricter of the two rather than guessing. On BTCUSDT and ETHUSDT the
+    market filter reports zeroed min/step on both Testnet and mainnet, so this
+    is conservatism for the symbol nobody has checked.
+    """
+
+    @staticmethod
+    def _info(*, market: MarketLotSize | None) -> SymbolInfo:
+        return SymbolInfo(
+            symbol="BTCUSDT",
+            base_asset="BTC",
+            quote_asset="USDT",
+            price_tick=Decimal("0.01"),
+            step_size=Decimal("0.001"),
+            min_qty=Decimal("0.001"),
+            min_notional=Decimal("0"),
+            market_lot=market,
+        )
+
+    def test_coarser_market_step_rounds_the_quantity_further_down(self) -> None:
+        """The price is chosen so the two steps give *different* answers.
+
+        200 quote at 77 is 2.597402... -- 2.597 on the LOT_SIZE step of 0.001,
+        but 2.5 on the coarser market step of 0.1. A price where both steps
+        divide evenly would pass whichever step were used and prove nothing.
+        """
+        market = MarketLotSize(
+            min_qty=Decimal("0"), max_qty=Decimal("100"), step_size=Decimal("0.1")
+        )
+        common = {
+            "equity": Decimal("10000"),
+            "price": Decimal("77"),
+            "sizing": make_sizing(fraction="0.02"),
+            "limits": make_limits(),
+        }
+        strict = calculate_position_size(symbol_info=self._info(market=market), **common)
+        lenient = calculate_position_size(symbol_info=self._info(market=None), **common)
+
+        assert lenient.quantity == Decimal("2.597")  # LOT_SIZE step alone
+        assert strict.quantity == Decimal("2.5")  # coarser MARKET_LOT_SIZE step
+        assert strict.quantity < lenient.quantity
+
+    def test_a_higher_market_min_qty_refuses_a_size_lot_size_would_allow(self) -> None:
+        market = MarketLotSize(min_qty=Decimal("5"), max_qty=Decimal("100"), step_size=Decimal("0"))
+        strict = calculate_position_size(
+            symbol_info=self._info(market=market),
+            equity=Decimal("10000"),
+            price=Decimal("100"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+        )
+        assert strict.quantity == Decimal(0)
+        assert "min_qty 5" in strict.reason
+
+        lenient = calculate_position_size(
+            symbol_info=self._info(market=None),
+            equity=Decimal("10000"),
+            price=Decimal("100"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+        )
+        assert lenient.quantity == Decimal("2")
+        assert lenient.is_tradeable
+
+    def test_zeroed_market_filter_changes_nothing(self) -> None:
+        """The live Testnet/mainnet shape must be a no-op, not a trap."""
+        market = MarketLotSize(
+            min_qty=Decimal("0"), max_qty=Decimal("146.30917125"), step_size=Decimal("0")
+        )
+        zeroed = calculate_position_size(
+            symbol_info=self._info(market=market),
+            equity=Decimal("10000"),
+            price=Decimal("100"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+        )
+        absent = calculate_position_size(
+            symbol_info=self._info(market=None),
+            equity=Decimal("10000"),
+            price=Decimal("100"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+        )
+        assert zeroed.quantity == absent.quantity == Decimal("2")

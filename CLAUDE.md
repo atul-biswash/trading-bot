@@ -390,8 +390,8 @@ The four steps, and what each reports when green:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  83 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 636 passed, 3 skipped
-                                       (639 passed with Testnet credentials present)
+pytest                                 647 passed, 3 skipped
+                                       (650 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -400,14 +400,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `639 passed` on a machine with Binance Testnet credentials in `.env`
-- `636 passed, 3 skipped` on a machine without them
+- `650 passed` on a machine with Binance Testnet credentials in `.env`
+- `647 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 636 and must not read it as a regression against a documented
-639. Quote the count with its condition, never bare.
+runner will see 647 and must not read it as a regression against a documented
+650. Quote the count with its condition, never bare.
 
-Only the `639` is measured here; `636` is `639` minus the three `skipif`-gated
+Only the `650` is measured here; `647` is `650` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -422,7 +422,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 636, so **treat a lone
+output was read. The unit suite is deterministic at 647, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.

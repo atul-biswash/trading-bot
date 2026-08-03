@@ -107,6 +107,28 @@ M4a's boot-snapshot portfolio, which nothing mutates today.
 
 ## Open items — not scoped to any milestone
 
+- **`_enforce` skips the notional check for exactly the order types
+  `applyMinToMarket` covers. Belongs to M5.** `BinanceClient._enforce` guards
+  its `min_notional` check with `if price is not None`, and
+  `OrderRequest.price` is `None` for both `MARKET` and stop-market
+  (`STOP_LOSS`, which carries only `stop_price`). So the "independent last
+  line of defence" is blind for precisely the orders the `NOTIONAL` filter's
+  `applyMinToMarket=true` applies to — measured `true` on BTCUSDT and ETHUSDT,
+  on Testnet and mainnet alike.
+
+  This is the sibling of the sizing bug fixed alongside this entry, one layer
+  down, and it is **not** closed by that fix: sizing now measures the notional
+  at the lowest price the trade carries, but `_enforce` re-checks
+  independently and cannot perform the check at all without a reference price.
+
+  It cannot be fixed by symmetry. A market order has no price to multiply, so
+  `_enforce` would need one passed in — a signature change to the adapter plus
+  a decision about where that price comes from (the signal's reference price,
+  a fresh ticker, or the `avgPrice` the filter itself is evaluated against,
+  which is a 5-minute average and not any price the caller holds). That is a
+  design question, not a patch, and it belongs with M5's order dispatch where
+  the caller and the price are both in scope.
+
 - **`Portfolio.free_quote` has no `ge=0` constraint** (`core/portfolio.py`). A
   negative free quote is nonsense for spot and is unreachable today only because
   the portfolio is seeded from exchange balance strings — an unenforced domain
