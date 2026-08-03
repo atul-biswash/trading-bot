@@ -47,6 +47,21 @@ truncated down to ``step_size`` as the final step, and a lot step is many orders
 of magnitude coarser than the 28th significant digit. The returned quantity is
 therefore an exact multiple of ``step_size``, which the tests assert directly.
 
+**``min_notional`` is checked at the lowest price the trade will carry, not at
+the entry price.** Binance evaluates the notional of *every* order, and for an
+algo order that includes ``stopPrice * quantity``. A protective stop rests below
+the entry on a long, so its notional is smaller: a quantity that clears the
+filter at the entry can be rejected at the stop with ``-1013 Filter failure:
+NOTIONAL``, and under a bracketed entry that rejection takes the whole order
+list with it. ``stop_price`` -- already a parameter, because ``risk_per_trade``
+sizes from it -- is therefore also the notional floor. The two uses are one
+number for one reason: where the stop actually is.
+
+The comparison is ``min(price, stop_price)`` rather than ``stop_price``
+directly. Nothing here assumes which side of the entry the stop sits on --
+``size_by_risk_per_trade`` deliberately takes an absolute distance -- and
+``min`` keeps that property intact.
+
 **Market orders.** ``min_notional`` is checked against the signal's reference
 price. A market order can fill slightly away from it, so a quantity that clears
 the filter here can still be rejected at the exchange. That is the honest limit
@@ -184,6 +199,14 @@ def calculate_position_size(
     symbol's lot ``step_size``; then verify it clears ``min_qty`` and
     ``min_notional``.
 
+    ``stop_price`` does two jobs, and they are the same fact: it is the distance
+    basis for ``risk_per_trade``, and it is the price ``min_notional`` is
+    measured at, because a protective leg resting there carries a smaller
+    notional than the entry does. A size that clears the filter at the entry and
+    fails at the stop is **refused**, never rounded up to clear -- every step in
+    this pipeline only reduces, and raising the quantity could breach both the
+    position cap and the risk budget.
+
     Capping before rounding matters. Rounding first and capping second could
     leave a quantity that is a valid lot multiple but sits fractionally above the
     cap, forcing a second rounding pass; this order needs only one.
@@ -234,9 +257,14 @@ def calculate_position_size(
     if quantity < symbol_info.min_qty:
         return reject(f"quantity {quantity} below min_qty {symbol_info.min_qty}")
 
-    notional = quantity * price
+    # The stop rests below the entry on a long, so its notional is the smaller
+    # one and it is the one the exchange rejects. See the module docstring.
+    binding_price = price if stop_price is None else min(price, stop_price)
+    notional = quantity * binding_price
     if notional < symbol_info.min_notional:
-        return reject(f"notional {notional} below min_notional {symbol_info.min_notional}")
+        return reject(
+            f"notional {notional} at {binding_price} below min_notional {symbol_info.min_notional}"
+        )
 
     return SizingDecision(
         symbol=symbol_info.symbol,

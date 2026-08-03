@@ -441,6 +441,98 @@ class TestFilterRejection:
 
 
 # --------------------------------------------------------------------------
+# min_notional binds at the lowest price the trade will carry
+# --------------------------------------------------------------------------
+class TestNotionalBindsAtTheStop:
+    """Binance evaluates ``stopPrice * quantity`` for an algo order too.
+
+    A protective stop rests below the entry on a long, so it carries the smaller
+    notional. Sizing that measured only the entry produced quantities the
+    exchange rejects with ``-1013 Filter failure: NOTIONAL`` -- observed live on
+    Binance Spot Testnet before this check existed.
+    """
+
+    def test_clears_at_entry_but_fails_at_the_stop_is_refused(self) -> None:
+        """The exact case the old code passed and the exchange rejected.
+
+        0.2 at 50 is exactly 10 -- the floor. The same 0.2 at the stop price of
+        45 is 9, which is below it. The trade must be refused.
+        """
+        decision = calculate_position_size(
+            symbol_info=make_symbol_info(step_size="0.1", min_qty="0", min_notional="10"),
+            equity=Decimal("500"),
+            price=Decimal("50"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+            stop_price=Decimal("45"),
+        )
+        assert decision.quantity == Decimal(0)
+        assert not decision.is_tradeable
+        # Exact, not approximate: 0.2 * 45, never 8.999999...
+        assert decision.requested_quantity * Decimal("45") == Decimal("9.0")
+
+    def test_the_reason_names_the_binding_price_not_the_entry(self) -> None:
+        """An operator must be able to see *which* price refused the trade."""
+        decision = calculate_position_size(
+            symbol_info=make_symbol_info(step_size="0.1", min_qty="0", min_notional="10"),
+            equity=Decimal("500"),
+            price=Decimal("50"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+            stop_price=Decimal("45"),
+        )
+        assert "at 45" in decision.reason
+        assert "min_notional" in decision.reason
+
+    def test_a_stop_that_still_clears_the_floor_trades(self) -> None:
+        """The check is a floor at the stop, not a blanket penalty."""
+        decision = calculate_position_size(
+            symbol_info=make_symbol_info(step_size="0.1", min_qty="0", min_notional="10"),
+            equity=Decimal("1000"),
+            price=Decimal("50"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+            stop_price=Decimal("45"),
+        )
+        assert decision.quantity == Decimal("0.4")
+        assert decision.quantity * Decimal("45") == Decimal("18")
+        assert decision.is_tradeable
+
+    def test_no_stop_price_falls_back_to_the_entry_price(self) -> None:
+        """Stops disabled: there is no lower leg, so the entry is the floor."""
+        decision = calculate_position_size(
+            symbol_info=make_symbol_info(step_size="0.1", min_qty="0", min_notional="10"),
+            equity=Decimal("500"),
+            price=Decimal("50"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+        )
+        assert decision.quantity == Decimal("0.2")
+        assert decision.is_tradeable
+
+    def test_a_stop_above_the_entry_does_not_relax_the_floor(self) -> None:
+        """``min``, not ``stop_price``: the function stays side-agnostic.
+
+        Unreachable on spot (a long's stop is below entry), but
+        ``size_by_risk_per_trade`` takes an absolute distance and does not assume
+        a side, so this one must not either. Using ``stop_price`` directly would
+        raise the measured notional here and let a sub-minimum trade through.
+        """
+        decision = calculate_position_size(
+            symbol_info=make_symbol_info(step_size="0.1", min_qty="0", min_notional="10"),
+            equity=Decimal("495"),
+            price=Decimal("49.5"),
+            sizing=make_sizing(fraction="0.02"),
+            limits=make_limits(),
+            stop_price=Decimal("60"),
+        )
+        # 0.2 at the entry of 49.5 is 9.9 -- below the floor of 10. At the stop
+        # of 60 it would be 12, which clears. The entry must win.
+        assert decision.quantity == Decimal(0)
+        assert "at 49.5" in decision.reason
+
+
+# --------------------------------------------------------------------------
 # SizingDecision invariants
 # --------------------------------------------------------------------------
 class TestSizingDecisionInvariants:
