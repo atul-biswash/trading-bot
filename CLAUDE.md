@@ -6,6 +6,7 @@ prioritises correctness, safety and robustness over speed of development.
 
 Detailed build history: `docs/PHASE_HISTORY.md`
 Current task: `docs/NEXT_MILESTONE.md`
+Protective-order contract: `docs/QC_PROTECTIVE_ORDERS.md`
 
 ---
 
@@ -246,14 +247,43 @@ scripts/         check_testnet.py · download_data.py
   frame, then `isfinite` on the scalar — bar count alone is not sufficient,
   because a bad tick re-masks to NaN long after warmup. No ATR ⇒ refuse the
   signal; never fall back to a percent stop.
-- **Exit evaluation is fed the closed candle's `close`**, never its high/low —
-  triggering on a price the bar has already left is optimistic in backtest and
-  dishonest live. `check_exit` / `advance_trailing_stop` live on the manager;
-  *driving* them from the candle subscription is execution's job, because an exit
-  check is per-candle-per-position and `on_signal` skips quiet bars.
+- **Client-side exit evaluation is fed the closed candle's `close`**, never its
+  high/low — triggering on a price the bar has already left is optimistic in
+  backtest and dishonest live. `check_exit` / `advance_trailing_stop` live on the
+  manager; *driving* them from the candle subscription is execution's job, because
+  an exit check is per-candle-per-position and `on_signal` skips quiet bars.
+
+  **Q-C re-scoped this rule; it did not repeal it.** It governs *client-side*
+  evaluation, where the bot chooses when to act. A protective order resting at the
+  exchange triggers **intrabar**, and that fill is not a client decision — so the
+  close-only rule does not describe it and must not be applied to it. The
+  consequence is recorded rather than hidden: `backtesting/` must model intrabar
+  triggering to keep backtest and live on one code path, and that is the largest
+  cost Q-C carries. See `docs/QC_PROTECTIVE_ORDERS.md`.
 - **`TradeIntent` is not an `OrderRequest`** — no take-profit field, and
   `stop_price` there means "this order's trigger". Mapping intent → orders is
   execution's job.
+
+**Protective orders (Q-C — full reasoning in `docs/QC_PROTECTIVE_ORDERS.md`)**
+- **Entry and protection are placed in one order-list call.** No client-side /
+  exchange split. Protection is *accepted* atomically with the entry; acceptance
+  is **not** activation, and the fill path is unmeasured.
+- **Leg types are fixed:** working `LIMIT`+`FOK`, below `STOP_LOSS`, above
+  `TAKE_PROFIT` — all three stop-market or marketable, none post-only.
+  `LIMIT_MAKER` was rejected for an activation-rejection mode whose blast radius
+  on the sibling stop is unmeasured.
+- **The placement shape branches four ways and the branch is irreducible.**
+  `PERCENT_PRICE_BY_SIDE` refuses a whole list at submission, so a "never fills"
+  dummy leg to force one shape is impossible.
+- **Take-profit without a stop is refused at config load, and that refusal is a
+  JUDGEMENT about payoff shape, not a measurement.** The code accepts it today and
+  so would the exchange. Both-disabled stays reachable with a boot warning.
+- **Reconciliation is keyed off what was REQUESTED, never off what is absent**,
+  and compares only fields that round-trip. `contingencyType` never says
+  `"OTOCO"`, so shape comes from leg count or our own IDs.
+- **`translate_binance_error` must match message text, not code.** `-2010` and
+  `-2011` each carry several meanings, and `-2010 'Duplicate order sent.'` is a
+  *success* signal under deterministic client order IDs.
 - **`assessment.decision.rule is None` means "the limits passed", NOT
   "approved".** `RiskAssessment` has no `rule` field at all; the rule is reached
   through `decision`, and is doubly optional — `decision` may be `None`, and
@@ -539,6 +569,25 @@ normal test already pins the order); and enforcement by Python itself (swapping
 a null-guard that also binds the name yields `NameError`). Only the first is
 something a future edit can delete by accident.
 
+### A discovery loop's budget must EXCEED the unknown it is discovering
+
+An attempt cap on a schema-derivation walk is not a safety margin — it is a
+guess about the answer. A walk that reveals **one field per round trip** needs a
+budget larger than the field count, and the field count is precisely what the
+walk exists to discover, so a cap chosen in advance can silently become the
+finding instead of the endpoint's behaviour.
+
+Q-C paid for this. The OTO schema walk was capped at 8 and needed 10: it stopped
+having learned eight parameter names and **nothing about whether the shape is
+accepted**, which was the actual question. The cap had to be raised and the walk
+resumed from the derived set — one extra round trip, and a report whose headline
+was "UNRESOLVED at the cap" rather than an answer.
+
+Two rules follow. **Stopping at the cap is right; exceeding it silently is not** —
+a walk that quietly runs long has stopped being a measurement with a stated cost.
+And **report the cap as a possible cause** whenever a walk terminates on it, so
+"the budget ran out" is never mistaken for "the endpoint refused".
+
 **There is a fourth answer, and it is "do not write the test":
 order-independence.** Before pinning an order, check that the two conditions can
 both hold. `size_not_tradeable` and `unaffordable` look like an obvious adjacent
@@ -618,15 +667,42 @@ imports `risk/` and so `risk/` cannot import `engine/`. `RiskManager.evaluate`
 sets `RiskAssessment.stage` at each of the twelve construction sites, and
 `modes._refusal_stage` — which re-derived `evaluate`'s control flow in a second
 file to label the log line — is deleted. `UNCLASSIFIED` left with it.
-`RiskAssessment` itself did **not** move; that collides with the port question
-and is settled once, in M5, with execution visible as a second consumer.
+`RiskAssessment` itself did **not** move; that collided with the port question,
+which Q-C has now decided (see below).
 
 Done in three commits: a byte-identical mechanical move, then the field and its
 invariant, then the deletion. The redundant ladder was kept for exactly one
 commit so its answer could be compared against the new field across all ten
 paths before being removed. The new ordering test is mutation-proved.
 
-Next: **Q-A**, the per-collaborator failure counter — **unscheduled**, because
-its thresholds need soak data and nothing has dispatched an order yet, so the
-`collaborator_failed` lines it would be calibrated from do not exist. **M5**
-places an order. See `docs/NEXT_MILESTONE.md`.
+**Two sizing bugs were fixed before Q-C's design**, both independent of where
+protection rests. `calculate_position_size` measured `min_notional` at the entry
+price only, while Binance evaluates `stopPrice * quantity` for an algo order too —
+so a stop resting below the entry carries the smaller notional and is the leg the
+exchange rejects. Observed live, not deduced: a Testnet probe took `-1013 Filter
+failure: NOTIONAL` on exactly that. No signature change was needed; `stop_price`
+was already a parameter and the check simply ignored it. Separately,
+`MARKET_LOT_SIZE` is now modelled — optional per symbol, with `effective_step_size`
+/ `effective_min_qty` taking the stricter of it and `LOT_SIZE`, because whether it
+binds a *triggered* stop is stated by neither the library nor `exchangeInfo`.
+
+**Q-C is complete, and it is a written contract rather than code.**
+`docs/QC_PROTECTIVE_ORDERS.md` decides where the protective levels live: entry
+and protection go out in **one order-list call**, there is no client-side /
+exchange split, and `check_exit` is demoted from actor to divergence monitor. It
+was run as **two independent proposals** — one written here from the tree and the
+probe record, one written in chat — then compared, with four disagreements pinned
+and adjudicated. The schemas, forbidden fields, error-code overloads and
+read-back asymmetries it relies on were measured across ten Testnet probe steps,
+and every claim in the note is marked MEASURED, DOCUMENTED or UNMEASURED. Q-D was
+folded in as a decision: the port widens and `RiskAssessment` moves with it.
+
+**Still nothing places an order.** `IntentLogger` remains the terminal
+collaborator; `execution/` is still a pair of stubs.
+
+Next: **M5**, order dispatch — it implements Q-C's contract and is where the bot
+first places an order. **Q-A** stays unscheduled: its thresholds need soak data
+and nothing has dispatched an order yet, so the `collaborator_failed` lines it
+would be calibrated from do not exist. **Q-B**, escalation policy, is settled at
+the start of M5 because Q-C leans on it in three places. See
+`docs/NEXT_MILESTONE.md`.

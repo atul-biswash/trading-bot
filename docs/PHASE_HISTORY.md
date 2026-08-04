@@ -1087,6 +1087,188 @@ be taken: its thresholds must come from soak data that cannot exist until
 something dispatches an order, so it is blocked behind M5 — while Q-C, which
 decides where the protective levels actually rest, blocks M5 in turn.
 
+## Phase 5 Q-C — where the protective levels live
+
+Decide-and-document. The output is a written contract,
+`docs/QC_PROTECTIVE_ORDERS.md`, and no line of `src/` changed. M5 implements
+against it.
+
+### The question, and why it blocked M5
+
+Every executor design assumes an answer to "which protective levels rest at the
+exchange and which stay client-side", whether or not it says so. The answer
+decides what `create_order` is called with and how many times, what the
+unprotected window between an entry fill and its stop actually is, what
+order-status tracking has to track, and what `Portfolio` write-back reconciles
+against. Settled afterwards, the executor gets rewritten rather than extended.
+
+### Two independent proposals, and where they diverged
+
+This milestone was run as two proposals rather than one. A design was written
+from the tree and the probe record on the assistant side, and a second was
+written in chat; they were then compared and the disagreements pinned for
+adjudication. The method was deliberate — a single proposal is checked only for
+internal consistency, while two are checked against each other.
+
+They agreed on the core: one order-list call, no split, protection accepted
+atomically with the entry, client-side `check_exit` demoted from actor to
+divergence monitor, deterministic client order IDs, and reconciliation keyed off
+queries rather than cached state.
+
+They diverged on four points, and the chat-side position won each:
+
+**(i) The take-profit leg type.** The assistant proposed `LIMIT_MAKER`,
+principally because it is free against the `MAX_NUM_ALGO_ORDERS` ceiling
+(measured: eight consecutive `LIMIT_MAKER` orders never tripped it, while a stop
+does) and earns maker rather than taker fees. The chat-side position was
+`TAKE_PROFIT`, on the grounds that the algo-ceiling advantage had already been
+downgraded as a constraint and the case therefore reduced to fees, while
+`LIMIT_MAKER` is post-only and carries a rejection mode at activation whose blast
+radius on the sibling stop is unmeasured. Choosing the measured failure mode over
+the unmeasured one on the protective path won.
+
+**(ii) Escalating on "entry FILLED, pendings PENDING_NEW".** The assistant's
+reconciliation table had this as a `CRITICAL` — "impossible if placement
+succeeded". It is not impossible; Binance documents it as the normal post-fill
+response requiring a re-query, and under `FOK` it is the expected success path.
+The row would have fired `CRITICAL` on every successful trade. Removed, replaced
+by a re-query with a bounded deadline.
+
+**(iii) The unprotected-divergence trigger.** The assistant keyed it on absence —
+"position open, zero legs resting". Under a both-disabled configuration that
+fires `CRITICAL` every candle forever. Re-keyed onto requested-and-absent, which
+is what divergence actually means, and `ProtectionState` gained
+`ABSENT_BY_DESIGN` so a deliberate absence is representable.
+
+**(iv) Identity collisions on re-placement.** The assistant's ID scheme was
+derived purely from `(symbol, entry_bar_time)`, which collides with itself the
+moment protection is re-placed after a divergence — returning `-2010 'Duplicate
+order sent.'`, which is measured. A generation segment was added, and with it the
+honest restatement of the guarantee: generation 0 is derivable by pure
+computation, anything above it is exchange-recoverable but not derivable.
+
+### The above-leg decision REVERSED under S4's evidence
+
+Worth recording because the reversal ran the other way to (i) and was driven by a
+measurement rather than by argument. The chat-side position began as
+`LIMIT_MAKER`-with-reservations. Probe S4 then placed a pending price outside
+`PERCENT_PRICE_BY_SIDE`'s upper bound and had the request refused at submission
+with `-1013`, the whole list rejected, nothing reaching `PENDING_NEW`. That
+finding hardened the preference for avoiding an unmeasured activation-time
+rejection on a leg whose failure takes the entire list with it, and the position
+moved to `TAKE_PROFIT`.
+
+A supporting argument offered at the time — that a one-price leg beats a
+two-price leg — was raised in review and **withdrawn**: `LIMIT_MAKER` and
+`TAKE_PROFIT` each carry exactly one price, so it distinguishes neither from the
+other and rules out only `TAKE_PROFIT_LIMIT`. The decision rests on the post-only
+rejection mode alone. It is recorded as withdrawn rather than quietly dropped,
+because a document of record carrying a reason that does not hold is worse than
+one carrying fewer reasons.
+
+### TP-only is refused, and the refusal is a judgement
+
+`stop_loss.enabled` and `take_profit.enabled` are independent today, and all four
+combinations are reachable — verified by running the real `RiskConfig` and
+`compute_protective_levels` across the grid rather than by reading them. The only
+existing coupling refuses `take_profit.type='rr'` and
+`position_sizing.method='risk_per_trade'` when the stop is disabled, because both
+multiply a stop distance that a disabled stop never produces. Nothing couples the
+two `enabled` flags.
+
+Take-profit-without-stop will be refused, in `RiskConfig`, because it is uniquely
+adversely shaped: winners truncated at the target, losers unbounded — the inverse
+of what a risk overlay is for — and under exchange-resting protection the
+favourable exit survives a crash while the unfavourable one does not. Nothing is
+lost, since a wide `stop_loss.percent` expresses the same intent and names the
+tolerance.
+
+**This is a JUDGEMENT about payoff shape, not a measurement.** The code accepts
+the configuration today and so would the exchange. It is written down as a
+judgement so a later reader does not mistake it for something the venue enforces.
+
+Both-disabled stays reachable with a boot warning, because `SignalAction.CLOSE`
+exists precisely so a strategy can own its exits, and refusing it would be the
+risk layer prohibiting a legitimate strategy style rather than managing risk.
+
+### A locked decision re-scoped rather than repealed
+
+`CLAUDE.md` locks "exit evaluation is fed the closed candle's `close`, never its
+high/low". That is correct for a client-side stop and wrong for an
+exchange-resting one, which triggers intrabar. Rather than leave two
+contradicting statements in the same file, the rule was re-scoped to govern
+*client-side* exit evaluation only. The consequence is recorded and not hidden:
+`backtesting/` must model intrabar triggering, which is materially harder than
+the close-only model, and it is the largest cost this design carries.
+
+### The discretionary close path, and why its order is forced
+
+A `CLOSE` signal against a position with resting protection cannot be dispatched
+as a bare sell: the discretionary sell and a protective leg triggering moments
+later would both complete, and the second sells base no longer held. The sequence
+is cancel, confirm, sell.
+
+Sell-then-cancel was rejected. It leaves a window in which the position is flat
+and a protective leg is still live, which can produce a sell against a zero
+balance; cancel-then-sell leaves a window in which the position is open and
+unprotected, between two calls the client is actively making.
+Unprotected-and-known beat protected-against-nothing.
+
+Confirmation is by query and never by the cancel response, because `-2011` cannot
+distinguish "already cancelled" from "already filled" and the two demand opposite
+actions — sell, or record an exit that has already happened. The query reads
+`executedQty` rather than `status` for the same reason.
+
+### The probe record
+
+Ten steps against Binance Spot Testnet, every one guarded by five structural
+conditions: mode, credential identity by hash, `client.testnet`, and the
+per-request resolved URI — never `client.API_URL`, which reports the production
+host even under `testnet=True`. Every cell used a working price 30% below market
+so nothing could fill, and the account total was identical at the start and end
+of every step after the first.
+
+**MEASURED:** the OTOCO 16-parameter and OTO 13-parameter schemas and the
+forbidden-field sets each rejects with `-1106`; `MARKET` refused as a working type
+(`-1159`) and `LIMIT` refused in the pending-above slot (`-1158`); `FOK` and `IOC`
+both accepted with every leg expiring and zero residue; `PERCENT_PRICE_BY_SIDE`
+enforced at submission and refusing the whole list; `contingencyType` reading
+`"OTO"` on both shapes and never `"OTOCO"`; `listClientOrderId` returning `null`
+in the placement response while correct on read-back; leg IDs honoured
+byte-for-byte on both shapes; `expiryReason` distinguishing
+`UNFILLED_FOK_ORDER_EXPIRED` from `OTO_PHASE_ONE_EXPIRED`; the overloaded meanings
+of `-2010` and `-2011`; and read-back not round-tripping the request.
+
+**DOCUMENTED, not measured:** the post-fill window in which the entry reads
+`FILLED` while pendings still read `PENDING_NEW`.
+
+**UNMEASURED, and recorded as such:** everything on the fill path, because no
+probe ever filled a working leg. That includes the `PENDING_NEW` to `NEW`
+transition, pending-leg partial fills, `LIMIT_MAKER`'s activation-rejection blast
+radius, `TAKE_PROFIT`'s algo-slot cost, and whether `MARKET_LOT_SIZE` or
+`NOTIONAL.applyMinToMarket` bind a triggered stop-type order. The last matters
+most: both protective legs are stop-markets, so if it binds, it binds on
+everything.
+
+### A probe-discipline finding, paid for in a round trip
+
+The OTO schema walk was capped at eight attempts. It needed ten. A discovery loop
+that reveals one field per round trip needs a budget **exceeding** the field
+count — and the field count is the unknown being discovered, so a cap chosen in
+advance can silently become the finding rather than the endpoint's behaviour. The
+walk stopped at the cap having learned eight field names and nothing about
+acceptance; the cap was raised and the walk resumed from the derived set. Stopping
+at the cap rather than exceeding it silently was right; setting it by guess was
+not.
+
+### Q-D folded in
+
+`RiskAssessment` and the `RiskManager` port were deferred from M4b on the grounds
+that the question needed a second consumer visible. This design supplies one: a
+reconciler, plus `check_exit` changing role from actor to monitor. The port widens
+to expose the composed path and `RiskAssessment` moves with it. Implementation is
+M5's, not Q-C's.
+
 ---
 
 ## Known open items
