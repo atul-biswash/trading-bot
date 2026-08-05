@@ -590,7 +590,12 @@ scripts/         check_testnet.py · download_data.py
 - No quoted annotations in new code (files carry `from __future__ import annotations`).
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
-- **All files are LF**, pinned by `.gitattributes`. Write LF.
+- **Write LF.** `.gitattributes` (`* text=auto eol=lf`) pins line endings going
+  forward. It does **not** describe the tree as it stands — every blob currently
+  in the repository is CRLF, because the attributes file arrived after the files
+  were committed and git does not renormalise retroactively. The bullet used to
+  claim "all files are LF" and that claim was false. See the open item in
+  `docs/NEXT_MILESTONE.md`.
 - `ruff format` is a gate (`make check`). It runs over `src tests scripts` — the
   same paths as `ruff check` — so a formatting failure surfaces in seconds,
   before pytest.
@@ -793,9 +798,17 @@ Step 3 is written that emphatically because both halves failed here. A sweep
 script that restored *after* printing crashed mid-run on a console encoding
 error and **left `src/` mutated on disk**; it was caught only by the next
 command's checksum. Its replacement restored via `read_text`/`write_text`, which
-round-trips newlines and produced a byte mismatch against this LF-pinned tree —
-content-identical, checksum-different, and indistinguishable from a real
-corruption until diffed. Never restore by re-reading and re-writing.
+round-trips newlines and produced a byte mismatch — content-identical,
+checksum-different, and indistinguishable from a real corruption until diffed.
+Never restore by re-reading and re-writing.
+
+**The mismatch was originally explained as "against this LF-pinned tree", and
+that explanation names a property the tree does not have** (every blob is CRLF —
+see the open item in `docs/NEXT_MILESTONE.md`). The *rule* is unaffected: text
+mode is newline-lossy in both directions, so re-reading and re-writing is unsafe
+whichever way the tree leans, and step 3's `shutil.copy2` is byte-exact whatever
+the bytes are. Only the stated cause is unverifiable as written, and it is
+corrected here rather than left for someone to reason from.
 
 Coverage found this way comes in three kinds, and they are not equivalent: an
 assertion that catches the mutation; an *implication* that makes an ordinary

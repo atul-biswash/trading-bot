@@ -252,3 +252,56 @@ belongs to M5.
   The proper fix is `pip-compile` with hashes over a `requirements.in` — deferred
   because it changes the install procedure for every contributor and the Docker
   build, and wants its own decision.
+
+- **The tree is CRLF, not LF. `.gitattributes` is correct; the rule that quoted
+  it was not.** `CLAUDE.md` locked "**All files are LF**, pinned by
+  `.gitattributes`" and that was false about the tree from the moment it was
+  written. The bullet has been corrected; the tree has not, deliberately.
+
+  **Measured, not inferred**, and the method matters: `git cat-file blob HEAD:<path>`
+  reads the stored bytes. `git show` does **not** — it applies the checkout
+  filters, so it renders LF and hides exactly this. Every file sampled reports CR
+  on every line:
+
+  | File at `HEAD` | lines with CR / total |
+  |---|---|
+  | `src/trading_bot/core/models.py` | 420 / 420 |
+  | `src/trading_bot/risk/manager.py` | 705 / 705 |
+  | `docs/PHASE_HISTORY.md` | 1284 / 1284 |
+  | `README.md` | 260 / 260 |
+  | `tests/unit/test_helpers.py` | 68 / 68 |
+
+  **`.gitattributes` is not broken.** `git check-attr text eol -- <path>` reports
+  `text: auto, eol: lf` for every path checked, and `core.autocrlf` is `false`, so
+  nothing is fighting it. It arrived in `ebb69ca` (phase 4 M1); the files were
+  committed in `d5d0a3a` (phase 1); **git does not renormalise retroactively**, and
+  `git log --all` contains no renormalisation commit. The attributes file governs
+  what happens next, and nothing has yet made "next" happen for content already
+  stored.
+
+  **What this does NOT undermine: the mutation-testing protocol.** Step 3's
+  `shutil.copy2` is a byte copy and is byte-exact whatever the bytes are, and the
+  md5 verification compares those same bytes. The protocol is correct and stays.
+
+  **What it DOES falsify: the protocol's stated cause.** `CLAUDE.md` explained the
+  historical byte mismatch as arising "against this LF-pinned tree" — a property
+  the tree does not have. Worse than merely unsupported: on a CRLF working tree,
+  `read_text`/`write_text` in default text mode converts CRLF→LF on read and
+  `\n`→`os.linesep` on write, so it would round-trip *correctly*. The recorded
+  mechanism therefore cannot be the one that fired, and a future reader reasoning
+  from it reasons from a false premise. The **rule** survives untouched — text mode
+  is newline-lossy in both directions, so re-reading and re-writing is unsafe
+  whichever way the tree leans. Only the explanation was wrong, and `CLAUDE.md` now
+  says so.
+
+  This is live rather than academic: the split proposed for M5 puts anti-rot
+  assertions in M5a–M5d (the stage-ladder shape), and `CLAUDE.md`'s protocol is
+  what governs proving they bite. Note the protocol lives in `CLAUDE.md`, not here
+  — nothing in this file schedules mutation tests today, and the M5a rewrite should
+  fix that.
+
+  **The fix, when it happens, is a whole-tree mechanical commit** — `git add
+  --renormalize .` — touching every file and changing no content. It must not be
+  mixed with semantic work: `CLAUDE.md`'s git rule requires mechanical changes in
+  separate commits, and a renormalisation diff would bury any semantic change
+  landing beside it beyond review. Deliberately not done here.
