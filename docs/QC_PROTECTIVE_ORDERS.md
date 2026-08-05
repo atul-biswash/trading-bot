@@ -204,9 +204,102 @@ restart), `protection: ProtectionState`, `order_list_id`, `last_reconciled_at`.
 `ProtectionState` must include `ABSENT_BY_DESIGN` distinct from unexpected absence,
 or a neither-enabled config reads as permanent divergence.
 
-`stop_loss` / `take_profit` are redefined as requested levels, immutable after
-entry. What rests is queried, never cached. `trailing_stop` / `highest_price` /
-`lowest_price` retained pending the trailing milestone.
+**`protection` carries no default and is not nullable.** `ABSENT_BY_DESIGN` is the
+tempting default and is the wrong one: it asserts "no protection is expected here",
+which is the off-switch for the divergence detector on that position, so a site that
+forgot the field would produce a position the reconciler has been told to ignore.
+Same reasoning as `RiskAssessment.stage`, one notch stronger — `stage` is nullable
+because "no stage" is a real state, while `protection` has a member for every state.
+
+`stop_loss` / `take_profit` are redefined as requested levels, **immutable once
+set**. What rests is queried, never cached. `trailing_stop` / `highest_price` /
+`lowest_price` retained pending the trailing milestone, and `trailing_stop` is
+explicitly **outside** the immutability rule — it is rewritten every bar by design.
+
+**"Immutable once set", not "immutable after entry", and the difference is
+load-bearing.** §7 keys divergence off what was *requested*, so a position with
+nothing requested gives reconciliation nothing to compare: the reconciler is
+**structurally silent** on it, and no budget, cadence or patience resolves the state.
+Under the committed-risk rule such a position also refuses every entry,
+portfolio-wide, permanently — the one refusal in the system that cannot clear.
+
+A position that has *never* carried a requested stop is therefore outside this
+rule's premise, and protection may be **re-requested** for it through the same
+next-generation machinery §7 specifies for unprotected divergence. A level that has
+been set stays immutable.
+
+Reachable routes to the state are narrow but real: `stop_loss.enabled` flipped
+`false` → `true` between runs with a position open, and the placement-unknown state
+after a timed-out write. Adoption of pre-existing holdings is **not** a route — see
+§5b — because no `Position` is ever constructed for a holding the bot did not open.
+
+Where detectable at boot it is refused at boot, before any socket, in the family of
+the five existing root refusals. Where it is not, it escalates as a **terminal**
+`CRITICAL` (`docs/QB_ESCALATION.md`, site 5), because a refusal that can never clear
+is not a refusal and an operator who reads it as "wait for the next bar" will wait
+forever.
+
+## 5b. Pre-existing holdings are not adopted as positions
+
+Today `_seed_portfolio` reads only the quote balance and builds an empty `positions`
+dict, so the bot does not adopt base holdings — **by accident, not by decision**.
+This settles it, because it determines whether §5's boot refusal is reachable at all,
+and because a bot that adopts holdings it did not open is a different product.
+
+**The case for adopting.** The account is the truth. A holding the bot cannot see is
+not in `equity`, and equity is the denominator of every sizing decision and of the
+daily-loss threshold. Understated equity is conservative in isolation, but the
+wrongness is not confined: with no adoption, `has_position` is `False` regardless of
+what the account holds, so a `BUY` passes `ALREADY_IN_POSITION` and buys **more**,
+sized against an equity that excludes the holding it is adding to.
+`max_position_size_percent` is computed against the wrong denominator. **The bot can
+pyramid onto a manual holding without knowing it exists.** That is a safety argument,
+and it is the strongest one on either side.
+
+**The case against.** A holding the bot did not open has no entry price, no stop, no
+take-profit, no `entry_bar_time`. `Position.entry_price` is required `Money`; using
+the current mark makes `unrealized_pnl` identically zero by construction and every
+P&L figure about it fiction. It has no requested protection and no legitimate way to
+have had any — which is exactly §5's terminal state, manufactured at boot on every
+run. And adopting means the bot will eventually **sell an asset a human bought**, on
+a strategy `CLOSE`, through cancel → query → `MARKET`.
+
+**Decision: count material holdings toward equity; never construct a `Position` for
+them; refuse entries on their symbol.**
+
+| Consumer | Behaviour |
+|---|---|
+| `equity` | Counts the holding. Denominator correct |
+| entries | Refused on that symbol under `UNMANAGED_HOLDING` while it remains |
+| `CLOSE` | `_exit_assessment` finds no `Position` and returns `NOTHING_TO_CLOSE`. **The bot never sells it** — enforced by the existing code path, not by a new guard |
+| §5's route 3 | **Closed by decision.** No `Position` is constructed without the bot having opened it, so adoption cannot manufacture a stopless position |
+
+**Materiality is `min_notional`.** A holding worth less than the symbol's
+`min_notional` cannot be sold at all, so it is definitionally dust, and dust must not
+block a pair forever. The threshold is already on `SymbolInfo`, is exchange-supplied,
+and is the one number in this milestone that needs no provenance line.
+
+**The snapshot is taken at boot, before any `Position` exists, and that timing is the
+correctness argument.** Measuring "unmanaged base" from raw balances at any later
+moment would count base held by positions *the bot opened*: `equity` would
+double-count it (once as `quantity × mark`, once as an unmanaged holding) and the
+refusal would mislabel — reporting `UNMANAGED_HOLDING` where the truth is
+`ALREADY_IN_POSITION`. At boot `positions` is empty by construction, so the snapshot
+excludes bot-owned base with no arithmetic, and the set is then immutable for the
+process lifetime because the bot never sells an unmanaged holding.
+
+The honest consequence: **the refusal does not clear within a run.** It clears across
+a restart, once the operator has sold. It escalates as a boot `WARNING`, once —
+never `CRITICAL`, because it is an ordinary state of a shared account and escalating
+it would train an operator to skim the level that carries §5's terminal condition.
+
+**One gap, named rather than absorbed.** `_mark_prices` prices open positions from
+`last_candle`; an unmanaged holding in an asset with **no configured pair** has no
+mark source. Refusing the boot over an unrelated asset is too aggressive, and
+silently ignoring it is today's behaviour. So: ignore unpriceable holdings and log a
+`WARNING` naming the asset and the fact that it is excluded from equity. The
+resulting error in equity is conservative (understated), and the warning is what
+stops it being invisible.
 
 ## 6. Client order IDs
 
