@@ -305,3 +305,42 @@ belongs to M5.
   mixed with semantic work: `CLAUDE.md`'s git rule requires mechanical changes in
   separate commits, and a renormalisation diff would bury any semantic change
   landing beside it beyond review. Deliberately not done here.
+
+- **S3's M5a salvage covers `src/` docstrings too, not only the out-of-repo
+  document.** The salvage was originally scoped to the 751-line
+  `PROJECT_KNOWLEDGE.md` held outside the repository — diffing the sections that
+  state rules in their own voice (§§5–8, §§10–12) against `CLAUDE.md`, on the
+  finding that its §7 carried a handler rule (`no I/O`) that `CLAUDE.md` never
+  had. §9 was checked and is clean: 20 rules, none absent, because its own header
+  defers to `CLAUDE.md` and it never claimed completeness. **Look at the sections
+  that state rules, not the one that curates them.**
+
+  The scope widens because a second instance surfaced from a different source
+  entirely. *"An exit must always be permitted — a limit that could trap an open
+  position would be a risk rule that creates risk"* governs the whole `CLOSE`
+  path and lived only in `core/interfaces.py::RiskManager.approve`'s docstring and
+  in `risk/manager.py::_exit_assessment`. It was never in `CLAUDE.md`. It was
+  found the same way `no I/O` was — by M5 trying to violate it — and it has now
+  been added *with* its scope clause.
+
+  **Three instances of the same class in two turns**, and the third is the
+  inverse shape, which is why it belongs in the same entry rather than filed
+  separately:
+
+  | Rule | Lived in | Shape |
+  |---|---|---|
+  | `no I/O` on the handler chain | one docstring (`engine/modes.py`) | rule outside the authority |
+  | `an exit must always be permitted` | one docstring (`core/interfaces.py`) | rule outside the authority |
+  | `all files are LF` | the authority | **authority asserting what the tree never satisfied** |
+
+  The first two are rules the authority did not know about; the third is a rule
+  the tree did not obey. Both directions are invisible from the side that matters,
+  and both surface only when something tries to act on them.
+
+  So the M5a salvage is: the seven `PROJECT_KNOWLEDGE.md` sections **plus** a pass
+  over `src/` module and method docstrings for rules stated in the imperative —
+  "must", "never", "always", "only" — that constrain future code and appear
+  nowhere in `CLAUDE.md`. Classify each as deliberately dropped, enforced by code
+  instead, or accidentally absent. **Produce the list; promote nothing.** Each
+  promotion is a semantic change to the authority and gets its own commit, per the
+  constraint that governed M5-0's own salvage item.
