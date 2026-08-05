@@ -216,6 +216,54 @@ scripts/         check_testnet.py · download_data.py
   follow suit: frozen, `Money`-typed `ProtectiveLevels` / `TrailingStopUpdate` /
   `ExitDecision`.
 - `equity` means **total portfolio value in quote currency**, not free balance.
+  A caller must *separately* confirm free balance covers the resulting order; that
+  clause lives on the `size_position` port docstring and is repeated here because
+  it is the half people drop.
+- **The daily-loss limit counts committed risk, not only realised loss, and the
+  basis is mark-to-stop.** An account 4% down realised, holding a position whose
+  resting stop commits another 2%, is not "4% down" for the purposes of a 5% cap.
+  A limit that counts only money already gone breaks its own promise
+  **structurally** — it permits opening position N+1 while position N's committed
+  loss is unbooked — and it does so on a perfect feed, not merely under polling.
+  Polling widens that window; this closes it and the pre-existing one together.
+
+  The check compares `realised_today(now) + Σ min(0, (binding_stop − mark) ×
+  quantity)` against the threshold. **Mark-to-stop, never entry-to-stop.**
+  Entry-to-stop would drag a third basis — position-lifetime, possibly spanning
+  days — into a comparison that already has two, and would count the
+  entry-to-mark portion once on the left while the mark-based equity already
+  counts it as `limit_percent` of itself on the right. That overlap is
+  `1 + limit_percent`, not `2×`; the reason to reject entry-to-stop is basis
+  coherence, not magnitude. Mark-to-stop leaves both left-hand terms "from today /
+  from now" and the entry-to-mark portion counted exactly once, as the scale
+  effect the M3 approximation already documents.
+
+  **`realised_pnl` is untouched and still holds realised facts only.** The
+  committed term lives in the *check*, not in the ledger — which is what keeps the
+  ledger matching an exchange statement.
+
+  **`binding_stop` is selected exactly as `should_exit` selects it** —
+  `max(stop_loss, trailing_stop)` for a long, `min` for a short. Reading
+  `position.stop_loss` directly would compute a trailed position's committed risk
+  off a level that is no longer operative, and it would **overstate**, refusing
+  entries for risk that is not there. Two components disagreeing about which stop
+  protects a position is the defect M4b existed to remove.
+- **An uncomputable committed risk is a refusal, not a zero — and the
+  discriminator is `stop_loss.enabled`.** A position with no computable stop
+  contributes `0` to the sum, which tells the limit check that an *unprotected*
+  position carries *no forward risk* — the exact inverse of the truth. So
+  `committed_risk` returns the sum **and** the count of positions it could not
+  price, and a non-zero count refuses entries, in the shape `NO_MARK_PRICE`
+  already has: an inability to compute, refusing before the limits are consulted.
+
+  Scoped by `stop_loss.enabled`, because the two states are not the same fact.
+  Stops **on** and a position without one is a divergence, and refusing is
+  correct — and it cannot clear, so it escalates (`docs/QB_ESCALATION.md`, site 5).
+  Stops **off** and the operator has declared they own their exits via
+  `SignalAction.CLOSE` — a style Q-C deliberately preserved — so the check degrades
+  to realised-only, documented, and honest *because the operator opted out*. Same
+  discriminator already locked for the sub-tick case: `stop_loss.enabled`
+  distinguishes "stops are off" from "no level fits right now".
 - **A protective level rounds toward its reference** so its realised distance can
   only shrink — the initial stop toward entry (realised loss ≤ the
   `risk_per_trade` budget), the trailing stop toward the high-water mark, the
@@ -262,7 +310,46 @@ scripts/         check_testnet.py · download_data.py
   cost Q-C carries. See `docs/QC_PROTECTIVE_ORDERS.md`.
 - **`TradeIntent` is not an `OrderRequest`** — no take-profit field, and
   `stop_price` there means "this order's trigger". Mapping intent → orders is
-  execution's job.
+  execution's job. Under Q-C the target of that mapping is an **order-list
+  request** for three of the four branches; `OrderRequest` expresses only the
+  neither-enabled single `LIMIT`, and even that needs a `time_in_force` field it
+  does not have today.
+- **`TradeIntent` splits into `EntryIntent` and `ExitIntent`; it does not fork a
+  field.** Under Q-C an entry carries `entry_limit` — a derived, marketable limit
+  — while a `CLOSE` dispatches `MARKET` and has no limit price at all. One field
+  cannot carry both, and a field that means different things by `side` makes
+  `_check_invariants` conditional on `side`, which is an invariant somebody
+  eventually inverts.
+
+  `EntryIntent`: `symbol`, `side=BUY`, `quantity`, `reference_price` (the candle
+  close), `entry_limit`, and `levels` — **required**, because the four-way
+  placement branch reads `levels.stop_loss is None` / `levels.take_profit is None`
+  to route, and "neither enabled" is still a `ProtectiveLevels` with both absent
+  and a `basis` saying why. `ExitIntent`: `symbol`, `side=SELL`, `quantity`,
+  `reference_price`.
+
+  Invariants. `EntryIntent`: `quantity > 0`; `entry_limit > 0`;
+  `reference_price > 0`; **`entry_limit >= reference_price`**;
+  `levels.symbol == symbol`; **`levels.entry_price == entry_limit`**;
+  `side is OrderSide.BUY`. `ExitIntent`: `quantity > 0`; `reference_price > 0`;
+  `side is OrderSide.SELL`.
+
+  `entry_limit >= reference_price` is new and earns its place: it makes Q-C §4's
+  slippage *direction* a property of the type, unfakeable independently of
+  whatever constraint `max_entry_slippage` carries in config. It is the one thing
+  that could silently invert.
+
+  The cost is a union `RiskAssessment.intent` that every consumer must narrow.
+  There is exactly one consumer today, so the cost is paid once, at its cheapest.
+  Dropping the intent from the `CLOSE` path was rejected: `RiskAssessment`'s
+  validator binds `approved` to `intent is not None`, and `approved` is locked as
+  the only authoritative field.
+- **The log line follows the split.** On an entry, `entry` is the `entry_limit` —
+  the price actually sent — and a sibling `reference` carries the candle close, so
+  the applied slippage is visible in one record instead of inferred from two. On
+  an exit there is **no `entry` field at all** — absent, not null, per the schema
+  rule — and `order_type="MARKET"` says so, because "at what price" is genuinely
+  unknown until it fills. A field that would have to lie is omitted.
 
 **Protective orders (Q-C — full reasoning in `docs/QC_PROTECTIVE_ORDERS.md`)**
 - **Entry and protection are placed in one order-list call.** No client-side /
@@ -312,6 +399,154 @@ scripts/         check_testnet.py · download_data.py
   next refusal added. The logger's `stage is None` branch is mypy narrowing plus
   a health check, logged at `ERROR` against a fixed literal — never raised or
   asserted, because `IntentLogger` runs inside the handler that must not raise.
+- **`Position.protection` is required and non-nullable — no default.** The
+  tempting default is `ABSENT_BY_DESIGN`, on the grounds that it keeps one
+  `Position` shape for the whole milestone and is immediately reachable under a
+  both-disabled config. Reject it: `ABSENT_BY_DESIGN` asserts "no protection is
+  expected here", and that assertion is the **off-switch for the divergence
+  detector** on that position. A `Position` built by a path that forgot the field
+  would be one the reconciler has been instructed to ignore, and the instruction
+  came from nobody. A default should be the value most likely to be *noticed* when
+  wrong; this is the value least likely to be.
+
+  Same reasoning as `RiskAssessment.stage`, one notch stronger. `stage` is
+  *required but nullable* because "no stage" is a real state; `protection` has a
+  member for every real state, so it is required and non-nullable — and a new
+  construction site cannot forget it, because it will not construct. `Position` is
+  constructed nowhere in `src/` today, so the whole bill is fixtures.
+
+  **Do not add a `model_validator` to `Position` in M5** — not even to enforce
+  "`ABSENT_BY_DESIGN` implies both levels absent". `Position` carries
+  `validate_assignment=True`, so a `mode="after"` validator re-runs on *every*
+  assignment and would observe the intermediate state between
+  `advance_trailing_stop`'s two writes. The prescribed fix — collapse those writes
+  into one method on `Position` — has to land first, and it is not M5's.
+- **Requested protective levels are immutable ONCE SET, not immutable after
+  entry.** The distinction is load-bearing. Reconciliation is keyed off what was
+  *requested*; a position with nothing requested gives it nothing to compare, so
+  the reconciler is **structurally silent** on it and no amount of budget or
+  cadence resolves the state. Such a position also refuses every entry,
+  portfolio-wide, permanently.
+
+  So a position that has *never* had a requested stop is outside the immutability
+  rule's premise, and protection may be **re-requested** through the same
+  next-generation machinery Q-C §7 specifies for unprotected divergence. A level
+  that *has* been set stays immutable. `trailing_stop` is explicitly outside this
+  rule in both directions — it is rewritten every bar by design.
+
+  Where detectable at boot it is refused at boot, before any socket, in the family
+  of the five existing root refusals. Where it is not, it escalates as a terminal
+  `CRITICAL` — see `docs/QB_ESCALATION.md`, site 5.
+- **Pre-existing base holdings are counted toward equity and never adopted as
+  positions.** Not adopting at all is unsafe — `has_position` would be `False`
+  regardless of what the account holds, so a `BUY` passes `ALREADY_IN_POSITION`
+  and pyramids onto a manual holding, sized against an equity that excludes it.
+  Adopting fully manufactures the stopless-position state at every boot and means
+  the bot eventually sells an asset a human bought. So: count them, refuse entries
+  on their symbol, never construct a `Position`. `CLOSE` then finds none and
+  returns `NOTHING_TO_CLOSE`, so "the bot never sells it" is enforced by the
+  existing code path rather than a new guard. Materiality is `min_notional` —
+  a holding too small to sell is dust. The snapshot is taken at boot **before any
+  `Position` exists**, which is what stops `equity` double-counting bot-owned base.
+  See `docs/QC_PROTECTIVE_ORDERS.md` §5b.
+
+**Execution**
+- **The signal handler may perform I/O; it may not perform *unbounded* I/O.** The
+  old rule was "no I/O", it lived in one docstring in `engine/modes.py`, and it was
+  the consequence stated as the prohibition: handlers are awaited sequentially from
+  `_on_candle`, itself awaited from the provider's `_notify` on the stream's
+  dispatch task, so handler latency is charged directly to the candle pipeline.
+  M4a's handler was I/O-free because it had nothing to do. M5's places orders. The
+  invariant that survives is **the candle pipeline must never be blocked by latency
+  we do not bound ourselves** — a budget, not an abstinence.
+
+  Dispatch stays **inline**. A bounded queue with a single consumer was rejected:
+  it makes `Portfolio` writable from a task that is not the one reading it, and the
+  first bug that buys is a **duplicate entry** — signal enqueued, not yet placed,
+  next bar's `BUY` sees `has_position` false and enqueues a second. That is a money
+  bug traded for a data bug (a missed bar, which the buffer already tolerates and
+  already logs). Fire-and-forget was rejected outright: unbounded tasks, no
+  ordering, no backpressure, exceptions parked in objects nobody awaits.
+- **A budget may refuse to BEGIN work. It must never abandon a write in flight.**
+  A placement that runs past its share overruns; the overrun is charged to the next
+  invocation's dispatch share. Abandoning a submission mid-flight produces a state
+  nobody can read.
+- **Reconciliation holds a reserved floor; dispatch cannot borrow from it.** The
+  budget splits `B_dispatch + B_recon`, and the skip rule points at dispatch:
+  **between skipping a placement and skipping a reconciliation, skip the
+  placement.** A skipped placement is a missed trade — a refusal, a value, logged,
+  with a reason. A skipped reconciliation is a ledger drifting from reality *while
+  the bot keeps trading on it*, and its three dangerous readers are equity
+  (overstated ⇒ sizes too large **and** the daily-loss threshold too generous),
+  realised P&L (the loss unbooked) and cooldown (never started after a stop-out).
+  The floor is what stops a `CLOSE`-emitting strategy from starving reconciliation:
+  `CLOSE` is ungateable by design, costs three round trips, and would otherwise
+  hold the whole budget every bar.
+- **The dispatch deadline is its own field, not `exchange.requests_timeout_s`.** On
+  the shipped `config.yaml` a three-call `CLOSE` at the general 10-second timeout is
+  30s, and two pairs closing on the same minute is 60s — the entire bar, before
+  reconciliation has run. It is roughly a third of the general timeout, and the
+  arithmetic that fixes it is enforced at config load: see `docs/M5_NUMBERS.md`.
+- **A timed-out write is resolved by query, never by retry.**
+  `BaseExchangeClient._call` already narrows placement to `idempotent=False`,
+  retrying only `RateLimitError` — a 429 is rejected pre-acceptance, and an
+  order-list submission is refused as a unit, so nothing partial survives one. A
+  **connection** timeout is different: the placement may have landed. Mark it
+  unknown and **query the IDs we would have sent**, which Q-C §6 makes derivable at
+  generation 0 by pure computation, no persistence, no I/O. This is that scheme's
+  first real use and the reason it was designed that way.
+
+  Found ⇒ it placed; reconcile. Not found ⇒ nothing rests; re-place at the **same**
+  generation. Query failed ⇒ re-place anyway, because a duplicate lands as
+  `-2010 'Duplicate order sent.'`, which Q-C §8 classifies as a **success signal**.
+  The re-place is idempotent *by the venue*, not by us.
+
+  **That guarantee is MEASURED for a duplicate client order ID and UNMEASURED for a
+  duplicate order *list*.** The recovery path's classifier depends on it. Settled by
+  a rejection — resubmit an accepted list's exact parameters and read the error —
+  and that measurement is M5c's, not a soak question.
+- **Dispatch carries its own retry budget, supplied per call, not per client.**
+  `retry_attempts=4` with `wait_exponential(multiplier=0.5, max=8.0)` can spend ~14s
+  inside one call, and under an inline handler that is charged to the pipeline. A
+  retry policy is a property of what is being asked, not of who is asking, and one
+  client should not need a twin to say "this one is a write on the hot path".
+- **Fills are observed by polling, and the trigger is deliberately not the
+  position's own bar.** Reconciliation runs over **every** open position on **any**
+  pair's candle, so staleness is bounded by the *shortest* configured timeframe
+  rather than the slowest position's. Passes are deduplicated by
+  `last_reconciled_at` — a position is re-read only once its stamp is older than the
+  shortest timeframe — so two pairs closing on the same minute pay for one pass, not
+  two. Positions are visited **oldest stamp first**, so a pass cut short by the
+  budget always advances the stalest one instead of starving a fixed tail.
+
+  A user-data stream is the correct successor and is deliberately deferred: a
+  listen-key lifecycle, a second socket with its own reconnect story, and a **worse**
+  failure mode than polling — a silently dead stream leaves us believing we are
+  current, where polling's staleness is at least bounded by its own cadence. It
+  would not remove the reconciler either; boot and divergence still need it.
+- **There is no static staleness guarantee — only what `last_reconciled_at`
+  reports.** The shortest timeframe is a floor, not a bound: add the query's own
+  latency, add every bar the budget skipped, add every bar that never arrived
+  because the feed dropped and the buffer does not backfill. So the decision path
+  **reads the stamp** rather than trusting the cadence: an open position staler than
+  `risk.max_position_staleness` refuses new entries under its own `RefusalStage` —
+  not because a limit fired, but because the ledger is not current enough for the
+  limits to mean anything. That refusal is also what frees the budget the reconciler
+  needs, so the system oscillates — trade, go stale, refuse, reconcile, trade —
+  rather than wedging.
+
+  The same check runs in the per-candle reconciliation driver, which fires on quiet
+  bars where nothing evaluates. There the response is escalation, not refusal: a bot
+  that is not trading is not harmed by staleness, but "an unmonitored open position
+  and no alarm" is the state an operator most needs told.
+- **An exit must always be permitted — that rule governs *limits*, not
+  venue-state uncertainty.** A limit that could trap an open position would be a
+  risk rule that creates risk, which is why no limit gates a `CLOSE`. It does
+  **not** require dispatching a sell whose outcome the bot cannot determine:
+  under Q-C §4b a failed confirming query means "do NOT sell", and suppressing
+  that symbol's exits is refusing to act on unknown state, not a limit. The two
+  read as a contradiction unless the scope is stated, so it is stated here. See
+  `docs/QB_ESCALATION.md`, Class E.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
