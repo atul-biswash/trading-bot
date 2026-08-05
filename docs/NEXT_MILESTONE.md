@@ -270,19 +270,16 @@ belongs to M5.
   found the same way `no I/O` was — by M5 trying to violate it — and it has now
   been added *with* its scope clause.
 
-  **Three instances of the same class in two turns**, and the third is the
-  inverse shape, which is why it belongs in the same entry rather than filed
-  separately:
+  **Two instances of the same class, from two different sources:**
 
-  | Rule | Lived in | Shape |
-  |---|---|---|
-  | `no I/O` on the handler chain | one docstring (`engine/modes.py`) | rule outside the authority |
-  | `an exit must always be permitted` | one docstring (`core/interfaces.py`) | rule outside the authority |
-  | `all files are LF` | the authority | **authority asserting what the tree never satisfied** |
+  | Rule | Lived in |
+  |---|---|
+  | `no I/O` on the handler chain | one docstring (`engine/modes.py`) |
+  | `an exit must always be permitted` | one docstring (`core/interfaces.py`) |
 
-  The first two are rules the authority did not know about; the third is a rule
-  the tree did not obey. Both directions are invisible from the side that matters,
-  and both surface only when something tries to act on them.
+  Both are rules the authority did not know about, both constrain code nobody had
+  written yet, and both surfaced only when M5 tried to act on them — which is the
+  argument for finding the rest before M5a writes code rather than after.
 
   So the M5a salvage is: the seven `PROJECT_KNOWLEDGE.md` sections **plus** a pass
   over `src/` module and method docstrings for rules stated in the imperative —
