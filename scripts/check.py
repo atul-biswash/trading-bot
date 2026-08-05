@@ -31,6 +31,35 @@ commit that introduced this file:
 Every tool is invoked as ``sys.executable -m <tool>`` so the checks always run in
 the interpreter that launched them -- never a different Python that happens to
 be earlier on ``PATH``. All three resolve this way, ``ruff`` included.
+
+The interpreter guard
+---------------------
+That last paragraph is correct and was not sufficient. ``sys.executable`` is
+whatever launched this file, and ``python scripts/check.py`` resolves through
+``PATH`` -- on a Windows machine with the Store Python earlier on it, the gate
+ran four tools in an interpreter that had never heard of this project. It failed
+loudly only because that interpreter happened to carry none of them. **Had it
+carried any, the gate would have reported PASS against the wrong environment,
+with an identical-looking summary block.**
+
+This is the third time the gate was correct and its invocation was not: ``make
+check`` was the documented gate for five phases and could not run on the machine
+where the work happened, and ``| tail`` masked a non-zero exit twice.
+
+:func:`interpreter_refusal` closes it, and the key it uses is deliberately *not*
+a location test -- not "am I in a venv", not "is my prefix under the repo".
+Either would refuse a legitimate CI runner, container or relocated venv while
+still passing any unrelated venv, which is the case that matters. It asks the
+only question the gate's claim rests on: **are the four tools about to measure
+this tree?** An interpreter that cannot import this checkout's ``trading_bot``
+cannot be running this checkout's tests, whatever its summary says.
+
+There are exactly three ways to satisfy it, and all three deliberately bind this
+interpreter to this checkout: ``pip install -e .`` from here (the documented
+setup -- see README), a ``PYTHONPATH`` entry pointing at this ``src/``, or a
+``.pth`` doing the same. None of them happens by PATH precedence or by
+activating the wrong environment, which is how all three historical failures
+arrived.
 """
 
 from __future__ import annotations
@@ -39,10 +68,64 @@ import argparse
 import subprocess
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Sequence
+
+#: This checkout's ``src/`` -- the directory a correct interpreter must resolve
+#: ``trading_bot`` inside. Derived from this file's own location, so a copy of
+#: the repo elsewhere checks itself rather than the original.
+_SRC = Path(__file__).resolve().parents[1] / "src"
+
+_WRONG_INTERPRETER = (
+    "\nRefusing to run: this interpreter is not the one that would measure this "
+    "tree.\n\n"
+    "  interpreter : {executable}\n"
+    "  trading_bot : {found}\n"
+    "  expected in : {expected}\n\n"
+    "The gate runs every tool as `sys.executable -m <tool>`, so a PASS from an "
+    "interpreter\nthat cannot import this checkout's package would be a PASS "
+    "against a different\nenvironment -- and the summary block looks identical "
+    "either way.\n\n"
+    "Run it through the project environment:\n"
+    "    .venv/Scripts/python.exe scripts/check.py     (Windows)\n"
+    "    .venv/bin/python scripts/check.py             (POSIX)\n\n"
+    "If this IS the project environment, the editable install is missing:\n"
+    "    pip install -e .\n"
+)
+
+
+def interpreter_refusal(module_file: str | None, *, expected_src: Path) -> str | None:
+    """The refusal message for this interpreter, or ``None`` if it is the right one.
+
+    ``module_file`` is ``trading_bot.__file__`` -- ``None`` both when the import
+    failed and when the module is a namespace package, which is the same answer
+    for our purposes: nothing importable resolves to this tree.
+
+    Kept pure and separate from :func:`_require_project_interpreter` so the
+    decision is testable without a second interpreter to run it in.
+    """
+    found = "<not importable>" if module_file is None else str(Path(module_file).resolve().parent)
+    if module_file is not None and Path(module_file).resolve().parents[1] == expected_src:
+        return None
+    return _WRONG_INTERPRETER.format(executable=sys.executable, found=found, expected=expected_src)
+
+
+def _require_project_interpreter() -> None:
+    """Exit non-zero unless this interpreter resolves ``trading_bot`` to this tree."""
+    try:
+        import trading_bot
+    except ModuleNotFoundError:
+        found = None
+    else:
+        found = trading_bot.__file__
+    # `_SRC` is read as a global here rather than bound as a default on
+    # `interpreter_refusal`, so a test can point it at another tree.
+    refusal = interpreter_refusal(found, expected_src=_SRC)
+    if refusal is not None:
+        raise SystemExit(refusal)
 
 
 class Step(NamedTuple):
@@ -123,6 +206,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="stop at the first failing step instead of running them all",
     )
     namespace = parser.parse_args(argv)
+
+    # Before any step, and after argument parsing so `--help` still works in any
+    # interpreter: refuse to measure this tree from an interpreter that cannot
+    # see it. See the module docstring.
+    _require_project_interpreter()
 
     selected = [s for s in STEPS if namespace.group is None or s.group == namespace.group]
     results: dict[str, bool] = {}
