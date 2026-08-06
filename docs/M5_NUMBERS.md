@@ -24,12 +24,19 @@ Every number below is marked one of:
 - **PLACEHOLDER — NOT MEASURED** — a rationale and **no sample behind it**. It must
   not be quoted as though it were measured, and must not ship to LIVE without its
   measurement.
-- **UNMEASURED — PENDING DERIVATION** — not a candidate for measurement at all; it
-  falls out of the coherence constraint once the numbers it depends on are fixed.
 
-**Four placeholders, one bounded, one unmeasured.** That is the honest state at
-M5-0 and it is written this way so a later reader cannot mistake a rationale for a
-sample, or a policy choice for a derivation.
+**Five placeholders, one bounded.** That is the honest state at M5-0 and it is
+written this way so a later reader cannot mistake a rationale for a sample, or a
+policy choice for a derivation.
+
+There are deliberately only three statuses. A fourth was drafted for
+`dispatch_deadline_s` on the grounds that the coherence constraint *derives* it —
+and withdrawn: the constraint narrows it but cannot produce it, because `alpha` is
+a policy choice and `T_recon` is itself unmeasured, so what falls out is a
+consequence of two other choices rather than a derivation from data. §5 also
+carries its own measurement plan, which the withdrawn status flatly contradicted. A
+status that houses exactly one entry, and that entry measurable, is a label rather
+than a category.
 
 ---
 
@@ -290,9 +297,10 @@ calls it). **"One-off, cause unresolved"** is the honest statement.
 the query half; the write half is measurable from M5c's expiring placements, which
 are real submissions that cannot fill.
 
-**Status: UNMEASURED — PENDING DERIVATION.** This is the one number that is not a
-candidate for measurement: it falls out of the coherence constraint below once
-`T_recon` and `alpha` are fixed.
+**Status: PLACEHOLDER — NOT MEASURED.** The coherence constraint below narrows it
+but does not produce it — `alpha` is a policy choice and `T_recon` is itself
+unmeasured — so the plan above is what settles it, with the cold-path term as an
+empirical input.
 
 ---
 
