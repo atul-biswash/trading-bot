@@ -1269,6 +1269,231 @@ reconciler, plus `check_exit` changing role from actor to monitor. The port wide
 to expose the composed path and `RiskAssessment` moves with it. Implementation is
 M5's, not Q-C's.
 
+## Phase 5 M5-0 — the decisions before dispatch
+
+Decide-and-document, in Q-C's shape: the output is written decisions, and no line
+of `src/` changed except a fix to the gate's own invocation. M5a implements
+against it.
+
+### Why a decisions-only milestone existed at all
+
+M5 was scoped as one milestone and split into six after the design pass. Four
+questions turned out to gate every one of them — where dispatch runs, how fills
+are observed, what a `TradeIntent` means once entry and protection go out
+together, and what the safety numbers are — and each had consequences in more than
+one milestone. Deciding them inside M5a would have meant deciding them while
+writing code that assumed an answer.
+
+### D1 — the handler chain, and a rule that was never where it was thought to be
+
+The chained signal handler was believed locked to "no I/O". It was not. `CLAUDE.md`
+had one `no I/O` and it was scoped to `RiskManager`; the repo-resident
+`PROJECT_KNOWLEDGE.md` had none; `PHASE_HISTORY`'s M4a entry had none. The rule
+existed in exactly one place in the repository — the docstring of
+`_build_signal_handler`. So M5 was codifying an unenforced convention rather than
+re-scoping a locked decision, which is the lighter of the two, and the honest move
+was to promote the real invariant while changing what it says.
+
+"No I/O" was the consequence stated as the prohibition. M4a's handler was I/O-free
+because it had nothing to do; M5's places orders. What survives is *the candle
+pipeline must never be blocked by latency we do not bound ourselves* — a budget,
+not an abstinence.
+
+Dispatch stays inline. A bounded queue with a single consumer was rejected: it
+makes `Portfolio` writable from a task that is not the one reading it, and the
+first bug that buys is a **duplicate entry** — signal enqueued, not yet placed,
+next bar's `BUY` sees `has_position` false and enqueues a second. A money bug
+traded for a data bug the buffer already tolerates. Fire-and-forget was rejected
+outright.
+
+Two rules inverted while being drafted in their final voice. A budget may refuse to
+BEGIN work but must never abandon a write in flight; and **between skipping a
+placement and skipping a reconciliation, skip the placement**. The first draft had
+that backwards — it protected the write and sacrificed the observation, when the
+observation is what makes every subsequent write safe. A skipped placement is a
+missed trade; a skipped reconciliation is a ledger drifting from reality while the
+bot keeps trading on it.
+
+### D2 — observing fills, and a limit that broke its own promise
+
+Fills are observed by polling, over every open position on any pair's candle, so
+staleness is bounded by the shortest configured timeframe rather than the slowest
+position's. A user-data stream is the correct successor and was deferred: it has a
+**worse** failure mode than polling, since a silently dead stream leaves us
+believing we are current.
+
+The sharp half was the daily-loss limit. M3 locked its approximation on the
+grounds that a loss limit must err EARLY; polling makes the realised loss land
+late. Rather than accept bounded lateness, the check now counts committed risk —
+and the basis was got wrong first. Entry-to-stop was drafted and rejected: it drags
+a third basis, position-lifetime, into a comparison that already has two, and the
+overlap with mark-based equity is `1 + limit_percent` (about 1.05x), not 2x. The
+reason to reject it is **basis coherence, not magnitude**. Mark-to-stop leaves both
+left-hand terms "from today / from now". `realised_pnl` stays a record of realised
+facts; the committed term lives in the check, which is what keeps the ledger
+matching an exchange statement.
+
+An uncomputable committed risk refuses rather than contributing zero — a position
+with no stop carries unbounded forward risk, and zero is the exact inverse of the
+truth. Scoped by `stop_loss.enabled`, reusing the discriminator already locked for
+the sub-tick case, so a `CLOSE`-owning strategy is not prohibited.
+
+### D3 — the intent splits rather than forking a field
+
+Under Q-C an entry carries a derived `entry_limit` and a `CLOSE` dispatches
+`MARKET` with no limit price at all. One field cannot carry both. Forking by side
+was rejected because it makes `_check_invariants` conditional on `side`, which is
+an invariant somebody eventually inverts. Dropping the intent from the `CLOSE` path
+was rejected because `RiskAssessment`'s validator binds `approved` to
+`intent is not None`.
+
+The split makes `levels` **required** on an entry — the four-way placement branch
+reads it to route — and adds `entry_limit >= reference_price`, which makes Q-C's
+slippage direction a property of the type rather than a config constraint.
+
+### Q-B, and what writing the mechanism down changed
+
+Q-C leaned on "CRITICAL, halt entries" in three places and defined neither half.
+Drafting the mechanism changed the design three times over the argument that
+preceded it:
+
+The sites split **three** ways, not two — self-clearing, resolvable by observation,
+terminal. Escalating all five at one level would make the CRITICAL line unreadable
+within a day, destroying it as a signal for the one site that genuinely cannot
+resolve.
+
+Site 1 halts the **symbol**, not the portfolio: the ledger is intact, only that
+symbol's venue state is unknown, and halting everything for a failed cancel trains
+an operator to override the halt.
+
+Site 1 must also suppress **exits** on that symbol. The halt gates entries and
+`CLOSE` is ungateable, so the next bar re-enters the same three-round-trip sequence
+that just failed, indefinitely. That appears to violate "an exit must always be
+permitted" and does not: the lock governs risk *limits*, while this is refusing to
+act on unknown state, which Q-C §4b already mandates in the same breath.
+
+CRITICAL means a log line and a halt flag, and nothing else. `notifications/` is a
+stub and stayed out: a notifier that raises inside a handler that must not raise is
+its own failure class.
+
+### The second document, and a rule attributed to a file that never held it
+
+`PROJECT_KNOWLEDGE.md` exists twice — a 237-line version tracked in the repo, and a
+751-line version one directory above it, outside the git root. They are an original
+and a deliberate rewrite; the rewrite is newer, is committed, and drops the twelve
+sections that restated `CLAUDE.md`, which is what its own standing warning
+forbids.
+
+The `no I/O` rule lived in the out-of-repo §7. Its §9, "Locked decisions", was
+diffed against `CLAUDE.md` and is **clean** — 20 rules, none absent — because its
+header defers to `CLAUDE.md` and it never claimed completeness. That is the
+finding: **look at the sections that state rules, not the one that curates them.**
+The salvage was originally scoped to §9 and would have returned a clean result and
+the wrong conclusion.
+
+### The method findings, which will be harder to reconstruct than the decisions
+
+**Pre-registering what would change your mind.** Before drafting the deliverables
+in their final voice, a prediction was recorded of which ones would move and why.
+It named `QB_ESCALATION.md` as highest risk and was right — three design changes
+came out of writing it. It also predicted a signature ripple in the mark-to-stop
+work that did **not** materialise, and saying so afterwards is the half that makes
+the exercise worth anything. Drafting a rule in its final voice is a different test
+from arguing for it.
+
+**A design already accepted still had a defect in it.** PRE-1 checked two refusals
+against each other that had been designed two turns apart and separately approved.
+Measuring unmanaged base holdings from raw balances would have double-counted base
+held by the bot's own positions in `equity`, and mislabelled `ALREADY_IN_POSITION`
+as `UNMANAGED_HOLDING`. The fix was a timing argument rather than arithmetic — take
+the snapshot at boot, before any `Position` exists — and it forced a correction to
+an already-accepted claim: the refusal does not clear within a run, only across a
+restart.
+
+**A measurement was accepted, argued from, and written into the authority
+document, and it was an artefact.** `git cat-file blob | grep -c $'\r'` was used to
+show every blob in the tree was CRLF. `$'\r'` did not survive as a carriage return
+in that shell, so the matcher matched every line. The tell was in the reported
+table and both reader and writer went past it: the CR count equalled the total line
+count in five heterogeneous files — a ratio of exactly 1.000, five times. A
+contradicting reading from `cat -A` was then explained away with an invented
+mixed-tree story instead of being resolved by re-measuring. The false claim reached
+`CLAUDE.md`, replaced a true statement about the tree with a false one, and
+declared a correct diagnosis in the mutation-testing section unverifiable. It was
+reverted.
+
+The rule that follows: **run an instrument against a case with a known answer
+before trusting its output.** Counting CRs in a file known to be CRLF would have
+caught it in seconds. Two instruments disagreeing is a stop condition, not
+something to narrate around. It was applied immediately afterwards — the alpha
+probe ships a `selftest` that injects a known lateness and a known handler delay
+and asserts the probe reports both, run immediately before each sample rather than
+once and reused.
+
+**A document created to stop numbers drifting from their provenance shipped with a
+false count.** `M5_NUMBERS.md`'s status legend read "Four of six are placeholders"
+while all six entries read `PLACEHOLDER — NOT MEASURED`. It was false when written,
+in the milestone that wrote it, in the one document whose entire purpose is keeping
+a number attached to its evidence — and neither writer nor reviewer caught it until
+the next turn's edit forced a read of the status lines. It is the sharpest
+available illustration of why "nothing enforces the documented counts" is still an
+open item: the counts that drift are not only the gate's.
+
+**Venue-down was separated from tree-broken by asking the venue, not by re-running
+the suite.** Three integration tests failed together; a direct request to
+`testnet.binance.vision/api/v3/ping` returned 502 while `api.binance.com` returned
+200, which located the fault outside the tree in one call. A 90-minute poll then
+returned 502 ninety times out of ninety, and **uniform failure licensed stopping
+rather than continuing** — the decision was brought back rather than absorbed by
+waiting longer. This is the same family as the `| tail` incidents: the gate was
+correct, and the thing that needed reading was not the gate.
+
+### The gate's own invocation, fixed
+
+`python scripts/check.py` resolved through PATH to an interpreter that had never
+heard of this project, and reported four FAILs in 0.2s. It failed loudly only
+because that interpreter happened to carry none of the four tools; had it carried
+any, the gate would have reported PASS against the wrong environment with a
+byte-identical summary block. That is the third time the gate was correct and its
+invocation was not.
+
+The guard keys on whether the interpreter can import **this checkout's**
+`trading_bot` — deliberately not a location test, since "am I in a venv" passes any
+venv and "is my prefix under the repo" refuses a legitimate CI runner or container.
+Verified empirically in both directions rather than asserted.
+
+### The alpha measurement, and the number it did not produce
+
+Taken through the public `on_candle` port with two probes bracketing the engine's
+handler, so its duration was measured without instrumenting it. 108 records over 90
+minutes — exactly the expected count, so no bar was missed, which is itself the
+direct answer to the question alpha guards.
+
+Worst pipeline overhead 1744.1 ms against a 60000 ms bar, stationary across three
+thirds. **The measurement bounds alpha and does not derive it**, which the
+two-state status legend could not express, so a third state was added. Raising
+alpha was refused on the record: it does not buy headroom, it relocates the
+constraint onto venue latency the probe never sampled.
+
+A 485.7 ms handler outlier was **not** treated as a p99. The six largest values
+were 2.6, 2.7, 2.9, 2.9, 3.7 and 485.7 — one point 130x above the next is not a
+tail, and the distribution is bimodal rather than heavy-tailed. Correlating against
+the run log placed it on the only bar in the sample that ran the full composed
+path.
+
+Settling that at n=1 would have been guessing between two very different answers —
+a once-per-process warm-up cost, or half a second on every order. A second
+experiment substituted faster strategy periods against a **scratchpad** config,
+leaving the composed path after the signal byte-identical, and converted an
+unbounded wait for a natural crossover into 25 minutes at n=6. Executions two
+through six cost 1.2–2.4 ms, indistinguishable from bars producing no signal.
+Cold-start confirmed; "half a second every time" refuted.
+
+What the experiment could **not** separate was pre-declared before it ran — tz
+database load, decimal context, a lazy import, or a GC pause — and remains
+unresolved. Declaring that in advance is what makes "one-off, cause unresolved"
+credible rather than evasive.
+
 ---
 
 ## Known open items
