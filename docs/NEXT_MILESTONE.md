@@ -1,60 +1,73 @@
-# Current milestone — M5: order dispatch
+# Current milestone — M5a: the vocabulary
 
-**Q-C is decided.** The contract is `docs/QC_PROTECTIVE_ORDERS.md`, and M5
-implements against it rather than re-deciding it. Read that first; this file is
-the task list and the single home for live open items.
+**M5 is six milestones, not one.** M5-0 (decisions) is complete. M5a is the first
+that changes `src/`, and it is deliberately the one with no I/O in it.
 
-## What M5 delivers
+Read first: `docs/QC_PROTECTIVE_ORDERS.md` (the contract), `docs/M5_NUMBERS.md`
+(the six numbers and their status), `docs/QB_ESCALATION.md` (what `CRITICAL`
+does). The decisions themselves are locked in `CLAUDE.md`; this file is the task
+list and the single home for live open items.
 
-The bot places its first order. Concretely:
+## Prerequisite, already met
 
-1. **`execution/executor.py`** — currently a docstring-only stub. It maps an
-   approved `TradeIntent` onto the placement shape the config selects (OTOCO, OTO
-   or a single order), dispatches it, and hands the result to reconciliation.
-2. **The reconciler** — compares requested protection against what the exchange
-   reports, at boot, after each placement, and per candle per open position.
-3. **`Portfolio` write-back** — open/close methods it does not have today, driven
-   by observed fills rather than by our own dispatch. This retires M4a's
-   boot-snapshot portfolio, which nothing mutates.
-4. **`IntentLogger` is replaced**, not extended. It was deliberately not called
-   `Executor` and deliberately not placed in `execution/`; that stub is now
-   claimed for real.
+**`alpha` is BOUNDED at 0.5** and its measurement is taken — `M5_NUMBERS.md` §3.
+No further measurement gates M5a.
 
-## Ordered by what blocks what
+## What M5a delivers
 
-**First, because everything else assumes them:**
+**Config.** `max_entry_slippage`, the `PERCENT_PRICE_BY_SIDE` band margin,
+`max_position_staleness`, `dispatch_deadline_s`, `reconcile_deadline_s`. The
+TP-only refusal as a **mechanical** rename commit (`_check_protective_coverage`)
+followed by the semantic commit adding the third check. The `AppConfig` coherence
+validator enforcing `P_sim x D + N_max x T_recon <= alpha x T_min`, with the
+refusal message given in `M5_NUMBERS.md`.
 
-- `max_entry_slippage` as a new `RiskConfig` field — `Decimal` (it multiplies a
-  price), `gt=0`, with a named default and a stated rationale.
-- `TradeIntent.price` changes meaning to `entry_limit`. Its docstring is
-  currently **false** under Q-C and must be corrected; `_check_invariants` forces
-  `compute_protective_levels` to be called with `entry_limit` too. The
-  `binding_price` sizing fix already landed stays correct unchanged.
-- `SymbolInfo` must model `PERCENT_PRICE_BY_SIDE`, with a band violation as a
-  **refusal value, not a raise**. The margin against the moving 5-minute average
-  is deliberately unspecified by Q-C and needs a named default here.
-- `ProtectionState` including `ABSENT_BY_DESIGN`, and the new `Position` fields:
-  `entry_bar_time`, `protection`, `order_list_id`, `last_reconciled_at`.
-- The TP-only refusal in `RiskConfig`, with the validator renamed
-  `_check_protective_coverage` — **a separate, mechanical commit** from the
-  semantic change that adds the third check.
+**Domain.** `ProtectionState` in `core/enums.py`. `Position` gains
+`entry_bar_time`, `protection` (**required, non-nullable**), `order_list_id`,
+`last_reconciled_at`, with `opened_at` made explicit. `Portfolio` gains `ge=0` on
+`free_quote`, `open_position` / `close_position`, the unmanaged-holdings boot
+snapshot, and the mark-to-stop committed-risk term in `daily_loss_exceeded`.
+`SymbolInfo` models `PERCENT_PRICE_BY_SIDE` and `MAX_NUM_ALGO_ORDERS`.
+`OrderStatus` gains `PENDING_NEW` and `EXPIRED_IN_MATCH` — without which
+`to_order` raises an **untranslated** `ValueError` on any order-list read-back,
+so no later milestone can be built without it. `Order` gains `order_list_id` and
+`stop_price`; `OrderRequest` gains `time_in_force`.
 
-**Then:**
+**Do NOT add a `model_validator` to `Position`.** `validate_assignment=True` means
+it re-runs on every assignment and would observe the intermediate state between
+`advance_trailing_stop`'s two writes. The prescribed fix — collapsing those writes
+into one method on `Position` — has to land first, and it is not M5a's.
 
-- `translate_binance_error` rebuilt to match **message text, not code**.
-  `-2010 'Duplicate order sent.'` is a success signal under deterministic IDs and
-  must not surface as an error. New: `OrderNotFoundError`, `FilterRejectedError`
-  carrying the parsed filter name, and contract errors for `-1106` / `-1128` /
-  `-1158` / `-1159`.
-- The discretionary `CLOSE` path: cancel, confirm by query, sell `MARKET`.
-- The unprotected-window log line, on entry and exit, with symbol and position
-  identity.
+## Sequencing — one item is explicitly last
 
-## Q-B — escalation policy
+**The composed-path warm-up runs `evaluate` at composition-root time, so it lands
+LAST in M5a, after the domain widening has settled.** Every construction site the
+boot path touches is one this milestone changes — `Position.protection` required
+and non-nullable, `Portfolio` open/close, `EntryIntent`/`ExitIntent`,
+`daily_loss_exceeded` gaining `marks`. A warm-up written against today's shapes
+needs rewriting inside the same milestone that changes them.
 
-Settled at the start of M5, not during it. What `CRITICAL` actually does — halt
-entries, notify, and by what mechanism — is undecided, and Q-C leans on it in
-three places.
+Its scope is an open decision: `UNKNOWN_PAIR` warms the entry to the path only and
+needs no market data or portfolio state, while warming the full path needs a
+synthetic pair context and portfolio — more boot-time machinery, and more to rot.
+Either way it is **timed and logged at boot**, because boot-time code that exists
+only for timing rots silently and the failure is invisible until the cost
+reappears on a real order.
+
+## Absorbed from open items into M5a's scope
+
+These were carried as open items and are now scheduled work, so they are removed
+from the list below rather than duplicated:
+
+- `Portfolio.free_quote` gains `ge=0` — Q-C's write-back gives it a second caller.
+- `NO_MARK_PRICE`'s two divergent reason strings collapse; the port question that
+  blocked it is decided.
+- `_exit_assessment`'s approval site gets the test it lacks.
+- `_enforce`'s `min_notional` blindness for `MARKET` and stop-market orders, and
+  its use of `step_size` / `min_qty` where sizing uses the **effective** filters.
+
+**Q-D is closed**, not deferred: folded into Q-C as a decision, implemented in
+M5b when the port widens and `RiskAssessment` moves to `core/`.
 
 ---
 
@@ -71,29 +84,6 @@ consecutive-failure counter is fed only from `_evaluate`, so a permanently broke
 handler produces a traceback every bar forever and no pair is ever quarantined.
 M4a's chained handler mitigates this by never raising; the counter would make it
 visible rather than merely contained.
-
-**Q-D is no longer open.** It was folded into Q-C as a decision: the port widens
-to expose the composed path and `RiskAssessment` moves with it. Implementation
-belongs to M5.
-
-- **`_enforce` is blind to notional for exactly the order types
-  `applyMinToMarket` covers. M5 work.** `BinanceClient._enforce` guards its
-  `min_notional` check with `if price is not None`, and `OrderRequest.price` is
-  `None` for both `MARKET` and stop-market (`STOP_LOSS`, which carries only
-  `stop_price`). So the independent last line of defence cannot perform the check
-  at all for those types, while `NOTIONAL.applyMinToMarket` is measured `true` on
-  BTCUSDT and ETHUSDT, on Testnet and mainnet alike.
-
-  This is the sibling of the sizing bug fixed alongside it, one layer down, and
-  it is **not** closed by that fix: sizing now measures the notional at the lowest
-  price the trade carries, but `_enforce` re-checks independently.
-
-  It cannot be fixed by symmetry. A market order has no price to multiply, so
-  `_enforce` would need one passed in — a signature change to the adapter plus a
-  decision about where that price comes from (the signal's reference price, a
-  fresh ticker, or the `avgPrice` the filter itself is evaluated against, which is
-  a five-minute average and not any price the caller holds). Under Q-C both
-  protective legs are stop-markets, so this now sits on the main path.
 
 - **`MARKET_LOT_SIZE` and `NOTIONAL.applyMinToMarket` on a *triggered* stop-type
   order — UNRESOLVED.** Neither the installed `python-binance` nor the
@@ -120,27 +110,6 @@ belongs to M5.
   asserted in a probe report and never verified. Q-C's ID scheme reaches it at
   generation >= 100 on a 12-character symbol. One deliberately over-long rejected
   request would settle it, free, and it is not a blocker.
-
-- **`Portfolio.free_quote` has no `ge=0` constraint.** A negative free quote is
-  nonsense for spot and is unreachable today only because the portfolio is seeded
-  from exchange balance strings — an unenforced domain invariant held up by its
-  one caller. Q-C's write-back gives it a second caller, so this stops being
-  theoretical in M5.
-
-- **`NO_MARK_PRICE` is constructed twice with different reason text.** `approve`
-  says "…; equity is unknown, so no limit can be checked"; `evaluate` says only
-  "cannot value open position(s) …". The two never meet at runtime because
-  `evaluate` bypasses the public `approve` entirely — it calls `_mark_prices` then
-  `_approve` directly. Collapsing them is a decision about the port, which Q-C has
-  now made, so it can land with M5.
-
-- **`_exit_assessment`'s approval site passes `stage=None` and is pinned by no
-  test.** It is the second of two approval constructions — the entry approval in
-  `evaluate` is covered by `test_an_approval_reports_no_stage`, this one is not —
-  and it can drift alone. Its fixture shape differs enough (an open position, a
-  `CLOSE` signal) to be separate work rather than a rider. Recorded so it is not
-  mistaken for covered by the entry-path test. Q-C changes this path, so M5
-  touches it.
 
 - **Two adjacent refusal-guard pairs remain unpinned by an ordering test:**
   `unsupported_action` against `no_mark_price`, and `no_mark_price` against
@@ -243,6 +212,22 @@ belongs to M5.
   gate-scope table in `CLAUDE.md`, and `README.md`. Worth a check that reads the
   numbers from a live run, but it must not become a gate that fails for a reason
   unrelated to the code.
+
+- **`ruff` and `mypy` are unpinned while every runtime dependency is pinned
+  `==`.** `requirements-dev.txt` floats the two tools that *produce the numbers
+  the gate reports*. A pin in this project encodes a **verified** version, not a
+  working one — `pydantic`, `pandas` and `numpy` carry line comments saying so —
+  and by that standard these two have a stronger claim than most: a `ruff` minor
+  release can change `ruff format`'s output and turn the gate red on a tree
+  nobody touched, and a `mypy` release can add a check that fails a file it
+  passed yesterday. Either failure looks like a regression in the code and is
+  not one.
+
+  Raised repeatedly in conversation and never written down, which is presumably
+  why it keeps being raised. Recording it here so the next raise can be answered
+  from the file. Deliberately not fixed in passing: pinning them changes what a
+  fresh `pip install -r requirements-dev.txt` produces for every contributor, and
+  it wants the same decision as `pip-compile` below rather than a separate one.
 
 - **Transitive dependencies still float.** The direct layer is pinned exactly;
   `websockets` / `aiohttp` under `python-binance` and friends resolve freely.
