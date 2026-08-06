@@ -14,13 +14,22 @@ that will change fits neither, and splitting it across both guarantees drift.
 
 Every number below is marked one of:
 
-- **MEASURED** — a provenance line names the sample, the date and the method.
-- **PLACEHOLDER — NOT MEASURED** — a working value with a stated rationale and
-  **no sample behind it**. It must not be quoted as though it were measured, and
-  it must not ship to LIVE without its measurement.
+- **MEASURED** — a provenance line names the sample, the date and the method, and
+  the value is derived from it.
+- **BOUNDED** — a measurement exists and constrains what the value must clear, but
+  **does not derive it**. The value is a policy choice made with that headroom in
+  view. Both halves are recorded deliberately: a later reader must be able to see
+  that the number is a choice *and* that re-running the measurement will not tell
+  them what to change it to.
+- **PLACEHOLDER — NOT MEASURED** — a rationale and **no sample behind it**. It must
+  not be quoted as though it were measured, and must not ship to LIVE without its
+  measurement.
+- **UNMEASURED — PENDING DERIVATION** — not a candidate for measurement at all; it
+  falls out of the coherence constraint once the numbers it depends on are fixed.
 
-**Four of six are placeholders.** That is the honest state at M5-0 and it is
-written this way so a later reader cannot mistake a rationale for a sample.
+**Four placeholders, one bounded, one unmeasured.** That is the honest state at
+M5-0 and it is written this way so a later reader cannot mistake a rationale for a
+sample, or a policy choice for a derivation.
 
 ---
 
@@ -156,13 +165,32 @@ And verify the tree afterwards by **checksum, not `git status`**: status sees on
 tracked files, and this project's own history has a sweep that left `src/` modified
 on disk and was caught by md5.
 
-**Working value: `alpha = 0.5`.**
+**Working value: `alpha = 0.5`. Status: BOUNDED.**
 
-**Status: PLACEHOLDER — NOT MEASURED.**
+**Provenance.** TESTNET, shipped `config.yaml` pairs, 2026-08-06 09:14–10:44,
+90 minutes, **108 records — 90 BTCUSDT/1m + 18 ETHUSDT/5m, exactly the expected
+count, so NO BAR WAS MISSED.** That last fact is a second result hiding inside the
+first, and it is the direct empirical answer to the question alpha exists to
+guard: the pipeline kept up for the whole window, on the shipped configuration,
+with nothing dropped.
 
-**Provenance:** *(to be written when measured)*
-`alpha = X: p99 candle arrival lateness across <pairs> over <N> bars was Y ms,
-measured <date> on Testnet; (1 - alpha) x T_min leaves K x that tail.`
+Worst observed pipeline overhead was 1258.4 ms arrival lateness + 485.7 ms handler
+= **1744.1 ms against a 60 000 ms bar, 2.9% of `T_min`**. Arrival lateness was
+**stationary** across three equal thirds (p90 997 / 1212 / 1017 ms; maxima within
+8% of each other). `alpha = 0.5` leaves 30 s of headroom against that worst case —
+a **17x margin**.
+
+**So jitter is not the binding term in the R2 constraint**, and `0.5` is a *policy*
+choice rather than a derivation. Raising alpha does not buy headroom; it relocates
+the constraint onto venue latency, which this probe does not sample. At
+`alpha = 0.95` the constraint would admit `D ~ 24 s` — an 8 s per-call deadline
+inside a three-call `CLOSE`, which is essentially the general
+`exchange.requests_timeout_s` that §5 exists to reject.
+
+Measurement method: two probes registered through the public `on_candle` port,
+bracketing the engine's handler in registration order, so its duration is measured
+without instrumenting it. Validated against an injected known answer immediately
+before sampling.
 
 ---
 
@@ -228,12 +256,43 @@ pairs closing on the same minute is 60 s — the entire bar, before reconciliati
 runs. **Roughly a third of `requests_timeout_s` is the right order of magnitude on
 the shipped config**, and the constraint below is what fixes it.
 
+**A first-execution cost of order 100–500 ms is paid inside the first dispatch,
+and it is an additive term in this budget.** Measured on TESTNET: the composed
+decision path costs **~2 ms in steady state** — six full executions across two
+runs at 1.2–2.4 ms, statistically indistinguishable from bars producing no signal
+at all — but its *first* execution in a process costs far more. Two runs: 485.7 ms
+on the first approved signal in one, 29.3 ms in the other with a further 229.1 ms
+landing on the first candle instead. **The order of magnitude is stable; the split
+and the size are not**, so this is recorded as a range and not a number.
+
+Under M5e the first approved signal is also the first *order*, so this is paid on
+top of venue latency, inside `dispatch_deadline_s`, **once per process**. At
+`D ~ 3.5 s` from the constraint table, a 485 ms excursion is 14% of the whole
+dispatch budget spent before the first byte reaches Binance.
+
+The remedy is **not** to inflate `D`. `D` is not free: the constraint multiplies it
+by `P_sim` and trades it against `N_max x T_recon` under a fixed `alpha x T_min`,
+so covering a once-per-process cost by widening `D` permanently taxes every
+subsequent bar. **The composed path is warmed at boot instead — an M5a decision** —
+and the warm-up is timed and logged at boot as its anti-rot measure, because
+boot-time code that exists only for timing rots silently and the failure is
+invisible until the cost reappears on a real order.
+
+What the evidence does **not** establish is *which* one-off cost this is. First-call
+tz-database load in `_roll_day`, `decimal` context materialisation, a lazily
+resolved import, or a GC pause coinciding with that bar are not separable without
+instrumenting `evaluate` itself. Eliminated by the data: pandas/NumPy frame
+building (every bar does it), the logging sink (a refused signal reached
+`IntentLogger` in 2.0 ms, 62 bars earlier), and ATR warm-up (a percent stop never
+calls it). **"One-off, cause unresolved"** is the honest statement.
+
 **Measurement:** the placement round-trip distribution on Testnet, read-only for
 the query half; the write half is measurable from M5c's expiring placements, which
 are real submissions that cannot fill.
 
-**Status: PLACEHOLDER — NOT MEASURED**; derivable from the constraint once
-`T_recon` and `alpha` are.
+**Status: UNMEASURED — PENDING DERIVATION.** This is the one number that is not a
+candidate for measurement: it falls out of the coherence constraint below once
+`T_recon` and `alpha` are fixed.
 
 ---
 
