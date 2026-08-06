@@ -653,10 +653,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  83 files already formatted
+ruff format --check src tests scripts  84 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 647 passed, 3 skipped
-                                       (650 passed with Testnet credentials present)
+pytest                                 653 passed, 3 skipped
+                                       (656 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -665,14 +665,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `650 passed` on a machine with Binance Testnet credentials in `.env`
-- `647 passed, 3 skipped` on a machine without them
+- `656 passed` on a machine with Binance Testnet credentials in `.env`
+- `653 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 647 and must not read it as a regression against a documented
-650. Quote the count with its condition, never bare.
+runner will see 653 and must not read it as a regression against a documented
+656. Quote the count with its condition, never bare.
 
-Only the `650` is measured here; `647` is `650` minus the three `skipif`-gated
+Only the `656` is measured here; `653` is `656` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -687,7 +687,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 647, so **treat a lone
+output was read. The unit suite is deterministic at 653, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -725,7 +725,7 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 83 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 84 |
 | `mypy` | `files = ["src/trading_bot", "scripts"]` | 58 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
@@ -932,12 +932,36 @@ read-back asymmetries it relies on were measured across ten Testnet probe steps,
 and every claim in the note is marked MEASURED, DOCUMENTED or UNMEASURED. Q-D was
 folded in as a decision: the port widens and `RiskAssessment` moves with it.
 
+**M5-0 is complete: the decisions that gate every M5 milestone are made and
+written down.** M5 is six milestones, not one. D1 (dispatch stays inline, with a
+per-call deadline, a per-bar budget and a reserved reconciliation floor), D2 (fills
+observed by polling over every position on any candle; committed risk on a
+mark-to-stop basis), D3 (`TradeIntent` splits into `EntryIntent` / `ExitIntent`)
+and D4 (the safety numbers) are locked above. **Q-B** is settled in
+`docs/QB_ESCALATION.md`: `CRITICAL` means a log line and a halt flag and nothing
+else, across five binding sites in three categories.
+`docs/M5_NUMBERS.md` holds the six numbers with their provenance and status;
+`docs/QC_PROTECTIVE_ORDERS.md` gained §5b, settling that pre-existing holdings are
+counted toward equity and never adopted as positions.
+
+**The only `src/` change was to the gate's own invocation.** `scripts/check.py`
+now refuses to run from an interpreter that cannot import this checkout's
+`trading_bot` — the third time the gate was correct and the way it was invoked was
+not.
+
+**`alpha` is measured-but-not-derived**, which is why `M5_NUMBERS.md` carries a
+BOUNDED status beside MEASURED and PLACEHOLDER. Worst pipeline overhead is 2.9% of
+the shortest bar and no bar was missed across 90 minutes, so jitter is not the
+binding term in the coherence constraint. The composed decision path costs ~2 ms
+warm and 10²ms on its first execution in a process, which is why it is warmed at
+boot in M5a rather than absorbed into `dispatch_deadline_s`.
+
 **Still nothing places an order.** `IntentLogger` remains the terminal
 collaborator; `execution/` is still a pair of stubs.
 
-Next: **M5**, order dispatch — it implements Q-C's contract and is where the bot
-first places an order. **Q-A** stays unscheduled: its thresholds need soak data
-and nothing has dispatched an order yet, so the `collaborator_failed` lines it
-would be calibrated from do not exist. **Q-B**, escalation policy, is settled at
-the start of M5 because Q-C leans on it in three places. See
+Next: **M5a**, the vocabulary — config fields, `ProtectionState`, the new
+`Position` and `Portfolio` shapes, and the `AppConfig` coherence refusal. It is
+deliberately the M5 milestone with no I/O in it. **Q-A** stays unscheduled: its
+thresholds need soak data and nothing has dispatched an order yet, so the
+`collaborator_failed` lines it would be calibrated from do not exist. See
 `docs/NEXT_MILESTONE.md`.
