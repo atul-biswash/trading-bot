@@ -86,6 +86,23 @@ and the stop with it. The margin buffers the average *moving* between the moment
 levels are computed (bar close) and the moment the exchange evaluates them
 (submission).
 
+**The five minutes are MEASURED, promoted from DOCUMENTED.** The filter states its
+own interval: `avgPriceMins` arrives on the `PERCENT_PRICE_BY_SIDE` payload as a
+JSON number, value `5`, on **both** configured symbols. So does the band itself —
+`bidMultiplierUp` / `askMultiplierUp` `"2"` and `bidMultiplierDown` /
+`askMultiplierDown` `"0.5"`, four fields rather than the two "0.5x–2x" implies.
+*Provenance: `GET /api/v3/exchangeInfo` via `get_symbol_info`, Binance Spot
+**TESTNET**, BTCUSDT and ETHUSDT, 2026-08-08, read-only, no order placed.* The
+same `avgPriceMins: 5` appears on `NOTIONAL`.
+
+**This changes nothing about §2's status, and the distinction is the point:
+measuring the INTERVAL did not measure the SERIES.** What is now measured is *how
+many minutes* of average the filter uses. What remains unestablished is *which
+number* it averages — specifically whether the `avgPrice` endpoint's value is the
+value the filter is evaluated against, which is the prior question in the
+measurement plan below and the thing the whole pre-check rests on. A margin still
+cannot be derived from this. The status stays **PLACEHOLDER**.
+
 **Too tight costs:** the pre-check passes and the exchange refuses anyway. One
 refused signal, logged, `FilterRejectedError` naming the filter. **Observable and
 free.**

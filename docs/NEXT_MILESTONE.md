@@ -86,18 +86,45 @@ M4a's chained handler mitigates this by never raising; the counter would make it
 visible rather than merely contained.
 
 - **`MARKET_LOT_SIZE` and `NOTIONAL.applyMinToMarket` on a *triggered* stop-type
-  order — UNRESOLVED.** Neither the installed `python-binance` nor the
-  `exchangeInfo` payload states whether "market" means an order submitted with
-  `type=MARKET` or any order that executes at market, including a triggered
-  `STOP_LOSS`. Both carry the values and neither defines the term. Settling it
-  needs Binance's published spot documentation or a test that requires a stop to
-  actually trigger — an irreversible fill.
+  order — NARROWED, still UNRESOLVED.** What survives is a question about the
+  **word**, not about the payload: does "market" mean an order submitted with
+  `type=MARKET`, or any order that *executes* at market, including a triggered
+  `STOP_LOSS`? Nothing states it, and settling it needs Binance's published spot
+  documentation or a test that requires a stop to actually trigger — an
+  irreversible fill.
+
+  **Half of this item was false and has been corrected rather than left standing.**
+  It read that the `exchangeInfo` payload does not state it. `applyMinToMarket` is
+  in fact **present and machine-readable, and it is `true`** on both configured
+  symbols — alongside `applyMaxToMarket: false`, `maxNotional`, and
+  `avgPriceMins: 5`, none of which the mapper read until M5a. *Provenance: `GET
+  /api/v3/exchangeInfo`, TESTNET, BTCUSDT and ETHUSDT, 2026-08-08, read-only.* So
+  the minimum **does** apply to market orders; the payload was never silent about
+  that, only about what counts as one.
 
   Sizing takes the stricter of `LOT_SIZE` and `MARKET_LOT_SIZE` rather than
   guessing. On mainnet BTCUSDT and ETHUSDT the market filter reports zeroed
   min/step, so the conservatism currently costs nothing; it is there for the
   symbol nobody has checked. **Under Q-C both protective legs are stop-markets,
   so if this binds, it binds on everything.**
+
+- **`MAX_NUM_ORDER_LISTS = 20`, and no document in this repository mentioned it
+  until now.** Measured on both configured symbols alongside
+  `MAX_NUM_ALGO_ORDERS = 5` *(`GET /api/v3/exchangeInfo`, TESTNET, BTCUSDT and
+  ETHUSDT, 2026-08-08, read-only)*. Q-C §3 counts algo slots carefully — a
+  protected position costs 2 of 5 — and never counts **list** slots at all, even
+  though under Q-C every protected position **is** an order list. It is a second
+  ceiling on the same object.
+
+  It cannot bind at `limits.max_open_positions = 3`, so this is not urgent. What
+  makes it worth carrying is that **whether terminated lists age out of the count
+  is UNKNOWN, and must not be assumed in either direction.** If the ceiling counts
+  only live lists, 20 is unreachable here. If it counts lists created in some
+  window, a bot trading one symbol on a 1-minute bar reaches 20 in twenty minutes
+  and then fails at submission for a reason no code path anticipates. Both filters
+  are parsed and unread on `SymbolInfo`, in the family of
+  `MarketLotSize.max_qty` below — captured precisely because an unrecorded ceiling
+  is one that gets discovered by hitting it.
 
 - **`MarketLotSize.max_qty` is parsed but not read.** The "0 means no constraint"
   convention is per-field, not filter-wide: both Testnet and mainnet report a real
