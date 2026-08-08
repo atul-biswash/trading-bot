@@ -260,8 +260,20 @@ forcing `max_open_positions` down.
 **It must be its own field.** `exchange.requests_timeout_s = 10` is a per-call
 timeout for reads; a three-call `CLOSE` sequence at that value is 30 s, and two
 pairs closing on the same minute is 60 s — the entire bar, before reconciliation
-runs. **Roughly a third of `requests_timeout_s` is the right order of magnitude on
-the shipped config**, and the constraint below is what fixes it.
+runs. **Roughly a third of `requests_timeout_s` is the right order of magnitude for
+the derived per-call share on the shipped config**, and the constraint below is what
+fixes it.
+
+**Definitional, stated once so the two figures cannot be collapsed again.**
+`risk.dispatch_deadline_s` — `D` — is the deadline for the **whole dispatch
+sequence**, worst case the three-call `CLOSE`, and it is the only configured number.
+The **per-call** figure is *derived*: `D` divided by the call count of the longest
+sequence, which is what the constraint table's rightmost column reports. On the
+shipped config the constraint admits `D <= 10.5 s`, whose derived per-call share is
+3.5 s. The sentence above describes that derived per-call figure (~3.3 s against a
+10 s general timeout); it has never described `D`. Reading it as `D` gives ~1.1 s per
+call inside a three-call `CLOSE` — below plausible venue round-trip, which is the
+ambiguous write, manufactured by the budget that exists to prevent it.
 
 **A first-execution cost of order 100–500 ms is paid inside the first dispatch,
 and it is an additive term in this budget.** Measured on TESTNET: the composed
@@ -273,9 +285,13 @@ landing on the first candle instead. **The order of magnitude is stable; the spl
 and the size are not**, so this is recorded as a range and not a number.
 
 Under M5e the first approved signal is also the first *order*, so this is paid on
-top of venue latency, inside `dispatch_deadline_s`, **once per process**. At
-`D ~ 3.5 s` from the constraint table, a 485 ms excursion is 14% of the whole
-dispatch budget spent before the first byte reaches Binance.
+top of venue latency, inside `dispatch_deadline_s`, **once per process**. Against
+`D = 10.5 s` — the **ceiling** the constraint admits on the shipped config, not a
+shipped default — a 485 ms excursion is **4.6%** of the whole dispatch budget spent
+before the first byte reaches Binance, and it is larger at any admissible default:
+**4.9% at 10.0, 5.4% at 9.0**. Run 2's `evaluate`-attributable 29.3 ms is 0.3% at the
+ceiling. What the sample gives is a range from a fraction of a percent to five
+percent, not a single figure.
 
 The remedy is **not** to inflate `D`. `D` is not free: the constraint multiplies it
 by `P_sim` and trades it against `N_max x T_recon` under a fixed `alpha x T_min`,
@@ -301,6 +317,50 @@ are real submissions that cannot fill.
 but does not produce it — `alpha` is a policy choice and `T_recon` is itself
 unmeasured — so the plan above is what settles it, with the cold-path term as an
 empirical input.
+
+> **Correction — `D` was mis-cited against its own table. Added at M5a-doc.**
+> This section previously read: *"At `D ~ 3.5 s` from the constraint table, a 485 ms
+> excursion is 14% of the whole dispatch budget."* The constraint table's `D` column
+> reads **10.5 s** on the shipped row; **3.5 s is that row's "per call in a 3-call
+> CLOSE" column.** The arithmetic was right for the number quoted
+> (485 / 3500 = 14%) and the symbol was wrong.
+>
+> **Corrected: 485 ms is 4.6% of the constraint ceiling, not 14%** — 4.9% at a 10.0
+> default, 5.4% at 9.0, and 0.3% for run 2's 29.3 ms.
+>
+> **This weakens the motivating fact for warming the composed path at boot, and the
+> weakening is stated rather than absorbed.** The case rested on a once-per-process
+> excursion consuming a seventh of the dispatch budget; on the corrected number it
+> consumes about a twentieth. Taken with the bound recorded below — the warm-up
+> removes ~11% of the one-off in one of the two runs — the empirical case is
+> materially smaller than it reads.
+>
+> **What survives:** `D` is not free. The constraint multiplies it by `P_sim` and
+> trades it against `N_max x T_recon` under a fixed `alpha x T_min`, so inflating
+> `D` to cover a once-per-process cost still permanently taxes every bar. That
+> argument never depended on the size of the excursion and is untouched.
+>
+> **What is now open:** whether a 4.6%-worst-case, partly-unattributed one-off
+> justifies boot-time machinery that must be maintained and can rot. The warm-up is
+> recorded in `CLAUDE.md`'s **Current state** and sequenced in
+> `docs/NEXT_MILESTONE.md`; it is **not** in `CLAUDE.md`'s Locked decisions. It is
+> not reopened by this commit, and is to be adjudicated on the corrected number.
+
+> **Bound on what the warm-up removes — added at M5a-doc, not a resolution.**
+> The first-execution paragraph says the one-off "is paid inside the first
+> dispatch." That is true of run 1 and false of run 2, by this section's own
+> numbers. The warm-up removes only the portion attributable to `evaluate`:
+> **485.7 ms of 485.7 ms (~100%) in run 1, and 29.3 ms of 258.4 ms (~11%) in
+> run 2.** The residual — 229.1 ms landing on the first *candle* rather than on the
+> first approved signal — is **unattributed**. It is not inside `evaluate`, so no
+> warm-up of the composed path reaches it, and the four-candidate list above does
+> not separate it.
+>
+> **What survives unchanged:** the one-off is real, is once per process, is an
+> additive term in this budget, and inflating `D` is still the wrong remedy for it.
+> **What is now bounded rather than asserted:** how much of it the warm-up actually
+> removes — between ~11% and ~100%, on a sample of two. The cause remains unknown
+> and this note does not resolve it.
 
 ---
 
@@ -370,10 +430,14 @@ client exists: the same posture as `_pair_timeframes`' duplicate-symbol refusal.
 
 ### The refusal message
 
+Worked with **`dispatch_deadline_s = 11.0`**, chosen *because it breaches*: it
+illustrates the refusal and is **not a proposed default**. The shipped default is an
+open decision this document does not settle.
+
 ```
-risk.dispatch_deadline_s = 10.0 x 2 pair(s) that can close simultaneously,
+risk.dispatch_deadline_s = 11.0 x 2 pair(s) that can close simultaneously,
 plus risk.reconcile_deadline_s = 3.0 x limits.max_open_positions = 3,
-is 29.0s. That exceeds 50% of the shortest enabled timeframe
+is 31.0s. That exceeds 50% of the shortest enabled timeframe
 (BTCUSDT/1m = 60s, budget 30.0s).
 
 The signal handler runs inline on the candle pipeline, so a bar closing
@@ -383,3 +447,7 @@ re-masks ATR to NaN long after warmup, disabling ATR stops on that pair.
 Lower risk.dispatch_deadline_s, lower risk.limits.max_open_positions, or
 configure a longer shortest timeframe in config.yaml.
 ```
+
+The previous worked example used `10.0`, giving `2 x 10.0 + 3 x 3.0 = 29.0s` against
+a 30.0s budget; the constraint is `<=`, so 29.0 passes and the message would never
+have been emitted for its own numbers.
