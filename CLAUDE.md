@@ -606,6 +606,15 @@ scripts/         check_testnet.py · download_data.py
   `@pytest.mark.parametrize` argument list. Define such tables at module level
   and reference them from `parametrize` (`_STOP_ROUNDING_CASES` is the worked
   example).
+- **A fence buys layout, not line length.** `# fmt: off` suppresses the
+  **formatter**; `E501` is a **lint** rule and is untouched by it. So a fenced
+  wire fixture cannot fence itself a long row — a payload line copied verbatim
+  from an API response will still fail `ruff check` at 100 characters, and the
+  fence will not say so until the gate does. **Hand-lay each row across several
+  lines inside the fence** (one dict per row, keys grouped as the wire groups
+  them) and **never reach for `# noqa` to keep a wire row on one line**: the
+  suppression rule is not relaxed for fixtures, and the reason to fence is that
+  the *grouping* mirrors the contract, which survives wrapping perfectly well.
 - **Fence only where layout is the sole carrier of a correspondence to an
   external contract.** Six fenced fixtures across five files:
 
