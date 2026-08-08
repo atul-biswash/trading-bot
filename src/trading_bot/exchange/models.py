@@ -46,6 +46,7 @@ from trading_bot.core.models import (
     MarketLotSize,
     Order,
     OrderRequest,
+    PercentPriceBySide,
     SymbolInfo,
     Ticker,
 )
@@ -140,9 +141,14 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
     renamed ``MIN_NOTIONAL`` to ``NOTIONAL``; both spellings are accepted.
     Raises :class:`ExchangeAPIError` if a mandatory filter is missing.
 
-    ``MARKET_LOT_SIZE`` is **optional**, and its absence is a normal symbol
-    rather than a malformed payload -- so it is fetched with ``get`` and left as
-    ``None``, while ``PRICE_FILTER`` and ``LOT_SIZE`` keep raising.
+    ``MARKET_LOT_SIZE``, ``PERCENT_PRICE_BY_SIDE``, ``MAX_NUM_ALGO_ORDERS`` and
+    ``MAX_NUM_ORDER_LISTS`` are all **optional**, and absence is a normal symbol
+    rather than a malformed payload -- so each is fetched with ``get`` and left
+    as ``None``, while ``PRICE_FILTER`` and ``LOT_SIZE`` keep raising.
+
+    The counts arrive as JSON **numbers** and the band multipliers as
+    **unpadded strings** (``"2"``, ``"0.5"``), unlike every other decimal on
+    this payload; both convert exactly.
     """
     filters = _filters_by_type(raw)
     try:
@@ -164,6 +170,20 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
         if raw_market_lot is not None
         else None
     )
+    raw_percent_price = filters.get("PERCENT_PRICE_BY_SIDE")
+    percent_price = (
+        PercentPriceBySide(
+            bid_multiplier_up=_dec(raw_percent_price["bidMultiplierUp"]),
+            bid_multiplier_down=_dec(raw_percent_price["bidMultiplierDown"]),
+            ask_multiplier_up=_dec(raw_percent_price["askMultiplierUp"]),
+            ask_multiplier_down=_dec(raw_percent_price["askMultiplierDown"]),
+            avg_price_mins=int(raw_percent_price["avgPriceMins"]),
+        )
+        if raw_percent_price is not None
+        else None
+    )
+    algo = filters.get("MAX_NUM_ALGO_ORDERS")
+    order_lists = filters.get("MAX_NUM_ORDER_LISTS")
     return SymbolInfo(
         symbol=raw["symbol"],
         base_asset=raw["baseAsset"],
@@ -173,6 +193,9 @@ def to_symbol_info(raw: dict[str, Any]) -> SymbolInfo:
         min_qty=_dec(lot_size["minQty"]),
         min_notional=_dec(notional.get("minNotional", "0")),
         market_lot=market_lot,
+        percent_price=percent_price,
+        max_num_algo_orders=None if algo is None else int(algo["maxNumAlgoOrders"]),
+        max_num_order_lists=None if order_lists is None else int(order_lists["maxNumOrderLists"]),
     )
 
 

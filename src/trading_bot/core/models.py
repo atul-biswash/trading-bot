@@ -193,6 +193,41 @@ class MarketLotSize(_Frozen):
     step_size: Money  # MARKET_LOT_SIZE stepSize; 0 means unconstrained
 
 
+class PercentPriceBySide(_Frozen):
+    """The ``PERCENT_PRICE_BY_SIDE`` filter. Optional -- not every symbol has it.
+
+    Bounds every order price to a band around the *average* price of the last
+    :attr:`avg_price_mins` minutes, evaluated at submission. A violation refuses
+    the **whole order list**, so a take-profit that drifts outside kills the
+    entry and the stop with it.
+
+    **Four multipliers, not two.** BTCUSDT and ETHUSDT both report a symmetric
+    band -- ``2`` up and ``0.5`` down on each side -- and collapsing the four
+    fields to two would encode that symmetry as a property of the *filter*
+    rather than of those two symbols. It is not one: the wire carries a
+    per-side structure and nothing promises the sides agree. Same
+    fidelity-to-the-wire reasoning that keeps :attr:`MarketLotSize.max_qty`
+    parsed and unread.
+
+    **``Decimal``, not ``Money``.** These are ratios that will multiply a price,
+    not prices. ``Money`` exists to stop a price being built from a float;
+    applying it to a band multiplier is a category error, and the same logic
+    already types ``max_entry_slippage`` as a plain ``Decimal``. The wire sends
+    them **unpadded** -- ``"2"`` and ``"0.5"``, not the eight-place form every
+    other decimal on this payload uses -- and both convert exactly.
+    """
+
+    bid_multiplier_up: Decimal
+    bid_multiplier_down: Decimal
+    ask_multiplier_up: Decimal
+    ask_multiplier_down: Decimal
+    #: Minutes of average price the band is measured against. Arrives as a JSON
+    #: number, not a string. It is the measured input to the band-margin
+    #: question -- the interval over which the average can move between the bar
+    #: close that computes a level and the submission that is judged against it.
+    avg_price_mins: int
+
+
 class SymbolInfo(_Frozen):
     """Trading rules (filters) for a symbol, needed to size and round orders."""
 
@@ -205,6 +240,17 @@ class SymbolInfo(_Frozen):
     min_notional: Money  # MIN_NOTIONAL / NOTIONAL
     #: ``MARKET_LOT_SIZE``, when the symbol reports it. ``None`` is normal.
     market_lot: MarketLotSize | None = None
+    #: ``PERCENT_PRICE_BY_SIDE``, when the symbol reports it. ``None`` is normal.
+    percent_price: PercentPriceBySide | None = None
+    #: ``MAX_NUM_ALGO_ORDERS.maxNumAlgoOrders``. A protected position costs two
+    #: of these -- a stop-market and a take-profit-market. Parsed, not read.
+    max_num_algo_orders: int | None = None
+    #: ``MAX_NUM_ORDER_LISTS.maxNumOrderLists``. Under the order-list design
+    #: every protected position *is* a list, so this is a second ceiling on the
+    #: same thing. Parsed, not read -- captured precisely because no design
+    #: document mentions it, which is how a ceiling gets discovered by hitting
+    #: it. Both configured symbols report 20.
+    max_num_order_lists: int | None = None
 
     @property
     def effective_step_size(self) -> Decimal:

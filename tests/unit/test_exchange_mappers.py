@@ -100,6 +100,52 @@ SYMBOL_MARKET_LOT_POPULATED = {
     ],
 }
 
+# The whole filters array as Binance Spot TESTNET returns it for BTCUSDT --
+# measured, not composed, and laid out in wire order with every filter present
+# rather than reduced to the four the mapper reads. Reducing it is what hid
+# LOT_SIZE.maxQty and NOTIONAL.applyMinToMarket from this suite for five
+# phases: a fixture trimmed to what the mapper consumes cannot show what the
+# mapper ignores.
+#
+# Two shapes here are the wire's and must not be tidied. The band multipliers
+# arrive UNPADDED -- "2" and "0.5" -- unlike every other decimal on this
+# payload, which carries eight places. avgPriceMins, the four maxNum* limits
+# and ICEBERG_PARTS.limit arrive as JSON *numbers*, not strings.
+# fmt: off
+SYMBOL_FULL_TESTNET = {
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER",
+         "minPrice": "0.01000000", "maxPrice": "1000000.00000000",
+         "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE",
+         "minQty": "0.00001000", "maxQty": "9000.00000000",
+         "stepSize": "0.00001000"},
+        {"filterType": "ICEBERG_PARTS", "limit": 100},
+        {"filterType": "MARKET_LOT_SIZE",
+         "minQty": "0.00000000", "maxQty": "141.67845966",
+         "stepSize": "0.00000000"},
+        {"filterType": "TRAILING_DELTA",
+         "minTrailingAboveDelta": 10, "maxTrailingAboveDelta": 2000,
+         "minTrailingBelowDelta": 10, "maxTrailingBelowDelta": 2000},
+        {"filterType": "PERCENT_PRICE_BY_SIDE",
+         "bidMultiplierUp": "2", "bidMultiplierDown": "0.5",
+         "askMultiplierUp": "2", "askMultiplierDown": "0.5",
+         "avgPriceMins": 5},
+        {"filterType": "NOTIONAL",
+         "minNotional": "5.00000000", "applyMinToMarket": True,
+         "maxNotional": "9000000.00000000", "applyMaxToMarket": False,
+         "avgPriceMins": 5},
+        {"filterType": "MAX_NUM_ORDERS", "maxNumOrders": 200},
+        {"filterType": "MAX_NUM_ORDER_LISTS", "maxNumOrderLists": 20},
+        {"filterType": "MAX_NUM_ALGO_ORDERS", "maxNumAlgoOrders": 5},
+        {"filterType": "MAX_NUM_ORDER_AMENDS", "maxNumOrderAmends": 10},
+    ],
+}
+# fmt: on
+
 TICKER_24H = {
     "symbol": "BTCUSDT",
     "lastPrice": "65000.50000000",
@@ -314,6 +360,79 @@ def test_market_lot_size_populated_wins_when_stricter() -> None:
     # The raw LOT_SIZE values are untouched -- effective is derived, not stored.
     assert info.step_size == Decimal("0.00001")
     assert info.min_qty == Decimal("0.00001")
+
+
+def test_percent_price_by_side_keeps_all_four_multipliers() -> None:
+    """Four fields, not two. BTCUSDT and ETHUSDT both report a symmetric band,
+    and collapsing to two would encode that symmetry as a property of the
+    *filter* rather than of those two symbols. Nothing on the wire promises the
+    sides agree.
+    """
+    info = m.to_symbol_info(SYMBOL_FULL_TESTNET)
+    assert info.percent_price is not None
+    band = info.percent_price
+    assert band.bid_multiplier_up == Decimal("2")
+    assert band.bid_multiplier_down == Decimal("0.5")
+    assert band.ask_multiplier_up == Decimal("2")
+    assert band.ask_multiplier_down == Decimal("0.5")
+
+
+def test_percent_price_multipliers_parse_exactly_from_the_unpadded_wire_form() -> None:
+    """The wire sends ``"2"`` and ``"0.5"``, not the eight-place form every
+    other decimal on this payload uses. Both convert exactly, and the value is
+    a ratio rather than money -- so it is a plain ``Decimal``.
+    """
+    band = m.to_symbol_info(SYMBOL_FULL_TESTNET).percent_price
+    assert band is not None
+    assert band.bid_multiplier_down * Decimal("100") == Decimal("50")  # exact, no 49.999...
+    assert band.ask_multiplier_up == 2
+
+
+def test_avg_price_mins_is_an_int_from_a_json_number() -> None:
+    """It arrives as a JSON number, not a string, and it is the interval the
+    band-margin question is about -- how far the average can move between the
+    bar close that computes a level and the submission judged against it.
+    """
+    band = m.to_symbol_info(SYMBOL_FULL_TESTNET).percent_price
+    assert band is not None
+    assert band.avg_price_mins == 5
+    assert isinstance(band.avg_price_mins, int)
+
+
+def test_the_two_order_count_ceilings_are_parsed() -> None:
+    """Both are parsed-but-unread, like ``max_qty``. ``MAX_NUM_ORDER_LISTS`` is
+    captured precisely because no design document mentions it: under the
+    order-list design every protected position *is* a list, so it is a second
+    ceiling on the same thing.
+    """
+    info = m.to_symbol_info(SYMBOL_FULL_TESTNET)
+    assert info.max_num_algo_orders == 5  # a protected position costs two
+    assert info.max_num_order_lists == 20
+
+
+def test_the_new_filters_are_optional_like_market_lot_size() -> None:
+    """A payload without them is a normal symbol, not a malformed one -- the
+    same rule ``MARKET_LOT_SIZE`` already follows, and the reason none of them
+    may join ``PRICE_FILTER`` / ``LOT_SIZE`` in raising.
+    """
+    info = m.to_symbol_info(SYMBOL_NOTIONAL)  # carries none of the three
+    assert info.percent_price is None
+    assert info.max_num_algo_orders is None
+    assert info.max_num_order_lists is None
+
+
+def test_the_full_testnet_payload_still_maps_the_four_filters_we_read() -> None:
+    """The measured payload carries eleven filters and the mapper reads four.
+    Parsing it end to end proves the seven it ignores do not disturb the four
+    it does -- which a fixture reduced to those four cannot show.
+    """
+    info = m.to_symbol_info(SYMBOL_FULL_TESTNET)
+    assert info.price_tick == Decimal("0.01")
+    assert info.step_size == Decimal("0.00001")
+    assert info.min_qty == Decimal("0.00001")
+    assert info.min_notional == Decimal("5")
+    assert info.market_lot is not None
+    assert info.market_lot.max_qty == Decimal("141.67845966")
 
 
 # --------------------------------------------------------------------------
