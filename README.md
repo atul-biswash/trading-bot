@@ -50,7 +50,7 @@ Reading this list first will save you time if it is not the tool you want.
 | Indicators (SMA, EMA, RSI, MACD, Bollinger, ATR) and strategies | ✅ built |
 | Risk: sizing, protective levels, limits, `RiskManager` | ✅ built |
 | Composition root wiring the whole decision path | ✅ built |
-| **Order execution** | ⛔ **stub — next milestone** |
+| **Order execution** | ⛔ **stub — M5 in progress** |
 | Backtesting, paper simulator, persistence, notifications | ⛔ stubs |
 
 `python -m trading_bot run` connects to Testnet and exercises
@@ -65,8 +65,10 @@ manager), `paper/simulator`, `persistence/`, `notifications/`, `backtesting/`,
 `backtest` exits with "not implemented yet".
 
 **Where protective orders will rest has been decided and written down** —
-`docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That contract is what the
-next milestone builds.
+`docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That contract is what M5
+builds, across six milestones: the vocabulary first, then the entry reference,
+the adapter, the ledger, dispatch, and the discretionary close. Only the fifth
+can cause a fill.
 
 ## Install
 
@@ -181,7 +183,9 @@ so keys in `.env` are enough — they need not be exported.
 | `CLAUDE.md` | **The authority.** Architecture, locked decisions, the money rule, the gate, the workflow. | Before changing anything |
 | `docs/NEXT_MILESTONE.md` | The current task and the single home for live open items | Starting work |
 | `docs/PHASE_HISTORY.md` | Append-only build log: what each milestone decided and *why*, including alternatives rejected | Asking "why is it like this?" |
-| `docs/QC_PROTECTIVE_ORDERS.md` | The protective-order contract the next milestone implements | Working on execution |
+| `docs/QC_PROTECTIVE_ORDERS.md` | The protective-order contract M5 implements: where protection rests, the placement shapes, the identity scheme | Working on execution |
+| `docs/QB_ESCALATION.md` | What `CRITICAL` does, its binding sites, and which can clear on their own | Handling failure paths |
+| `docs/M5_NUMBERS.md` | The safety numbers, each with its cost-if-wrong and its measurement status | Choosing or changing a threshold |
 | `PROJECT_KNOWLEDGE.md` | Orientation for a reviewer with no repository access | Reviewing from outside |
 
 Precedence, when they disagree: **the code wins over `CLAUDE.md`, and `CLAUDE.md`
