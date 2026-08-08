@@ -191,6 +191,35 @@ class RefusalStage(str, Enum):
     UNAFFORDABLE = "unaffordable"
 
 
+class ProtectionState(str, Enum):
+    """What is known about a position's protective orders at the exchange.
+
+    Carried by :attr:`~trading_bot.core.models.Position.protection`, which is
+    **required and non-nullable**: a wrong value here is the off-switch for the
+    divergence detector on that position, so there is no default to forget.
+
+    **Members arrive with their writers, and that discipline is the point.**
+    Only these two exist because only these two are written by rules already
+    decided. ``PENDING``, ``ACTIVE`` and ``DIVERGED`` are named in the
+    order-list contract and land in the milestones that first write them --
+    deliberately *not* now. An unwritten member sitting in this enum is a
+    plausible-looking value available to whoever is nearest a construction site
+    and needs something to type, in the one field whose wrong value is
+    **silent**: it does not fail, it switches off the detector that would have
+    noticed. Adding a member later is additive and moves no fixture; removing a
+    member that has already been assigned somewhere is not.
+    """
+
+    #: No protection is expected here, because none was requested -- a
+    #: both-disabled configuration. Distinct from unexpected absence, or such a
+    #: position would read as permanently diverged on every reconciliation.
+    ABSENT_BY_DESIGN = "absent_by_design"
+    #: The protection story is not established. The placement may or may not
+    #: have landed -- the state a timed-out write leaves, which is resolved by
+    #: querying the IDs we would have sent rather than by retrying.
+    UNKNOWN = "unknown"
+
+
 class PositionSizingMethod(str, Enum):
     FIXED_FRACTION = "fixed_fraction"
     FIXED_AMOUNT = "fixed_amount"

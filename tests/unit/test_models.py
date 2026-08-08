@@ -8,8 +8,11 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from trading_bot.core.enums import PositionSide, SignalAction
+from trading_bot.core.enums import PositionSide, ProtectionState, SignalAction
 from trading_bot.core.models import Balance, Position, Signal, Ticker
+
+#: A fixed bar close, so `entry_bar_time` is deterministic across a run.
+BAR_TIME = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
 
 
 def test_balance_total() -> None:
@@ -46,6 +49,8 @@ def test_position_unrealized_pnl_long() -> None:
         side=PositionSide.LONG,
         quantity=Decimal("2"),
         entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
     )
     assert pos.unrealized_pnl(Decimal("110")) == Decimal("20")
     assert pos.unrealized_pnl(Decimal("90")) == Decimal("-20")
@@ -57,6 +62,8 @@ def test_position_unrealized_pnl_short() -> None:
         side=PositionSide.SHORT,
         quantity=Decimal("2"),
         entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
     )
     assert pos.unrealized_pnl(Decimal("90")) == Decimal("20")
 
@@ -96,6 +103,8 @@ def test_money_guard_covers_optional_fields_too() -> None:
             side=PositionSide.LONG,
             quantity=Decimal("1"),
             entry_price=Decimal("100"),
+            entry_bar_time=BAR_TIME,
+            protection=ProtectionState.UNKNOWN,
             stop_loss=98.5,
         )
 
@@ -109,7 +118,63 @@ def _open_position() -> Position:
         side=PositionSide.LONG,
         quantity=Decimal("1"),
         entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
     )
+
+
+def test_protection_has_no_default_and_a_site_that_forgets_it_cannot_construct() -> None:
+    """The tempting default is ``ABSENT_BY_DESIGN``, and it is the wrong one: it
+    asserts "no protection is expected here", which switches the divergence
+    detector off for that position. A construction site that forgot the field
+    would produce a position the reconciler had been told to ignore, and the
+    instruction would have come from nobody. So there is no default, and
+    forgetting it fails loudly at construction instead.
+    """
+    with pytest.raises(ValidationError, match="protection"):
+        Position(
+            symbol="BTCUSDT",
+            side=PositionSide.LONG,
+            quantity=Decimal("1"),
+            entry_price=Decimal("100"),
+            entry_bar_time=BAR_TIME,
+        )
+
+
+def test_entry_bar_time_and_opened_at_are_independent() -> None:
+    """They answer different questions and neither replaces the other.
+    ``opened_at`` is wall-clock and does not survive a restart; ``entry_bar_time``
+    is the bar close the entry was decided on, and is what seeds a derivable
+    client order ID -- which is precisely why it cannot be wall-clock.
+    """
+    later = datetime(2026, 7, 25, 13, 30, tzinfo=timezone.utc)
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("1"),
+        entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.ABSENT_BY_DESIGN,
+        opened_at=later,
+    )
+    assert pos.entry_bar_time == BAR_TIME
+    assert pos.opened_at == later
+    # The order-list identity and the reconciliation stamp start unknown.
+    assert pos.order_list_id is None
+    assert pos.last_reconciled_at is None
+
+
+def test_protection_state_ships_only_the_members_that_have_writers() -> None:
+    """Members arrive with their writers. ``PENDING`` / ``ACTIVE`` / ``DIVERGED``
+    are named in the order-list contract and land in the milestones that first
+    write them -- not before. An unwritten member is a plausible value sitting in
+    the one field whose wrong value is *silent*: it does not fail, it switches
+    off the detector that would have noticed.
+    """
+    assert set(ProtectionState) == {
+        ProtectionState.ABSENT_BY_DESIGN,
+        ProtectionState.UNKNOWN,
+    }
 
 
 def test_money_guard_survives_assignment_on_position() -> None:

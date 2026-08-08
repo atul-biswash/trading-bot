@@ -30,6 +30,7 @@ from trading_bot.core.enums import (
     OrderStatus,
     OrderType,
     PositionSide,
+    ProtectionState,
     RiskRule,
     SignalAction,
     TimeInForce,
@@ -352,6 +353,12 @@ class Position(BaseModel):
     validator to tolerate partial state: an invariant that accepts the halfway
     position is not an invariant, and it would silently accept a trailing stop
     that had genuinely drifted away from its high-water mark.
+
+    **Two timestamps, and they answer different questions.** ``opened_at`` is
+    wall-clock: when this process created the object. ``entry_bar_time`` is the
+    close time of the bar the entry was decided on, and it is what seeds a
+    deterministic client order ID -- so it must survive a restart, which
+    ``opened_at`` does not. Neither replaces the other.
     """
 
     model_config = ConfigDict(validate_assignment=True)
@@ -360,7 +367,25 @@ class Position(BaseModel):
     side: PositionSide
     quantity: Money
     entry_price: Money
+    #: Close time of the bar this entry was decided on. Deterministic across a
+    #: restart, unlike :attr:`opened_at`, which is why it -- not ``opened_at``
+    #: -- seeds a derivable client order ID.
+    entry_bar_time: datetime
+    #: What is known about this position's protective orders. **Required and
+    #: non-nullable on purpose:** the tempting default asserts "no protection is
+    #: expected here", which switches the divergence detector off for this
+    #: position, and a site that forgot the field would be one the reconciler
+    #: had been told to ignore -- instructed by nobody.
+    protection: ProtectionState
+    #: Wall-clock creation time of this object. Not restart-stable; see
+    #: :attr:`entry_bar_time`.
     opened_at: datetime = Field(default_factory=_utcnow)
+    #: The exchange's order-list identity, once one is known.
+    order_list_id: str | None = None
+    #: When this position was last read back from the exchange. ``None`` means
+    #: never, which is what a freshly opened position reports until the first
+    #: reconciliation pass reaches it.
+    last_reconciled_at: datetime | None = None
     stop_loss: Money | None = None
     take_profit: Money | None = None
     trailing_stop: Money | None = None

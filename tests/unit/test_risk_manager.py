@@ -33,6 +33,7 @@ from trading_bot.core.enums import (
     OrderSide,
     PositionSide,
     PositionSizingMethod,
+    ProtectionState,
     RefusalStage,
     RiskRule,
     SignalAction,
@@ -236,15 +237,20 @@ def long_position(
     entry: str = "100",
     stop_loss: Decimal | None = None,
     take_profit: Decimal | None = None,
+    trailing_stop: Decimal | None = None,
+    protection: ProtectionState = ProtectionState.UNKNOWN,
 ) -> Position:
     return Position(
         symbol=symbol,
         side=PositionSide.LONG,
         quantity=D(quantity),
         entry_price=D(entry),
+        entry_bar_time=NOW,
+        protection=protection,
         opened_at=NOW,
         stop_loss=stop_loss,
         take_profit=take_profit,
+        trailing_stop=trailing_stop,
     )
 
 
@@ -267,7 +273,12 @@ class TestPortfolio:
             free_quote=D("1000"),
             positions={
                 SYMBOL: Position(
-                    symbol=SYMBOL, side=PositionSide.FLAT, quantity=D("0"), entry_price=D("100")
+                    symbol=SYMBOL,
+                    side=PositionSide.FLAT,
+                    quantity=D("0"),
+                    entry_price=D("100"),
+                    entry_bar_time=NOW,
+                    protection=ProtectionState.UNKNOWN,
                 )
             },
         )

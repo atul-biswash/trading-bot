@@ -8,6 +8,7 @@ the whole point of directional rounding lives at the tick boundary.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -22,6 +23,7 @@ from trading_bot.config.models import (
 from trading_bot.core.enums import (
     PositionSide,
     PositionSizingMethod,
+    ProtectionState,
     StopType,
     TakeProfitType,
 )
@@ -42,6 +44,8 @@ from trading_bot.risk.rules import (
 D = Decimal
 LONG = PositionSide.LONG
 SHORT = PositionSide.SHORT
+#: A fixed bar close, so `entry_bar_time` is deterministic across a run.
+BAR_TIME = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
 
 
 # --------------------------------------------------------------------------
@@ -487,7 +491,15 @@ class TestProtectiveLevelsInvariants:
 # should_exit: precedence, both sides
 # --------------------------------------------------------------------------
 def _long_position(**levels: Decimal) -> Position:
-    return Position(symbol="BTCUSDT", side=LONG, quantity=D("1"), entry_price=D("100"), **levels)
+    return Position(
+        symbol="BTCUSDT",
+        side=LONG,
+        quantity=D("1"),
+        entry_price=D("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
+        **levels,
+    )
 
 
 class TestShouldExit:
@@ -538,6 +550,8 @@ class TestShouldExit:
             side=SHORT,
             quantity=D("1"),
             entry_price=D("100"),
+            entry_bar_time=BAR_TIME,
+            protection=ProtectionState.UNKNOWN,
             stop_loss=D("102"),
             take_profit=D("96"),
         )
@@ -548,7 +562,12 @@ class TestShouldExit:
 
     def test_flat_position_never_exits(self) -> None:
         position = Position(
-            symbol="BTCUSDT", side=PositionSide.FLAT, quantity=D("0"), entry_price=D("100")
+            symbol="BTCUSDT",
+            side=PositionSide.FLAT,
+            quantity=D("0"),
+            entry_price=D("100"),
+            entry_bar_time=BAR_TIME,
+            protection=ProtectionState.UNKNOWN,
         )
         assert should_exit(position=position, price=D("50")) is None
 
