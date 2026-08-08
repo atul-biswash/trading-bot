@@ -485,8 +485,15 @@ scripts/         check_testnet.py · download_data.py
 - **The dispatch deadline is its own field, not `exchange.requests_timeout_s`.** On
   the shipped `config.yaml` a three-call `CLOSE` at the general 10-second timeout is
   30s, and two pairs closing on the same minute is 60s — the entire bar, before
-  reconciliation has run. It is roughly a third of the general timeout, and the
-  arithmetic that fixes it is enforced at config load: see `docs/M5_NUMBERS.md`.
+  reconciliation has run. **The field bounds the whole dispatch sequence — worst
+  case that three-call `CLOSE` — and is the only configured number; the per-call
+  share is derived from it, not set.** On the shipped `config.yaml` the coherence
+  constraint admits `D <= 10.5s`, whose derived per-call share is ~3.5s. It is that
+  *derived* figure that is roughly a third of the general timeout, never the field
+  itself — read the two as one and the per-call deadline lands near 1.1s, below
+  plausible venue round-trip, which manufactures the ambiguous write the budget
+  exists to prevent. The arithmetic that fixes it is enforced at config load: see
+  `docs/M5_NUMBERS.md`.
 - **A timed-out write is resolved by query, never by retry.**
   `BaseExchangeClient._call` already narrows placement to `idempotent=False`,
   retrying only `RateLimitError` — a 429 is rejected pre-acceptance, and an
