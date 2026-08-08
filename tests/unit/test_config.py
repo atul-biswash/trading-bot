@@ -9,10 +9,13 @@ import pytest
 from pydantic import ValidationError
 
 from trading_bot.config.models import (
+    AppConfig,
+    BacktestConfig,
     PairConfig,
     PositionSizingConfig,
     RiskConfig,
     StopLossConfig,
+    StrategyConfig,
     TakeProfitConfig,
     TradingConfig,
     TrailingStopConfig,
@@ -267,6 +270,101 @@ class TestRiskConfigCoherence:
                 stop_loss=StopLossConfig(enabled=False),
                 take_profit=TakeProfitConfig(type=TakeProfitType.RR),
             )
+
+
+def _app_config(
+    *,
+    pairs: list[tuple[str, str]] | None = None,
+    risk: RiskConfig | None = None,
+) -> AppConfig:
+    """An AppConfig carrying only what the coherence constraint reads."""
+    return AppConfig(
+        strategy=StrategyConfig(name="sma_crossover"),
+        backtesting=BacktestConfig(start_date="2024-01-01", end_date="2024-02-01"),
+        trading=TradingConfig(pairs=[PairConfig(symbol=s, timeframe=t) for s, t in (pairs or [])]),
+        risk=risk or RiskConfig(),
+    )
+
+
+class TestDispatchBudgetCoherence:
+    """`P_sim x D + N_max x T_recon <= alpha x T_min`, enforced at config load.
+
+    On AppConfig rather than RiskConfig, because two of the five terms come from
+    `trading.pairs`, which RiskConfig cannot see.
+    """
+
+    def test_the_shipped_shape_passes_with_margin(self) -> None:
+        """2 x 9.0 + 3 x 3.0 = 27.0 against a 30.0s budget -- 3.0s spare, and
+        1.5s under the 10.5s ceiling the constraint admits for the deadline.
+        """
+        _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")])
+
+    def test_a_third_simultaneous_pair_is_refused(self) -> None:
+        """What makes adding a pair a decision rather than a silent degradation:
+        3 x 9.0 + 3 x 3.0 = 36.0 against the same 30.0s budget.
+        """
+        with pytest.raises(ValidationError, match="exceeds 50%"):
+            _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")])
+
+    def test_the_refusal_names_all_four_inputs_and_a_remedy(self) -> None:
+        """An operator must be able to see which number to change without
+        re-deriving the constraint.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")])
+        message = str(excinfo.value)
+        assert "risk.dispatch_deadline_s = 9.0" in message
+        assert "risk.reconcile_deadline_s = 3.0" in message
+        assert "max_open_positions = 3" in message
+        assert "BTCUSDT/1m = 60s" in message
+        assert "Lower risk.dispatch_deadline_s" in message
+
+    def test_a_longer_shortest_timeframe_admits_the_same_deadline(self) -> None:
+        """T_min is the SHORTEST enabled timeframe, so the same three pairs fit
+        once none of them is on a 1-minute bar: budget 150s against 36.0s.
+        """
+        _app_config(pairs=[("BTCUSDT", "5m"), ("ETHUSDT", "5m"), ("SOLUSDT", "15m")])
+
+    def test_zero_enabled_pairs_is_vacuous_here_and_refused_at_boot(self) -> None:
+        """NOT an oversight, and not to be "fixed" into a refusal.
+
+        There is no pipeline to overrun and T_min is undefined rather than zero.
+        `engine.modes.live_system` already refuses an empty enabled-pair set at
+        BOOT, with a message about the operational consequence. Refusing here
+        too would give one configuration two different errors depending on which
+        check ran first, and would move a boot refusal into config load where
+        `main.py` reports it differently.
+
+        This is also the case that would break every config-loading test in the
+        suite: `tests/conftest.py` writes no `trading:` key at all, so `pairs`
+        falls to its default empty list on every one of them.
+        """
+        _app_config(pairs=[])
+
+    def test_disabled_pairs_do_not_count_toward_p_sim(self) -> None:
+        """`P_sim` is pairs whose bars can close in the same instant, and a
+        disabled pair never closes a bar at all.
+        """
+        config = AppConfig(
+            strategy=StrategyConfig(name="sma_crossover"),
+            backtesting=BacktestConfig(start_date="2024-01-01", end_date="2024-02-01"),
+            trading=TradingConfig(
+                pairs=[
+                    PairConfig(symbol="BTCUSDT", timeframe="1m"),
+                    PairConfig(symbol="ETHUSDT", timeframe="1m"),
+                    PairConfig(symbol="SOLUSDT", timeframe="1m", enabled=False),
+                ]
+            ),
+        )
+        assert len(config.trading.enabled_pairs) == 2
+
+    def test_the_shipped_config_yaml_passes_its_own_constraint(self) -> None:
+        """The file this repository ships must load. Nothing else in the suite
+        reads it -- every other test writes its own -- so without this the
+        shipped defaults could drift out of coherence unnoticed.
+        """
+        settings = get_settings(str(Path(__file__).resolve().parents[2] / "config.yaml"))
+        assert settings.config.risk.dispatch_deadline_s == 9.0
 
 
 # --------------------------------------------------------------------------

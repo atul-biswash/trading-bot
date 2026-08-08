@@ -42,6 +42,7 @@ from trading_bot.core.enums import (
     TakeProfitType,
     TradingMode,
 )
+from trading_bot.utils.helpers import timeframe_to_ms
 
 
 class _Model(BaseModel):
@@ -421,6 +422,26 @@ class EngineConfig(_Model):
         return self
 
 
+#: Pipeline headroom factor for the coherence constraint on :class:`AppConfig`:
+#: at most this fraction of the shortest bar may be spent on dispatch plus
+#: reconciliation. Not a config field -- it is a property of the pipeline's
+#: headroom policy, not of an operator's account.
+#:
+#: **BOUNDED, not measured.** A measurement exists and constrains what the value
+#: must clear, but does not derive it: worst observed pipeline overhead was 2.9%
+#: of a 60 s bar across 90 minutes with no bar missed, so 0.5 leaves roughly a
+#: 17x margin and jitter is not the binding term. Raising it does not buy
+#: headroom; it relocates the constraint onto venue latency, which that probe
+#: never sampled. Full provenance and method: ``docs/M5_NUMBERS.md`` section 3.
+_PIPELINE_HEADROOM = 0.5
+
+#: Calls in the longest dispatch sequence -- the discretionary close, which is
+#: cancel, then confirm by query, then sell. Used only to report the derived
+#: per-call share in the refusal message; the configured number is the whole
+#: sequence.
+_CLOSE_SEQUENCE_CALLS = 3
+
+
 class AppConfig(_Model):
     """Root config object — the fully parsed ``config.yaml``."""
 
@@ -436,3 +457,61 @@ class AppConfig(_Model):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
+
+    @model_validator(mode="after")
+    def _check_dispatch_budget_fits_the_bar(self) -> AppConfig:
+        """Refuse a budget that cannot fit inside the shortest bar.
+
+        ``P_sim x D + N_max x T_recon <= alpha x T_min``, per candle-handler
+        invocation -- the right unit, because two pairs whose bars coincide
+        produce two back-to-back invocations, each with a full budget.
+
+        It lives on :class:`AppConfig` rather than :class:`RiskConfig` because
+        two of its five terms come from ``trading.pairs``, which ``RiskConfig``
+        cannot see. Pure, runs at config load, costs no round trip, and fails
+        before any client exists.
+
+        Reconciliation does **not** carry ``P_sim``: passes are deduplicated by
+        the reconciliation stamp, so the second invocation on a coinciding
+        minute finds every stamp fresh and does nothing. Dispatch does, because
+        two pairs can each emit a signal on the same minute.
+        """
+        enabled = self.trading.enabled_pairs
+        if not enabled:
+            # Vacuously satisfied: no pipeline to overrun, and `T_min` is
+            # undefined rather than zero. This is NOT an oversight and must not
+            # be "fixed" into a refusal -- `engine.modes.live_system` already
+            # refuses an empty enabled-pair set AT BOOT, with a message about
+            # the operational consequence ("the bot would connect, seed nothing,
+            # and sit silent"). Refusing here too would give one configuration
+            # two different errors depending on which check ran first, and would
+            # move a boot refusal into config load, where `main.py` reports it
+            # differently.
+            return self
+
+        t_min_s = min(timeframe_to_ms(pair.timeframe) for pair in enabled) / 1000
+        p_sim = len(enabled)
+        n_max = self.risk.limits.max_open_positions
+        dispatch = p_sim * self.risk.dispatch_deadline_s
+        reconcile = n_max * self.risk.reconcile_deadline_s
+        budget = _PIPELINE_HEADROOM * t_min_s
+
+        if dispatch + reconcile <= budget:
+            return self
+
+        shortest = min(enabled, key=lambda pair: timeframe_to_ms(pair.timeframe))
+        raise ValueError(
+            f"risk.dispatch_deadline_s = {self.risk.dispatch_deadline_s} x {p_sim} pair(s) "
+            f"that can close simultaneously, plus risk.reconcile_deadline_s = "
+            f"{self.risk.reconcile_deadline_s} x limits.max_open_positions = {n_max}, "
+            f"is {dispatch + reconcile:.1f}s. That exceeds "
+            f"{_PIPELINE_HEADROOM:.0%} of the shortest enabled timeframe "
+            f"({shortest.symbol}/{shortest.timeframe} = {t_min_s:.0f}s, budget {budget:.1f}s).\n"
+            "\n"
+            "The signal handler runs inline on the candle pipeline, so a bar closing\n"
+            "while it is still working is missed and never backfilled -- and a gap\n"
+            "re-masks ATR to NaN long after warmup, disabling ATR stops on that pair.\n"
+            "\n"
+            "Lower risk.dispatch_deadline_s, lower risk.limits.max_open_positions, or\n"
+            "configure a longer shortest timeframe in config.yaml."
+        )
