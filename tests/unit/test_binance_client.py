@@ -346,6 +346,70 @@ async def test_create_order_rejects_below_min_qty_without_dispatch() -> None:
     client.create_order.assert_not_awaited()
 
 
+async def test_create_order_rejects_a_stop_market_below_min_notional() -> None:
+    """The exchange evaluates ``stopPrice * quantity`` for a stop-type order,
+    and a stop resting below the entry carries the *smaller* notional -- so it
+    is the leg rejected first. Skipping the check whenever ``price`` was absent
+    sent every stop-type order out unchecked.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL  # minNotional 5
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        quantity=Decimal("0.00001"),
+        stop_price=Decimal("100.00"),  # notional 0.001, far below 5
+    )
+    with pytest.raises(OrderError, match="below min_notional"):
+        await bc.create_order(req)
+
+    client.create_order.assert_not_awaited()
+
+
+async def test_create_order_allows_a_stop_market_that_clears_min_notional() -> None:
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL  # minNotional 5
+    client.create_order.return_value = ORDER_LIMIT_NEW
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        quantity=Decimal("0.001"),
+        stop_price=Decimal("64000.00"),  # notional 64, clears 5
+    )
+    await bc.create_order(req)
+
+    client.create_order.assert_awaited_once()
+
+
+async def test_a_plain_market_order_is_still_not_notional_checked() -> None:
+    """Documented limit, not an oversight. A ``MARKET`` order has no
+    client-side price to multiply, and the exchange judges it against a
+    5-minute average this method never fetches -- so the check cannot run here
+    even though ``NOTIONAL.applyMinToMarket`` is true on both configured
+    symbols. It can therefore still be rejected at the venue.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL  # minNotional 5
+    client.create_order.return_value = ORDER_LIMIT_NEW
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.MARKET,
+        quantity=Decimal("0.00001"),  # worth far less than 5 at any real price
+    )
+    await bc.create_order(req)
+
+    client.create_order.assert_awaited_once()
+
+
 async def test_create_order_rounds_to_the_effective_step_not_the_raw_lot_step() -> None:
     """``_enforce`` is the last line of defence in front of sizing, so it must
     not be *weaker* than the sizing it re-checks. Sizing rounds to

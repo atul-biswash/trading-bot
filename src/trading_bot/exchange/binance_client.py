@@ -207,9 +207,19 @@ class BinanceClient(BaseExchangeClient):
 
         Rounds quantity down to the **effective** lot step and price down to
         ``price_tick``, then validates the **effective** minimum quantity
-        (always) and ``min_notional`` (when the price is known, i.e. non-market
-        orders). Raises :class:`OrderError` before any network call if the order
-        cannot satisfy the exchange filters.
+        (always) and ``min_notional`` (whenever *some* price is known -- the
+        limit price, or a stop-type order's trigger). Raises
+        :class:`OrderError` before any network call if the order cannot satisfy
+        the exchange filters.
+
+        **A plain ``MARKET`` order is still not notional-checked**, and that is
+        a stated limit rather than an oversight: no client-side price exists to
+        multiply, and the exchange evaluates it against a 5-minute average this
+        method never fetches. Binance does apply the minimum to market orders --
+        ``NOTIONAL.applyMinToMarket`` is ``true`` on both configured symbols
+        (MEASURED, Testnet) -- so such an order can still be rejected at the
+        venue. Whether the same flag binds a *triggered* stop-type order is
+        UNRESOLVED; checking the trigger is the conservative reading.
 
         **Effective, not raw.** ``effective_step_size`` / ``effective_min_qty``
         take the stricter of ``LOT_SIZE`` and ``MARKET_LOT_SIZE``, which is what
@@ -241,8 +251,17 @@ class BinanceClient(BaseExchangeClient):
             raise OrderError(
                 f"Quantity {quantity} below min_qty {info.effective_min_qty} for {request.symbol}"
             )
-        if price is not None and info.min_notional > 0:
-            notional = quantity * price
+        # A stop-market order carries no price, but the exchange still evaluates
+        # a notional for it: ``stopPrice * quantity``. Skipping the check
+        # whenever ``price`` was absent meant every stop-type order went out
+        # unchecked -- and a stop resting below the entry carries the *smaller*
+        # notional, so it is the leg the exchange rejects first. Observed live:
+        # a Testnet probe took ``-1013 Filter failure: NOTIONAL`` on exactly
+        # that. The reference is the price when there is one, the trigger
+        # otherwise.
+        notional_price = price if price is not None else request.stop_price
+        if notional_price is not None and info.min_notional > 0:
+            notional = quantity * notional_price
             if notional < info.min_notional:
                 raise OrderError(
                     f"Notional {notional} below min_notional {info.min_notional} "
