@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from trading_bot.core.enums import PositionSide
+from trading_bot.core.enums import PositionSide, ProtectionState
 from trading_bot.core.models import Money, Position
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -50,6 +50,25 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 #: Divisor for the whole-percent config fields (``5.0`` means 5%).
 _PERCENT = Decimal(100)
+
+#: Protection states in which a position's recorded stop level may be trusted
+#: to actually rest at the exchange.
+#:
+#: **A whitelist, and the direction is the opposite of ``OrderStatus``'s -- on
+#: purpose.** There, a blacklist of terminal states makes a new member default
+#: to *open*, so the error costs one wasted round trip. Here, a new member
+#: defaulting to *trusted* would make committed risk **understate**, which is
+#: the error that lets an entry through on the strength of protection that does
+#: not exist. Each field takes the direction whose wrong answer is the cheap
+#: one, and for this field that means an unclassified state is not trusted.
+#:
+#: **The ``protection`` half of this test is FIXTURE-ONLY today.** Nothing in
+#: ``src/`` populates ``Position.protection`` until the reconciler exists, so
+#: today the discriminating condition in practice is the absent stop level.
+#: This does **not** close the defect it anticipates -- a position whose
+#: requested stop was found not to be resting still prices off that stop until
+#: a writer sets a state outside this set.
+_TRUSTED_PROTECTION = frozenset({ProtectionState.ABSENT_BY_DESIGN})
 
 
 def _require_aware(name: str, moment: datetime) -> datetime:
@@ -219,10 +238,88 @@ class Portfolio(BaseModel):
         self._roll_day(now)
         self.realised_pnl = self.realised_pnl + amount
 
+    @staticmethod
+    def _binding_stop(position: Position) -> Decimal | None:
+        """The stop that actually protects ``position``, or ``None`` if none does.
+
+        **The tie-break is the one ``should_exit`` uses -- the candidate set is
+        not.** ``should_exit`` maxes over the stops that have *triggered* at a
+        given price; there is no price here and no trigger, so this maxes over
+        the stops that are *present*. Reusing the triggered set literally would
+        return ``None`` for every healthy position and report a committed risk
+        of zero, which is the exact inversion the uncomputable count exists to
+        prevent.
+
+        Reading ``stop_loss`` directly instead would price a trailed position
+        off a level that is no longer operative, and would **overstate** --
+        refusing entries for risk that is not there.
+        """
+        levels = [
+            level for level in (position.stop_loss, position.trailing_stop) if level is not None
+        ]
+        if not levels:
+            return None
+        return max(levels) if position.side is PositionSide.LONG else min(levels)
+
+    def committed_risk(self, marks: Mapping[str, Decimal]) -> tuple[Decimal, int]:
+        """Forward loss already committed by resting stops, and what could not be priced.
+
+        Returns ``(total, uncomputable_count)``. ``total`` is negative or zero.
+
+        **Mark-to-stop, never entry-to-stop**, and the reason is basis coherence
+        rather than magnitude. The daily-loss check already compares two
+        quantities: realised P&L measured *from the start of today to now*, and
+        a percentage of equity measured *as of now*. ``(binding_stop - mark)``
+        measures *from now, forward to the stop* -- the same anchor, so the
+        comparison stays at two bases. ``(binding_stop - entry)`` would measure
+        from whenever the position opened, a third window that can span days.
+        It would also double-count: the entry-to-mark move is already unrealised
+        P&L, so ``equity(now)`` has already reduced the threshold by
+        ``limit_percent`` of it on the right-hand side, and entry-to-stop would
+        put the same move on the left at full weight. The overlap is
+        ``1 + limit_percent``, not ``2x``.
+
+        **An uncomputable position is counted, not silently zeroed.** A position
+        whose forward risk cannot be priced contributes ``0`` to a sum, which
+        tells the caller that an unprotected position carries *no* forward risk
+        -- the exact inverse of the truth. So the count comes back beside the
+        total and the caller refuses on it. Whether a non-zero count *should*
+        refuse is policy, and lives in the risk manager: this object holds no
+        config and does not know whether stops are enabled.
+        """
+        total = Decimal(0)
+        uncomputable = 0
+        for position in self.open_positions:
+            stop = self._binding_stop(position)
+            mark = marks.get(position.symbol)
+            if stop is None or mark is None or position.protection not in _TRUSTED_PROTECTION:
+                uncomputable += 1
+                continue
+            # min(0, ...) so a stop already better than the mark commits nothing.
+            # Long-only by construction: `equity` raises on any other side.
+            total += min(Decimal(0), (stop - mark) * position.quantity)
+        return total, uncomputable
+
     def daily_loss_exceeded(
-        self, *, limit_percent: Decimal, equity: Decimal, now: datetime
+        self,
+        *,
+        limit_percent: Decimal,
+        equity: Decimal,
+        now: datetime,
+        marks: Mapping[str, Decimal],
     ) -> bool:
-        """Whether today's realised loss has breached ``limit_percent`` of equity.
+        """Whether today's realised loss *plus committed risk* has breached the cap.
+
+        An account 4% down realised, holding a position whose resting stop
+        commits another 2%, is not "4% down" for the purposes of a 5% cap. A
+        limit that counted only money already gone would break its own promise
+        **structurally**: it would permit opening position N+1 while position
+        N's committed loss was still unbooked, and it would do so on a perfect
+        feed rather than merely under polling.
+
+        Only the committed *sum* is consumed here. The uncomputable *count* is
+        checked upstream, before the limits are consulted at all, because an
+        inability to compute is not a limit's verdict.
 
         ``equity`` is the value *now*, not at the start of the day. That is a
         deliberate approximation with a known direction: after a 5% loss equity
@@ -232,9 +329,14 @@ class Portfolio(BaseModel):
         which is the one that costs money. Exact start-of-day semantics would
         require the ledger to be handed mark prices at the day roll, which can
         fall when no signal is in flight.
+
+        ``realised_pnl`` is untouched by any of this. The committed term lives
+        in the check, never in the ledger -- which is what keeps the ledger
+        matching an exchange statement.
         """
+        committed, _uncomputable = self.committed_risk(marks)
         threshold = -(equity * limit_percent / _PERCENT)
-        return self.realised_today(now) <= threshold
+        return self.realised_today(now) + committed <= threshold
 
     # -- cooldown -----------------------------------------------------------
     def start_cooldown(self, symbol: str, *, now: datetime, minutes: int) -> None:

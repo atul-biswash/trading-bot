@@ -309,10 +309,14 @@ class TestPortfolio:
         limit = D("5.0")  # 5% of 10000 == 500
 
         portfolio.record_realised_pnl(D("-499.99"), now=NOW)
-        assert not portfolio.daily_loss_exceeded(limit_percent=limit, equity=D("10000"), now=NOW)
+        assert not portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+        )
 
         portfolio.record_realised_pnl(D("-0.01"), now=NOW)
-        assert portfolio.daily_loss_exceeded(limit_percent=limit, equity=D("10000"), now=NOW)
+        assert portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+        )
 
     def test_open_position_debits_the_cost_and_records_the_position(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
@@ -381,6 +385,150 @@ class TestPortfolio:
             portfolio.free_quote = D("-1")
         with pytest.raises(ValidationError):
             Portfolio(free_quote=D("-1"))
+
+    def test_committed_risk_is_measured_from_the_mark_not_from_the_entry(self) -> None:
+        """Mark-to-stop keeps the check at two bases. The entry-to-mark move is
+        already reflected on the right-hand side, because equity is marked -- so
+        counting it on the left too would overlap by `1 + limit_percent`.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="2",
+                    entry="100",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        # Mark 95: entry-to-stop would be (90-100)*2 = -20; mark-to-stop is
+        # (90-95)*2 = -10, and the missing -10 is the entry-to-mark move that
+        # equity has already priced in.
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("95")})
+        assert total == D("-10")
+        assert uncomputable == 0
+
+    def test_committed_risk_uses_the_binding_stop_not_stop_loss(self) -> None:
+        """A trailed position's committed risk is measured off the level that is
+        actually operative -- `max` for a long, the same tie-break `should_exit`
+        applies. Reading `stop_loss` directly would price off a level no longer
+        in force and OVERSTATE, refusing entries for risk that is not there.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="1",
+                    entry="100",
+                    stop_loss=D("90"),
+                    trailing_stop=D("97"),  # ratcheted up; this is what binds
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        total, _ = portfolio.committed_risk({SYMBOL: D("100")})
+        assert total == D("-3")  # (97 - 100) * 1, not (90 - 100) * 1
+
+    def test_committed_risk_counts_a_position_it_cannot_price(self) -> None:
+        """Contributing 0 would tell the caller an unprotected position carries
+        no forward risk -- the exact inverse of the truth.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={SYMBOL: long_position()},  # no stop of any kind
+        )
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+        assert total == D("0")
+        assert uncomputable == 1
+
+    def test_committed_risk_distrusts_a_stop_whose_protection_is_unknown(self) -> None:
+        """The D-7 half. A stop level is recorded, but the protection story is
+        not established, so the level may not rest at the exchange and pricing
+        off it would UNDERSTATE committed risk.
+
+        **Fixture-only today**: nothing in ``src/`` populates ``protection``
+        until the reconciler exists, so this does not close D-7 -- it builds the
+        signature that will not have to change when it is closed.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(stop_loss=D("90"), protection=ProtectionState.UNKNOWN)
+            },
+        )
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+        assert total == D("0")
+        assert uncomputable == 1
+
+    def test_a_stop_already_above_the_mark_commits_nothing_rather_than_a_credit(self) -> None:
+        """The `min(0, ...)` clamp. A long whose stop sits *above* the mark has
+        already been breached -- a stale or transient state that `should_exit`
+        would act on -- and the arithmetic would otherwise report `+5` of
+        committed *profit*, which would offset another position's committed loss
+        and quietly raise the daily-loss headroom. Committed risk only ever
+        subtracts.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="1",
+                    entry="100",
+                    stop_loss=D("105"),  # above the mark below
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        total, _ = portfolio.committed_risk({SYMBOL: D("100")})
+        assert total == D("0")  # not +5
+
+    def test_the_daily_limit_counts_committed_risk_beside_realised_loss(self) -> None:
+        """An account 4% down realised, holding a position whose stop commits
+        another 2%, is not "4% down" for the purposes of a 5% cap.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="10",
+                    entry="100",
+                    stop_loss=D("80"),  # commits (80 - 100) * 10 = -200
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        marks = {SYMBOL: D("100")}
+        portfolio.record_realised_pnl(D("-400"), now=NOW)  # 20% of a 2000 equity
+        limit = D("25.0")  # threshold -500 against equity 2000
+
+        # Realised alone is -400, inside the cap. Realised + committed is -600,
+        # which is not -- and the ledger still reads -400.
+        assert portfolio.realised_today(NOW) == D("-400")
+        assert portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("2000"), now=NOW, marks=marks
+        )
+
+    def test_realised_pnl_is_untouched_by_the_committed_term(self) -> None:
+        """The committed term lives in the check, never in the ledger -- which is
+        what keeps the ledger matching an exchange statement.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="10",
+                    entry="100",
+                    stop_loss=D("80"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        portfolio.daily_loss_exceeded(
+            limit_percent=D("5.0"), equity=D("2000"), now=NOW, marks={SYMBOL: D("100")}
+        )
+        assert portfolio.realised_pnl == D("0")
+        assert portfolio.realised_today(NOW) == D("0")
 
     def test_cooldown_expires_by_comparison_not_by_sweep(self) -> None:
         portfolio = Portfolio(free_quote=D("1000"))
@@ -742,7 +890,15 @@ class TestEvaluate:
         )
         portfolio = Portfolio(
             free_quote=D("50"),
-            positions={"ETHUSDT": long_position(symbol="ETHUSDT", quantity="100", entry="100")},
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    quantity="100",
+                    entry="100",
+                    stop_loss=D("99"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
         )
         assessment = manager.evaluate(buy(), portfolio=portfolio)
 

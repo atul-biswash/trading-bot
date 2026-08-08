@@ -284,9 +284,18 @@ class RiskManager(RiskManagerPort):
                     f"{', '.join(unpriced)}; equity is unknown, so no limit can be checked"
                 ),
             )
-        return self._approve(signal, portfolio=portfolio, equity=portfolio.equity(marks))
+        return self._approve(
+            signal, portfolio=portfolio, equity=portfolio.equity(marks), marks=marks
+        )
 
-    def _approve(self, signal: Signal, *, portfolio: Portfolio, equity: Decimal) -> RiskDecision:
+    def _approve(
+        self,
+        signal: Signal,
+        *,
+        portfolio: Portfolio,
+        equity: Decimal,
+        marks: Mapping[str, Decimal],
+    ) -> RiskDecision:
         """Evaluate the limits against an already-computed ``equity``.
 
         First failure wins, in a fixed order: the portfolio-wide halt that makes
@@ -304,7 +313,7 @@ class RiskManager(RiskManagerPort):
             return refuse(RiskRule.NO_EQUITY, f"equity is {equity}; nothing to risk")
 
         if portfolio.daily_loss_exceeded(
-            limit_percent=limits.max_daily_loss_percent, equity=equity, now=now
+            limit_percent=limits.max_daily_loss_percent, equity=equity, now=now, marks=marks
         ):
             return refuse(
                 RiskRule.DAILY_LOSS_HALT,
@@ -461,8 +470,26 @@ class RiskManager(RiskManagerPort):
             )
             return refuse(decision.reason, stage=RefusalStage.NO_MARK_PRICE, decision=decision)
 
+        # Forward risk that cannot be priced refuses BEFORE the limits, in the
+        # shape NO_MARK_PRICE already has: an inability to compute, not a
+        # limit's verdict. Scoped by `stop_loss.enabled`, because the two states
+        # are different facts -- stops on with a position lacking one is a
+        # divergence and refusing is correct, while stops off means the operator
+        # has declared they own their exits, so the check honestly degrades to
+        # realised-only. There is deliberately no RiskDecision here: no RiskRule
+        # names this, which keeps NO_MARK_PRICE the single place the two
+        # vocabularies coincide.
+        _committed, uncomputable = portfolio.committed_risk(marks)
+        if uncomputable and self._config.stop_loss.enabled:
+            return refuse(
+                f"{uncomputable} open position(s) have no computable stop while "
+                "risk.stop_loss.enabled is true; committed risk cannot be summed, so "
+                "no daily-loss limit can be checked and all entries are refused",
+                stage=RefusalStage.COMMITTED_RISK_UNKNOWN,
+            )
+
         equity = portfolio.equity(marks)
-        decision = self._approve(signal, portfolio=portfolio, equity=equity)
+        decision = self._approve(signal, portfolio=portfolio, equity=equity, marks=marks)
         if not decision.approved:
             return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 

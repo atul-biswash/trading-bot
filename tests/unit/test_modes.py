@@ -45,6 +45,7 @@ from trading_bot.config.models import StopLossConfig, TakeProfitConfig
 from trading_bot.core.enums import (
     OrderSide,
     PositionSizingMethod,
+    ProtectionState,
     RefusalStage,
     RiskRule,
     SignalAction,
@@ -299,6 +300,27 @@ def _case_no_mark_price() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
+def _case_committed_risk_unknown() -> Case:
+    """A PRICEABLE open position with no computable stop, while stops are ON.
+
+    Distinct from `_case_no_mark_price` in exactly one fact: the provider has a
+    candle for the position, so equity is knowable and only its *forward* risk
+    is not. The signal names a different symbol so `ALREADY_IN_POSITION` cannot
+    be what fires.
+    """
+    pairs = multi_pairs(SYMBOL, "ETHUSDT")
+    manager, _ = build_manager(
+        provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+        pairs=pairs,
+    )
+    portfolio = Portfolio(
+        free_quote=D("10000"),
+        positions={"ETHUSDT": long_position(symbol="ETHUSDT")},  # no stop level
+    )
+    signal = buy()
+    return signal, manager.evaluate(signal, portfolio=portfolio), pairs
+
+
 def _case_limit_refused() -> Case:
     manager, _ = build_manager()
     signal = buy()
@@ -351,13 +373,23 @@ def _case_unaffordable() -> Case:
     )
     portfolio = Portfolio(
         free_quote=D("50"),
-        positions={"ETHUSDT": long_position(symbol="ETHUSDT", quantity="100", entry="100")},
+        # A trusted stop, so this case refuses on affordability rather than on
+        # an uncomputable committed risk one guard earlier.
+        positions={
+            "ETHUSDT": long_position(
+                symbol="ETHUSDT",
+                quantity="100",
+                entry="100",
+                stop_loss=D("99"),
+                protection=ProtectionState.ABSENT_BY_DESIGN,
+            )
+        },
     )
     signal = buy()
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
-# Ten paths, one row each. Defined at module level rather than inline in
+# Eleven paths, one row each. Defined at module level rather than inline in
 # `parametrize` so the correspondence to `evaluate`'s branches stays readable.
 _STAGE_CASES = [
     (RefusalStage.UNKNOWN_PAIR, _case_unknown_pair),
@@ -365,6 +397,7 @@ _STAGE_CASES = [
     (RefusalStage.NOTHING_TO_CLOSE, _case_nothing_to_close),
     (RefusalStage.UNSUPPORTED_ACTION, _case_unsupported_action),
     (RefusalStage.NO_MARK_PRICE, _case_no_mark_price),
+    (RefusalStage.COMMITTED_RISK_UNKNOWN, _case_committed_risk_unknown),
     (RefusalStage.LIMIT_REFUSED, _case_limit_refused),
     (RefusalStage.ATR_UNAVAILABLE, _case_atr_unavailable),
     (RefusalStage.STOP_UNPLACEABLE, _case_stop_unplaceable),
@@ -463,7 +496,16 @@ class TestRefusalStages:
             provider=FakeProvider(frames={SYMBOL: ohlcv(14)}, candles={SYMBOL: candle()}),
             pairs=pairs,
         )
-        portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: long_position()})
+        # A trusted stop, so committed risk is computable and the pair under
+        # test is genuinely limits-versus-ATR.
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                SYMBOL: long_position(
+                    stop_loss=D("99"), protection=ProtectionState.ABSENT_BY_DESIGN
+                )
+            },
+        )
 
         assessment = manager.evaluate(buy(), portfolio=portfolio)
 

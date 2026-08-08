@@ -171,6 +171,10 @@ class RefusalStage(str, Enum):
     but is not: it refuses structurally *before* the limits are consulted at
     all, so it is an inability to compute equity rather than a limit's verdict,
     and it is the one place the two vocabularies genuinely coincide.
+    :attr:`COMMITTED_RISK_UNKNOWN` sits in the same family and for the same
+    reason -- forward risk that cannot be priced is an inability to compute,
+    not a limit firing -- and it deliberately has **no** ``RiskRule`` twin, so
+    the coincidence above stays the single one it claims to be.
 
     There is no ``UNCLASSIFIED``. Every member here is reachable, because
     ``RiskAssessment``'s validator binds a refusal to naming one; an
@@ -184,6 +188,7 @@ class RefusalStage(str, Enum):
     NOTHING_TO_CLOSE = "nothing_to_close"
     UNSUPPORTED_ACTION = "unsupported_action"
     NO_MARK_PRICE = "no_mark_price"
+    COMMITTED_RISK_UNKNOWN = "committed_risk_unknown"
     LIMIT_REFUSED = "limit_refused"
     ATR_UNAVAILABLE = "atr_unavailable"
     STOP_UNPLACEABLE = "stop_unplaceable"
