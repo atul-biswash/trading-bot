@@ -17,7 +17,7 @@ from binance.exceptions import (
     BinanceRequestException,
 )
 
-from trading_bot.core.enums import OrderSide, OrderStatus, OrderType
+from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
     ExchangeAPIError,
     ExchangeConnectionError,
@@ -465,6 +465,61 @@ def test_to_order_maps_the_order_list_statuses(wire_status: str, expected: Order
     """
     raw = {**ORDER_LIMIT_NEW, "status": wire_status}
     assert m.to_order(raw).status is expected
+
+
+def test_to_order_reads_stop_price_and_order_list_id() -> None:
+    raw = {**ORDER_LIMIT_NEW, "stopPrice": "63100.00000000", "orderListId": 987}
+    o = m.to_order(raw)
+    assert o.stop_price == Decimal("63100.00")
+    assert o.order_list_id == "987"
+
+
+def test_to_order_treats_the_exchange_sentinels_as_absent() -> None:
+    """An ordinary order reports ``stopPrice`` ``"0.00000000"`` and
+    ``orderListId`` ``-1``. Neither is a value: a zero trigger price is not a
+    price, and ``-1`` is "no list", not list number -1. Carrying either into
+    the domain would make every plain order look like a stop order belonging
+    to a shared list.
+    """
+    o = m.to_order({**ORDER_LIMIT_NEW, "stopPrice": "0.00000000", "orderListId": -1})
+    assert o.stop_price is None
+    assert o.order_list_id is None
+
+
+def test_to_order_leaves_both_absent_when_the_payload_omits_them() -> None:
+    o = m.to_order(ORDER_LIMIT_NEW)  # neither key present
+    assert o.stop_price is None
+    assert o.order_list_id is None
+
+
+def test_a_request_states_its_own_time_in_force_over_the_default() -> None:
+    """The working leg of an order list must be ``FOK``, and until this field
+    existed the request had no way to say so -- the translation default decided
+    for it.
+    """
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.001"),
+        price=Decimal("64000.00"),
+        time_in_force=TimeInForce.FOK,
+    )
+    assert m.order_request_to_params(req)["timeInForce"] == "FOK"
+    # The explicit keyword still loses to the request's own statement.
+    assert m.order_request_to_params(req, time_in_force=TimeInForce.GTC)["timeInForce"] == "FOK"
+
+
+def test_a_request_that_states_nothing_keeps_the_translation_default() -> None:
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.001"),
+        price=Decimal("64000.00"),
+    )
+    assert m.order_request_to_params(req)["timeInForce"] == "GTC"
+    assert m.order_request_to_params(req, time_in_force=TimeInForce.IOC)["timeInForce"] == "IOC"
 
 
 # --------------------------------------------------------------------------

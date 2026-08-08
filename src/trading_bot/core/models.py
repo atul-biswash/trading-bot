@@ -32,6 +32,7 @@ from trading_bot.core.enums import (
     PositionSide,
     RiskRule,
     SignalAction,
+    TimeInForce,
 )
 
 
@@ -238,6 +239,12 @@ class OrderRequest(_Frozen):
     price: Money | None = None  # required for LIMIT orders
     stop_price: Money | None = None  # required for STOP/TAKE_PROFIT orders
     client_order_id: str | None = None
+    #: What this order asks for, when it asks for something other than the
+    #: dispatch default. ``None`` means "not stated", and the mapper's own
+    #: default applies -- so every request written before this field existed
+    #: keeps behaving exactly as it did. A working ``LIMIT`` leg needs ``FOK``,
+    #: which the request had no way to say.
+    time_in_force: TimeInForce | None = None
 
 
 class Order(_Frozen):
@@ -254,6 +261,14 @@ class Order(_Frozen):
     average_price: Money | None = None
     created_at: datetime | None = None
     client_order_id: str | None = None
+    #: The trigger price on a stop-type order. ``None`` on an order that has
+    #: none, following ``price``'s convention rather than carrying the
+    #: exchange's ``"0.00000000"`` into the domain as a real zero.
+    stop_price: Money | None = None
+    #: Which order list this order belongs to, or ``None`` when it belongs to
+    #: none. The exchange spells "no list" as ``-1``; that is a sentinel, not a
+    #: list identity, and it is not carried into the domain.
+    order_list_id: str | None = None
 
 
 class Trade(_Frozen):

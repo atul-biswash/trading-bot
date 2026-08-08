@@ -310,6 +310,13 @@ def to_order(raw: dict[str, Any]) -> Order:
     (``cummulativeQuoteQty / executedQty``); it is ``None`` while nothing has
     filled. A market order's reported ``price`` of ``"0.00000000"`` maps to
     ``None`` so the average price is the single source of truth for fill price.
+    ``stopPrice`` follows the same convention, for the same reason: an order
+    with no trigger reports zero, and a zero trigger price is not a price.
+
+    ``orderListId`` is ``-1`` for an order that belongs to no list. That is a
+    sentinel rather than an identity, so it maps to ``None`` -- otherwise every
+    ordinary order would appear to belong to list "-1", and a reconciler keyed
+    on list membership would group them together.
     """
     executed = _dec(raw.get("executedQty", "0"))
     cummulative = _dec(raw.get("cummulativeQuoteQty", "0"))  # Binance's spelling
@@ -318,6 +325,13 @@ def to_order(raw: dict[str, Any]) -> Order:
     price = _opt_dec(raw.get("price"))
     if price is not None and price == 0:
         price = None
+
+    stop_price = _opt_dec(raw.get("stopPrice"))
+    if stop_price is not None and stop_price == 0:
+        stop_price = None
+
+    raw_list_id = raw.get("orderListId")
+    order_list_id = None if raw_list_id is None or int(raw_list_id) == -1 else str(raw_list_id)
 
     return Order(
         order_id=str(raw["orderId"]),
@@ -331,6 +345,8 @@ def to_order(raw: dict[str, Any]) -> Order:
         average_price=average_price,
         created_at=_first_ms(raw, "transactTime", "time", "updateTime"),
         client_order_id=raw.get("clientOrderId"),
+        stop_price=stop_price,
+        order_list_id=order_list_id,
     )
 
 
@@ -352,6 +368,13 @@ def order_request_to_params(
 
     Validates that the price/stop fields required by the order type are present,
     raising :class:`OrderError` before any network call is attempted.
+
+    ``request.time_in_force`` wins when the request states one; the keyword is
+    the fallback for requests that do not. Both exist deliberately: the keyword
+    is the caller's default and predates the field, so every existing call site
+    keeps its behaviour, while a request that must be ``FOK`` -- the working leg
+    of an order list -- can now say so itself instead of relying on whoever
+    happens to translate it.
     """
     params: dict[str, Any] = {
         "symbol": request.symbol,
@@ -364,7 +387,7 @@ def order_request_to_params(
         if request.price is None:
             raise OrderError(f"{request.type.value} order requires a price")
         params["price"] = format_decimal(request.price)
-        params["timeInForce"] = time_in_force.value
+        params["timeInForce"] = (request.time_in_force or time_in_force).value
 
     if request.type in _NEEDS_STOP:
         if request.stop_price is None:
