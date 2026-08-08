@@ -31,7 +31,9 @@ triggers intrabar. The rule is **RE-SCOPED, not repealed**: it governs *client-s
 exit evaluation*, where triggering on a price the bar has left is dishonest. A
 resting order's fill is not a client decision. Consequence: `backtesting/` must
 model intrabar triggering to keep backtest and live on one code path. Both
-statements must be reconciled in `CLAUDE.md` in this rotation.
+statements are now reconciled in `CLAUDE.md`, which carries the re-scoping in the
+same bullet as the original rule rather than in a second place that could drift
+from it.
 
 ## 2. Placement shapes
 
@@ -397,10 +399,26 @@ to `evaluate`'s composed path, not only to a docstring. The `binding_price` fix
 already landed stays correct unchanged: `min(price, stop_price)` still selects the
 lowest leg price, with `price` now meaning `entry_limit`.
 
+> **SUPERSEDED in its mechanism, not in its consequence — see M5-0's D3.**
+> `TradeIntent` does not change what a field *means*; it **splits** into
+> `EntryIntent` and `ExitIntent`. A `CLOSE` dispatches `MARKET` and carries no
+> limit price at all, so one field cannot serve both, and a field whose meaning
+> depends on `side` makes `_check_invariants` conditional on `side` — an invariant
+> somebody eventually inverts.
+>
+> Everything above about `entry_limit` being the reference for the protective
+> levels *and* for sizing stands unchanged, and is now a property of the type:
+> `EntryIntent` enforces `levels.entry_price == entry_limit`, plus
+> `entry_limit >= reference_price`, which makes §4's slippage **direction**
+> unfakeable independently of whatever bound `max_entry_slippage` carries in
+> config. `CLAUDE.md` holds the full field sets and invariants.
+
 `backtesting/` must model intrabar triggering (§1).
 
 **Q-D is folded in as a decision:** the port widens to expose the composed path,
-and `RiskAssessment` moves with it. Implementation in M5.
+and `RiskAssessment` moves with it. Implemented in **M5b**, alongside the entry
+reference and the intent split, because `EntryIntent`'s invariants and the widened
+port move together.
 
 ## 10. Unmeasured / open
 
