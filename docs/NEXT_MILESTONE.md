@@ -291,3 +291,60 @@ visible rather than merely contained.
   instead, or accidentally absent. **Produce the list; promote nothing.** Each
   promotion is a semantic change to the authority and gets its own commit, per the
   constraint that governed M5-0's own salvage item.
+
+- **OWED TO `docs/PHASE_HISTORY.md` AT M5a's ROTATION: the reading commit
+  `7c1af17` superseded.** `CLAUDE.md`'s Execution bullet previously read *"It is
+  roughly a third of the general timeout."* That described the **derived per-call
+  share** (~3.3s against the 10s general timeout) and **not the field**, which
+  bounds the **whole dispatch sequence** — worst case the three-call `CLOSE`.
+  Record it in the tense it was decided, as part of the normal rotation.
+
+  This item exists because there is nowhere else for it to live. `CLAUDE.md`
+  carries no annotation blocks by house style, so the correction landed as prose
+  and the superseded reading went into the commit body — and **a commit message is
+  loaded into no future session.** Until the rotation records it, the only account
+  of what the authority used to say is one `git log` entry nobody will think to
+  read.
+
+- **The line-ending note is stale, its index line is wrong, and the instrument is
+  fine. Four findings, deliberately not compressed into one.**
+
+  1. **The instrument is SOUND.** The CR-counting command form was validated at
+     M5a-doc against a **non-zero known answer** (a scratch file outside the repo
+     with 5 CRLF endings) plus a **negative control** (0 CR), with the
+     construction verified beforehand by an independent instrument that shares no
+     code path with it. Expected 5, reported 5; expected 0, reported 0. So **all
+     105 tracked files containing zero CR bytes is a measurement, not an
+     artefact** — the check discriminates, and does not merely return the answer
+     it was expected to produce.
+  2. **The stored note itself is largely sound.** It records a **mixed,
+     file-by-file** state measured 2026-08-02, names the files on each side,
+     defers to the committed blob as the authority rather than to the worktree,
+     and **already retracts a stronger earlier version of itself**.
+  3. **The `MEMORY.md` INDEX LINE overstates it**, describing the tree as CRLF.
+     **The index line is the drift surface, not the note.** Reading the index in
+     place of the note produced a false claim in review **twice in one session** —
+     the same failure class as describing a document from a summary of it.
+  4. **The note is STALE:** the files it names as CRLF are pure LF today. **The
+     cause is UNDETERMINED and must not be reconstructed** — a hand-normalisation
+     during the origin session would explain it, but nobody observed it, and the
+     origin session's transcript is not retrievable. **The note wants updating
+     with today's measurement, not deleting.**
+
+- **`OrderStatus.is_open` is a WHITELIST, and its default direction is an open
+  decision for M5a's code plan — not scheduled work.** `is_open` is
+  `self in (NEW, PARTIALLY_FILLED)` and `is_closed` is its negation, so **every
+  future member defaults to CLOSED**: a reconciler would stop watching an order
+  still working at the venue. A **blacklist of terminal states** defaults new
+  members to **OPEN**, costing one wasted round trip against the reserved
+  reconciliation floor. **The two failure directions are not comparable**, which is
+  why this is a decision rather than a preference.
+
+  **The property has ZERO production consumers today** — measured at M5a-doc: the
+  only references anywhere are four per-member assertions in
+  `tests/unit/test_enums.py`, and every other `is_open` / `is_closed` in the tree
+  belongs to `Position.is_open` or to `Candle.is_closed`, which are different names
+  that happen to share a spelling. That is the window in which the direction can be
+  changed for free, and **adding `PENDING_NEW` closes it**: Q-C §1 puts every
+  protective leg in that state from placement until the working order fills, so
+  from then on the property has a consumer whose answer matters.
