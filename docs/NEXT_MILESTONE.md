@@ -206,6 +206,24 @@ visible rather than merely contained.
   no way to have a pretty console and a JSON file. Roughly three lines in
   `_console_handler` to separate; deliberately out of scope so far.
 
+- **Nothing enforces that the *prose* still describes the current plan, either.**
+  The sibling of the counts item below, one level up, and it has now bitten twice
+  in one milestone. The rotation procedure names three files; `README.md` drifted
+  on the gate counts because the procedure did not name it, and
+  `QC_PROTECTIVE_ORDERS.md` drifted on **substance** because a decided contract can
+  be superseded by a later decision while the milestone doing the superseding edits
+  entirely different files. Q-C §9 went on specifying `TradeIntent.price` changing
+  meaning after D3 had split the type.
+
+  The procedure has been widened — `README.md` joins step 2, and a fourth step
+  re-reads the contracts — but **the fix is a discipline, not a mechanism**, and
+  discipline is what failed the first time. What would actually catch it is hard to
+  automate honestly: "does this paragraph still describe the plan" is not greppable,
+  and a check that fired on every superseded-looking sentence would be ignored
+  within a milestone. The cheapest real improvement is probably a convention that a
+  superseding decision names the contract section it supersedes, so the annotation
+  becomes a lookup rather than a re-read. Recorded rather than solved.
+
 - **Nothing enforces the documented counts.** They are updated by hand and have
   drifted within a single session more than once. `ruff format` and `mypy` each
   appear in **three** places: the fenced gate output in `CLAUDE.md`, the

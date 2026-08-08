@@ -849,13 +849,27 @@ renames) in **separate commits** from semantic ones. Never mix them.
 1. Append the milestone to `docs/PHASE_HISTORY.md` — decisions and *why*,
    including alternatives rejected. It is a build log written in the tense it was
    decided: never restate current state there, and never renumber past entries.
-2. Update this file — "Current state", the baseline numbers in "Quality gates"
-   taken from a **fresh `make check`** (never a remembered count), and any new
-   locked decision.
+2. Update this file **and `README.md` in the same commit** — "Current state", any
+   new locked decision, and the baseline numbers taken from a **fresh gate run**
+   (never a remembered count). The counts live in *four* places across the two
+   files, and they are one atomic fact about one gate run: splitting them leaves a
+   window in which the repo disagrees with itself, which is the drift the
+   "grep for the NUMBER" warning below exists to prevent.
 3. Rewrite `docs/NEXT_MILESTONE.md` for the next milestone, carrying forward any
    open items that are still open. This is the single home for live open items.
+4. **Re-read the contracts under `docs/` for prose this milestone superseded.**
+   `QC_PROTECTIVE_ORDERS.md`, `QB_ESCALATION.md` and `M5_NUMBERS.md` are *decided
+   documents*, not logs: a later decision can invalidate a paragraph in one of them
+   and nothing will prompt a re-read, because the milestone that superseded it was
+   editing different files. **Annotate, never delete** — record what was superseded
+   *and what survived*, since the two are rarely the same.
 
-There is no separate workflow document; these three steps are the procedure, and
+   This is the step the M5-0 rotation missed. Q-C §9 still specified
+   `TradeIntent.price` changing meaning after D3 had split the type, and §1 still
+   carried an instruction that had already been executed. A reader arriving cold at
+   either would have built something nothing adopted.
+
+There is no separate workflow document; these four steps are the procedure, and
 they live here because this is the only file loaded into every session. Docs that
 must be remembered to be read are how the four drifts found in the M3 audit got
 in.
