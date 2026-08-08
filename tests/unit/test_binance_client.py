@@ -63,6 +63,38 @@ SYMBOL_HIGH_MINQTY = {  # minQty (0.001) larger than step (0.00001)
         {"filterType": "NOTIONAL", "minNotional": "0.00000000"},
     ],
 }
+SYMBOL_COARSE_MARKET_STEP = {  # MARKET_LOT_SIZE step (0.001) coarser than LOT_SIZE (0.00001)
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00001000"},
+        {
+            "filterType": "MARKET_LOT_SIZE",
+            "minQty": "0.00001000",
+            "maxQty": "100.00000000",
+            "stepSize": "0.00100000",
+        },
+        {"filterType": "NOTIONAL", "minNotional": "0.00000000"},
+    ],
+}
+SYMBOL_HIGH_MARKET_MINQTY = {  # MARKET_LOT_SIZE minQty (0.001) above LOT_SIZE's (0.00001)
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00001000"},
+        {
+            "filterType": "MARKET_LOT_SIZE",
+            "minQty": "0.00100000",
+            "maxQty": "100.00000000",
+            "stepSize": "0.00001000",
+        },
+        {"filterType": "NOTIONAL", "minNotional": "0.00000000"},
+    ],
+}
 # Binance kline arrays are positional, and these fixtures deliberately keep that
 # raw shape rather than being built by a helper: the mapper under test is what
 # turns position into meaning, so a fixture that already knew the field names
@@ -309,6 +341,54 @@ async def test_create_order_rejects_below_min_qty_without_dispatch() -> None:
         price=Decimal("64000.00"),
     )
     with pytest.raises(OrderError):
+        await bc.create_order(req)
+
+    client.create_order.assert_not_awaited()
+
+
+async def test_create_order_rounds_to_the_effective_step_not_the_raw_lot_step() -> None:
+    """``_enforce`` is the last line of defence in front of sizing, so it must
+    not be *weaker* than the sizing it re-checks. Sizing rounds to
+    ``effective_step_size`` -- the coarser of ``LOT_SIZE`` and
+    ``MARKET_LOT_SIZE`` -- and reading the raw step here let a quantity through
+    that the sizer would have refused.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL_COARSE_MARKET_STEP
+    client.create_order.return_value = ORDER_LIMIT_NEW
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.0012345"),
+        price=Decimal("64000.00"),
+    )
+    await bc.create_order(req)
+
+    # Raw LOT_SIZE would floor this to 0.00123; the market step floors it to 0.001.
+    assert client.create_order.await_args.kwargs["quantity"] == "0.00100000"
+
+
+async def test_create_order_rejects_below_the_effective_min_qty() -> None:
+    """Same divergence, the other filter: 0.0005 clears ``LOT_SIZE``'s 0.00001
+    minimum and is refused by ``MARKET_LOT_SIZE``'s 0.001. The lot steps are
+    equal here on purpose, so the rounding guard cannot fire first and claim
+    the credit.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL_HIGH_MARKET_MINQTY
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        quantity=Decimal("0.0005"),
+        price=Decimal("64000.00"),
+    )
+    with pytest.raises(OrderError, match="below min_qty"):
         await bc.create_order(req)
 
     client.create_order.assert_not_awaited()

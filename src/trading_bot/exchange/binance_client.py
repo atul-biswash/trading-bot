@@ -205,13 +205,22 @@ class BinanceClient(BaseExchangeClient):
     async def _enforce(self, request: OrderRequest) -> OrderRequest:
         """Round price/quantity to the symbol's filters and reject invalid orders.
 
-        Rounds quantity down to ``step_size`` and price down to ``price_tick``,
-        then validates ``min_qty`` (always) and ``min_notional`` (when the price
-        is known, i.e. non-market orders). Raises :class:`OrderError` before any
-        network call if the order cannot satisfy the exchange filters.
+        Rounds quantity down to the **effective** lot step and price down to
+        ``price_tick``, then validates the **effective** minimum quantity
+        (always) and ``min_notional`` (when the price is known, i.e. non-market
+        orders). Raises :class:`OrderError` before any network call if the order
+        cannot satisfy the exchange filters.
+
+        **Effective, not raw.** ``effective_step_size`` / ``effective_min_qty``
+        take the stricter of ``LOT_SIZE`` and ``MARKET_LOT_SIZE``, which is what
+        ``risk.position_sizing`` already sizes against. Reading the raw
+        ``LOT_SIZE`` fields here made this last line of defence *weaker* than
+        the sizing it exists to re-check -- so a quantity the sizer would have
+        refused could pass the very guard meant to catch it. The two now agree
+        by construction rather than by coincidence.
         """
         info = await self.get_symbol_info(request.symbol)
-        quantity = round_step_size(request.quantity, info.step_size)
+        quantity = round_step_size(request.quantity, info.effective_step_size)
         price = round_price(request.price, info.price_tick) if request.price is not None else None
 
         if quantity != request.quantity or price != request.price:
@@ -226,11 +235,11 @@ class BinanceClient(BaseExchangeClient):
 
         if quantity <= 0:
             raise OrderError(
-                f"Quantity for {request.symbol} rounds to zero at step {info.step_size}"
+                f"Quantity for {request.symbol} rounds to zero at step {info.effective_step_size}"
             )
-        if quantity < info.min_qty:
+        if quantity < info.effective_min_qty:
             raise OrderError(
-                f"Quantity {quantity} below min_qty {info.min_qty} for {request.symbol}"
+                f"Quantity {quantity} below min_qty {info.effective_min_qty} for {request.symbol}"
             )
         if price is not None and info.min_notional > 0:
             notional = quantity * price
