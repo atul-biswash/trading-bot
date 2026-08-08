@@ -208,6 +208,55 @@ class TestRiskConfigCoherence:
             take_profit=TakeProfitConfig(enabled=False),
         )
 
+    def test_the_two_price_fields_are_decimal_and_the_three_durations_are_not(self) -> None:
+        """The money rule applied field by field, not uniformly. A field becomes
+        `Decimal` at the milestone that first multiplies it by money OR compares
+        it against money; a duration compared against a clock does neither, and
+        typing it `Decimal` would buy nothing and cost a conversion at every
+        asyncio call site.
+        """
+        risk = RiskConfig()
+        assert isinstance(risk.max_entry_slippage, Decimal)
+        assert isinstance(risk.price_band_margin, Decimal)
+        assert isinstance(risk.max_position_staleness_s, float)
+        assert isinstance(risk.dispatch_deadline_s, float)
+        assert isinstance(risk.reconcile_deadline_s, float)
+
+    def test_max_entry_slippage_is_a_fraction_parsed_exactly(self) -> None:
+        """`0.001` is 0.1%, not 0.1 -- the entry formula is
+        `close x (1 + slippage)`. Parsed through the shortest-repr boundary, so
+        it is exactly 1/1000 rather than a binary approximation of it.
+        """
+        assert RiskConfig().max_entry_slippage == Decimal("0.001")
+        assert RiskConfig().max_entry_slippage * Decimal("1000") == Decimal("1")
+
+    @pytest.mark.parametrize("value", [Decimal("0"), Decimal("-0.001"), Decimal("0.06")])
+    def test_max_entry_slippage_is_bounded_at_both_ends(self, value: Decimal) -> None:
+        """The upper bound is what stops the config expressing "market order in
+        disguise"; near it the price is band-refusable and the whole list dies.
+        """
+        with pytest.raises(ValidationError):
+            RiskConfig(max_entry_slippage=value)
+
+    @pytest.mark.parametrize(
+        "field",
+        ["max_position_staleness_s", "dispatch_deadline_s", "reconcile_deadline_s"],
+    )
+    def test_every_duration_must_be_positive(self, field: str) -> None:
+        with pytest.raises(ValidationError):
+            RiskConfig(**{field: 0.0})
+
+    def test_the_shipped_safety_defaults(self) -> None:
+        """Pinned so a change to any of them is a visible diff rather than a
+        silent drift. All five are PLACEHOLDER -- NOT MEASURED.
+        """
+        risk = RiskConfig()
+        assert risk.max_entry_slippage == Decimal("0.001")
+        assert risk.price_band_margin == Decimal("0.02")
+        assert risk.max_position_staleness_s == 180.0
+        assert risk.dispatch_deadline_s == 9.0
+        assert risk.reconcile_deadline_s == 3.0
+
     def test_the_rr_case_keeps_its_more_specific_message(self) -> None:
         """`rr` with no stop is a strict subset of take-profit-with-no-stop, so
         it is checked first. Checked second it would be unreachable, and the

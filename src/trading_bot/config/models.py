@@ -211,11 +211,83 @@ class RiskLimitsConfig(_Model):
 
 
 class RiskConfig(_Model):
+    """Risk policy. Five of these fields carry numbers that are **not measured**.
+
+    ``max_entry_slippage`` and ``price_band_margin`` are ``Decimal`` because
+    both multiply a price; the three ``_s`` durations are ``float`` because they
+    are compared against clocks and never against money. That split is the money
+    rule applied field by field rather than uniformly: a config field becomes
+    ``Decimal`` at the milestone that first multiplies it by money *or compares
+    it against money*, and a duration does neither.
+
+    Statuses and provenance for every one of them live in
+    ``docs/M5_NUMBERS.md``. Five of the six numbers there are **PLACEHOLDER --
+    NOT MEASURED**, and the field docstrings below say which, so a rationale is
+    never mistaken for a sample.
+    """
+
     position_sizing: PositionSizingConfig = Field(default_factory=PositionSizingConfig)
     stop_loss: StopLossConfig = Field(default_factory=StopLossConfig)
     take_profit: TakeProfitConfig = Field(default_factory=TakeProfitConfig)
     trailing_stop: TrailingStopConfig = Field(default_factory=TrailingStopConfig)
     limits: RiskLimitsConfig = Field(default_factory=RiskLimitsConfig)
+
+    #: How far above the reference price a marketable entry limit may sit, as a
+    #: **fraction** (``0.001`` is 0.1%), not a whole percent. ``Decimal``: it
+    #: multiplies a price.
+    #:
+    #: **The upper bound is a ceiling on absurdity, not a supported range.** The
+    #: measured ``PERCENT_PRICE_BY_SIDE`` band is 0.5x-2x of a 5-minute average,
+    #: so a working price far above the recent average is itself band-refusable
+    #: -- and a band violation refuses the **whole order list**, entry and both
+    #: protective legs together, not gracefully. Anything approaching ``0.05`` is
+    #: already in that territory and is asking for a market order in disguise.
+    #:
+    #: **PLACEHOLDER -- NOT MEASURED**, both the default and the bound. The real
+    #: value is a quantile of the close-to-ask distance, and no sample exists.
+    max_entry_slippage: Decimal = Field(Decimal("0.001"), gt=0, le=Decimal("0.05"))
+    #: Safety margin applied to the ``PERCENT_PRICE_BY_SIDE`` band before a
+    #: protective price is checked against it, as a fraction. ``Decimal``: it
+    #: scales band multipliers that are themselves ``Decimal`` on ``SymbolInfo``.
+    #:
+    #: Biased **small** on purpose: the exchange enforces the band itself and a
+    #: violation is a clean whole-list rejection, so this pre-check exists to
+    #: make a refusal legible and save a round trip, not to be the authority.
+    #:
+    #: **PLACEHOLDER -- NOT MEASURED**, and blocked behind a prior question --
+    #: whether the ``avgPrice`` endpoint reports the series the filter is
+    #: actually evaluated against.
+    price_band_margin: Decimal = Field(Decimal("0.02"), gt=0, le=Decimal("0.5"))
+    #: How stale an open position's exchange read may be before new entries are
+    #: refused, in **seconds**. A duration compared against the age of a
+    #: reconciliation stamp, so ``float`` rather than ``Decimal``.
+    #:
+    #: **Its meaning is coupled to the shortest enabled timeframe; its type is
+    #: not.** The working value is 3x that timeframe -- a policy choice, "two
+    #: consecutive budget skips are normal", not a derivation. Lengthen your
+    #: shortest bar and this needs raising **by hand**: nothing checks it, and a
+    #: value that fires on a healthy system is the worse failure, because an
+    #: operator who sees the line every bar stops reading it.
+    #:
+    #: **PLACEHOLDER -- NOT MEASURED.**
+    max_position_staleness_s: float = Field(180.0, gt=0)
+    #: Deadline for the **whole dispatch sequence** -- worst case a three-call
+    #: ``CLOSE`` -- in seconds. The only configured number of the two; the
+    #: per-call share is **derived** from it (3.0 s here), never set.
+    #:
+    #: Not ``exchange.requests_timeout_s``: at that general 10 s value a
+    #: three-call ``CLOSE`` is 30 s and two pairs closing on the same minute is
+    #: 60 s, the entire bar, before reconciliation has run.
+    #:
+    #: **PLACEHOLDER -- NOT MEASURED.** Too tight is the expensive direction: a
+    #: placement that times out may in fact have placed.
+    dispatch_deadline_s: float = Field(9.0, gt=0)
+    #: Deadline for **one** position's reconciliation query, in seconds. Bounds
+    #: a single slow read so it cannot consume the reserved floor and starve the
+    #: rest of the pass.
+    #:
+    #: **PLACEHOLDER -- NOT MEASURED.**
+    reconcile_deadline_s: float = Field(3.0, gt=0)
 
     @model_validator(mode="after")
     def _check_protective_coverage(self) -> RiskConfig:

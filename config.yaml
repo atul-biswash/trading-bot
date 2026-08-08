@@ -72,6 +72,38 @@ risk:
     max_position_size_percent: 20.0 # (exact) cap any single position vs. equity
     cooldown_minutes: 15            # per-symbol pause after a stop-out
 
+  # The M5 safety numbers. STATUS IS PART OF EACH VALUE: five of the six numbers
+  # in docs/M5_NUMBERS.md are PLACEHOLDER -- NOT MEASURED, meaning a rationale
+  # with no sample behind it. Do not quote one as though it were measured, and
+  # do not ship any of them to LIVE without its measurement.
+  max_entry_slippage: 0.001         # (exact) 0.1%, a FRACTION not a percent.
+                                    # PLACEHOLDER -- NOT MEASURED. The real value
+                                    # is a quantile of close-to-ask distance; no
+                                    # sample exists. Bounded above at 0.05, which
+                                    # is a ceiling on absurdity rather than a
+                                    # supported range: near it, the price is
+                                    # itself band-refusable and the WHOLE order
+                                    # list dies, entry and both protective legs.
+  price_band_margin: 0.02           # (exact) safety margin on PERCENT_PRICE_BY_SIDE.
+                                    # PLACEHOLDER -- NOT MEASURED, and blocked
+                                    # behind a prior question: whether avgPrice
+                                    # reports the series the filter judges against.
+                                    # Deliberately small -- the exchange is the
+                                    # authority, this only saves a round trip.
+  max_position_staleness_s: 180.0   # PLACEHOLDER -- NOT MEASURED. 3x the shortest
+                                    # enabled timeframe ON THIS PAIR LIST; a policy
+                                    # choice, not a derivation. Lengthen your
+                                    # shortest bar and RAISE THIS BY HAND -- nothing
+                                    # checks it, and a value that fires on a healthy
+                                    # system trains you to ignore the line.
+  dispatch_deadline_s: 9.0          # PLACEHOLDER -- NOT MEASURED. Bounds the WHOLE
+                                    # dispatch sequence, worst case a three-call
+                                    # CLOSE. The per-call share is DERIVED (~3.0s),
+                                    # never set here. Not exchange.requests_timeout_s:
+                                    # a three-call CLOSE at that 10s would be 30s.
+  reconcile_deadline_s: 3.0         # PLACEHOLDER -- NOT MEASURED. One order-list
+                                    # query, so a slow read cannot starve the pass.
+
 backtesting:
   start_date: "2024-01-01"
   end_date: "2024-06-30"
