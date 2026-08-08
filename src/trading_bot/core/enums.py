@@ -176,6 +176,12 @@ class RefusalStage(str, Enum):
     not a limit firing -- and it deliberately has **no** ``RiskRule`` twin, so
     the coincidence above stays the single one it claims to be.
 
+    :attr:`UNMANAGED_HOLDING` is deliberately **not** in that family, and its
+    position says so: it is checked *after* the limits pass, because under an
+    unmanaged holding the ledger is **intact**. Nothing is uncomputable; one
+    symbol is simply not ours to trade. Placing it beside the two guards above
+    would assert the opposite in the structure of the code.
+
     There is no ``UNCLASSIFIED``. Every member here is reachable, because
     ``RiskAssessment``'s validator binds a refusal to naming one; an
     unreachable member would invite defensive branching on a state the domain
@@ -190,6 +196,7 @@ class RefusalStage(str, Enum):
     NO_MARK_PRICE = "no_mark_price"
     COMMITTED_RISK_UNKNOWN = "committed_risk_unknown"
     LIMIT_REFUSED = "limit_refused"
+    UNMANAGED_HOLDING = "unmanaged_holding"
     ATR_UNAVAILABLE = "atr_unavailable"
     STOP_UNPLACEABLE = "stop_unplaceable"
     SIZE_NOT_TRADEABLE = "size_not_tradeable"

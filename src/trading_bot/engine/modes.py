@@ -430,6 +430,91 @@ async def _seed_portfolio(client: ExchangeClient, *, quote_asset: str) -> Portfo
     )
 
 
+async def _snapshot_unmanaged_holdings(
+    client: ExchangeClient, *, pairs: Mapping[str, PairContext], portfolio: Portfolio
+) -> None:
+    """Record material base holdings the account had before this bot started.
+
+    **Counted toward equity, never adopted as positions.** Adopting would give
+    a holding no entry price, no stop and no requested protection -- the
+    terminal stopless state, manufactured at every boot -- and would eventually
+    have the bot sell an asset a human bought. Ignoring them is worse:
+    ``has_position`` would be ``False`` whatever the account holds, so a ``BUY``
+    would pass ``ALREADY_IN_POSITION`` and pyramid onto the holding, sized
+    against an equity that excludes the thing it is adding to.
+
+    **Priced over REST, deliberately.** The provider exists to serve the live
+    path and its buffers are empty until ``start()``, which runs after the
+    composition root has yielded -- so ``last_candle`` has nothing at boot. One
+    read-only ticker per candidate asset costs a round trip and keeps this
+    entire step ahead of any socket, which is where the other four boot
+    refusals live.
+
+    **Taken before any ``Position`` exists, and that timing is the argument.**
+    Measuring unmanaged base later would count base held by positions the bot
+    opened: ``equity`` would double-count it and the refusal would mislabel,
+    reporting an unmanaged holding where the truth is ``ALREADY_IN_POSITION``.
+
+    ``total`` and ``free`` answer different questions and both are used.
+    Equity asks what the account **owns**, so the recorded quantity is ``total``
+    -- locked base is owned, and excluding it understates the denominator every
+    sizing decision divides by. Materiality asks whether this is **dust**, and
+    dust is defined by sellability: a holding worth less than ``min_notional``
+    cannot be sold at all. Locked base is not sellable, so only ``free`` counts
+    toward clearing that threshold. The asymmetry is safe both ways -- a holding
+    whose free portion is dust does not block the symbol, which is right,
+    because the locked portion is committed to somebody else's resting order.
+    """
+    quote = portfolio.quote_asset
+    # Base asset -> the symbol that prices it, restricted to pairs quoted in the
+    # portfolio's currency: a BTCEUR pair cannot value a BTC holding for a
+    # USDT-denominated account. Two enabled pairs sharing a base asset *and* the
+    # quote asset would let the last one win here; the exchange does not offer
+    # such a duplicate, and `_pair_timeframes` already refuses duplicate symbols.
+    by_base = {
+        context.symbol_info.base_asset: symbol
+        for symbol, context in pairs.items()
+        if context.symbol_info.quote_asset == quote
+    }
+
+    for balance in await client.get_balances():
+        asset = balance.asset.upper()
+        # The quote asset is already `free_quote`; counting it here would
+        # double it into equity outright.
+        if asset == quote or balance.total <= 0:
+            continue
+
+        symbol = by_base.get(asset)
+        if symbol is None:
+            _log.warning(
+                "%s: holding of %s is EXCLUDED FROM EQUITY -- no enabled %s pair, so it "
+                "cannot be priced. Equity is understated by its value.",
+                asset,
+                balance.total,
+                quote,
+            )
+            continue
+
+        price = (await client.get_ticker(symbol)).last
+        if balance.free * price < pairs[symbol].symbol_info.min_notional:
+            continue  # dust: too small to sell, so it must not block the pair
+
+        portfolio.unmanaged_holdings[symbol] = balance.total
+        # WARNING, once, at boot -- never CRITICAL. This is an ordinary state of
+        # a shared account and will be true on many boots; escalating it would
+        # train an operator to skim the level that carries the one condition
+        # nothing can resolve.
+        _log.warning(
+            "%s: the account held %s %s at boot that this bot did not open. It is counted "
+            "toward equity and THE BOT WILL NOT TRADE OR SELL IT. Entries on %s are "
+            "excluded while it remains.",
+            symbol,
+            balance.total,
+            asset,
+            symbol,
+        )
+
+
 # --------------------------------------------------------------------------
 # The root
 # --------------------------------------------------------------------------
@@ -468,6 +553,8 @@ async def live_system(
         portfolio = await _seed_portfolio(
             resolved_client, quote_asset=settings.config.trading.base_currency
         )
+        # Still before any socket, with the other four boot refusals.
+        await _snapshot_unmanaged_holdings(resolved_client, pairs=pairs, portfolio=portfolio)
 
         provider = await BufferedMarketDataProvider.create(
             settings, client=resolved_client, stream=stream

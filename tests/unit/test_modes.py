@@ -100,8 +100,13 @@ _MODES_LOGGER = "trading_bot.engine.modes"
 # --------------------------------------------------------------------------
 # Scripted fakes
 # --------------------------------------------------------------------------
+#: Module-level so it can be a default argument: ruff's B008 forbids calling a
+#: function in a signature default.
+_DEFAULT_TICKER_LAST = D("100")
+
+
 class FakeRootClient(ExchangeClient):
-    """Serves the two boot calls -- symbol info and balances -- and counts closes."""
+    """Serves the boot calls -- symbol info, balances, tickers -- and counts closes."""
 
     def __init__(
         self,
@@ -110,6 +115,7 @@ class FakeRootClient(ExchangeClient):
         unknown_symbols: frozenset[str] = frozenset(),
         journal: list[str] | None = None,
         balances_error: Exception | None = None,
+        ticker_last: Decimal = _DEFAULT_TICKER_LAST,
     ) -> None:
         self._balances = (
             balances
@@ -119,6 +125,7 @@ class FakeRootClient(ExchangeClient):
         self._unknown = unknown_symbols
         self._journal = journal if journal is not None else []
         self._balances_error = balances_error
+        self._ticker_last = ticker_last
         self.symbol_info_calls: list[str] = []
         self.close_calls = 0
 
@@ -143,9 +150,15 @@ class FakeRootClient(ExchangeClient):
         self.close_calls += 1
         self._journal.append("close_client")
 
-    # Unused by the root; present to satisfy the port.
-    async def get_ticker(self, symbol: str) -> Ticker:  # pragma: no cover - not exercised
-        raise NotImplementedError
+    async def get_ticker(self, symbol: str) -> Ticker:
+        self._journal.append(f"ticker:{symbol}")
+        return Ticker(
+            symbol=symbol,
+            bid=D("100"),
+            ask=D("100"),
+            last=self._ticker_last,
+            timestamp=NOW,
+        )
 
     async def create_order(self, request: OrderRequest) -> Order:  # pragma: no cover
         raise NotImplementedError
@@ -321,6 +334,25 @@ def _case_committed_risk_unknown() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
+def _case_unmanaged_holding() -> Case:
+    """A material base holding the bot did not open, on the signal's symbol.
+
+    `positions` is empty and that is doing double duty: it keeps NO_MARK_PRICE
+    and COMMITTED_RISK_UNKNOWN silent (nothing to price, nothing uncomputable),
+    and it keeps ALREADY_IN_POSITION silent -- which is precisely the hazard
+    this refusal exists for. Without it the BUY would pyramid onto the holding.
+    """
+    pairs = default_pairs()
+    manager, _ = build_manager(pairs=pairs)
+    portfolio = Portfolio(
+        free_quote=D("10000"),
+        positions={},
+        unmanaged_holdings={SYMBOL: D("0.5")},
+    )
+    signal = buy()
+    return signal, manager.evaluate(signal, portfolio=portfolio), pairs
+
+
 def _case_limit_refused() -> Case:
     manager, _ = build_manager()
     signal = buy()
@@ -389,7 +421,7 @@ def _case_unaffordable() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
-# Eleven paths, one row each. Defined at module level rather than inline in
+# Twelve paths, one row each. Defined at module level rather than inline in
 # `parametrize` so the correspondence to `evaluate`'s branches stays readable.
 _STAGE_CASES = [
     (RefusalStage.UNKNOWN_PAIR, _case_unknown_pair),
@@ -399,6 +431,7 @@ _STAGE_CASES = [
     (RefusalStage.NO_MARK_PRICE, _case_no_mark_price),
     (RefusalStage.COMMITTED_RISK_UNKNOWN, _case_committed_risk_unknown),
     (RefusalStage.LIMIT_REFUSED, _case_limit_refused),
+    (RefusalStage.UNMANAGED_HOLDING, _case_unmanaged_holding),
     (RefusalStage.ATR_UNAVAILABLE, _case_atr_unavailable),
     (RefusalStage.STOP_UNPLACEABLE, _case_stop_unplaceable),
     (RefusalStage.SIZE_NOT_TRADEABLE, _case_size_not_tradeable),
@@ -948,6 +981,184 @@ class TestQuoteAssetMatching:
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             assert system.portfolio.quote_asset == "USDT"
             assert system.portfolio.free_quote == D("5000")
+
+
+class TestUnmanagedHoldings:
+    """The boot snapshot. Counted toward equity, never adopted as positions."""
+
+    async def test_a_material_base_holding_is_recorded_but_never_a_position(
+        self, tmp_path: Path
+    ) -> None:
+        """Adopting would manufacture the stopless state at every boot and would
+        eventually have the bot sell an asset a human bought. Ignoring it would
+        let a BUY pass ALREADY_IN_POSITION and pyramid onto it."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.unmanaged_holdings == {SYMBOL: D("0.5")}
+            assert system.portfolio.positions == {}  # never adopted
+            assert not system.portfolio.has_position(SYMBOL)
+            assert system.portfolio.has_unmanaged_holding(SYMBOL)
+
+    async def test_the_recorded_quantity_is_total_because_equity_asks_what_is_owned(
+        self, tmp_path: Path
+    ) -> None:
+        """Locked base is owned. Excluding it understates the denominator every
+        sizing decision divides by."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.4"), locked=D("0.1")),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.unmanaged_holdings == {SYMBOL: D("0.5")}
+
+    async def test_materiality_uses_free_because_dust_means_unsellable(
+        self, tmp_path: Path
+    ) -> None:
+        """The two thresholds do NOT agree, and the asymmetry is deliberate.
+        Equity asks what is owned (`total`); materiality asks whether this is
+        dust, and dust is defined by sellability -- locked base cannot be sold,
+        so it cannot help clear the threshold. Here free x 100 = 1 is below the
+        symbol's min_notional of 10, so the holding does not block the pair even
+        though its total value is 100.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.01"), locked=D("0.99")),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.unmanaged_holdings == {}
+
+    async def test_dust_below_min_notional_does_not_block_the_pair(self, tmp_path: Path) -> None:
+        """A holding too small to sell must not refuse a symbol forever."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.000001"), locked=D("0")),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.unmanaged_holdings == {}
+
+    async def test_the_quote_asset_is_never_counted_as_an_unmanaged_holding(
+        self, tmp_path: Path
+    ) -> None:
+        """It is already `free_quote`; counting it here would double it into equity."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(balances=[Balance(asset="USDT", free=D("5000"), locked=D("0"))])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.unmanaged_holdings == {}
+            assert system.portfolio.free_quote == D("5000")
+
+    async def test_an_unpriceable_asset_is_ignored_with_a_warning_not_a_refusal(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Refusing the boot over an asset the bot does not trade is overreach.
+        The resulting equity error is conservative -- understated -- and the
+        warning is what stops it being invisible."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="DOGE", free=D("1000"), locked=D("0")),  # no enabled pair
+            ]
+        )
+
+        with caplog.at_level(logging.WARNING, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert system.portfolio.unmanaged_holdings == {}
+
+        messages = [r.getMessage() for r in caplog.records if r.name == "trading_bot.engine.modes"]
+        assert any("DOGE" in m and "EXCLUDED FROM EQUITY" in m for m in messages)
+
+    async def test_the_escalation_is_a_boot_warning_never_critical(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """An unmanaged holding is an ordinary state of a shared account and will
+        be true on many boots. At CRITICAL it would train an operator to skim the
+        level that carries the one condition nothing can resolve."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ]
+        )
+
+        with caplog.at_level(logging.WARNING, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        ours = [r for r in caplog.records if r.name == "trading_bot.engine.modes"]
+        assert any(r.levelno == logging.WARNING and SYMBOL in r.getMessage() for r in ours)
+        assert not any(r.levelno >= logging.CRITICAL for r in ours)
+
+    async def test_the_snapshot_is_taken_before_any_socket(self, tmp_path: Path) -> None:
+        """It joins the other four boot refusals ahead of anything going live.
+
+        It has to be priced over REST for exactly this reason: the provider's
+        buffers are empty until `start()`, and `start()` runs after this context
+        manager has yielded -- so `last_candle` has nothing to give at boot.
+        """
+        settings = write_settings(tmp_path)
+        journal: list[str] = []
+        stream = FakeStream(journal=journal)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ],
+            journal=journal,
+        )
+
+        async with live_system(settings, client=client, stream=stream) as system:
+            assert system.portfolio.unmanaged_holdings == {SYMBOL: D("0.5")}
+            assert journal.index("balances") < journal.index(f"ticker:{SYMBOL}")
+            # Nothing has gone live: the snapshot is complete and the stream has
+            # never been started.
+            assert stream.start_calls == 0
+            assert "stream_start" not in journal
+
+    def test_a_close_on_an_unmanaged_symbol_finds_nothing_to_close(self) -> None:
+        """ "The bot never sells it" is enforced by the EXISTING code path -- no
+        Position is constructed, so `_exit_assessment` takes its NOTHING_TO_CLOSE
+        branch. No new guard, which is the point."""
+        manager, _ = build_manager()
+        portfolio = Portfolio(free_quote=D("10000"), unmanaged_holdings={SYMBOL: D("0.5")})
+
+        assessment = manager.evaluate(
+            Signal(symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW),
+            portfolio=portfolio,
+        )
+
+        assert assessment.stage is RefusalStage.NOTHING_TO_CLOSE
+
+    def test_an_unmanaged_holding_counts_toward_equity(self) -> None:
+        """The denominator of every sizing decision and of the daily-loss cap."""
+        portfolio = Portfolio(free_quote=D("1000"), unmanaged_holdings={SYMBOL: D("2")})
+        assert portfolio.equity({SYMBOL: D("150")}) == D("1300")
+
+    def test_equity_raises_when_an_unmanaged_holding_cannot_be_marked(self) -> None:
+        portfolio = Portfolio(free_quote=D("1000"), unmanaged_holdings={SYMBOL: D("2")})
+        with pytest.raises(ValueError, match="no mark price for unmanaged holding"):
+            portfolio.equity({})
 
 
 # --------------------------------------------------------------------------

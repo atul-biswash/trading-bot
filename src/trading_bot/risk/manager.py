@@ -493,6 +493,22 @@ class RiskManager(RiskManagerPort):
         if not decision.approved:
             return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 
+        # AFTER the limits, not before, and the position is the argument. An
+        # unmanaged holding leaves the ledger INTACT -- nothing is uncomputable,
+        # one symbol is simply not ours to trade -- so it does not belong beside
+        # NO_MARK_PRICE and COMMITTED_RISK_UNKNOWN, which are inabilities to
+        # compute. It is a fact about one symbol, and `_approve`'s own order
+        # puts the portfolio-wide halts ahead of those. Checking it here keeps
+        # that order intact while still letting it carry its own stage.
+        if portfolio.has_unmanaged_holding(symbol):
+            return refuse(
+                f"{symbol}: the account holds {portfolio.unmanaged_holdings[symbol]} of the "
+                "base asset that this bot did not open. It is counted toward equity and the "
+                "bot will not trade or sell it; entries here are excluded while it remains",
+                stage=RefusalStage.UNMANAGED_HOLDING,
+                decision=decision,
+            )
+
         stop_loss = self._config.stop_loss
         atr_value: float | None = None
         if stop_loss.enabled and stop_loss.type is StopType.ATR:
@@ -671,7 +687,12 @@ class RiskManager(RiskManagerPort):
         return context.symbol_info.price_tick if context is not None else Decimal(0)
 
     def _mark_prices(self, portfolio: Portfolio) -> tuple[dict[str, Decimal], list[str]]:
-        """Latest close per open position, plus the symbols that have none.
+        """Latest close per symbol equity must value, plus the ones that have none.
+
+        Covers open positions **and** unmanaged base holdings: both are counted
+        by ``equity``, so pricing only the first would make ``equity`` raise on
+        a mark it was never given. ``marked_symbols`` supplies the union in a
+        stable order.
 
         Prices come from ``last_candle`` -- exact ``Decimal`` -- never from the
         ``float`` frame. Returning the unpriced symbols rather than raising lets
@@ -679,12 +700,12 @@ class RiskManager(RiskManagerPort):
         """
         marks: dict[str, Decimal] = {}
         unpriced: list[str] = []
-        for position in portfolio.open_positions:
-            price = self._last_close(position.symbol)
+        for symbol in portfolio.marked_symbols():
+            price = self._last_close(symbol)
             if price is None:
-                unpriced.append(position.symbol)
+                unpriced.append(symbol)
             else:
-                marks[position.symbol] = price
+                marks[symbol] = price
         return marks, unpriced
 
     def _last_close(self, symbol: str) -> Decimal | None:

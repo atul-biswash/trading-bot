@@ -109,6 +109,27 @@ class Portfolio(BaseModel):
     pnl_date: date | None = None
     #: Per-symbol instants before which no new entry is allowed.
     cooldown_until: dict[str, datetime] = Field(default_factory=dict)
+    #: Material base holdings the account had at boot that this bot did not
+    #: open, keyed by the **symbol** they are priced against -- so the same
+    #: ``marks`` mapping that values positions values these too. The quantity is
+    #: the **total** balance, free plus locked, because equity asks what the
+    #: account owns.
+    #:
+    #: **Counted toward equity, never adopted as positions, and their symbols
+    #: refuse entries.** Adopting them would manufacture a stopless position at
+    #: every boot and would eventually have the bot sell an asset a human
+    #: bought; ignoring them entirely would let a ``BUY`` pass
+    #: ``ALREADY_IN_POSITION`` and pyramid onto the holding, sized against an
+    #: equity that excludes it.
+    #:
+    #: **Immutable for the process lifetime -- by convention, not enforcement.**
+    #: ``validate_assignment`` re-validates a *reassignment* of this field but
+    #: cannot see an in-place mutation of the dict, so nothing here stops a
+    #: caller adding a key. The snapshot is taken once, at boot, before any
+    #: ``Position`` exists, and that timing is the correctness argument: taken
+    #: later it would count base held by positions the bot opened, which
+    #: ``equity`` would then double-count and the refusal would mislabel.
+    unmanaged_holdings: dict[str, Money] = Field(default_factory=dict)
 
     # -- positions ----------------------------------------------------------
     @property
@@ -125,6 +146,25 @@ class Portfolio(BaseModel):
         """Whether ``symbol`` already has an open position."""
         position = self.positions.get(symbol)
         return position is not None and position.is_open
+
+    def has_unmanaged_holding(self, symbol: str) -> bool:
+        """Whether ``symbol``'s base asset carries a holding the bot did not open."""
+        return symbol in self.unmanaged_holdings
+
+    def marked_symbols(self) -> list[str]:
+        """Every symbol ``equity`` needs a mark for, open positions first.
+
+        Both open positions and unmanaged holdings are valued, so both must be
+        priced. Returned in a stable order and de-duplicated, so a caller
+        reporting which symbols it could not price reports them deterministically.
+        """
+        symbols: list[str] = []
+        seen: set[str] = set()
+        for symbol in [p.symbol for p in self.open_positions] + list(self.unmanaged_holdings):
+            if symbol not in seen:
+                seen.add(symbol)
+                symbols.append(symbol)
+        return symbols
 
     def open_position(self, position: Position, *, cost: Decimal) -> None:
         """Record ``position`` and debit ``cost`` from the free quote balance.
@@ -209,6 +249,14 @@ class Portfolio(BaseModel):
                     f"no mark price for open position {position.symbol}; equity is unknown"
                 )
             total += position.quantity * mark
+        for symbol, quantity in self.unmanaged_holdings.items():
+            # An unmanaged holding is the account's, not the bot's, but it is
+            # still the account's value -- and equity is the denominator of
+            # every sizing decision and of the daily-loss threshold.
+            mark = marks.get(symbol)
+            if mark is None:
+                raise ValueError(f"no mark price for unmanaged holding {symbol}; equity is unknown")
+            total += quantity * mark
         return total
 
     # -- daily realised P&L -------------------------------------------------
