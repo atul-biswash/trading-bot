@@ -136,6 +136,24 @@ unknown, so portfolio-wide is correct — the same logic as `NO_MARK_PRICE`. For
 **Consequence: site 1 halts that symbol, not the portfolio.** Halting everything for
 a failed cancel is overreach and trains an operator to override the halt.
 
+**OPEN — site 3's halt scope is unassigned, and this note does not assign it.** The
+paragraph above names sites 1, 2, 3 and 5 in its premise, then gives portfolio-wide
+to 2 and 5 and per-symbol to 1, and never returns to 3. Both readings are available
+from its own reasoning and neither is obviously right:
+
+- **Per-symbol, like site 1** — the ledger is intact. Realised P&L, equity and the
+  position's recorded size are not in doubt; what failed is one symbol's protection
+  failing to re-place.
+- **Portfolio-wide, like site 5** — the position is unprotected, so its committed
+  risk is not truthfully computable, and the committed-risk sum that gates every
+  entry is wrong portfolio-wide rather than on that symbol alone.
+
+**Marked for adjudication.** See the open defect in `QC_PROTECTIVE_ORDERS.md` §7,
+which is the same fact seen from the other document: under site 3 the position's
+requested `stop_loss` is non-`None`, so the committed-risk sum prices a level known
+not to rest. Whether that makes the state per-symbol or portfolio-wide is exactly
+the question left open here.
+
 **Class D — the halt is a ratchet toward flat.** Entries stop, exits continue, so the
 book only shrinks. That is intended, and worth stating so it is not mistaken for a
 bug: a halted bot converges on flat and then idles.

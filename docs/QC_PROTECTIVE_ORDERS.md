@@ -46,8 +46,14 @@ violation refusing the whole list (MEASURED, S4). The arity branch is irreducibl
 |---|---|---|
 | stop + TP | OTOCO, 3 legs | `v3_post_order_list_otoco` |
 | stop only | OTO, 2 legs | `v3_post_order_list_oto` |
-| TP only | refused at config load | — |
+| TP only | refused at config load † | — |
 | neither | single order, `LIMIT` + `FOK` | `create_order` |
+
+† **Target state, not current behaviour.** The code accepts a take-profit-only
+configuration today and so would the exchange — see the paragraph below this table,
+which says so explicitly. The refusal lands in M5a. The row is written in the
+present tense because it describes the shape once M5a has landed, not the shape the
+tree has now.
 
 The neither-enabled branch uses **the same entry mechanic as every other shape** —
 `LIMIT` at `entry_limit`, `FOK`. The entry mechanic is a property of the entry, not
@@ -366,6 +372,32 @@ Moments: at boot, after each placement, per candle per open position.
 Unprotected divergence → re-place once at the next generation; on failure
 `CRITICAL`, halt entries, **do not auto-close**. Re-placing is reversible; closing
 realises a loss on a possibly-transient read.
+
+**OPEN DEFECT — committed risk prices a stop this section knows is not resting.**
+Divergence is keyed off what was *requested*, so a position in the site-3 state has
+a non-`None` `stop_loss` **by definition** — that is how the divergence was
+detected. `CLAUDE.md`'s committed-risk term selects `binding_stop` from the
+position's requested levels and sums `min(0, (binding_stop − mark) x quantity)`, so
+it prices a level known not to rest.
+
+**Consequence: committed risk is UNDERSTATED, and the daily-loss check therefore
+permits entries on the strength of protection that does not exist — on the one
+position the system knows to be unprotected.**
+
+The uncomputable-risk discriminator cannot see it: that test is `stop_loss is None`,
+scoped by `stop_loss.enabled`, and here `stop_loss` is not `None`. `ProtectionState`
+can see it, which is the argument for keying the uncomputable count off `protection`
+as well as off `stop_loss`.
+
+**Latent, not live.** The site-3 state requires a detected divergence *and* a failed
+re-place, and the reconciler that produces it does not exist yet. That bounds how
+alarming this is today; it does not bound how alarming it is once M5d lands.
+
+**Not fixed here.** The reconciler is M5d's. This note exists so that M5a does not
+lock a `committed_risk` signature that forecloses the fix, and so that whoever
+writes M5d does not have to rediscover the interaction. Whether such a position
+should count as *uncomputable* (refuse) rather than as *mispriced* (understate) is
+the natural fix and is deliberately **not** prescribed here.
 
 ## 8. Errors
 
