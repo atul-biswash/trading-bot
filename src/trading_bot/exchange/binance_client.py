@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import ExchangeAPIError, OrderError
+from trading_bot.core.exceptions import ExchangeAPIError, FilterRejectedError, OrderError
 from trading_bot.core.models import (
     Balance,
     Candle,
@@ -228,8 +228,38 @@ class BinanceClient(BaseExchangeClient):
         the sizing it exists to re-check -- so a quantity the sizer would have
         refused could pass the very guard meant to catch it. The two now agree
         by construction rather than by coincidence.
+
+        **``price`` is rounded and ``stop_price`` is rejected, and the asymmetry
+        is deliberate.** ``price`` is legitimately *derived* here: an entry limit
+        comes from a candle close and a slippage multiplier, so putting it on
+        the tick is part of constructing it. ``stop_price`` is not derived -- it
+        *arrives* from ``risk.rules`` already tick-rounded by contract, toward
+        its reference, with the direction chosen per level so the realised
+        distance can only shrink. An off-tick ``stop_price`` therefore means an
+        upstream broke that contract, and rounding it here would paper over the
+        break: ``ROUND_DOWN`` on a long's stop moves it *away* from entry, so a
+        silently widened stop would breach the ``risk_per_trade`` budget through
+        the very component meant to catch such a breach. Rejecting names the
+        break instead.
+
+        **What this check is, precisely: detection, not defence.** It does not
+        protect the trigger -- ``risk.rules`` rounding correctly is still the
+        only thing that does. What it buys is that the dependency on that
+        upstream is **explicit and loud** rather than silent and coincidental.
+        The trigger is protected once and checked once, not twice.
         """
         info = await self.get_symbol_info(request.symbol)
+
+        if request.stop_price is not None and (
+            round_price(request.stop_price, info.price_tick) != request.stop_price
+        ):
+            raise FilterRejectedError(
+                f"stop_price {request.stop_price} for {request.symbol} is not a multiple "
+                f"of tickSize {info.price_tick}; protective levels arrive tick-rounded, "
+                "so this is an upstream contract violation rather than a market state",
+                filter_name="PRICE_FILTER",
+            )
+
         quantity = round_step_size(request.quantity, info.effective_step_size)
         price = round_price(request.price, info.price_tick) if request.price is not None else None
 

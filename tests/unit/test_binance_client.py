@@ -21,6 +21,7 @@ from trading_bot.core.enums import OrderSide, OrderStatus, OrderType
 from trading_bot.core.exceptions import (
     ExchangeAPIError,
     ExchangeConnectionError,
+    FilterRejectedError,
     InsufficientBalanceError,
     OrderError,
 )
@@ -344,6 +345,58 @@ async def test_create_order_rejects_below_min_qty_without_dispatch() -> None:
         await bc.create_order(req)
 
     client.create_order.assert_not_awaited()
+
+
+async def test_create_order_rejects_an_off_tick_stop_price_without_dispatch() -> None:
+    """``stop_price`` is REJECTED where ``price`` is rounded, and the asymmetry
+    is the point. ``price`` is derived here; ``stop_price`` arrives from
+    ``risk.rules`` already tick-rounded by contract, so an off-tick trigger is
+    an upstream contract violation, not a market state.
+
+    Rounding it instead would be worse than leaving the gap: ``ROUND_DOWN`` on a
+    long's stop moves it *away* from entry, silently widening the risk past the
+    configured budget -- through the component that exists to catch that.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL  # tickSize 0.01
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        quantity=Decimal("0.001"),
+        stop_price=Decimal("63700.0049"),  # not a multiple of 0.01
+    )
+    with pytest.raises(FilterRejectedError) as excinfo:
+        await bc.create_order(req)
+
+    # The venue would have named this filter too; the local refusal and the
+    # remote one must read as the same condition.
+    assert excinfo.value.filter_name == "PRICE_FILTER"
+    client.create_order.assert_not_awaited()
+
+
+async def test_create_order_accepts_an_on_tick_stop_price_untouched() -> None:
+    """The guard must fire only on a genuine violation. Every request from a
+    correct upstream is an exact multiple and passes through unchanged -- so
+    tightening this check into rejecting valid requests turns this red.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL  # tickSize 0.01
+    client.create_order.return_value = ORDER_LIMIT_NEW
+    bc = _make(client, enforce_filters=True)
+
+    req = OrderRequest(
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        quantity=Decimal("0.001"),
+        stop_price=Decimal("63700.00"),  # exactly on tick
+    )
+    await bc.create_order(req)
+
+    assert client.create_order.await_args.kwargs["stopPrice"] == "63700.00"
 
 
 async def test_create_order_rejects_a_stop_market_below_min_notional() -> None:

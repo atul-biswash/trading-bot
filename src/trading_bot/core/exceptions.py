@@ -49,6 +49,27 @@ class OrderError(ExchangeError):
     """An order was rejected or could not be created/canceled."""
 
 
+class FilterRejectedError(OrderError):
+    """An order violates a named exchange filter.
+
+    A subclass of :class:`OrderError` rather than a sibling, so every existing
+    ``except OrderError`` keeps catching it: a filter rejection *is* an order
+    rejection, with the filter named.
+
+    ``filter_name`` carries the exchange's own spelling -- ``PRICE_FILTER``,
+    ``LOT_SIZE``, ``NOTIONAL`` -- so a refusal raised locally before dispatch
+    and one parsed out of a venue rejection are legible as the same condition.
+    A caller must be able to read "which filter" without parsing the message.
+
+    :param message: human-readable description.
+    :param filter_name: the exchange's filter name, e.g. ``"PRICE_FILTER"``.
+    """
+
+    def __init__(self, message: str, *, filter_name: str) -> None:
+        super().__init__(message)
+        self.filter_name = filter_name
+
+
 # --- Data -------------------------------------------------------------------
 class DataError(TradingBotError):
     """Missing, malformed, or insufficient market data."""
