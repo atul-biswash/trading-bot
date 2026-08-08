@@ -15,6 +15,15 @@ touches the code. A previous version of this material referenced a
 `MILESTONE_WORKFLOW.md` that existed nowhere in the tree, for months, and nothing
 in the repository could have detected that.
 
+**There are two documents with this name, and this is the newer one.** This file is
+tracked in the repository and is the *source* of the material pasted into a review
+conversation. A much longer predecessor exists outside the repository; it restated
+`CLAUDE.md` at length — exactly what the precedence rule below forbids — and it is
+superseded. The discriminator is easy: **the old one numbers its sections, this one
+does not.** A rule found only in the numbered version has not necessarily been
+adopted anywhere; check it against `CLAUDE.md` before relying on it. That has
+already caught one rule which governed real behaviour and lived nowhere else.
+
 **Precedence, when sources disagree:**
 
 1. **The code wins over `CLAUDE.md`.**
@@ -57,7 +66,14 @@ strategy per pair.
 - **`docs/PHASE_HISTORY.md`** — append-only build log. What each milestone decided
   and *why*, including alternatives rejected, written in the tense it was decided.
   Never restates current state.
-- **`docs/QC_PROTECTIVE_ORDERS.md`** — the protective-order contract.
+- **`docs/QC_PROTECTIVE_ORDERS.md`** — the protective-order contract: where the
+  protective levels rest, the placement shapes, the identity scheme, and what
+  reconciliation compares.
+- **`docs/QB_ESCALATION.md`** — what `CRITICAL` means operationally, its binding
+  sites, and which of them can clear on their own.
+- **`docs/M5_NUMBERS.md`** — the safety numbers, each with what it protects
+  against, what a wrong value costs in each direction, and its measurement status.
+  A number here is never quoted without that status.
 
 ## Architecture, in the shape a reviewer needs
 
@@ -67,7 +83,7 @@ and abstract ports; outer layers implement them. Concretely: `core` defines an
 converted by pure mapper functions, and every call routes through one
 retry-and-error-translation helper so callers only ever see domain exceptions.
 
-Three properties are worth knowing because most review questions land on them:
+Four properties are worth knowing because most review questions land on them:
 
 **Money is `Decimal` in the domain, never `float`** — enforced by a validator, not
 by convention. There is exactly one `Decimal`→`float` boundary, in the data layer,
@@ -84,6 +100,17 @@ forever. Genuine contract violations still raise.
 bar and is silent while the condition persists; state is recomputed from the
 buffer rather than held on the strategy object, so behaviour is identical after a
 restart or a redelivered bar.
+
+**Order dispatch runs inline on the candle pipeline, under a budget.** Signal
+handlers are awaited sequentially from the market-data callback, so whatever they
+do is charged directly to the feed. The governing rule is not "no I/O" but *no
+latency we do not bound ourselves*: a per-call deadline distinct from the general
+request timeout, a per-invocation budget, and a reserved floor that reconciliation
+cannot be starved of — because between skipping a placement and skipping a
+reconciliation, the placement is the safe one to skip. A bounded queue with its own
+consumer was considered and rejected: it makes the portfolio writable from a task
+that is not the one reading it, and the first bug that buys is a duplicate entry.
+`CLAUDE.md` carries the reasoning and the numbers live in `docs/M5_NUMBERS.md`.
 
 ---
 
@@ -226,8 +253,21 @@ reviewer should hold the design to it.
 - **Ask for the file rather than assuming its contents.** `CLAUDE.md` and the docs
   under `docs/` are the source of truth and can be pasted into the conversation.
 - **Distinguish measured from assumed.** The project marks findings MEASURED,
-  DOCUMENTED or UNMEASURED, and the marks are load-bearing. A design resting on an
-  unmeasured claim is not automatically wrong, but it should say so.
+  DOCUMENTED or UNMEASURED, and the marks are load-bearing. Safety *numbers* carry
+  a further status, **BOUNDED** — a measurement exists and constrains what the
+  value must clear, but does not derive it, so the value itself remains a policy
+  choice. That is a different claim from either "measured" or "guessed", and
+  collapsing it into one of them loses the thing worth knowing. A design resting on
+  an unmeasured claim is not automatically wrong, but it should say so.
+- **An instrument is validated against a known answer before its output is
+  trusted.** A measurement in this project was once accepted, argued from, and
+  written into `CLAUDE.md` before proving to be an artefact of a broken text
+  matcher — one whose signature was visible in the reported figures and went
+  unremarked by both author and reviewer. The discipline adopted afterwards is to
+  run any instrument against a case whose answer is already known, and to treat two
+  instruments disagreeing as a stop condition rather than something to explain
+  around. A reviewer shown a measurement is entitled to ask how the instrument was
+  checked.
 - **Challenge locked decisions on evidence, not taste.** `CLAUDE.md` carries a list
   of decisions marked not to be re-litigated without an explicit reason. They each
   record why; a reviewer disagreeing should engage with that reasoning.
