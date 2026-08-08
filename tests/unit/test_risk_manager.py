@@ -314,6 +314,74 @@ class TestPortfolio:
         portfolio.record_realised_pnl(D("-0.01"), now=NOW)
         assert portfolio.daily_loss_exceeded(limit_percent=limit, equity=D("10000"), now=NOW)
 
+    def test_open_position_debits_the_cost_and_records_the_position(self) -> None:
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.open_position(long_position(quantity="2", entry="150"), cost=D("300"))
+
+        assert portfolio.free_quote == D("9700")
+        assert portfolio.has_position(SYMBOL)
+
+    def test_open_position_debits_before_it_inserts(self) -> None:
+        """``free_quote`` carries ``ge=0``, so an over-spend raises on the debit.
+        Debiting first is what makes that raise leave the ledger untouched --
+        inserting first would leave a position whose cost was never accounted
+        for, which is a ledger that has already stopped matching the account.
+        """
+        portfolio = Portfolio(free_quote=D("100"))
+
+        with pytest.raises(ValidationError):
+            portfolio.open_position(long_position(), cost=D("500"))
+
+        assert portfolio.free_quote == D("100")  # unchanged
+        assert not portfolio.has_position(SYMBOL)  # and nothing was inserted
+
+    def test_close_position_credits_proceeds_and_books_realised_pnl(self) -> None:
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
+
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+
+        assert pnl == D("20")  # (110 - 100) * 2
+        assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
+        assert portfolio.realised_today(NOW) == D("20")
+        assert not portfolio.has_position(SYMBOL)
+
+    def test_close_position_nets_the_fee_so_the_ledger_matches_a_statement(self) -> None:
+        """The stated reason the ledger holds realised facts only is that it must
+        match an exchange statement, and a statement is net of fees.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
+
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=D("0.5"))
+
+        assert pnl == D("19.5")
+        assert portfolio.free_quote == D("1019.5")
+        assert portfolio.realised_today(NOW) == D("19.5")
+
+    def test_close_position_on_a_symbol_not_held_is_a_normal_zero(self) -> None:
+        portfolio = Portfolio(free_quote=D("1000"))
+        assert portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW) == D("0")
+        assert portfolio.free_quote == D("1000")
+        assert portfolio.realised_today(NOW) == D("0")
+
+    def test_close_position_rejects_a_naive_datetime(self) -> None:
+        """Nothing here reads a clock; every time-dependent method takes ``now``
+        and a naive value raises rather than being assumed to be UTC.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.open_position(long_position(), cost=D("100"))
+
+        with pytest.raises(ValueError, match="timezone-aware"):
+            portfolio.close_position(SYMBOL, exit_price=D("110"), now=datetime(2026, 7, 25, 12, 0))
+
+    def test_free_quote_cannot_go_negative(self) -> None:
+        portfolio = Portfolio(free_quote=D("100"))
+        with pytest.raises(ValidationError):
+            portfolio.free_quote = D("-1")
+        with pytest.raises(ValidationError):
+            Portfolio(free_quote=D("-1"))
+
     def test_cooldown_expires_by_comparison_not_by_sweep(self) -> None:
         portfolio = Portfolio(free_quote=D("1000"))
         portfolio.start_cooldown(SYMBOL, now=NOW, minutes=15)

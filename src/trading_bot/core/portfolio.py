@@ -77,8 +77,10 @@ class Portfolio(BaseModel):
 
     #: Currency every balance, P&L and equity figure here is denominated in.
     quote_asset: str = "USDT"
-    #: Unencumbered quote balance -- what an order can actually spend.
-    free_quote: Money = Decimal(0)
+    #: Unencumbered quote balance -- what an order can actually spend. Never
+    #: negative: with ``validate_assignment`` on, an over-spend raises here
+    #: rather than leaving the ledger describing an account that cannot exist.
+    free_quote: Money = Field(Decimal(0), ge=0)
     #: Open positions by symbol. One position per symbol: this system does not
     #: pyramid, and a second entry would have to merge or overwrite.
     positions: dict[str, Position] = Field(default_factory=dict)
@@ -104,6 +106,58 @@ class Portfolio(BaseModel):
         """Whether ``symbol`` already has an open position."""
         position = self.positions.get(symbol)
         return position is not None and position.is_open
+
+    def open_position(self, position: Position, *, cost: Decimal) -> None:
+        """Record ``position`` and debit ``cost`` from the free quote balance.
+
+        **The debit happens first, and the order is load-bearing.**
+        ``free_quote`` carries ``ge=0`` under ``validate_assignment``, so an
+        over-spend raises on that assignment. Debiting first means such a raise
+        leaves the ledger untouched; inserting first would leave a position in
+        the book with its cost unaccounted for -- a ledger that has already
+        stopped matching the account. Affordability is checked upstream by the
+        risk manager, so reaching the raise is a bug rather than a market state,
+        which is exactly why it must not half-apply.
+
+        ``cost`` is passed rather than derived from ``entry_price x quantity``
+        because the two are not the same number once fees exist, and the ledger
+        must track what actually left the balance.
+        """
+        self.free_quote = self.free_quote - cost
+        self.positions[position.symbol] = position
+
+    def close_position(
+        self,
+        symbol: str,
+        *,
+        exit_price: Decimal,
+        now: datetime,
+        fee: Decimal = Decimal(0),
+    ) -> Decimal:
+        """Close ``symbol``, credit the proceeds, and book the realised P&L.
+
+        Returns the realised P&L (negative for a loss), or ``Decimal(0)`` when
+        there was no position to close -- which is a normal outcome, not an
+        error, since a `CLOSE` can arrive for a symbol the bot does not hold.
+
+        **``fee`` is subtracted from the realised P&L**, because the reason the
+        ledger holds realised facts only is that it must match an exchange
+        statement -- and a statement is net of fees. A gross-only close would
+        fail the test that rule sets for itself.
+
+        Accrual goes through :meth:`record_realised_pnl` rather than assigning
+        :attr:`realised_pnl` directly, so there is one accrual path and one day
+        roll. Cooldown is **not** started here: ``cooldown_minutes`` is
+        configuration, and this object holds none.
+        """
+        position = self.positions.pop(symbol, None)
+        if position is None:
+            return Decimal(0)
+
+        pnl = position.unrealized_pnl(exit_price) - fee
+        self.free_quote = self.free_quote + position.quantity * exit_price - fee
+        self.record_realised_pnl(pnl, now=now)
+        return pnl
 
     def equity(self, marks: Mapping[str, Decimal]) -> Decimal:
         """Total portfolio value in the quote currency.
