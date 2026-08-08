@@ -219,15 +219,32 @@ class RiskConfig(_Model):
 
     @model_validator(mode="after")
     def _check_protective_coverage(self) -> RiskConfig:
-        """Reject config that multiplies a stop distance a disabled stop never gives.
+        """Reject configurations whose protective coverage is incoherent.
 
-        Both an ``rr`` take-profit and ``risk_per_trade`` sizing derive their size
-        from the stop distance; with ``stop_loss.enabled`` false there is no such
-        distance. Catching it here fails fast at startup with a clear message,
-        rather than raising on the first signal hours into a run. The runtime
-        checks in ``risk.rules`` / ``risk.position_sizing`` stay as defence in
-        depth -- a caller can pass ``stop_price``/``stop_distance`` directly,
-        bypassing config entirely.
+        Three checks, and the third is different **in kind** from the first two.
+
+        The first two are arithmetic: an ``rr`` take-profit and
+        ``risk_per_trade`` sizing both derive their number from the stop
+        distance, and with ``stop_loss.enabled`` false there is no such
+        distance. Catching that here fails fast at startup rather than raising
+        on the first signal hours into a run, and the runtime checks in
+        ``risk.rules`` / ``risk.position_sizing`` stay as defence in depth --
+        a caller can pass ``stop_price``/``stop_distance`` directly, bypassing
+        config entirely.
+
+        The third refuses a **take-profit with no stop at all**, and nothing
+        downstream is unable to compute it: the exchange accepts that
+        configuration, no filter forbids it, and this bot accepted it until
+        now. It is refused as a **judgement about payoff shape** -- winners
+        truncated while losers run unbounded, and under exchange-resting
+        protection the favourable exit survives a crash while the unfavourable
+        one does not. There is deliberately **no runtime counterpart** to it,
+        because it is an opinion about configuration rather than a precondition
+        for arithmetic.
+
+        Order matters between the first and the third. The ``rr`` case is a
+        strict subset of the take-profit-only case, so it is checked first to
+        earn its more specific message; checked second it would be unreachable.
         """
         if (
             self.take_profit.enabled
@@ -236,8 +253,9 @@ class RiskConfig(_Model):
         ):
             raise ValueError(
                 "take_profit.type='rr' sizes the target from the stop distance, but "
-                "stop_loss.enabled is false -- enable stop_loss or use "
-                "take_profit.type='percent'"
+                "stop_loss.enabled is false -- enable stop_loss. (Switching to "
+                "take_profit.type='percent' will not help: a take-profit with no stop "
+                "is refused on its own account, see below.)"
             )
         if (
             self.position_sizing.method is PositionSizingMethod.RISK_PER_TRADE
@@ -247,6 +265,17 @@ class RiskConfig(_Model):
                 "position_sizing.method='risk_per_trade' sizes from the stop distance, "
                 "but stop_loss.enabled is false -- enable stop_loss or choose another "
                 "sizing method"
+            )
+        if self.take_profit.enabled and not self.stop_loss.enabled:
+            raise ValueError(
+                "take_profit.enabled is true while stop_loss.enabled is false. This bot "
+                "refuses a take-profit-only configuration: it truncates winners while "
+                "leaving losers unbounded, and under exchange-resting protection the "
+                "favourable exit survives a crash while the unfavourable one does not. "
+                "This is a JUDGEMENT about payoff shape made by this project -- the "
+                "exchange accepts this configuration, no filter forbids it, and this bot "
+                "accepted it until now. A wide stop_loss.percent expresses the same "
+                "intent and names the tolerance. Disabling both is still supported."
             )
         return self
 

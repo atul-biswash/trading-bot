@@ -170,12 +170,54 @@ class TestRiskConfigCoherence:
             take_profit=TakeProfitConfig(type=TakeProfitType.RR),
         )
 
-    def test_percent_take_profit_without_a_stop_is_allowed(self) -> None:
-        """A percent target needs no stop distance, so disabling the stop is fine."""
+    def test_a_take_profit_with_no_stop_is_refused_as_a_judgement(self) -> None:
+        """This configuration was ALLOWED until now, and the assertion is
+        inverted rather than deleted so the change of mind stays visible.
+
+        Nothing downstream became unable to compute it -- a percent target needs
+        no stop distance, which is why it was legal. It is refused because the
+        payoff shape is adversely lopsided: winners truncated, losers unbounded.
+        """
+        with pytest.raises(ValueError, match="JUDGEMENT about payoff shape"):
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
+            )
+
+    def test_the_refusal_does_not_blame_the_exchange_or_a_filter(self) -> None:
+        """The message must name the opinion as ours. An operator who reads it as
+        an exchange constraint will go looking for a filter that does not exist.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
+            )
+        message = str(excinfo.value)
+        assert "made by this project" in message
+        assert "the exchange accepts this configuration" in message
+        assert "no filter forbids it" in message
+
+    def test_disabling_both_is_still_supported(self) -> None:
+        """`SignalAction.CLOSE` exists so a strategy can own its exits, and that
+        style is deliberately preserved -- so the refusal keys on take-profit
+        WITH no stop, never on the absence of a stop alone.
+        """
         RiskConfig(
             stop_loss=StopLossConfig(enabled=False),
-            take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
+            take_profit=TakeProfitConfig(enabled=False),
         )
+
+    def test_the_rr_case_keeps_its_more_specific_message(self) -> None:
+        """`rr` with no stop is a strict subset of take-profit-with-no-stop, so
+        it is checked first. Checked second it would be unreachable, and the
+        operator would lose the reason their target cannot be computed at all.
+        """
+        with pytest.raises(ValueError, match="sizes the target from the stop distance"):
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(type=TakeProfitType.RR),
+            )
 
 
 # --------------------------------------------------------------------------

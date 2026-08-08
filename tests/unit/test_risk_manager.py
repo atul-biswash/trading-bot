@@ -38,7 +38,6 @@ from trading_bot.core.enums import (
     RiskRule,
     SignalAction,
     StopType,
-    TakeProfitType,
 )
 from trading_bot.core.interfaces import MarketDataProvider
 from trading_bot.core.models import Candle, Position, RiskDecision, Signal, SymbolInfo
@@ -804,12 +803,19 @@ class TestNoPlaceableStop:
         self, method: PositionSizingMethod
     ) -> None:
         """Stops off is the operator's explicit choice, not a transient state,
-        so the entry proceeds unprotected."""
+        so the entry proceeds unprotected.
+
+        Both protective levels are disabled here because a take-profit with no
+        stop is now refused at config load as a payoff-shape judgement. The
+        neither-enabled shape is the one that stays reachable -- deliberately,
+        so a strategy that owns its exits via `SignalAction.CLOSE` keeps
+        working -- and it is the shape this test was always really about.
+        """
         manager, _ = build_manager(
             config=risk_config(
                 method=method,
                 stop_loss=StopLossConfig(enabled=False),
-                take_profit=TakeProfitConfig(type=TakeProfitType.PERCENT),
+                take_profit=TakeProfitConfig(enabled=False),
             )
         )
         assessment = manager.evaluate(buy(), portfolio=Portfolio(free_quote=D("10000")))
@@ -817,7 +823,7 @@ class TestNoPlaceableStop:
         assert assessment.approved
         assert assessment.levels is not None
         assert assessment.levels.stop_loss is None
-        assert assessment.levels.take_profit == D("104.00")
+        assert assessment.levels.take_profit is None
 
     def test_risk_per_trade_with_stops_disabled_is_rejected_at_config_load(self) -> None:
         """The combination never reaches the manager: it fails fast at startup,
