@@ -450,6 +450,23 @@ def test_to_order_reads_time_when_transacttime_absent() -> None:
     assert o.average_price == Decimal("64000.00")  # 32.0 / 0.0005
 
 
+@pytest.mark.parametrize(
+    ("wire_status", "expected"),
+    [
+        ("PENDING_NEW", OrderStatus.PENDING_NEW),
+        ("EXPIRED_IN_MATCH", OrderStatus.EXPIRED_IN_MATCH),
+    ],
+)
+def test_to_order_maps_the_order_list_statuses(wire_status: str, expected: OrderStatus) -> None:
+    """``to_order`` calls ``OrderStatus(raw["status"])`` bare, so an unmodelled
+    status raises an **untranslated** ``ValueError`` rather than a domain error.
+    Both of these arrive on any order-list read-back, so without them no later
+    milestone can read one back at all.
+    """
+    raw = {**ORDER_LIMIT_NEW, "status": wire_status}
+    assert m.to_order(raw).status is expected
+
+
 # --------------------------------------------------------------------------
 # OrderRequest -> Binance params
 # --------------------------------------------------------------------------

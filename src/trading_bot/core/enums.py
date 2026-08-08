@@ -46,6 +46,18 @@ class OrderType(str, Enum):
 
 
 class OrderStatus(str, Enum):
+    """An order's lifecycle state, as Binance reports it.
+
+    **The split is a blacklist of terminal states, not a whitelist of live
+    ones**, and the direction is the whole decision. A member added later
+    without anyone classifying it defaults to *open*. Being wrong that way
+    costs one wasted reconciliation round trip against the reserved floor.
+    Being wrong the other way makes a reconciler stop watching an order that
+    is still working at the venue, which is a position going unmonitored --
+    and it does so silently, because a status nobody thought about is exactly
+    the one nobody writes a test for.
+    """
+
     NEW = "NEW"
     PARTIALLY_FILLED = "PARTIALLY_FILLED"
     FILLED = "FILLED"
@@ -53,14 +65,40 @@ class OrderStatus(str, Enum):
     PENDING_CANCEL = "PENDING_CANCEL"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
-
-    @property
-    def is_open(self) -> bool:
-        return self in (OrderStatus.NEW, OrderStatus.PARTIALLY_FILLED)
+    #: Accepted but not yet working. Every protective leg of an order list
+    #: reads this from placement until the working order fills, so this is the
+    #: state a reconciler most needs to keep watching.
+    PENDING_NEW = "PENDING_NEW"
+    # Expired during matching. **Its classification is UNMEASURED.** Nothing in
+    # this tree defines it and neither does `python-binance`; it is on the open
+    # side because under a blacklist an unmeasured member takes the side whose
+    # error costs a round trip, not the side whose error stops a reconciler
+    # watching a live order. It looks obviously terminal and may well be.
+    # Moving it requires a **measurement**, not an argument from its name.
+    EXPIRED_IN_MATCH = "EXPIRED_IN_MATCH"
 
     @property
     def is_closed(self) -> bool:
-        return not self.is_open
+        """Whether the order has finished and nothing further will happen to it."""
+        return self in _TERMINAL_STATUSES
+
+    @property
+    def is_open(self) -> bool:
+        """Whether the order may still rest, fill, or change at the venue."""
+        return not self.is_closed
+
+
+#: The states from which nothing further happens. Membership here is the
+#: deliberate half of :class:`OrderStatus`'s split -- everything absent is open
+#: by default, which is the cheap direction to be wrong in.
+_TERMINAL_STATUSES = frozenset(
+    {
+        OrderStatus.FILLED,
+        OrderStatus.CANCELED,
+        OrderStatus.REJECTED,
+        OrderStatus.EXPIRED,
+    }
+)
 
 
 class TimeInForce(str, Enum):
