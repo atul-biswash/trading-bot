@@ -218,7 +218,7 @@ class RiskConfig(_Model):
     limits: RiskLimitsConfig = Field(default_factory=RiskLimitsConfig)
 
     @model_validator(mode="after")
-    def _check_stop_distance_is_available(self) -> RiskConfig:
+    def _check_protective_coverage(self) -> RiskConfig:
         """Reject config that multiplies a stop distance a disabled stop never gives.
 
         Both an ``rr`` take-profit and ``risk_per_trade`` sizing derive their size
