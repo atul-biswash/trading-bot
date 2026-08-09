@@ -1,73 +1,156 @@
-# Current milestone — M5a: the vocabulary
+# Current milestone — M5b: the intent split and the widened port
 
-**M5 is six milestones, not one.** M5-0 (decisions) is complete. M5a is the first
-that changes `src/`, and it is deliberately the one with no I/O in it.
+**M5 is six milestones, not one.** M5-0 (decisions) and M5a (the vocabulary) are
+complete. M5b is the second that changes `src/`, and — like M5a — it adds no I/O.
+Nothing in it can place an order.
 
-Read first: `docs/QC_PROTECTIVE_ORDERS.md` (the contract), `docs/M5_NUMBERS.md`
-(the six numbers and their status), `docs/QB_ESCALATION.md` (what `CRITICAL`
-does). The decisions themselves are locked in `CLAUDE.md`; this file is the task
-list and the single home for live open items.
+Read first: `docs/QC_PROTECTIVE_ORDERS.md` §4 and §9 (the entry reference and the
+port), `docs/M5_NUMBERS.md` §1 (`max_entry_slippage`), `docs/QB_ESCALATION.md`.
+The decisions themselves are locked in `CLAUDE.md`; this file is the task list and
+the single home for live open items.
 
-## Prerequisite, already met
+---
 
-**`alpha` is BOUNDED at 0.5** and its measurement is taken — `M5_NUMBERS.md` §3.
-No further measurement gates M5a.
+## Prerequisites — TWO, and NEITHER IS MET
 
-## What M5a delivers
+M5a's equivalent section read *"Prerequisite, already met"*. This one does not.
+Both live here rather than among the open items below, and the placement is
+deliberate: **M5b moves the very port that carries them.** Filed as open items
+they read as advisory, and the whole point is that they are not.
 
-**Config.** `max_entry_slippage`, the `PERCENT_PRICE_BY_SIDE` band margin,
-`max_position_staleness`, `dispatch_deadline_s`, `reconcile_deadline_s`. The
-TP-only refusal as a **mechanical** rename commit (`_check_protective_coverage`)
-followed by the semantic commit adding the third check. The `AppConfig` coherence
-validator enforcing `P_sim x D + N_max x T_recon <= alpha x T_min`, with the
-refusal message given in `M5_NUMBERS.md`.
+### P1 — `Portfolio` mutates on read, and two docstrings say it does not
 
-**Domain.** `ProtectionState` in `core/enums.py`. `Position` gains
-`entry_bar_time`, `protection` (**required, non-nullable**), `order_list_id`,
-`last_reconciled_at`, with `opened_at` made explicit. `Portfolio` gains `ge=0` on
-`free_quote`, `open_position` / `close_position`, the unmanaged-holdings boot
-snapshot, and the mark-to-stop committed-risk term in `daily_loss_exceeded`.
-`SymbolInfo` models `PERCENT_PRICE_BY_SIDE` and `MAX_NUM_ALGO_ORDERS`.
-`OrderStatus` gains `PENDING_NEW` and `EXPIRED_IN_MATCH` — without which
-`to_order` raises an **untranslated** `ValueError` on any order-list read-back,
-so no later milestone can be built without it. `Order` gains `order_list_id` and
-`stop_price`; `OrderRequest` gains `time_in_force`.
+**Confirmed by execution**, not inferred:
 
-**Do NOT add a `model_validator` to `Position`.** `validate_assignment=True` means
-it re-runs on every assignment and would observe the intermediate state between
-`advance_trailing_stop`'s two writes. The prescribed fix — collapsing those writes
-into one method on `Position` — has to land first, and it is not M5a's.
+```
+before:  realised_pnl=-500  pnl_date=2026-08-07
+  -> daily_loss_exceeded(limit_percent=5, equity=10000,
+                         now=2026-08-08T00:01Z, marks={})  -> False
+after :  realised_pnl=0     pnl_date=2026-08-08
+```
 
-## Sequencing — one item is explicitly last
+`daily_loss_exceeded` → `realised_today` → `_roll_day`, which **assigns**
+`realised_pnl` and `pnl_date` when the UTC day turns. A documented read performs
+a write.
 
-**The composed-path warm-up runs `evaluate` at composition-root time, so it lands
-LAST in M5a, after the domain widening has settled.** Every construction site the
-boot path touches is one this milestone changes — `Position.protection` required
-and non-nullable, `Portfolio` open/close, `EntryIntent`/`ExitIntent`,
-`daily_loss_exceeded` gaining `marks`. A warm-up written against today's shapes
-needs rewriting inside the same milestone that changes them.
+**Two statements of the false clause, and both travel into `core/` when the port
+moves:**
 
-Its scope is an open decision: `UNKNOWN_PAIR` warms the entry to the path only and
-needs no market data or portfolio state, while warming the full path needs a
-synthetic pair context and portfolio — more boot-time machinery, and more to rot.
-Either way it is **timed and logged at boot**, because boot-time code that exists
-only for timing rots silently and the failure is invisible until the cost
-reappears on a real order.
+| File | Text |
+|---|---|
+| `core/interfaces.py` (`RiskManager.approve`) | *"It is read, never mutated: recording an entry or an exit belongs to whoever actually places the order."* |
+| `core/portfolio.py` (`Portfolio`) | *"The risk manager only ever reads it; the mutators below are called by execution when an order actually fills."* |
 
-## Absorbed from open items into M5a's scope
+**What is NOT wrong, stated so the fix does not overshoot.** `_roll_day` honours
+the no-clock rule — the turn is driven by the caller's `now`, never by a wall
+clock — and lazy rolling is itself correct: a bot that trades nothing overnight
+would otherwise carry yesterday's halt into a new day with nothing to poke it.
+Every individual site looks right. What is wrong is that **a lazy accrual mutates
+on read**, it fires **once per UTC day** on the **first evaluation after
+midnight**, and that evaluation is on the path deciding whether the bot may open a
+position. A suite whose fixtures all sit inside one day never sees it.
 
-These were carried as open items and are now scheduled work, so they are removed
-from the list below rather than duplicated:
+**Why it must be settled BEFORE the mechanical move, not after.** The likely
+resolution is behavioural — an explicit `roll_day(now)` called once per candle,
+with the read paths made genuinely read-only — and that touches the callers of
+`realised_today` / `daily_loss_exceeded`, which sit among exactly the construction
+sites the move relocates. Settling it first is one edit; settling it after is the
+same edit applied across a moved file plus a second review of the move itself.
 
-- `Portfolio.free_quote` gains `ge=0` — Q-C's write-back gives it a second caller.
-- `NO_MARK_PRICE`'s two divergent reason strings collapse; the port question that
-  blocked it is decided.
-- `_exit_assessment`'s approval site gets the test it lacks.
-- `_enforce`'s `min_notional` blindness for `MARKET` and stop-market orders, and
-  its use of `step_size` / `min_qty` where sizing uses the **effective** filters.
+So it is **commit 0**, and it may change behaviour.
 
-**Q-D is closed**, not deferred: folded into Q-C as a decision, implemented in
-M5b when the port widens and `RiskAssessment` moves to `core/`.
+### P2 — the widened port must not admit an entry whose committed risk is unknown
+
+`evaluate` refuses under `COMMITTED_RISK_UNKNOWN` when
+`portfolio.committed_risk(marks)` reports positions it could not price and
+`stop_loss.enabled` is true. **The port's `approve` does not.** It computes
+`marks`, delegates to `_approve`, and `_approve` consults `daily_loss_exceeded`
+and never `committed_risk` — so a caller reaching `approve` can be told
+`approved=True` for an entry whose committed risk is unknown. That is the exact
+inversion the refusal exists to prevent: an unprotected position reported as
+carrying no forward risk.
+
+It is latent today because `approve` has **zero production callers** — which is
+also why M5a declined to give `COMMITTED_RISK_UNKNOWN` a `RiskRule` twin, on the
+grounds that the widened port replaces `approve` this milestone. **That reasoning
+is only sound if M5b actually closes the gap.**
+
+**Binding requirement, not a task: when the port widens, no method on it may
+approve an entry whose committed risk is unknown.** Three ways to satisfy it, and
+choosing between them is M5b's:
+
+1. `approve` gains the check (and `COMMITTED_RISK_UNKNOWN` gains its `RiskRule`
+   twin after all, eroding the stated property that `NO_MARK_PRICE` is the single
+   place the two vocabularies coincide);
+2. `approve` leaves the port entirely, so `evaluate` is the only entry point;
+3. `approve` becomes private to `RiskManager`, off the port but still callable
+   internally.
+
+Option 2 is the cheapest to reason about and the most disruptive to the port's
+shape. **Do not default to it silently** — whichever is chosen, record why.
+
+---
+
+## What M5b delivers
+
+Commit 0 is the prerequisite above. The rest, in order:
+
+| # | Commit | Kind |
+|---|---|---|
+| 0 | **Settle P1** — `roll_day` made explicit; read paths made read-only; both docstrings corrected | **semantic, may change behaviour** |
+| 1 | Move `RiskAssessment`, the `TradeIntent` family and `PairContext` to `core/` | **mechanical — byte-identical, its own commit** |
+| 2 | Widen the `RiskManager` port: `evaluate` joins it; **resolve P2**; correct the false purity clause (see below) | semantic |
+| 3 | `TradeIntent` → `EntryIntent` + `ExitIntent`, with the invariants locked in `CLAUDE.md` | semantic |
+| 4 | `entry_limit` derived from `reference_price` and `max_entry_slippage` | semantic |
+| 5 | `IntentLogger` narrows the union; the log line follows the split | semantic |
+| 6 | Collapse `NO_MARK_PRICE`'s two divergent reason strings *(M5a carryover)* | semantic |
+| 7 | `engine/modes.py`'s handler docstring: "No I/O" → the bounded-I/O rule *(M5a carryover)* | correction, `src/` |
+
+**Commit 1 is mechanical and must not carry anything else.** The move is the one
+change in this milestone a reviewer can verify by checksum rather than by reading.
+
+**`entry_limit >= reference_price` is the invariant that earns its place.** It
+makes Q-C §4's slippage *direction* a property of the type, unfakeable
+independently of whatever bound `max_entry_slippage` carries in config. It is the
+one thing here that could silently invert.
+
+**The log line follows the split.** On an entry, `entry` is the `entry_limit` —
+the price actually sent — and a sibling `reference` carries the candle close, so
+applied slippage is visible in one record. On an exit there is **no `entry` field
+at all** (absent, not null, per the schema rule) and `order_type="MARKET"` says
+why: the price is genuinely unknown until it fills.
+
+### Folded into commit 2 — the port's second false clause
+
+Distinct from P1 and settled by wording alone, so it is a task rather than a
+prerequisite. `RiskManager.approve`'s port docstring claims it *"stays a pure
+function of its arguments and the clock."* It is not: the concrete `approve` calls
+`_mark_prices(portfolio)`, which reads `self._provider.last_candle(...)` — a
+collaborator injected at construction, not an argument, and one whose value
+changes bar to bar. Correct it where the port is being edited anyway; do not open
+a separate commit for a sentence.
+
+---
+
+## Closed by M5a's rotation — recorded so they are not re-raised
+
+- **`OrderStatus.is_open`'s direction.** Decided: a blacklist of terminal states.
+  The window closed as predicted when `PENDING_NEW` landed.
+- **The four items absorbed into M5a's scope** — `free_quote` `ge=0`,
+  `_exit_assessment`'s missing test, and `_enforce`'s `min_notional` /
+  effective-filter blindness. **Two others were absorbed and did NOT land; they
+  are carried below rather than allowed to vanish**, which is the hazard an
+  absorbed item creates.
+- **The `PHASE_HISTORY` debt from `7c1af17`** — discharged in the M5a entry.
+- **S3's salvage, both halves.** The `src/` docstring pass produced four
+  promotions, all landed. Two were *undercounted by the plan and corrected by
+  reading the code*: idempotence is nine sites in three spellings, not six, and
+  handler isolation is three layers, not two.
+- **The line-ending note.** Re-measured 2026-08-09 with the instrument validated
+  against a known non-zero answer and a negative control: **105 tracked files,
+  zero CR bytes.** The note is updated with today's measurement and the
+  overstating index line is corrected. The cause of the change from the
+  2026-08-02 mixed state is **undetermined and was not reconstructed**.
 
 ---
 
@@ -83,7 +166,24 @@ attempted" while positions are open — and the shape M4a left is unchanged.
 consecutive-failure counter is fed only from `_evaluate`, so a permanently broken
 handler produces a traceback every bar forever and no pair is ever quarantined.
 M4a's chained handler mitigates this by never raising; the counter would make it
-visible rather than merely contained.
+visible rather than merely contained. **M5a widened its scope without changing
+it:** the same gap exists at all *three* isolation layers, not just the engine's.
+
+### Carried from M5a's scope, absorbed but not landed
+
+- **`NO_MARK_PRICE` still has two divergent reason strings.** `approve` says
+  *"cannot value open position(s) X; equity is unknown, so no limit can be
+  checked"*; `evaluate` says *"cannot value open position(s) X"*. One condition,
+  two texts, and an operator correlating logs cannot tell they are the same thing.
+  Scheduled as M5b commit 6.
+- **`engine/modes.py`'s handler docstring still reads "No I/O."** M5-0 superseded
+  that rule with a bounded-I/O one — *the handler may perform I/O; it may not
+  perform unbounded I/O* — and `CLAUDE.md` carries the replacement. A `src/`
+  docstring contradicting the authority, which the M5a rotation could not fix
+  because it allowed no `src/` changes outside the gate. Scheduled as M5b
+  commit 7.
+
+### Exchange behaviour still unresolved
 
 - **`MARKET_LOT_SIZE` and `NOTIONAL.applyMinToMarket` on a *triggered* stop-type
   order — NARROWED, still UNRESOLVED.** What survives is a question about the
@@ -93,38 +193,30 @@ visible rather than merely contained.
   documentation or a test that requires a stop to actually trigger — an
   irreversible fill.
 
-  **Half of this item was false and has been corrected rather than left standing.**
-  It read that the `exchangeInfo` payload does not state it. `applyMinToMarket` is
-  in fact **present and machine-readable, and it is `true`** on both configured
-  symbols — alongside `applyMaxToMarket: false`, `maxNotional`, and
-  `avgPriceMins: 5`, none of which the mapper read until M5a. *Provenance: `GET
-  /api/v3/exchangeInfo`, TESTNET, BTCUSDT and ETHUSDT, 2026-08-08, read-only.* So
-  the minimum **does** apply to market orders; the payload was never silent about
-  that, only about what counts as one.
+  `applyMinToMarket` is **present, machine-readable and `true`** on both
+  configured symbols, alongside `applyMaxToMarket: false`, `maxNotional` and
+  `avgPriceMins: 5`. *Provenance: `GET /api/v3/exchangeInfo`, TESTNET, BTCUSDT and
+  ETHUSDT, 2026-08-08, read-only.* So the minimum **does** apply to market orders;
+  the payload was never silent about that, only about what counts as one.
 
   Sizing takes the stricter of `LOT_SIZE` and `MARKET_LOT_SIZE` rather than
-  guessing. On mainnet BTCUSDT and ETHUSDT the market filter reports zeroed
-  min/step, so the conservatism currently costs nothing; it is there for the
-  symbol nobody has checked. **Under Q-C both protective legs are stop-markets,
-  so if this binds, it binds on everything.**
+  guessing, and M5a extended the same treatment to `_enforce`. On both configured
+  symbols the market filter reports zeroed min/step, so the conservatism currently
+  costs nothing; it is there for the symbol nobody has checked. **Under Q-C both
+  protective legs are stop-markets, so if this binds, it binds on everything.**
 
-- **`MAX_NUM_ORDER_LISTS = 20`, and no document in this repository mentioned it
-  until now.** Measured on both configured symbols alongside
-  `MAX_NUM_ALGO_ORDERS = 5` *(`GET /api/v3/exchangeInfo`, TESTNET, BTCUSDT and
-  ETHUSDT, 2026-08-08, read-only)*. Q-C §3 counts algo slots carefully — a
-  protected position costs 2 of 5 — and never counts **list** slots at all, even
-  though under Q-C every protected position **is** an order list. It is a second
-  ceiling on the same object.
+- **`MAX_NUM_ORDER_LISTS = 20`, now modelled but still unread.** Measured on both
+  configured symbols alongside `MAX_NUM_ALGO_ORDERS = 5` *(same provenance as
+  above)*, and M5a put both on `SymbolInfo`. Q-C §3 counts algo slots carefully —
+  a protected position costs 2 of 5 — and never counts **list** slots, though
+  under Q-C every protected position **is** an order list.
 
   It cannot bind at `limits.max_open_positions = 3`, so this is not urgent. What
   makes it worth carrying is that **whether terminated lists age out of the count
   is UNKNOWN, and must not be assumed in either direction.** If the ceiling counts
   only live lists, 20 is unreachable here. If it counts lists created in some
   window, a bot trading one symbol on a 1-minute bar reaches 20 in twenty minutes
-  and then fails at submission for a reason no code path anticipates. Both filters
-  are parsed and unread on `SymbolInfo`, in the family of
-  `MarketLotSize.max_qty` below — captured precisely because an unrecorded ceiling
-  is one that gets discovered by hitting it.
+  and then fails at submission for a reason no code path anticipates.
 
 - **`MarketLotSize.max_qty` is parsed but not read.** The "0 means no constraint"
   convention is per-field, not filter-wide: both Testnet and mainnet report a real
@@ -138,12 +230,24 @@ visible rather than merely contained.
   generation >= 100 on a 12-character symbol. One deliberately over-long rejected
   request would settle it, free, and it is not a blocker.
 
+- **A duplicate order *LIST* is UNMEASURED where a duplicate order *ID* is
+  measured.** Q-C §8 classifies `-2010 'Duplicate order sent.'` as a *success*
+  signal, and the timed-out-write recovery path depends on it. That guarantee is
+  measured for a duplicate client order ID and **not** for a duplicate list.
+  Settled by resubmitting an accepted list's exact parameters and reading the
+  error — a rejection, so it costs nothing. **This is M5c's, not a soak question.**
+
+### Risk and refusal-path debt
+
 - **Two adjacent refusal-guard pairs remain unpinned by an ordering test:**
   `unsupported_action` against `no_mark_price`, and `no_mark_price` against
   `limit_refused`. The second is the one where a swap crashes rather than
   mislabels — equity is computed between the guards — so a test there would assert
   on an exception type and prove something other than ordering. Pre-existing debt
-  that M4b illuminated rather than created.
+  that M4b illuminated rather than created. **M5a added two guards to this
+  sequence** (`COMMITTED_RISK_UNKNOWN` before the limits, `UNMANAGED_HOLDING`
+  after them) and pinned them through `_STAGE_CASES`; the two pairs above are
+  unchanged.
 
 - **`size_not_tradeable` against `unaffordable` is order-INDEPENDENT, a different
   claim from the entry above and not to be collapsed into it.** Those two are
@@ -154,6 +258,23 @@ visible rather than merely contained.
   unobservable in every reachable state. A test that bit would need a negative
   `free_quote` and would then fail on a harmless refactor while pinning nothing
   real.
+
+- **`Position.protection`'s half of the committed-risk test is FIXTURE-ONLY.**
+  Nothing in `src/` populates it until the reconciler exists, so today the
+  operative condition is the absent stop level. A position whose requested stop
+  was found *not* to be resting still prices committed risk off that stop —
+  understating it, on the one position the system knows to be unprotected. Latent,
+  because the reconciler that would produce the state does not exist. M5a built
+  the signature that will not have to change when it is closed; **closing it is
+  M5d's.** See `docs/QC_PROTECTIVE_ORDERS.md` §7.
+
+- **QB §3 Class C names sites 1, 2, 3 and 5 in its premise and never returns to
+  3.** Both readings are transcribed from Class C's own reasoning — the ledger is
+  intact, which argues per-symbol like site 1; the position is unprotected, which
+  argues portfolio-wide like site 5 — and the question is marked for adjudication.
+  Unchanged by M5a.
+
+### Environment and CLI
 
 - **PAPER mode reaches Binance *mainnet* with empty credentials. Contained by
   M4a, not fixed.** This contradicts "Testnet is the default everywhere", so it is
@@ -178,7 +299,9 @@ visible rather than merely contained.
   (live prices from Testnet, which is what "live prices, no orders sent" almost
   certainly meant), or `binance_credentials()` refuses every mode that constructs
   a client. It belongs with `paper/simulator.py`, the milestone that gives PAPER a
-  composition root of its own.
+  composition root of its own — **which is now also the milestone that must apply
+  `CLAUDE.md`'s composition-root ownership rule**, promoted at M5a's rotation
+  precisely because nothing told that author the root closes what it hands over.
 
 - **A leak window in `BinanceMarketDataStream.create`, unreachable only because
   another file forbids it.** `create` awaits `_BinanceSocketSource.create` — which
@@ -223,6 +346,9 @@ visible rather than merely contained.
   is not installed. The four delegating recipes are tab-indented (verified) and
   the gate itself no longer depends on `make`, but `$(PYTHON)` expansion and
   recipe execution remain unexercised. Needs one run where `make` exists.
+  **Newly relevant:** the gate now refuses a piped stdout, and whether `make`
+  hands a recipe a pipe or an inherited descriptor has not been measured here.
+  Measure it in the same run rather than assuming.
 
 - **`make cov` and `make format` do not honour `$(PYTHON)`.** They call bare
   `pytest` / `ruff`, so `make PYTHON=... cov` silently uses a different
@@ -233,30 +359,31 @@ visible rather than merely contained.
   no way to have a pretty console and a JSON file. Roughly three lines in
   `_console_handler` to separate; deliberately out of scope so far.
 
-- **Nothing enforces that the *prose* still describes the current plan, either.**
-  The sibling of the counts item below, one level up, and it has now bitten twice
-  in one milestone. The rotation procedure names three files; `README.md` drifted
-  on the gate counts because the procedure did not name it, and
-  `QC_PROTECTIVE_ORDERS.md` drifted on **substance** because a decided contract can
-  be superseded by a later decision while the milestone doing the superseding edits
-  entirely different files. Q-C §9 went on specifying `TradeIntent.price` changing
-  meaning after D3 had split the type.
+### Process and dependencies
 
-  The procedure has been widened — `README.md` joins step 2, and a fourth step
-  re-reads the contracts — but **the fix is a discipline, not a mechanism**, and
-  discipline is what failed the first time. What would actually catch it is hard to
-  automate honestly: "does this paragraph still describe the plan" is not greppable,
-  and a check that fired on every superseded-looking sentence would be ignored
-  within a milestone. The cheapest real improvement is probably a convention that a
-  superseding decision names the contract section it supersedes, so the annotation
-  becomes a lookup rather than a re-read. Recorded rather than solved.
+- **Nothing enforces that the *prose* still describes the current plan.** The
+  rotation procedure has been widened — `README.md` joined step 2, and a fourth
+  step re-reads the contracts — but **the fix is a discipline, not a mechanism**,
+  and discipline is what failed the first time. What would actually catch it is
+  hard to automate honestly: "does this paragraph still describe the plan" is not
+  greppable, and a check that fired on every superseded-looking sentence would be
+  ignored within a milestone. The cheapest real improvement is probably a
+  convention that a superseding decision names the contract section it supersedes,
+  so the annotation becomes a lookup rather than a re-read.
+
+  **M5a's rotation is weak evidence that the fourth step works** — it caught four
+  stale `CLAUDE.md` claims and annotated eight contract sections — but it is one
+  data point taken by the person who wrote the step.
 
 - **Nothing enforces the documented counts.** They are updated by hand and have
   drifted within a single session more than once. `ruff format` and `mypy` each
   appear in **three** places: the fenced gate output in `CLAUDE.md`, the
-  gate-scope table in `CLAUDE.md`, and `README.md`. Worth a check that reads the
-  numbers from a live run, but it must not become a gate that fails for a reason
-  unrelated to the code.
+  gate-scope table in `CLAUDE.md`, and `README.md`. **M5a's rotation is a live
+  example of why grepping the digits matters rather than editing remembered
+  lines:** neither of those two numbers moved, so the only sites needing an edit
+  were pytest's — and a pass that had updated "the lines I changed" would have
+  been correct by luck. Worth a check that reads the numbers from a live run, but
+  it must not become a gate that fails for a reason unrelated to the code.
 
 - **`ruff` and `mypy` are unpinned while every runtime dependency is pinned
   `==`.** `requirements-dev.txt` floats the two tools that *produce the numbers
@@ -268,11 +395,9 @@ visible rather than merely contained.
   passed yesterday. Either failure looks like a regression in the code and is
   not one.
 
-  Raised repeatedly in conversation and never written down, which is presumably
-  why it keeps being raised. Recording it here so the next raise can be answered
-  from the file. Deliberately not fixed in passing: pinning them changes what a
-  fresh `pip install -r requirements-dev.txt` produces for every contributor, and
-  it wants the same decision as `pip-compile` below rather than a separate one.
+  Deliberately not fixed in passing: pinning them changes what a fresh
+  `pip install -r requirements-dev.txt` produces for every contributor, and it
+  wants the same decision as `pip-compile` below rather than a separate one.
 
 - **Transitive dependencies still float.** The direct layer is pinned exactly;
   `websockets` / `aiohttp` under `python-binance` and friends resolve freely.
@@ -282,96 +407,3 @@ visible rather than merely contained.
   The proper fix is `pip-compile` with hashes over a `requirements.in` — deferred
   because it changes the install procedure for every contributor and the Docker
   build, and wants its own decision.
-
-- **S3's M5a salvage covers `src/` docstrings too, not only the out-of-repo
-  document.** The salvage was originally scoped to the 751-line
-  `PROJECT_KNOWLEDGE.md` held outside the repository — diffing the sections that
-  state rules in their own voice (§§5–8, §§10–12) against `CLAUDE.md`, on the
-  finding that its §7 carried a handler rule (`no I/O`) that `CLAUDE.md` never
-  had. §9 was checked and is clean: 20 rules, none absent, because its own header
-  defers to `CLAUDE.md` and it never claimed completeness. **Look at the sections
-  that state rules, not the one that curates them.**
-
-  The scope widens because a second instance surfaced from a different source
-  entirely. *"An exit must always be permitted — a limit that could trap an open
-  position would be a risk rule that creates risk"* governs the whole `CLOSE`
-  path and lived only in `core/interfaces.py::RiskManager.approve`'s docstring and
-  in `risk/manager.py::_exit_assessment`. It was never in `CLAUDE.md`. It was
-  found the same way `no I/O` was — by M5 trying to violate it — and it has now
-  been added *with* its scope clause.
-
-  **Two instances of the same class, from two different sources:**
-
-  | Rule | Lived in |
-  |---|---|
-  | `no I/O` on the handler chain | one docstring (`engine/modes.py`) |
-  | `an exit must always be permitted` | one docstring (`core/interfaces.py`) |
-
-  Both are rules the authority did not know about, both constrain code nobody had
-  written yet, and both surfaced only when M5 tried to act on them — which is the
-  argument for finding the rest before M5a writes code rather than after.
-
-  So the M5a salvage is: the seven `PROJECT_KNOWLEDGE.md` sections **plus** a pass
-  over `src/` module and method docstrings for rules stated in the imperative —
-  "must", "never", "always", "only" — that constrain future code and appear
-  nowhere in `CLAUDE.md`. Classify each as deliberately dropped, enforced by code
-  instead, or accidentally absent. **Produce the list; promote nothing.** Each
-  promotion is a semantic change to the authority and gets its own commit, per the
-  constraint that governed M5-0's own salvage item.
-
-- **OWED TO `docs/PHASE_HISTORY.md` AT M5a's ROTATION: the reading commit
-  `7c1af17` superseded.** `CLAUDE.md`'s Execution bullet previously read *"It is
-  roughly a third of the general timeout."* That described the **derived per-call
-  share** (~3.3s against the 10s general timeout) and **not the field**, which
-  bounds the **whole dispatch sequence** — worst case the three-call `CLOSE`.
-  Record it in the tense it was decided, as part of the normal rotation.
-
-  This item exists because there is nowhere else for it to live. `CLAUDE.md`
-  carries no annotation blocks by house style, so the correction landed as prose
-  and the superseded reading went into the commit body — and **a commit message is
-  loaded into no future session.** Until the rotation records it, the only account
-  of what the authority used to say is one `git log` entry nobody will think to
-  read.
-
-- **The line-ending note is stale, its index line is wrong, and the instrument is
-  fine. Four findings, deliberately not compressed into one.**
-
-  1. **The instrument is SOUND.** The CR-counting command form was validated at
-     M5a-doc against a **non-zero known answer** (a scratch file outside the repo
-     with 5 CRLF endings) plus a **negative control** (0 CR), with the
-     construction verified beforehand by an independent instrument that shares no
-     code path with it. Expected 5, reported 5; expected 0, reported 0. So **all
-     105 tracked files containing zero CR bytes is a measurement, not an
-     artefact** — the check discriminates, and does not merely return the answer
-     it was expected to produce.
-  2. **The stored note itself is largely sound.** It records a **mixed,
-     file-by-file** state measured 2026-08-02, names the files on each side,
-     defers to the committed blob as the authority rather than to the worktree,
-     and **already retracts a stronger earlier version of itself**.
-  3. **The `MEMORY.md` INDEX LINE overstates it**, describing the tree as CRLF.
-     **The index line is the drift surface, not the note.** Reading the index in
-     place of the note produced a false claim in review **twice in one session** —
-     the same failure class as describing a document from a summary of it.
-  4. **The note is STALE:** the files it names as CRLF are pure LF today. **The
-     cause is UNDETERMINED and must not be reconstructed** — a hand-normalisation
-     during the origin session would explain it, but nobody observed it, and the
-     origin session's transcript is not retrievable. **The note wants updating
-     with today's measurement, not deleting.**
-
-- **`OrderStatus.is_open` is a WHITELIST, and its default direction is an open
-  decision for M5a's code plan — not scheduled work.** `is_open` is
-  `self in (NEW, PARTIALLY_FILLED)` and `is_closed` is its negation, so **every
-  future member defaults to CLOSED**: a reconciler would stop watching an order
-  still working at the venue. A **blacklist of terminal states** defaults new
-  members to **OPEN**, costing one wasted round trip against the reserved
-  reconciliation floor. **The two failure directions are not comparable**, which is
-  why this is a decision rather than a preference.
-
-  **The property has ZERO production consumers today** — measured at M5a-doc: the
-  only references anywhere are four per-member assertions in
-  `tests/unit/test_enums.py`, and every other `is_open` / `is_closed` in the tree
-  belongs to `Position.is_open` or to `Candle.is_closed`, which are different names
-  that happen to share a spelling. That is the window in which the direction can be
-  changed for free, and **adding `PENDING_NEW` closes it**: Q-C §1 puts every
-  protective leg in that state from placement until the working order fills, so
-  from then on the property has a consumer whose answer matters.
