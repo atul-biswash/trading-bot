@@ -1496,6 +1496,239 @@ credible rather than evasive.
 
 ---
 
+## Phase 5 M5a — the vocabulary
+
+The first M5 milestone to change `src/`, and deliberately the one with no I/O in
+it. Config fields, `ProtectionState`, the widened `Position` and `Portfolio`, the
+exchange filters nobody had modelled, and the coherence refusal. Sixteen commits,
+plus this rotation.
+
+### The rejections, which are most of what is worth recording
+
+**The composed-path warm-up — dropped, and the number that justified it was
+wrong.** `NEXT_MILESTONE` sequenced it explicitly last, on the argument that every
+construction site the boot path touches is one this milestone changes. What
+removed it was not the sequencing but `07d9309`: M5_NUMBERS §5 read *"at `D ≈ 3.5s`
+a 485 ms excursion is 14% of the whole dispatch budget"*, and 3.5 s is the
+constraint table's **per-call** column while `D` on that row is 10.5 s. The
+arithmetic was right for the number quoted and the symbol was wrong, so the real
+figure is **4.6%**, roughly a third the size. The warm-up was to be adjudicated on
+4.6% and did not survive it. What survives unchanged is the underlying
+measurement: the composed path costs ~2 ms warm and 10²ms on its first execution
+in a process. If the warm-up returns it returns as dispatch's, at the milestone
+that pays the cost on a real order — not as boot-time code whose only purpose is
+timing, which rots invisibly because nothing fails when it stops being true.
+
+**Plan commit 8 — the scoped relocation of `_seed_portfolio` — rejected on the
+tree rather than on taste.** The idea was to move the portfolio seed later in the
+boot so unmanaged holdings could be priced from the candle buffer instead of over
+REST. It cannot work, and the reason is three calls deep:
+`BufferedMarketDataProvider.create` only calls `track()`, which is
+`setdefault(deque(maxlen=…))` — an **empty** deque. History is seeded in `start()`,
+which `TradingEngine.start()` calls, which `main.py` calls *after* `live_system`
+has yielded. So `last_candle` returns nothing at **every** point inside the
+composition root, and the relocation would have moved the snapshot from one place
+with no marks to another place with no marks. Replaced by one read-only
+`get_ticker` per candidate asset: a round trip, and it keeps the whole step ahead
+of any socket, where the other four boot refusals already live.
+
+**`ProtectionState`'s complete-now member set — rejected. Two members, not five.**
+Q-C names `PENDING`, `ACTIVE` and `DIVERGED` alongside `ABSENT_BY_DESIGN` and
+`UNKNOWN`, and writing all five would have been one commit instead of several
+later. The reason not to is the **field**, not the enum. `Position.protection` is
+the one field whose wrong value is *silent*: `ABSENT_BY_DESIGN` asserts "no
+protection is expected here", which is the off-switch for the divergence detector
+on that position. An unwritten member is a plausible-looking value sitting within
+reach of whoever is nearest a construction site and needs something to type. Only
+the two states reachable today shipped — one forced by the order-list contract
+(without it a both-disabled configuration reads as permanent divergence), one by
+the locked rule that a timed-out write is marked unknown and resolved by querying
+the IDs we would have sent. Adding a member later is additive and moves no
+fixture; removing one already assigned somewhere is not.
+
+**`EXPIRED_IN_MATCH` on the terminal side — rejected, and the rejection is about
+evidence, not about the name.** It looks obviously terminal. Nothing in this tree
+defines it and neither does `python-binance`, so "obviously" is the whole of the
+case for it. Under the blacklist `is_open` became in the same commit, an
+unmeasured member takes the side whose error costs one wasted round trip against
+the reserved reconciliation floor, rather than the side whose error stops a
+reconciler watching an order still working at the venue. **Moving it requires a
+measurement, not an argument from its name**, and `core/enums.py` says so rather
+than presenting the placement as settled.
+
+### `is_open` inverted from a whitelist to a blacklist, in the window before it had a consumer
+
+`is_open` was `self in (NEW, PARTIALLY_FILLED)` with `is_closed` its negation, so
+every future member defaulted to CLOSED — the expensive default, because a status
+nobody thought about is exactly the one nobody writes a test for. The property had
+**zero production consumers**, measured: the only references anywhere were four
+per-member assertions in `test_enums.py`, every other `is_open`/`is_closed` in the
+tree belonging to `Position` or `Candle`, which are different names that happen to
+share a spelling. That window was what made the direction free to change, and
+adding `PENDING_NEW` is what closed it — Q-C §1 puts every protective leg in that
+state from placement until the working order fills.
+
+One existing member flipped: `PENDING_CANCEL` now reads open, which is more
+correct, since a cancel in flight leaves the order on the book where it can still
+fill. **No existing test covered it** — all four assertions passed under both
+definitions, and a suite that passes either way is not covering the semantics.
+
+### Two directions chosen in one milestone, deliberately opposite
+
+`OrderStatus.is_open` became a **blacklist** of terminal states so an
+unclassified member defaults to open. `_TRUSTED_PROTECTION` was written as a
+**whitelist** so an unclassified `ProtectionState` defaults to untrusted. Read
+side by side these look inconsistent; the rule that produces both is that each
+field takes the direction whose **wrong answer is the cheap one**. For `is_open`,
+wrongly-closed stops a reconciler watching a live order and wrongly-open costs a
+round trip. For protection, wrongly-trusted makes committed risk *understate* and
+lets an entry through on the strength of protection that does not exist.
+
+### Mark-to-stop, on basis coherence rather than magnitude
+
+The daily-loss check already compares two quantities: realised P&L from the start
+of today to now, and a percentage of equity as of now. The committed term
+`(binding_stop − mark)` measures from now forward, so the comparison stays at two
+bases. Entry-to-stop would introduce a third window that can span days, and would
+double-count — not by a factor of two: the entry-to-mark move is already
+unrealised P&L, so `equity(now)` has reduced the threshold by `limit_percent` of
+it on the right, and entry-to-stop would put the same move on the left at full
+weight. The overlap is `1 + limit_percent`. **Magnitude was not the argument;
+basis coherence was.**
+
+`binding_stop` takes `should_exit`'s tie-break — `max` for a long, `min` for a
+short — over the stops that are **present**, not the stops that have **triggered**.
+That distinction is the one thing here that would have failed silently: reusing
+`should_exit`'s candidate set literally returns `None` for every healthy position
+and reports committed risk of zero, the exact inversion the uncomputable count
+exists to prevent.
+
+### The unmanaged-holding refusal is placed after the limits, and the placement is the decision
+
+`NO_MARK_PRICE` and `COMMITTED_RISK_UNKNOWN` refuse **before** the limits because
+they are inabilities to compute. Under an unmanaged holding the ledger is
+**intact** — nothing is uncomputable, one symbol is simply not ours to trade — so
+placing it beside them would assert the opposite in the structure of the code. It
+refuses after `_approve`, which keeps `_approve`'s documented order untouched
+while still carrying its own stage. "The bot never sells it" is then enforced by
+the **existing** path rather than a new guard: no `Position` is constructed, so
+`_exit_assessment` finds none and returns `NOTHING_TO_CLOSE`.
+
+`total` and `free` answer different questions and both are used. Equity asks what
+the account **owns**, so the recorded quantity is `total`. Materiality asks whether
+this is **dust**, and Q-C defines dust by *sellability*, so only `free` clears the
+threshold. Q-C is silent on this and the next reader will assume the two agree.
+
+### The take-profit-only refusal, and an order that would have made a check dead
+
+Refused because the payoff shape is adversely lopsided, **not** because anything
+cannot compute it — the exchange accepts it and so did this bot until now. The
+message names the opinion as ours, and a test asserts that it does, because an
+operator reading the refusal as an exchange constraint will go looking for a
+filter that does not exist.
+
+Order matters between the first and third checks: `rr`-with-no-stop is a **strict
+subset** of take-profit-with-no-stop, so checked second it would be unreachable.
+That subsumption also made the first check's *remedy* wrong rather than merely
+narrow — it advised switching to `take_profit.type='percent'`, which is now
+refused too.
+
+### What the coherence validator taught about the suite
+
+`P_sim × D + N_max × T_recon <= alpha × T_min`, on `AppConfig` because two of the
+five terms come from `trading.pairs`. **The empty-pairs case would have broken the
+whole suite** and was found four turns before the commit: `tests/conftest.py`
+writes no `trading:` key, so `pairs` falls to its default empty list on every
+config-loading test, and a naive `min()` raises on all of them. The guard returns
+early — vacuously satisfied, no pipeline to overrun, `T_min` undefined rather than
+zero — and refusing there instead was rejected because `live_system` already
+refuses an empty enabled-pair set at boot, so one configuration would produce two
+different errors depending on which check ran first.
+
+`alpha` lives as a module constant beside its only consumer rather than as a
+config field: it is a property of the pipeline's headroom policy, not of an
+operator's account.
+
+### `_enforce` was weaker than the sizing it exists to re-check
+
+Three fixes, deliberately separate commits. It rounded to `LOT_SIZE.stepSize`
+while sizing used the **effective** filters, so the independent last line of
+defence could pass a quantity the sizer would have refused — the two agreed only
+by coincidence on symbols where `MARKET_LOT_SIZE` does not bind. It ran the
+notional check only `if price is not None`, so every stop-type order went
+unchecked, and that is the wrong half to skip: the exchange evaluates
+`stopPrice × quantity`, and a stop below the entry carries the *smaller* notional
+and is the leg rejected first. Observed live, not deduced — a Testnet probe took
+`-1013 Filter failure: NOTIONAL` on exactly that shape.
+
+The third landed a commit later than the other two because **the obvious fix was
+wrong**. `_enforce` passed `stop_price` through un-rounded; rounding it like
+`price` would use `ROUND_DOWN`, and on a long's `STOP_LOSS` the trigger sits
+*below* its reference, so rounding down moves it **away** from entry and the
+realised stop distance grows — an unbooked breach of `risk_per_trade` arriving
+through the component that exists to catch exactly that. Rounding by inferred
+direction was rejected too: it would make the dispatch adapter read *risk
+semantics* off `OrderType` and side, and what a level means is risk's business.
+So it **rejects**. Stated plainly in the commit and worth repeating: this
+*converts* the defect rather than closing it — `_enforce` still does not defend
+the trigger, it detects that someone upstream failed to.
+
+### The eleven-filter fixture, and what a fence does not buy
+
+The `exchangeInfo` fixture keeps the whole eleven-filter array in wire order
+rather than reducing to the four the mapper reads. Reducing it is precisely what
+hid `LOT_SIZE.maxQty` and `NOTIONAL.applyMinToMarket` from this suite for five
+phases: a fixture trimmed to what the mapper consumes cannot show what the mapper
+ignores.
+
+Writing it produced a rule the authority lacked. It was first laid one filter per
+line, as the wire presents it, held in shape by seven `# noqa: E501`
+suppressions — in a tranche whose constraints said no `noqa`, written immediately
+after being told so. **`# fmt: off` suppresses the formatter; `E501` is a lint
+rule and is untouched by it.** The fence had felt like permission for the whole
+layout and is permission for part of it.
+
+### The rotation
+
+`scripts/check.py` gained a second invocation guard: it refuses a run whose
+stdout is a pipe. `isatty()` was rejected on measurement rather than taste — on
+this machine it is false for a pipe, for `> gate.log` under both cmd.exe and
+git-bash, *and* for the harness the work is done through, so a guard on it would
+refuse a file redirect, which launders nothing and truncates nothing.
+`stat.S_ISFIFO` discriminates, verified on real descriptors under both shells.
+The guard cannot repair `$?` — under `| tail` the refusal's own status is
+laundered too — and the docstring says so; what it buys is that the run does not
+happen and the operator gets a refusal instead of a plausible summary.
+
+**The superseded reading owed to this file from `7c1af17`.** `CLAUDE.md`'s
+Execution bullet read *"It is roughly a third of the general timeout."* That
+described the **derived per-call share** (~3.3 s against the 10 s general timeout)
+and **not the field**, which bounds the whole dispatch sequence — worst case the
+three-call `CLOSE`. `M5_NUMBERS` §5 said whole-sequence in its first line and in
+its constraint table's symbol row, so the authority was the file disagreeing with
+the contract. Recorded here because `CLAUDE.md` carries no annotation blocks by
+house style, so the correction landed as prose and the old reading went into a
+commit body — and a commit message is loaded into no future session.
+
+**The salvage's `src/` docstring half closed with four promotions**, and two of
+them were *undercounted by the plan and corrected by reading the code*. Lifecycle
+idempotence was filed as six sites and is nine, in three spellings — a grep for
+`Idempotent` misses `TradingEngine.stop`, one of the two methods the root's
+double-teardown depends on. Handler isolation was filed as two layers and is
+three; `_notify`'s own docstring says it mirrors the stream's, and the stream has
+one. Both tables are in `CLAUDE.md` rather than a sentence, because in both cases
+the sentence is what was wrong.
+
+**Two items absorbed into M5a's scope did not land, and are carried deliberately
+rather than allowed to vanish.** An absorbed item is removed from the open-items
+list by the rotation, so an absorbed-but-undone item disappears without ever being
+closed — that is the hazard, and it is the reason both are named in
+`NEXT_MILESTONE` as M5b's: `NO_MARK_PRICE`'s two divergent reason strings, and
+`engine/modes.py`'s handler docstring still reading *"No I/O"* after M5-0
+superseded that rule with a bounded-I/O one.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**
