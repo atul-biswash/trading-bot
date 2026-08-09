@@ -170,6 +170,32 @@ scripts/         check_testnet.py · download_data.py
   execution picks up. `assessment.intent` is the approved, sized, protected
   `TradeIntent`; `None` with a `reason` is a normal, expected answer.
 
+### A composition root closes what it hands over — injected or not
+
+Adapters below a root close only what they **built**:
+`BufferedMarketDataProvider` keys teardown on `owns_client = client is None`,
+because an injected object belongs to its caller. A composition root **is** that
+caller and has no caller of its own, so it **inverts** that convention and closes
+the client unconditionally. Without the inversion an injected client is closed by
+nobody — on the success path *and* on the path where the stream fails to build.
+
+**This binds every root, not just `live_system`.** The two not yet written are
+`paper/simulator.py` and `backtesting/engine.py`, and their author will read
+`owns_client`, conclude that injected means not-ours, and leak a live aiohttp
+session on every boot — silently, because a leaked session fails no test. Read
+the rule here, not the convention one layer down.
+
+Two mechanics make the inversion safe, and both are load-bearing rather than
+incidental. Teardown is **nested, not one `finally`** — one scope per object,
+opened immediately after that object is bound, so a boot that fails at step 2
+cannot raise `UnboundLocalError` over the real error, and the ordering is
+structural instead of remembered. And `close()`/`stop()` must be **idempotent**,
+which they already have to be: `AsyncClient.create` calls `close_connection()`
+in its own `except` before re-raising.
+
+Stated in `engine/modes.py`'s module docstring, under *"Ownership: this root
+closes the client unconditionally"*; this is the authority's copy of it.
+
 ---
 
 ## Locked decisions — do not re-litigate without an explicit reason
