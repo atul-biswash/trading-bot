@@ -229,6 +229,35 @@ Two consequences. **A new lifecycle method inherits the obligation** — a
 that is a second source of truth for a fact the object already owns, and it goes
 stale the moment anything else calls `stop()`.
 
+### Handler isolation is THREE layers, not one
+
+The `TradingEngine.on_signal` bullet above names the layer nearest the decision
+path. It is the last of three, and every layer isolates for the same reason: a
+buggy subscriber must not be able to kill the feed the rest of the bot depends
+on.
+
+| Layer | Isolator | Subscribers |
+|---|---|---|
+| stream | `BinanceMarketDataStream._dispatch` | the provider's per-pair handler |
+| provider | `BufferedMarketDataProvider._notify` | the engine's candle hook |
+| engine | `TradingEngine._emit` | signal handlers |
+
+**Naming all three matters now, and specifically the middle one.** M5's
+reconciliation driver is a candle subscriber, not a signal subscriber — it has to
+be, because reconciliation runs over *every* open position on *any* pair's candle
+while `on_signal` skips quiet bars. So it attaches to `_notify`, the layer the
+authority did not mention, and a driver written on the assumption that the
+engine's isolation covered it would be relying on a guarantee from the wrong
+seam.
+
+**Isolation contains a failure; it does not report one, at any layer.** The
+consecutive-failure counter is fed from `_evaluate` only, so a permanently broken
+subscriber at *any* of the three produces a traceback every bar forever and
+quarantines nothing — which is why M4a's chained signal handler is written never
+to raise, and why the reconciliation driver must be written the same way. Making
+that visible rather than merely contained is Q-A's, and Q-A is blocked on soak
+data.
+
 ---
 
 ## Locked decisions — do not re-litigate without an explicit reason
