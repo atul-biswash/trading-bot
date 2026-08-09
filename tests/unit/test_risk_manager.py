@@ -300,8 +300,46 @@ class TestPortfolio:
         portfolio.record_realised_pnl(D("-10"), now=NOW + timedelta(hours=11))
         assert portfolio.realised_today(NOW + timedelta(hours=11)) == D("-130.25")
 
-        # Past midnight UTC: a fresh day, rolled lazily on read.
+        # Past midnight UTC: a fresh day, derived on read rather than rolled.
         assert portfolio.realised_today(NOW + timedelta(hours=13)) == D("0")
+
+    def test_realised_today_derives_the_new_day_without_writing(self) -> None:
+        """The read paths are read-only, which is what two docstrings already
+        claim -- ``RiskManager.approve``'s port docstring ("It is read, never
+        mutated") and this class's own. Before M5b the day roll fired from
+        ``realised_today``, so a documented read rewrote the ledger once per UTC
+        day, on the first evaluation after midnight -- the path deciding whether
+        to open a position.
+
+        Asserted on the fields, not on the return value: the return was already
+        correct, and a test that checks only the answer cannot see the write.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+
+        assert portfolio.realised_today(NOW + timedelta(hours=13)) == D("0")
+
+        assert portfolio.realised_pnl == D("-450")
+        assert portfolio.pnl_date == NOW.date()
+
+    def test_the_daily_loss_halt_releases_at_the_next_utc_day_without_a_write(self) -> None:
+        """The release used to be produced by the mutation above. It is now
+        produced by the derivation, so the halt still lifts at midnight and the
+        ledger is not rewritten to lift it.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-500"), now=NOW)
+        limit = D("5.0")  # threshold -500 against equity 10000
+
+        assert portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+        )
+        assert not portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("10000"), now=NOW + timedelta(hours=13), marks={}
+        )
+
+        assert portfolio.realised_pnl == D("-500")
+        assert portfolio.pnl_date == NOW.date()
 
     def test_daily_loss_threshold_is_a_percent_of_equity(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
@@ -550,6 +588,20 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"))
         with pytest.raises(ValueError, match="timezone-aware"):
             portfolio.realised_today(datetime(2026, 7, 25, 12, 0))
+
+    def test_naive_datetime_is_rejected_on_the_accrual_path_too(self) -> None:
+        """The same rule, pinned independently of the read path.
+
+        Both paths now resolve the UTC day through one helper, so a single edit
+        can remove the rejection from both at once -- and the sibling above was
+        the suite's only direct hold on it. ``close_position`` reaches this
+        guard as well, but only through a position it has already popped and a
+        balance it has already credited, so it pins the rule incidentally
+        rather than on purpose.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        with pytest.raises(ValueError, match="timezone-aware"):
+            portfolio.record_realised_pnl(D("-1"), now=datetime(2026, 7, 25, 12, 0))
 
     def test_money_fields_reject_a_float_on_assignment(self) -> None:
         """validate_assignment closes the leak plain pydantic models leave open:

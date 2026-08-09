@@ -83,6 +83,17 @@ def _require_aware(name: str, moment: datetime) -> datetime:
     return moment
 
 
+def _utc_day(name: str, moment: datetime) -> date:
+    """The UTC calendar day ``moment`` falls on, rejecting a naive value.
+
+    One definition, shared by the accrual path and the read path. Two copies of
+    ``astimezone(timezone.utc).date()`` would be a duplicated predicate -- they
+    answer the same question, "which day is this?", and an edit that reached one
+    and missed the other would let a read disagree with the write it describes.
+    """
+    return _require_aware(name, moment).astimezone(timezone.utc).date()
+
+
 class Portfolio(BaseModel):
     """Open positions, free balance, and the limit state the risk rules read.
 
@@ -261,22 +272,31 @@ class Portfolio(BaseModel):
 
     # -- daily realised P&L -------------------------------------------------
     def _roll_day(self, now: datetime) -> None:
-        """Reset the ledger if ``now`` falls on a later UTC day than it covers.
+        """Reset the ledger if ``now`` falls on a different UTC day than it covers.
 
-        Rolled lazily, on read as well as on write, rather than by a scheduled
-        reset. A bot that trades nothing overnight would otherwise carry
-        yesterday's halt into a new day and refuse to trade until something
-        happened to poke it -- and nothing would.
+        Rolled lazily, on the accrual path, rather than by a scheduled reset. A
+        bot that trades nothing overnight would otherwise carry yesterday's halt
+        into a new day and refuse to trade until something happened to poke it
+        -- and nothing would. :meth:`realised_today` reaches the same outcome
+        without a write, by deriving it.
         """
-        today = _require_aware("now", now).astimezone(timezone.utc).date()
+        today = _utc_day("now", now)
         if self.pnl_date != today:
             self.realised_pnl = Decimal(0)
             self.pnl_date = today
 
     def realised_today(self, now: datetime) -> Decimal:
-        """Realised P&L for the UTC day containing ``now``. Negative is a loss."""
-        self._roll_day(now)
-        return self.realised_pnl
+        """Realised P&L for the UTC day containing ``now``. Negative is a loss.
+
+        **Derived, never assigned.** A ledger whose :attr:`pnl_date` has gone
+        stale reads as zero for the new day without being rewritten, so this is
+        a read in the sense the port docstring claims: it cannot change what a
+        later caller sees. Resetting belongs to :meth:`record_realised_pnl`,
+        which is a write already, and which is what a bot that trades nothing
+        overnight never reaches -- so the derivation, not the reset, is what
+        releases yesterday's daily-loss halt.
+        """
+        return self.realised_pnl if self.pnl_date == _utc_day("now", now) else Decimal(0)
 
     def record_realised_pnl(self, amount: Decimal, *, now: datetime) -> None:
         """Accrue ``amount`` of realised P&L into the day containing ``now``.
