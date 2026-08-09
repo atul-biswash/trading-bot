@@ -49,11 +49,26 @@ violation refusing the whole list (MEASURED, S4). The arity branch is irreducibl
 | TP only | refused at config load † | — |
 | neither | single order, `LIMIT` + `FOK` | `create_order` |
 
-† **Target state, not current behaviour.** The code accepts a take-profit-only
-configuration today and so would the exchange — see the paragraph below this table,
-which says so explicitly. The refusal lands in M5a. The row is written in the
-present tense because it describes the shape once M5a has landed, not the shape the
-tree has now.
+† **RESOLVED at M5a — the row is now current behaviour.** This dagger previously
+read *"Target state, not current behaviour… the refusal lands in M5a"*, and it has.
+`RiskConfig._check_protective_coverage` gained a third check and refuses a
+take-profit configured with no stop at load, before any client exists.
+
+> **Annotation added at M5a's rotation.** The dagger is kept rather than deleted
+> because two things it recorded are still worth reading. First, the refusal
+> remains **ours**, not the exchange's — nothing downstream is unable to compute a
+> take-profit-only configuration, no filter forbids it, and this bot accepted it
+> until M5a. The shipped message names the opinion as ours in those words, and a
+> test asserts that it does, because an operator who reads it as an exchange
+> constraint will go looking for a filter that does not exist. Second, **the
+> refusal keys on take-profit WITH no stop, never on the absence of a stop alone**:
+> both-disabled stays reachable with a boot warning, because `SignalAction.CLOSE`
+> exists so a strategy can own its exits and that style is deliberately preserved.
+>
+> One thing this table does not show: an `rr` take-profit with no stop is a
+> **strict subset** of this case, so the two checks are ordered — the `rr` check
+> runs first, or it would be unreachable and the operator would lose the reason
+> their target cannot be computed at all.
 
 The neither-enabled branch uses **the same entry mechanic as every other shape** —
 `LIMIT` at `entry_limit`, `FOK`. The entry mechanic is a property of the entry, not
@@ -131,6 +146,26 @@ credited with a cost it did not carry.*
 `TAKE_PROFIT`), up from 1 under `LIMIT_MAKER`. Cannot bind at one position per
 symbol. *`STOP_LOSS_LIMIT`=1 and OCO=1 are MEASURED; `TAKE_PROFIT`'s cost is
 INFERRED from it being a stop-type order.*
+
+> **Annotation added at M5a's rotation — the CEILING is now measured; the COST is
+> still inferred.** The two halves of "2 of 5" had different statuses and this
+> section stated only one of them. `MAX_NUM_ALGO_ORDERS = 5` is now MEASURED and
+> modelled on `SymbolInfo` *(`GET /api/v3/exchangeInfo`, TESTNET, BTCUSDT and
+> ETHUSDT, 2026-08-08, read-only)*, so the denominator is no longer taken on
+> trust. **The numerator is unchanged**: `TAKE_PROFIT` costing one slot remains
+> INFERRED from it being a stop-type order, and measuring it needs a placement
+> rather than a read.
+>
+> **A second ceiling on the same object was missing from this section entirely.**
+> `MAX_NUM_ORDER_LISTS = 20`, measured in the same call and now also on
+> `SymbolInfo`. Under this contract every protected position **is** an order list,
+> so lists are a second budget alongside algo slots and §3 counts only the first.
+> It cannot bind at `limits.max_open_positions = 3`, so nothing here changes — but
+> **whether terminated lists age out of that count is UNKNOWN and must not be
+> assumed either way.** If it counts only live lists, 20 is unreachable here; if it
+> counts lists created in a window, one symbol on a 1-minute bar reaches 20 in
+> twenty minutes and fails at submission for a reason no code path anticipates.
+> Carried as an open item in `docs/NEXT_MILESTONE.md`.
 
 **Cost, stated plainly:** risk-per-trade is a PRE-SLIPPAGE guarantee and the
 take-profit is a PRE-SLIPPAGE target. Neither is exact.
@@ -218,6 +253,29 @@ which is the off-switch for the divergence detector on that position, so a site 
 forgot the field would produce a position the reconciler has been told to ignore.
 Same reasoning as `RiskAssessment.stage`, one notch stronger — `stage` is nullable
 because "no stage" is a real state, while `protection` has a member for every state.
+
+> **BUILT at M5a, with one deliberate departure from this section.** All four
+> fields exist, `protection` is required and non-nullable as specified, and
+> `opened_at` was made explicit alongside `entry_bar_time` rather than left to be
+> mistaken for it.
+>
+> **`ProtectionState` shipped with TWO members, not the five this contract names.**
+> `ABSENT_BY_DESIGN` and `UNKNOWN` only; `PENDING`, `ACTIVE` and `DIVERGED` land
+> with the milestones that first *write* them. The reason is this section's own
+> argument about `protection` turned on the enum: it is the one field whose wrong
+> value is **silent**, because `ABSENT_BY_DESIGN` switches off the divergence
+> detector rather than failing. An unwritten member is a plausible-looking value
+> within reach of whoever is nearest a construction site and needs something to
+> type. Adding a member later is additive and moves no fixture; removing one
+> already assigned somewhere is not. **This does not weaken the required-and-
+> non-nullable argument above** — "a member for every state" means every state
+> *reachable*, and the two shipped are exactly those: one forced by this contract
+> (a both-disabled config must not read as permanent divergence), one by the
+> timed-out-write rule.
+>
+> **What is NOT built and is not this section's to build:** nothing in `src/`
+> constructs a `Position` yet, so nothing populates `protection`. The consequence
+> is recorded at §7's annotation.
 
 `stop_loss` / `take_profit` are redefined as requested levels, **immutable once
 set**. What rests is queried, never cached. `trailing_stop` / `highest_price` /
@@ -398,6 +456,28 @@ lock a `committed_risk` signature that forecloses the fix, and so that whoever
 writes M5d does not have to rediscover the interaction. Whether such a position
 should count as *uncomputable* (refuse) rather than as *mispriced* (understate) is
 the natural fix and is deliberately **not** prescribed here.
+
+> **Annotation added at M5a's rotation — the note DID its job, and the defect is
+> unchanged.** `Portfolio.committed_risk` shipped returning `(total,
+> uncomputable)`, and the uncomputable test reads `stop is None or mark is None
+> or position.protection not in _TRUSTED_PROTECTION` — so the signature this note
+> existed to protect is in place and **keying off `protection` is already wired**,
+> not merely possible.
+>
+> **What has NOT changed is the thing that matters.** `_TRUSTED_PROTECTION` is a
+> whitelist containing only `ABSENT_BY_DESIGN`, and nothing in `src/` assigns
+> `Position.protection` at all, so the operative condition today is still the
+> absent stop level. A position in the site-3 state would still price off a
+> requested stop known not to rest. **This note is not discharged**; M5a built the
+> shape and M5d must still close the defect.
+>
+> One consequence of `_TRUSTED_PROTECTION` being a whitelist is worth stating
+> here rather than leaving to be inferred: when `PENDING`, `ACTIVE` and `DIVERGED`
+> are added, each defaults to **untrusted** until someone deliberately admits it.
+> For `ACTIVE` that will be wrong and cheap — a spurious refusal. For `DIVERGED`
+> it is right. That is the intended direction: the error that refuses an entry
+> costs a missed trade, the error that trusts a stop that is not there costs the
+> position.
 
 ## 8. Errors
 

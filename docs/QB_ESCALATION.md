@@ -154,6 +154,24 @@ requested `stop_loss` is non-`None`, so the committed-risk sum prices a level kn
 not to rest. Whether that makes the state per-symbol or portfolio-wide is exactly
 the question left open here.
 
+> **Still open after M5a, and M5a shipped evidence bearing on it rather than an
+> answer.** `COMMITTED_RISK_UNKNOWN` now exists as a `RefusalStage` and refuses
+> **portfolio-wide**, before the limits are consulted, whenever
+> `Portfolio.committed_risk` reports any position it could not price. So the
+> *mechanism* a portfolio-wide reading of site 3 would use is built and behaves as
+> Class C's second bullet describes.
+>
+> **That is not an adjudication and must not be read as one.** Nothing in `src/`
+> assigns `Position.protection` yet, so site 3's state cannot arise and the shipped
+> refusal has never seen it. What M5a settled is narrower and worth having: the
+> refusal is scoped by `stop_loss.enabled`, so "stops are off" and "no computable
+> stop while stops are on" are already distinguished — which is a discriminator any
+> answer to this question will need, whichever way it goes.
+>
+> **What survives unchanged:** the question, both readings, and the reason neither
+> is obviously right. The natural moment to settle it is M5d, when the reconciler
+> that produces the state is written.
+
 **Class D — the halt is a ratchet toward flat.** Entries stop, exits continue, so the
 book only shrinks. That is intended, and worth stating so it is not mistaken for a
 bug: a halted bot converges on flat and then idles.

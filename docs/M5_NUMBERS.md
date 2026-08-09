@@ -218,7 +218,16 @@ before sampling.
 
 ---
 
-## 4. `risk.max_position_staleness`
+## 4. `risk.max_position_staleness_s`
+
+> **Renamed at M5a — the document follows the code.** This section was written as
+> `max_position_staleness`; the field shipped as **`max_position_staleness_s`**,
+> because every other duration in `config.yaml` carries its unit and a duration
+> field that omits one is precisely the ambiguity that produced the
+> `dispatch_deadline_s` conflation four commits were spent correcting. **The
+> working value below is now the shipped default**, and everything else in this
+> section — the measurement split, the too-tight/too-loose costs, the status —
+> survives unchanged.
 
 **Protects against:** trading on a ledger that no longer describes reality.
 Concretely, the three dangerous readers: equity overstated => sizes too large
@@ -256,6 +265,13 @@ soak**. The re-derivation is expected, not a surprise.
 **policy choice** — "two consecutive budget skips are normal" — not a measurement.
 The floor on the shipped config is `60 s + T_recon`, so any value at or below ~63 s
 fires on a healthy system.
+
+**Shipped at M5a as `180.0`.** Its meaning is coupled to the shortest enabled
+timeframe and its type is not: an operator who lengthens their shortest bar must
+raise this by hand and **nothing checks it**. That asymmetry is deliberate rather
+than an omission — a value that fires on a healthy system trains an operator to
+skim the line, which is the worse failure direction, and it is then unavailable as
+a warning when it means something.
 
 **Status: PLACEHOLDER — NOT MEASURED.**
 
@@ -445,11 +461,47 @@ see `trading.pairs`. Pure, runs at config load, costs no round trip, fails befor
 client exists: the same posture as `_pair_timeframes`' duplicate-symbol refusal.
 `config/models.py` importing `timeframe_to_ms` from `utils/helpers` opens no cycle.
 
+> **BUILT at M5a as `_check_dispatch_budget_fits_the_bar`, exactly as specified
+> here, plus two things this section did not anticipate.**
+>
+> **`alpha` lives as a module constant beside the validator, not as a config
+> field.** §3 sets its value but never says where it should live. It is a property
+> of the pipeline's headroom policy, not of an operator's account, so exposing it
+> would invite tuning the safety margin rather than the thing breaching it. Its
+> docstring carries the word **BOUNDED** and points back at §3, because BOUNDED is
+> the one status a reader must not read as MEASURED.
+>
+> **An empty enabled-pair list is VACUOUSLY SATISFIED and returns early — this is
+> not an oversight and must not be "fixed" into a refusal.** There is no pipeline
+> to overrun and `T_min` is undefined rather than zero. `engine.modes.live_system`
+> already refuses an empty enabled-pair set *at boot*, with a message about the
+> operational consequence; refusing here too would give one configuration two
+> different errors depending on which check ran first, and would move a boot
+> refusal into config load where `main.py` reports it on a different stream.
+>
+> It is also the case that would have broken the suite: `tests/conftest.py` writes
+> no `trading:` key at all, so `pairs` falls to its default empty list on **every**
+> config-loading test, and a naive `min()` over enabled pairs raises on all of
+> them.
+
 ### The refusal message
 
 Worked with **`dispatch_deadline_s = 11.0`**, chosen *because it breaches*: it
-illustrates the refusal and is **not a proposed default**. The shipped default is an
-open decision this document does not settle.
+illustrates the refusal and is **not a proposed default**.
+
+> **The default is no longer open — M5a shipped `9.0`.** This paragraph used to
+> end *"The shipped default is an open decision this document does not settle."*
+> It is settled: `9.0` sits **1.5 s under the 10.5 s ceiling** the constraint
+> admits on the shipped pair list, and its derived per-call share is `3.0 s`. The
+> `11.0` above stays exactly as written — it is the *breaching* example, its whole
+> job is to be refused, and replacing it with the shipped value would make the
+> worked message one that is never emitted, which is the defect this section was
+> rewritten to fix in the first place.
+>
+> **What survives:** everything else here, including that `D` is the whole-sequence
+> deadline and `3.0 s` is derived from it rather than configured. **The message
+> below is now the text the code actually emits** — verified by a test that asserts
+> each of its four inputs appears — rather than a specification of one.
 
 ```
 risk.dispatch_deadline_s = 11.0 x 2 pair(s) that can close simultaneously,
