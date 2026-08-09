@@ -60,11 +60,62 @@ setup -- see README), a ``PYTHONPATH`` entry pointing at this ``src/``, or a
 ``.pth`` doing the same. None of them happens by PATH precedence or by
 activating the wrong environment, which is how all three historical failures
 arrived.
+
+The unread-output guard
+-----------------------
+``| tail`` has masked a non-zero exit from this gate **twice**. A shell
+pipeline's status is the *last* stage's unless ``pipefail`` is set, so
+``python scripts/check.py | tail`` reports ``tail``'s success whatever the gate
+did -- and the truncation discarded the pytest summary that named the cause,
+both times.
+
+:func:`pipe_refusal` closes it, and the predicate is **a pipe specifically**,
+not "not a terminal". The obvious test, ``sys.stdout.isatty()``, was rejected on
+a measurement rather than on taste: on this machine ``isatty()`` is ``False``
+for a pipe, for ``> gate.log`` under both cmd.exe and git-bash, *and* for the
+tool harness the work is actually done through. A guard on it would refuse
+every one of those, and the first thing it would refuse is a redirect to a file
+-- which launders nothing (the exit status survives) and truncates nothing (the
+file has every byte). A guard that refuses correct usage is one people delete.
+
+``stat.S_ISFIFO`` separates the three cases that matter. Measured, because
+Windows is where this runs and its file-type reporting is not something to
+assume::
+
+    cmd.exe  ... | findstr    st_mode 0o10000    ISFIFO   <- refused
+    git-bash ... | tail       st_mode 0o10000    ISFIFO   <- refused
+    cmd.exe  ... > file       st_mode 0o100666   ISREG    <- allowed
+    git-bash ... > file       st_mode 0o100666   ISREG    <- allowed
+    os.pipe() write end       st_mode 0o10000    ISFIFO
+
+The last row is why the test can be honest: an ``os.pipe()`` write end is
+byte-for-byte the same ``st_mode`` as a real shell pipe here, so the test
+exercises the case rather than a model of it.
+
+**What it cannot do, stated so nobody reads it larger than it is.** Nothing this
+process does can repair ``$?`` -- under ``| tail`` the refusal's own exit status
+is laundered too. What is bought is that the run does not happen and the
+operator gets a refusal instead of a plausible summary. Weaker than the
+interpreter guard, which prevents a wrong measurement; this one only prevents a
+right measurement from being silently thrown away.
+
+Two consequences follow from that limit. The refusal is raised as
+:class:`SystemExit`, so Python writes it to **stderr** -- had it gone to stdout,
+``| head -1`` would swallow the refusal as well. And a legitimate non-interactive
+consumer that reads the process's own status (CI, a pre-commit hook, an editor
+task) needs a way through, because no portable test distinguishes a pipe to
+``tail`` from a pipe to a log collector: ``CHECK_ALLOW_PIPE`` is it. An
+environment variable rather than a flag, deliberately -- ``--allow-pipe | tail``
+would be one keystroke away from the habit this exists to break. There is no
+automatic ``CI=true`` exemption either: a developer with ``CI`` exported for some
+other tool would be silently unguarded.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import stat
 import subprocess
 import sys
 import time
@@ -111,6 +162,64 @@ def interpreter_refusal(module_file: str | None, *, expected_src: Path) -> str |
     if module_file is not None and Path(module_file).resolve().parents[1] == expected_src:
         return None
     return _WRONG_INTERPRETER.format(executable=sys.executable, found=found, expected=expected_src)
+
+
+#: Set to any non-empty value to allow a piped run. Presence is the whole
+#: signal -- ``CHECK_ALLOW_PIPE=0`` allows it too, because a parser for
+#: falsey spellings would be a second thing to keep true for no gain.
+_ALLOW_PIPE_ENV = "CHECK_ALLOW_PIPE"
+
+_UNREAD_OUTPUT = (
+    "\nRefusing to run: this gate's output is being piped, so its exit status is "
+    "not the one\nyou will read.\n\n"
+    "  stdout : a pipe (FIFO)\n"
+    f"  set    : {_ALLOW_PIPE_ENV} is unset\n\n"
+    "A shell pipeline reports the LAST stage's status unless `set -o pipefail` is "
+    "in force,\nso `python scripts/check.py | tail` reports tail's success no matter "
+    "what the gate did.\nThat has masked a non-zero exit here twice, and both times "
+    "the truncation also discarded\nthe diagnostic naming the cause.\n\n"
+    "Run it bare and read its own summary:\n"
+    "    python scripts/check.py\n\n"
+    "Or redirect to a file, which keeps both the exit status and every line:\n"
+    "    python scripts/check.py > gate.log\n\n"
+    "If the caller reads this process's own exit status (CI, a pre-commit hook, an "
+    "editor\ntask), say so explicitly:\n"
+    f"    {_ALLOW_PIPE_ENV}=1 python scripts/check.py | your-consumer\n"
+)
+
+
+def pipe_refusal(st_mode: int, *, allow_pipe: bool) -> str | None:
+    """The refusal message for this stdout, or ``None`` if it may be used.
+
+    ``st_mode`` is ``os.fstat(stdout).st_mode``. Only a FIFO is refused: a
+    regular file (``> gate.log``) preserves both the exit status and every line,
+    and a character device is a terminal or ``os.devnull``.
+
+    Kept pure and separate from :func:`_require_readable_output` so the decision
+    is testable against synthetic and real descriptors alike, mirroring
+    :func:`interpreter_refusal`.
+    """
+    if allow_pipe or not stat.S_ISFIFO(st_mode):
+        return None
+    return _UNREAD_OUTPUT
+
+
+def _require_readable_output() -> None:
+    """Exit non-zero when stdout is a pipe and no opt-out was given.
+
+    Degrades to *allow* when stdout cannot be stat'd -- a captured stream with no
+    real descriptor raises on ``fileno()``. A guard that crashes the gate because
+    it could not inspect a file descriptor is a guard people delete, and the
+    thing being protected is a reporting convention rather than a correctness
+    one.
+    """
+    try:
+        st_mode = os.fstat(sys.stdout.fileno()).st_mode
+    except (AttributeError, OSError, ValueError):
+        return
+    refusal = pipe_refusal(st_mode, allow_pipe=bool(os.environ.get(_ALLOW_PIPE_ENV)))
+    if refusal is not None:
+        raise SystemExit(refusal)
 
 
 def _require_project_interpreter() -> None:
@@ -207,9 +316,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     namespace = parser.parse_args(argv)
 
-    # Before any step, and after argument parsing so `--help` still works in any
-    # interpreter: refuse to measure this tree from an interpreter that cannot
-    # see it. See the module docstring.
+    # Two refusals before any step, both after argument parsing so `--help`
+    # still works anywhere. Order is not load-bearing -- both are pure, both
+    # exit, both reach stderr. The invocation is checked first because it is the
+    # one the operator fixes by re-typing the command they just typed; the
+    # interpreter is a property of the environment. See the module docstring.
+    _require_readable_output()
     _require_project_interpreter()
 
     selected = [s for s in STEPS if namespace.group is None or s.group == namespace.group]
