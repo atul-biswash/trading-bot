@@ -196,6 +196,39 @@ in its own `except` before re-raising.
 Stated in `engine/modes.py`'s module docstring, under *"Ownership: this root
 closes the client unconditionally"*; this is the authority's copy of it.
 
+### Lifecycle methods are idempotent — `track`, `start`, `stop`
+
+Every lifecycle method may be called more than once; the second call is a no-op,
+never an error. The rule is about *the second call*, not about "no side effects":
+`start` genuinely does work the first time, and what it may not do is fail,
+duplicate that work, or leave the object worse than the first call left it.
+
+It is **consumed** by `live_system`, whose nested teardown reaches
+`provider.stop()` on a path where `engine.stop()` has already stopped it —
+*"Safe to reach twice, every `stop()` on this path is documented idempotent"*.
+The root's correctness therefore rests on a promise made in other files, and
+until now in no central one.
+
+**The contract is spelled three ways across nine sites, and that is the reason it
+belongs here rather than in a docstring.**
+
+| Spelling | Sites |
+|---|---|
+| `Idempotent.` | `MarketDataProvider.stop` (the port), `BufferedMarketDataProvider.track` / `.start`, `TradingEngine.start`, `BinanceMarketDataStream.start`, `setup_logging` |
+| `Safe to call any time.` | `BufferedMarketDataProvider.stop`, `TradingEngine.stop` |
+| `Safe to call more than once and even if start was never called.` | `BinanceMarketDataStream.stop` |
+
+**A grep for `Idempotent` finds six of the nine and misses `TradingEngine.stop`** —
+one of the two methods the root's double-teardown actually depends on. Anyone
+checking whether the contract holds before relying on it would have concluded it
+does not.
+
+Two consequences. **A new lifecycle method inherits the obligation** — a
+`reconciler.stop()` that raises on a second call breaks teardown, not itself. And
+**a root may not paper over double-teardown with a "did I already stop?" flag**:
+that is a second source of truth for a fact the object already owns, and it goes
+stale the moment anything else calls `stop()`.
+
 ---
 
 ## Locked decisions — do not re-litigate without an explicit reason
