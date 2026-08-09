@@ -310,9 +310,60 @@ data.
   `numpy.float64` is not, and no `isinstance` test separates them. Exact-type
   matching also rejects every NumPy scalar without `core/` naming NumPy.
 
+**Enums, and which way an unclassified member should fall**
+- **Each enum takes the defaulting direction whose WRONG ANSWER IS THE CHEAP
+  ONE.** M5a set two in opposite directions on purpose, and read side by side they
+  look inconsistent unless the generating rule is stated. `OrderStatus.is_open` is
+  a **blacklist** of terminal states, so a member nobody has classified defaults to
+  *open* and being wrong costs one wasted round trip against the reserved
+  reconciliation floor; as a whitelist it defaulted to *closed*, which stops a
+  reconciler watching an order still working at the venue.
+  `_TRUSTED_PROTECTION` is a **whitelist**, so an unclassified `ProtectionState`
+  defaults to *untrusted*; trusting it by default would make committed risk
+  **understate** and let an entry through on the strength of protection that does
+  not exist. The two failure directions are not comparable, which is why this is a
+  decision per field rather than a house preference.
+- **`EXPIRED_IN_MATCH`'s classification is UNMEASURED and sits on the open side.**
+  Nothing in this tree defines it and neither does `python-binance`. It looks
+  terminal, and "it looks terminal" is the whole of the case for it. **Moving it
+  requires a measurement, not an argument from its name.**
+- **An enum member is not written until something writes it.** `ProtectionState`
+  shipped with **two** members — `ABSENT_BY_DESIGN` and `UNKNOWN` — while Q-C names
+  five; `PENDING`, `ACTIVE` and `DIVERGED` land with the milestones that first
+  assign them. The reason is the *field*, not the enum: `Position.protection` is
+  the one field whose wrong value is **silent**, because `ABSENT_BY_DESIGN` is the
+  off-switch for the divergence detector on that position. An unwritten member is
+  a plausible-looking value within reach of whoever is nearest a construction site
+  and needs something to type. Adding a member later is additive and moves no
+  fixture; removing one already assigned somewhere is not.
+
 **Risk**
 - Rounding **down** to `step_size` for quantities (`ROUND_DOWN`). Rounding up can
   overspend a balance and get the order rejected — or filled.
+- **`_enforce` REJECTS an off-tick `stop_price`; it does not round it.** The
+  asymmetry with `price` is deliberate. `price` is legitimately *derived* at
+  dispatch — an entry limit from a candle close and a slippage multiplier — so
+  putting it on the tick is part of constructing it. `stop_price` **arrives**
+  tick-rounded from `risk/rules.py` by contract, toward its reference, direction
+  chosen per level; an off-tick one means an upstream broke that contract.
+  Rounding it would use `ROUND_DOWN`, and on a long's `STOP_LOSS` the trigger sits
+  *below* its reference, so rounding down moves it **away** from entry and the
+  realised stop distance **grows** — an unbooked breach of `risk_per_trade`
+  arriving through the component that exists to catch exactly that. Rounding by
+  inferred direction was rejected too: it would make the dispatch adapter read
+  *risk semantics* off `OrderType` and side, and what a level means is risk's
+  business. Note this **converts** the defect rather than closing it — `_enforce`
+  detects that an upstream failed to protect the trigger; it does not protect it.
+- **The independent last line of defence must not be WEAKER than the sizing it
+  re-checks.** `_enforce` read raw `LOT_SIZE` while sizing used the **effective**
+  filters, so a quantity the sizer would have refused could pass the guard meant
+  to catch it — the two agreed only by coincidence on symbols where
+  `MARKET_LOT_SIZE` does not bind. It also skipped the notional check whenever
+  `price is None`, which is every stop-type order, and that is the wrong half to
+  skip: the exchange evaluates `stopPrice × quantity`, and a stop below the entry
+  carries the *smaller* notional and is the leg rejected first. A plain `MARKET`
+  order remains unchecked and is documented as such — there is no client-side
+  price to multiply.
 - Exchange filters are applied **in sizing**, not deferred to execution:
   `BinanceClient._enforce` signals violations by *raising*, and "too small to
   trade" is routine, not exceptional. `_enforce` stays as an independent last
@@ -783,8 +834,8 @@ The four steps, and what each reports when green:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  84 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 653 passed, 3 skipped
-                                       (656 passed with Testnet credentials present)
+pytest                                 732 passed, 3 skipped
+                                       (735 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -793,14 +844,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `656 passed` on a machine with Binance Testnet credentials in `.env`
-- `653 passed, 3 skipped` on a machine without them
+- `735 passed` on a machine with Binance Testnet credentials in `.env`
+- `732 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 653 and must not read it as a regression against a documented
-656. Quote the count with its condition, never bare.
+runner will see 732 and must not read it as a regression against a documented
+735. Quote the count with its condition, never bare.
 
-Only the `656` is measured here; `653` is `656` minus the three `skipif`-gated
+Only the `735` is measured here; `732` is `735` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -815,7 +866,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 653, so **treat a lone
+output was read. The unit suite is deterministic at 732, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -1095,15 +1146,63 @@ not.
 BOUNDED status beside MEASURED and PLACEHOLDER. Worst pipeline overhead is 2.9% of
 the shortest bar and no bar was missed across 90 minutes, so jitter is not the
 binding term in the coherence constraint. The composed decision path costs ~2 ms
-warm and 10²ms on its first execution in a process, which is why it is warmed at
-boot in M5a rather than absorbed into `dispatch_deadline_s`.
+warm and 10²ms on its first execution in a process.
+
+**M5a is complete: the vocabulary exists, and nothing in it performs I/O.**
+
+*Config.* `RiskConfig` gained the five M5 safety fields —
+`max_entry_slippage`, `price_band_margin`, `max_position_staleness_s`,
+`dispatch_deadline_s`, `reconcile_deadline_s`. **Five of the six numbers in
+`M5_NUMBERS.md` are PLACEHOLDER — NOT MEASURED**, and both the docstrings and
+`config.yaml` say so in those words, so an operator cannot mistake a rationale
+for a sample. Their types are not uniform, and the split is the money rule
+applied field by field: the two that will multiply money are `Decimal`, the three
+durations compared against clocks stay `float`. `AppConfig` gained the coherence
+validator — `P_sim × D + N_max × T_recon <= alpha × T_min`, per candle-handler
+invocation — which refuses a dispatch budget that cannot fit the shortest bar.
+The shipped defaults pass with margin (`2 × 9.0 + 3 × 3.0 = 27.0` against `30.0`);
+a third 1-minute pair takes it to 36.0 and is refused, which makes an added pair
+a decision rather than a silent degradation. `_check_protective_coverage` gained
+its third check: a take-profit with no stop is now **refused at load**.
+
+*Domain.* `ProtectionState` in `core/enums.py`, with **two** members and a
+docstring saying the omission of the other three is a decision. `Position` gained
+`entry_bar_time`, `protection` (required, non-nullable), `order_list_id` and
+`last_reconciled_at`. `Portfolio` gained `ge=0` on `free_quote`, `open_position` /
+`close_position`, the unmanaged-holdings boot snapshot, and the mark-to-stop
+committed-risk term. `OrderStatus` gained `PENDING_NEW` and `EXPIRED_IN_MATCH`,
+and **`is_open` inverted from a whitelist of open states to a blacklist of
+terminal ones**, so a future member defaults to OPEN. `SymbolInfo` models
+`PERCENT_PRICE_BY_SIDE`, `MAX_NUM_ALGO_ORDERS` and `MAX_NUM_ORDER_LISTS`.
+`Order` gained `order_list_id` and `stop_price`; `OrderRequest` gained
+`time_in_force`.
+
+*Exchange.* Three `_enforce` fixes, each its own commit: it now reads the
+**effective** lot filters rather than raw `LOT_SIZE`, checks notional against a
+stop-type order's **trigger** rather than skipping it, and **rejects** an off-tick
+`stop_price` rather than rounding it — rounding would use `ROUND_DOWN`, which on a
+long's stop moves the trigger *away* from entry and grows the realised stop
+distance. `FilterRejectedError` exists, with one local raiser and no translator
+until error parsing lands.
+
+*The warm-up was dropped, not deferred.* `07d9309` corrected the figure that
+motivated it from 14% to 4.6% of the constraint ceiling — the 14% read the
+constraint table's per-call column as `D` — and it did not survive re-adjudication
+on the corrected number. If it returns it belongs to the milestone that pays the
+cost on a real order, not to boot-time code whose only purpose is timing.
 
 **Still nothing places an order.** `IntentLogger` remains the terminal
 collaborator; `execution/` is still a pair of stubs.
 
-Next: **M5a**, the vocabulary — config fields, `ProtectionState`, the new
-`Position` and `Portfolio` shapes, and the `AppConfig` coherence refusal. It is
-deliberately the M5 milestone with no I/O in it. **Q-A** stays unscheduled: its
-thresholds need soak data and nothing has dispatched an order yet, so the
-`collaborator_failed` lines it would be calibrated from do not exist. See
-`docs/NEXT_MILESTONE.md`.
+Next: **M5b**, the intent split and the widened port — `TradeIntent` becomes
+`EntryIntent` / `ExitIntent`, `entry_limit` gets derived, the `RiskManager` port
+widens to carry `evaluate`, and `RiskAssessment` moves to `core/`. Still no I/O.
+**It has two prerequisites that are NOT met**, both stated at the top of
+`docs/NEXT_MILESTONE.md` rather than filed among the open items, because M5b
+moves the very port that carries them: a **mutation-on-read** in the portfolio's
+lazy day-roll, and the requirement that the widened port must not leave a path
+able to approve an entry whose committed risk is unknown.
+
+**Q-A** stays unscheduled: its thresholds need soak data and nothing has
+dispatched an order yet, so the `collaborator_failed` lines it would be
+calibrated from do not exist. See `docs/NEXT_MILESTONE.md`.

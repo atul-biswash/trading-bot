@@ -70,6 +70,18 @@ builds, across six milestones: the vocabulary first, then the entry reference,
 the adapter, the ledger, dispatch, and the discretionary close. Only the fifth
 can cause a fill.
 
+**M5a — the vocabulary — is complete, and it added no I/O.** The five safety
+fields are on `RiskConfig`, and **five of the six numbers are placeholders that
+have not been measured**; the docstrings and `config.yaml` say so in those words,
+because a rationale is not a sample. `AppConfig` now refuses at load a dispatch
+budget that cannot fit inside the shortest configured bar, and refuses a
+take-profit configured with no stop. `Position` and `Portfolio` carry the fields
+the protective-order contract needs, `SymbolInfo` models three exchange filters
+nobody had read, and three defects were fixed in `_enforce`, the last-line filter
+check — most notably that it now **rejects** an off-tick stop trigger instead of
+rounding it, since rounding one down moves a long's stop *away* from entry and
+quietly widens the risk it exists to bound.
+
 ## Install
 
 ### Linux / macOS
@@ -129,8 +141,8 @@ new finding is a regression.
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  84 files already formatted
 mypy                                   Success: no issues found in 58 source files
-pytest                                 653 passed, 3 skipped
-                                       (656 = 653 + 3 with Testnet credentials)
+pytest                                 732 passed, 3 skipped
+                                       (735 = 732 + 3 with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -139,9 +151,9 @@ pytest                                 653 passed, 3 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `653 passed, 3 skipped` on a machine without
-  them and `656 passed` on a machine with them. **Both are green.** A fresh clone
-  seeing 653 is not looking at a regression — quote the count with its condition,
+  keys. The *same commit* reports `732 passed, 3 skipped` on a machine without
+  them and `735 passed` on a machine with them. **Both are green.** A fresh clone
+  seeing 732 is not looking at a regression — quote the count with its condition,
   never bare.
 - **Network.** Those three tests make live read-only calls to Testnet and two wait
   on a real 1-minute bar, so a full run takes ~90s longer and can fail for reasons
