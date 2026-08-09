@@ -418,8 +418,10 @@ data.
   `stop_price` there means "this order's trigger". Mapping intent → orders is
   execution's job. Under Q-C the target of that mapping is an **order-list
   request** for three of the four branches; `OrderRequest` expresses only the
-  neither-enabled single `LIMIT`, and even that needs a `time_in_force` field it
-  does not have today.
+  neither-enabled single `LIMIT`, for which M5a gave it the `time_in_force` field
+  it lacked. The request's own field wins over `order_request_to_params`'
+  keyword, which stays as the fallback for requests that state nothing — so a
+  working `LIMIT` leg that must be `FOK` says so itself.
 - **`TradeIntent` splits into `EntryIntent` and `ExitIntent`; it does not fork a
   field.** Under Q-C an entry carries `entry_limit` — a derived, marketable limit
   — while a `CLOSE` dispatches `MARKET` and has no limit price at all. One field
@@ -469,8 +471,12 @@ data.
   `PERCENT_PRICE_BY_SIDE` refuses a whole list at submission, so a "never fills"
   dummy leg to force one shape is impossible.
 - **Take-profit without a stop is refused at config load, and that refusal is a
-  JUDGEMENT about payoff shape, not a measurement.** The code accepts it today and
-  so would the exchange. Both-disabled stays reachable with a boot warning.
+  JUDGEMENT about payoff shape, not a measurement.** Nothing downstream is unable
+  to compute it and the exchange would accept it; this bot accepted it until M5a
+  added the refusal to `_check_protective_coverage`, whose message names the
+  opinion as ours in those words. Both-disabled stays reachable with a boot
+  warning. The refusal keys on take-profit **with** no stop, never on the absence
+  of a stop alone — `SignalAction.CLOSE` exists so a strategy can own its exits.
 - **Reconciliation is keyed off what was REQUESTED, never off what is absent**,
   and compares only fields that round-trip. `contingencyType` never says
   `"OTOCO"`, so shape comes from leg count or our own IDs.
@@ -480,12 +486,12 @@ data.
 - **`assessment.decision.rule is None` means "the limits passed", NOT
   "approved".** `RiskAssessment` has no `rule` field at all; the rule is reached
   through `decision`, and is doubly optional — `decision` may be `None`, and
-  even when present `rule` may be. **Four refusal paths carry a decision with
-  `approved=True` and `rule=None`**: the ATR bridge, an unplaceable stop, the
-  sizer, and affordability, all of which refuse *after* the limits passed.
-  Branching on rule presence reads all four as approvals. **`RiskAssessment.
-  approved` is the only authoritative field** — its validator binds it to
-  `intent is not None`, so the two cannot drift.
+  even when present `rule` may be. **Five refusal paths carry a decision with
+  `approved=True` and `rule=None`**: an unmanaged holding, the ATR bridge, an
+  unplaceable stop, the sizer, and affordability, all of which refuse *after* the
+  limits passed. Branching on rule presence reads all five as approvals.
+  **`RiskAssessment.approved` is the only authoritative field** — its validator
+  binds it to `intent is not None`, so the two cannot drift.
 - **`evaluate` reports where it stopped; nothing infers it.**
   `RiskAssessment.stage` is a `RefusalStage` (in `core/enums.py`, beside
   `RiskRule`), set at the site that refuses. **Required but nullable** — no
@@ -642,7 +648,7 @@ data.
   latency, add every bar the budget skipped, add every bar that never arrived
   because the feed dropped and the buffer does not backfill. So the decision path
   **reads the stamp** rather than trusting the cadence: an open position staler than
-  `risk.max_position_staleness` refuses new entries under its own `RefusalStage` —
+  `risk.max_position_staleness_s` refuses new entries under its own `RefusalStage` —
   not because a limit fired, but because the ledger is not current enough for the
   limits to mean anything. That refusal is also what frees the budget the reconciler
   needs, so the system oscillates — trade, go stale, refuse, reconcile, trade —
