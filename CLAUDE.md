@@ -277,6 +277,24 @@ data.
   after a restart, after a reconnect re-delivers a corrected bar, and in backtest.
 - `warmup_period` is **derived from the indicator NaN contract**, never guessed.
   Indicators express warmup as leading `NaN` — never zero, never back-filled.
+- **Nobody mutates anybody else's frame, and the two halves of that are stated in
+  different files.** `get_dataframe` returns `frame.copy()`, which is what makes
+  its *"callers may mutate the result freely"* true — a strategy may add indicator
+  columns in place without corrupting the buffer, and the buffer is the shared
+  state the whole single-threaded design rests on. Going the other way, **every
+  function in `indicators/` is pure: the caller's input is never mutated**, and
+  the output carries the input index unchanged.
+
+  Together they mean an indicator can be fed a strategy's own Series, or another
+  indicator's output, or a slice of the frame, without anyone needing to know who
+  else holds a reference. Break either half and the failure is a wrong *number* on
+  a later bar in a different component — no exception, no test failure, and
+  nothing to grep for.
+
+  The cost is the copy, per pair per bar, on a bounded buffer. It is paid
+  deliberately and is not to be optimised away in favour of a documented
+  "please don't mutate this": the whole point is that the guarantee does not
+  depend on every future caller having read the docstring.
 - **Insufficient data is not an error.** Short input returns all-`NaN` / `None`;
   raising would count toward the engine's quarantine and disable a pair that
   only needed more candles.
