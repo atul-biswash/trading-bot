@@ -312,23 +312,6 @@ class Portfolio(BaseModel):
         return total
 
     # -- daily realised P&L -------------------------------------------------
-    def _roll_day(self, now: datetime) -> None:
-        """Reset the ledger if it covers a UTC day earlier than ``now``'s, or covers none yet.
-
-        Rolled lazily, on the accrual path, rather than by a scheduled reset. A
-        bot that trades nothing overnight would otherwise carry yesterday's halt
-        into a new day and refuse to trade until something happened to poke it
-        -- and nothing would. :meth:`realised_today` reaches the same outcome
-        without a write, by deriving it.
-
-        A ``now`` *earlier* than the covered day does not reset anything; see
-        :func:`_ledger_is_stale` for why that direction is the cheap one.
-        """
-        today = _utc_day("now", now)
-        if _ledger_is_stale(self.pnl_date, today):
-            self.realised_pnl = Decimal(0)
-            self.pnl_date = today
-
     def realised_today(self, now: datetime) -> Decimal:
         """Realised P&L for the UTC day containing ``now``. Negative is a loss.
 
@@ -353,9 +336,37 @@ class Portfolio(BaseModel):
         """Accrue ``amount`` of realised P&L into the day containing ``now``.
 
         Called by execution when a position closes. Negative for a loss.
+
+        **This is the only place the day rolls**, and the roll is lazy rather
+        than scheduled: a bot that trades nothing overnight would otherwise
+        carry yesterday's halt into a new day with nothing to poke it.
+        :meth:`realised_today` reaches the same outcome on the read side
+        without writing, by deriving it -- which is what makes it usable here
+        as the base this accrual adds to, so the roll's effect has one
+        expression rather than two. Note the consequence: a public read is
+        load-bearing for a write, so a side effect added to
+        :meth:`realised_today` would break both.
+
+        **Nothing is written until everything that can fail has run.** The
+        addition raises on a ``float``, a ``numpy.float64`` or a ``str``
+        operand, and the assignment raises on a non-finite result -- ``Money``
+        rejects those independently of the float guard. Both run first, so a
+        failed accrual leaves the ledger exactly as it was. Committing the roll
+        first, as this method did until M5b, left a zeroed new day that nothing
+        was ever booked into: the previous day's realised facts destroyed by a
+        write that then failed.
+
+        ``pnl_date`` moves **only** when the ledger is stale. Assigning it
+        unconditionally would back-date on a ``now`` that has moved backwards,
+        which is the defect :func:`_ledger_is_stale` exists to prevent.
         """
-        self._roll_day(now)
-        self.realised_pnl = self.realised_pnl + amount
+        today = _utc_day("now", now)
+        rolled = _ledger_is_stale(self.pnl_date, today)
+        total = self.realised_today(now) + amount
+
+        self.realised_pnl = total
+        if rolled:
+            self.pnl_date = today
 
     @staticmethod
     def _binding_stop(position: Position) -> Decimal | None:

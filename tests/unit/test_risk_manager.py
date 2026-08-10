@@ -393,6 +393,51 @@ class TestPortfolio:
         assert portfolio.realised_pnl == D("-5")
         assert portfolio.pnl_date == NOW.date()
 
+    @pytest.mark.parametrize(
+        ("amount", "now", "expected", "match"),
+        [
+            (0.5, NOW + timedelta(hours=13), TypeError, "unsupported operand"),
+            (0.5, NOW + timedelta(hours=1), TypeError, "unsupported operand"),
+            (0.5, NOW - timedelta(hours=13), TypeError, "unsupported operand"),
+            (np.float64(0.5), NOW + timedelta(hours=13), TypeError, "unsupported operand"),
+            ("0.5", NOW + timedelta(hours=13), TypeError, "unsupported operand"),
+            (D("NaN"), NOW + timedelta(hours=13), ValidationError, "finite number"),
+        ],
+        ids=[
+            "float_rolling",
+            "float_same_day",
+            "float_backwards_day",
+            "numpy_float_rolling",
+            "str_rolling",
+            "non_finite_rolling",
+        ],
+    )
+    def test_a_failed_accrual_leaves_the_ledger_untouched(
+        self, amount: object, now: datetime, expected: type[Exception], match: str
+    ) -> None:
+        """The roll is a write, and it used to be committed before the accrual
+        that can fail -- so a bad amount on the first accrual after midnight
+        destroyed the previous day's realised facts and advanced ``pnl_date`` to
+        a day nothing had been booked into. That is the same end state commit 1
+        closed by the backwards-clock route.
+
+        Both branches of the roll are covered deliberately: only the rolling one
+        could half-apply, and a fix that closed it by moving the roll would
+        silently change the other. The non-finite row is the discriminating
+        case -- ``Money`` rejects it at the *assignment*, independently of the
+        float guard on the arithmetic, so a fix that ordered only the
+        arithmetic first would still half-apply here.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+
+        with pytest.raises(expected, match=match):
+            # non-Decimal amounts are deliberate: four of the six triggers.
+            portfolio.record_realised_pnl(amount, now=now)  # type: ignore[arg-type]
+
+        assert portfolio.realised_pnl == D("-450")
+        assert portfolio.pnl_date == NOW.date()
+
     def test_daily_loss_threshold_is_a_percent_of_equity(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
         limit = D("5.0")  # 5% of 10000 == 500
