@@ -243,13 +243,30 @@ class Portfolio(BaseModel):
         :attr:`realised_pnl` directly, so there is one accrual path and one day
         roll. Cooldown is **not** started here: ``cooldown_minutes`` is
         configuration, and this object holds none.
+
+        **Nothing is written until everything that can fail has run** -- the
+        discipline :meth:`open_position` states from the other side. The
+        arithmetic raises on a ``float`` operand and ``now`` must be
+        timezone-aware, so both run while the ledger is still untouched; the
+        credit then goes first, because ``free_quote`` carries ``ge=0`` and is
+        the one commit step that can still raise. Note the two methods look
+        opposite -- one debits first, one credits first -- and are the same
+        rule: in both, the ``free_quote`` assignment is the fallible step, and
+        the fallible step precedes the irreversible one. Reaching any of these
+        raises is a bug rather than a market state, which is exactly why it
+        must not half-apply: a position removed with its proceeds unaccounted
+        for is a ledger that has already stopped matching the account.
         """
-        position = self.positions.pop(symbol, None)
+        position = self.positions.get(symbol)
         if position is None:
             return Decimal(0)
 
         pnl = position.unrealized_pnl(exit_price) - fee
-        self.free_quote = self.free_quote + position.quantity * exit_price - fee
+        proceeds = self.free_quote + position.quantity * exit_price - fee
+        _require_aware("now", now)
+
+        self.free_quote = proceeds
+        del self.positions[symbol]
         self.record_realised_pnl(pnl, now=now)
         return pnl
 

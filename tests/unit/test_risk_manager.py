@@ -468,6 +468,51 @@ class TestPortfolio:
         with pytest.raises(ValueError, match="timezone-aware"):
             portfolio.close_position(SYMBOL, exit_price=D("110"), now=datetime(2026, 7, 25, 12, 0))
 
+    @pytest.mark.parametrize(
+        ("exit_price", "fee", "now", "expected", "match"),
+        [
+            (110.0, D("0"), NOW, TypeError, "unsupported operand"),
+            (D("110"), 0.5, NOW, TypeError, "unsupported operand"),
+            (D("110"), D("2000"), NOW, ValidationError, "greater than or equal to 0"),
+            (D("-500"), D("0"), NOW, ValidationError, "greater than or equal to 0"),
+            (D("110"), D("0"), NOW.replace(tzinfo=None), ValueError, "timezone-aware"),
+        ],
+        ids=["float_price", "float_fee", "fee_exceeds_balance", "negative_price", "naive_now"],
+    )
+    def test_a_failed_close_leaves_the_ledger_untouched(
+        self,
+        exit_price: Decimal | float,
+        fee: Decimal | float,
+        now: datetime,
+        expected: type[Exception],
+        match: str,
+    ) -> None:
+        """Five ways this method can fail partway through a three-write sequence.
+        Reaching any of them is a bug rather than a market state, and a bug that
+        removes a position while its proceeds go unaccounted for leaves a ledger
+        that has already stopped matching the account -- which is what
+        ``open_position``'s ordering discipline exists to prevent, stated there
+        and until now obeyed only there.
+
+        The float rows are the money rule working as designed: ``Decimal``
+        arithmetic announces a bad crossing by raising. What is fixed is not
+        that they raise, but that they raise before anything is written.
+        """
+        portfolio = Portfolio(free_quote=D("800"), positions={SYMBOL: long_position(quantity="2")})
+
+        with pytest.raises(expected, match=match):
+            # float operands are deliberate: two of the five triggers.
+            portfolio.close_position(
+                SYMBOL,
+                exit_price=exit_price,  # type: ignore[arg-type]
+                now=now,
+                fee=fee,  # type: ignore[arg-type]
+            )
+
+        assert SYMBOL in portfolio.positions
+        assert portfolio.free_quote == D("800")
+        assert portfolio.realised_pnl == D("0")
+
     def test_free_quote_cannot_go_negative(self) -> None:
         portfolio = Portfolio(free_quote=D("100"))
         with pytest.raises(ValidationError):
