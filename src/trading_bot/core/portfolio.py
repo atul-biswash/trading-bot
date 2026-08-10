@@ -94,6 +94,30 @@ def _utc_day(name: str, moment: datetime) -> date:
     return _require_aware(name, moment).astimezone(timezone.utc).date()
 
 
+def _ledger_is_stale(covered: date | None, now_day: date) -> bool:
+    """Whether a ledger covering ``covered`` is out of date at ``now_day``.
+
+    **Strictly later, not merely different, and that is the whole decision.**
+    A ``now`` that moves *backwards* across midnight -- an NTP correction, or an
+    out-of-order replay -- makes the two days differ without the ledger being
+    stale at all. Read as "different", the write path resets a day of booked
+    realised facts and back-dates what survives, and the read path reports zero
+    for a day whose loss is still recorded, releasing the daily-loss halt on a
+    loss that really happened. Read as "later", the same backwards ``now``
+    accrues into the day the ledger already covers and reads that day's figure:
+    the wrong day, conservatively, rather than no day at all.
+
+    ``covered is None`` is the first accrual of a run, before any day is
+    recorded, and it is not an edge case to tolerate but the guard that makes
+    the comparison legal -- ``date > None`` raises ``TypeError``.
+
+    One definition for both paths, for the reason :func:`_utc_day` is one: the
+    comparison direction is now the thing that could drift between the read and
+    the write of the same field, and it is exactly the thing being fixed here.
+    """
+    return covered is None or now_day > covered
+
+
 class Portfolio(BaseModel):
     """Open positions, free balance, and the limit state the risk rules read.
 
@@ -272,16 +296,19 @@ class Portfolio(BaseModel):
 
     # -- daily realised P&L -------------------------------------------------
     def _roll_day(self, now: datetime) -> None:
-        """Reset the ledger if ``now`` falls on a different UTC day than it covers.
+        """Reset the ledger if it covers a UTC day earlier than ``now``'s, or covers none yet.
 
         Rolled lazily, on the accrual path, rather than by a scheduled reset. A
         bot that trades nothing overnight would otherwise carry yesterday's halt
         into a new day and refuse to trade until something happened to poke it
         -- and nothing would. :meth:`realised_today` reaches the same outcome
         without a write, by deriving it.
+
+        A ``now`` *earlier* than the covered day does not reset anything; see
+        :func:`_ledger_is_stale` for why that direction is the cheap one.
         """
         today = _utc_day("now", now)
-        if self.pnl_date != today:
+        if _ledger_is_stale(self.pnl_date, today):
             self.realised_pnl = Decimal(0)
             self.pnl_date = today
 
@@ -295,8 +322,15 @@ class Portfolio(BaseModel):
         which is a write already, and which is what a bot that trades nothing
         overnight never reaches -- so the derivation, not the reset, is what
         releases yesterday's daily-loss halt.
+
+        Zero is returned only for a **later** day. A ``now`` that has moved
+        backwards still reads the recorded figure: answering zero there would
+        hide a booked loss from the daily-loss check and permit an entry the
+        account is halted for.
         """
-        return self.realised_pnl if self.pnl_date == _utc_day("now", now) else Decimal(0)
+        if _ledger_is_stale(self.pnl_date, _utc_day("now", now)):
+            return Decimal(0)
+        return self.realised_pnl
 
     def record_realised_pnl(self, amount: Decimal, *, now: datetime) -> None:
         """Accrue ``amount`` of realised P&L into the day containing ``now``.

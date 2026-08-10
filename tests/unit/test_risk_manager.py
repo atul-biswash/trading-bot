@@ -341,6 +341,58 @@ class TestPortfolio:
         assert portfolio.realised_pnl == D("-500")
         assert portfolio.pnl_date == NOW.date()
 
+    def test_a_backwards_now_does_not_destroy_or_back_date_the_ledger(self) -> None:
+        """The write half. ``now`` can move backwards -- an NTP correction, or an
+        out-of-order replay -- and a day comparison that tests *difference*
+        rather than *lateness* reads that as a new day: it resets a day of
+        booked realised facts and back-dates what survives to a day they did not
+        happen on. No exchange statement matches that ledger.
+
+        Accruing into the day already covered is the cheap wrong answer: the
+        figure lands on the wrong day, but nothing is lost and the earlier day's
+        loss counts against the current cap, so the halt errs early.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+
+        portfolio.record_realised_pnl(D("-10"), now=NOW - timedelta(hours=13))
+
+        assert portfolio.realised_pnl == D("-460")
+        assert portfolio.pnl_date == NOW.date()
+
+    def test_a_backwards_now_does_not_hide_the_days_realised_loss(self) -> None:
+        """The read half, and the same defect pointing the other way.
+
+        Deriving on equality answers zero for *any* day that is not the covered
+        one, including an earlier one -- so a clock that steps back over
+        midnight hides a loss the ledger still holds, and the daily-loss halt
+        evaporates while the account is down. Erring late is the direction that
+        costs money; this errs early instead, by reporting the recorded figure.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-600"), now=NOW)  # 6% of 10000
+        earlier = NOW - timedelta(hours=13)
+        limit = D("5.0")  # threshold -500 against equity 10000
+
+        assert portfolio.realised_today(earlier) == D("-600")
+        assert portfolio.daily_loss_exceeded(
+            limit_percent=limit, equity=D("10000"), now=earlier, marks={}
+        )
+
+    def test_the_first_accrual_of_a_run_does_not_compare_against_a_missing_day(self) -> None:
+        """``pnl_date`` is ``None`` until something is booked, and ``date > None``
+        raises ``TypeError`` -- so the null guard in ``_ledger_is_stale`` is what
+        makes the comparison legal, not a defensive extra. Without it every run
+        would fail on its first realised P&L.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        assert portfolio.pnl_date is None
+
+        portfolio.record_realised_pnl(D("-5"), now=NOW)
+
+        assert portfolio.realised_pnl == D("-5")
+        assert portfolio.pnl_date == NOW.date()
+
     def test_daily_loss_threshold_is_a_percent_of_equity(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
         limit = D("5.0")  # 5% of 10000 == 500
