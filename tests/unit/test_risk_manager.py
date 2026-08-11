@@ -58,7 +58,7 @@ from trading_bot.risk.manager import (
     RiskAssessment,
     RiskManager,
 )
-from trading_bot.risk.rules import ExitReason
+from trading_bot.risk.rules import ExitReason, should_exit
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Callable, Mapping
@@ -623,11 +623,19 @@ class TestPortfolio:
         assert total == D("-10")
         assert uncomputable == 0
 
-    def test_committed_risk_uses_the_binding_stop_not_stop_loss(self) -> None:
-        """A trailed position's committed risk is measured off the level that is
-        actually operative -- `max` for a long, the same tie-break `should_exit`
-        applies. Reading `stop_loss` directly would price off a level no longer
-        in force and OVERSTATE, refusing entries for risk that is not there.
+    def test_committed_risk_prices_off_the_resting_stop_not_the_trail(self) -> None:
+        """This assertion was `-3` until now, and is INVERTED rather than
+        deleted so the change of mind stays visible.
+
+        It read the trail as "the level actually operative". It is not: nothing
+        places or amends an order for a trailing level -- Q-C section 3 fixes
+        the legs at three and none is a trailing leg -- so a position whose
+        process dies is protected at `stop_loss`, not at the trail. Pricing off
+        the trail UNDERSTATED forward risk by 58% here, and the daily-loss check
+        would have permitted entries on protection that does not exist.
+
+        Committed risk prices off what RESTS. Overstating while the bot is alive
+        is the error this codebase chooses.
         """
         portfolio = Portfolio(
             free_quote=D("1000"),
@@ -635,14 +643,67 @@ class TestPortfolio:
                 SYMBOL: long_position(
                     quantity="1",
                     entry="100",
-                    stop_loss=D("90"),
-                    trailing_stop=D("97"),  # ratcheted up; this is what binds
+                    stop_loss=D("90"),  # this rests, so this is what binds
+                    trailing_stop=D("97"),  # client-side only; no venue counterpart
                     protection=ProtectionState.ABSENT_BY_DESIGN,
                 )
             },
         )
         total, _ = portfolio.committed_risk({SYMBOL: D("100")})
-        assert total == D("-3")  # (97 - 100) * 1, not (90 - 100) * 1
+        assert total == D("-10")  # (90 - 100) * 1, not (97 - 100) * 1
+
+    def test_a_trailed_position_with_no_resting_stop_is_uncomputable(self) -> None:
+        """A trail alone is not protection, so it cannot be priced as though it
+        were. The position contributes 0 and is COUNTED, which refuses entries.
+
+        Reachable across runs: `stop_loss.enabled` flipped false then true with a
+        position open (Q-C section 5), so the position never carried a requested
+        stop while the trail advanced. Counting it would book forward risk for an
+        exit that only happens while this process is alive.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="1",
+                    entry="100",
+                    stop_loss=None,
+                    trailing_stop=D("97"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+        # The count first: being COUNTED is this test's claim, and contributing
+        # zero is the consequence. Asserted the other way round, a mutation that
+        # priced the trail would fail on the total and never reach the count.
+        assert uncomputable == 1
+        assert total == D("0")
+
+    def test_should_exit_still_prefers_the_trail(self) -> None:
+        """The asymmetry is deliberate and must stay: `should_exit` asks whether
+        to exit NOW and prefers the trail, which is the level a live bot acts on;
+        `_binding_stop` asks what happens if the bot STOPS RUNNING.
+
+        Without this test a future edit could "restore consistency" by making
+        `should_exit` ignore the trail, and nothing would object -- which would
+        break the client-side exit path in the name of the fix above.
+        """
+        position = long_position(
+            quantity="1",
+            entry="100",
+            stop_loss=D("90"),
+            trailing_stop=D("97"),
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+        )
+        # 89 triggers BOTH stops, which is the only state in which a preference
+        # is observable. At a price that triggers the trail alone, an edit that
+        # dropped the trail would return None and the test would fail on the
+        # not-None guard rather than on the preference it exists to pin.
+        decision = should_exit(position=position, price=D("89"))
+        assert decision is not None
+        assert decision.reason is ExitReason.TRAILING_STOP
+        assert decision.price == D("97")
 
     def test_committed_risk_counts_a_position_it_cannot_price(self) -> None:
         """Contributing 0 would tell the caller an unprotected position carries

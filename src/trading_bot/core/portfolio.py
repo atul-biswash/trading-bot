@@ -372,24 +372,43 @@ class Portfolio(BaseModel):
     def _binding_stop(position: Position) -> Decimal | None:
         """The stop that actually protects ``position``, or ``None`` if none does.
 
-        **The tie-break is the one ``should_exit`` uses -- the candidate set is
-        not.** ``should_exit`` maxes over the stops that have *triggered* at a
-        given price; there is no price here and no trigger, so this maxes over
-        the stops that are *present*. Reusing the triggered set literally would
-        return ``None`` for every healthy position and report a committed risk
-        of zero, which is the exact inversion the uncomputable count exists to
-        prevent.
+        **Committed risk prices off what RESTS AT THE VENUE.** That is the rule;
+        the set of resting levels is a consequence of it rather than a
+        preference. Q-C section 3 fixes the order list at three legs -- the
+        working ``LIMIT``, the ``STOP_LOSS`` and the ``TAKE_PROFIT`` -- so today
+        that set is exactly ``{stop_loss}``. When venue-side trailing lands, a
+        trailing level starts resting and becomes eligible here **without
+        re-opening this decision**.
 
-        Reading ``stop_loss`` directly instead would price a trailed position
-        off a level that is no longer operative, and would **overstate** --
-        refusing entries for risk that is not there.
+        ``trailing_stop`` is therefore excluded, and the exclusion is about
+        where the level lives rather than about which is nearer. It is written
+        by ``RiskManager.advance_trailing_stop`` and read by ``should_exit``;
+        nothing places or amends an order for it, and Q-C section 5 retains the
+        field "pending the trailing milestone".
+
+        **The asymmetry with ``should_exit`` is deliberate: the two answer
+        different questions.** ``should_exit`` asks whether to exit *now*, so it
+        prefers the trail, which is the level a live bot would act on.
+        ``_binding_stop`` asks what happens if the bot **stops running** -- and
+        only the second is what committed risk means. A trailed position whose
+        process dies is protected at ``stop_loss``, not at the trail.
+
+        This supersedes the earlier reasoning that reading ``stop_loss``
+        directly "would price off a level no longer operative and OVERSTATE".
+        That is correct about its mechanism and wrong about this system: it
+        assumed the trailing level is operative, and it landed before the design
+        that would make it so. Overstating is also the error this codebase
+        chooses -- Q-C section 7: the error that refuses an entry costs a missed
+        trade, the error that trusts a stop that is not there costs the
+        position.
+
+        **Q-C section 7's site-3 defect is NOT closed here.** A position whose
+        *requested* ``stop_loss`` was found not to be resting still prices off
+        it, because that level is non-``None`` by definition -- that is how the
+        divergence was detected. Its discriminator is ``protection``, not level
+        selection, and closing it remains M5d's.
         """
-        levels = [
-            level for level in (position.stop_loss, position.trailing_stop) if level is not None
-        ]
-        if not levels:
-            return None
-        return max(levels) if position.side is PositionSide.LONG else min(levels)
+        return position.stop_loss
 
     def committed_risk(self, marks: Mapping[str, Decimal]) -> tuple[Decimal, int]:
         """Forward loss already committed by resting stops, and what could not be priced.
