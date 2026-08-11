@@ -144,7 +144,7 @@ class RiskRule(str, Enum):
 
     NO_MARK_PRICE = "no_mark_price"  # an open position cannot be valued
     NO_EQUITY = "no_equity"  # equity is not strictly positive
-    DAILY_LOSS_HALT = "daily_loss_halt"  # realised loss today breached the cap
+    DAILY_LOSS_HALT = "daily_loss_halt"  # realised loss + committed risk breached the cap
     ALREADY_IN_POSITION = "already_in_position"
     COOLDOWN = "cooldown"  # symbol still cooling down after an exit
     MAX_OPEN_POSITIONS = "max_open_positions"

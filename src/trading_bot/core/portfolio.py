@@ -436,7 +436,7 @@ class Portfolio(BaseModel):
         limit_percent: Decimal,
         equity: Decimal,
         now: datetime,
-        marks: Mapping[str, Decimal],
+        committed: Decimal,
     ) -> bool:
         """Whether today's realised loss *plus committed risk* has breached the cap.
 
@@ -447,9 +447,13 @@ class Portfolio(BaseModel):
         N's committed loss was still unbooked, and it would do so on a perfect
         feed rather than merely under polling.
 
-        Only the committed *sum* is consumed here. The uncomputable *count* is
-        checked upstream, before the limits are consulted at all, because an
-        inability to compute is not a limit's verdict.
+        ``committed`` is supplied rather than computed, for the same reason
+        ``equity`` is: both are derived from the same ``marks`` mapping by the
+        caller, and computing one here while taking the other as an argument
+        was the asymmetry that made ``committed_risk`` run twice per
+        evaluation. The caller keeps the uncomputable *count* from that one
+        computation and checks it upstream, before the limits are consulted at
+        all, because an inability to compute is not a limit's verdict.
 
         ``equity`` is the value *now*, not at the start of the day. That is a
         deliberate approximation with a known direction: after a 5% loss equity
@@ -464,7 +468,6 @@ class Portfolio(BaseModel):
         in the check, never in the ledger -- which is what keeps the ledger
         matching an exchange statement.
         """
-        committed, _uncomputable = self.committed_risk(marks)
         threshold = -(equity * limit_percent / _PERCENT)
         return self.realised_today(now) + committed <= threshold
 

@@ -332,10 +332,10 @@ class TestPortfolio:
         limit = D("5.0")  # threshold -500 against equity 10000
 
         assert portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+            limit_percent=limit, equity=D("10000"), now=NOW, committed=D("0")
         )
         assert not portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("10000"), now=NOW + timedelta(hours=13), marks={}
+            limit_percent=limit, equity=D("10000"), now=NOW + timedelta(hours=13), committed=D("0")
         )
 
         assert portfolio.realised_pnl == D("-500")
@@ -376,7 +376,7 @@ class TestPortfolio:
 
         assert portfolio.realised_today(earlier) == D("-600")
         assert portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("10000"), now=earlier, marks={}
+            limit_percent=limit, equity=D("10000"), now=earlier, committed=D("0")
         )
 
     def test_the_first_accrual_of_a_run_does_not_compare_against_a_missing_day(self) -> None:
@@ -444,12 +444,12 @@ class TestPortfolio:
 
         portfolio.record_realised_pnl(D("-499.99"), now=NOW)
         assert not portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+            limit_percent=limit, equity=D("10000"), now=NOW, committed=D("0")
         )
 
         portfolio.record_realised_pnl(D("-0.01"), now=NOW)
         assert portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("10000"), now=NOW, marks={}
+            limit_percent=limit, equity=D("10000"), now=NOW, committed=D("0")
         )
 
     def test_open_position_debits_the_cost_and_records_the_position(self) -> None:
@@ -684,8 +684,10 @@ class TestPortfolio:
         # Realised alone is -400, inside the cap. Realised + committed is -600,
         # which is not -- and the ledger still reads -400.
         assert portfolio.realised_today(NOW) == D("-400")
+        committed, _ = portfolio.committed_risk(marks)
+        assert committed == D("-200")
         assert portfolio.daily_loss_exceeded(
-            limit_percent=limit, equity=D("2000"), now=NOW, marks=marks
+            limit_percent=limit, equity=D("2000"), now=NOW, committed=committed
         )
 
     def test_realised_pnl_is_untouched_by_the_committed_term(self) -> None:
@@ -703,8 +705,9 @@ class TestPortfolio:
                 )
             },
         )
+        committed, _ = portfolio.committed_risk({SYMBOL: D("100")})
         portfolio.daily_loss_exceeded(
-            limit_percent=D("5.0"), equity=D("2000"), now=NOW, marks={SYMBOL: D("100")}
+            limit_percent=D("5.0"), equity=D("2000"), now=NOW, committed=committed
         )
         assert portfolio.realised_pnl == D("0")
         assert portfolio.realised_today(NOW) == D("0")
@@ -1042,6 +1045,114 @@ class TestEvaluate:
         )
         assert not assessment.approved
         assert "DOGEUSDT" in assessment.reason
+
+    @pytest.mark.parametrize(
+        ("stop_loss_level", "realised", "expected_committed"),
+        [(D("80"), D("-400"), D("-200")), (None, D("-600"), D("0"))],
+        ids=["committed_pushes_it_over", "committed_is_zero"],
+    )
+    def test_the_daily_loss_message_is_checkable_against_its_own_predicate(
+        self, stop_loss_level: Decimal | None, realised: Decimal, expected_committed: Decimal
+    ) -> None:
+        """An operator doing the arithmetic from the message alone must reach the
+        verdict the predicate reached. The shipped message named realised P&L
+        only, while the predicate has added committed risk since `0029f61`, so
+        it asserted that -400 breached 25% of 2000 -- which is false, and is the
+        failure `RiskDecision` exists to prevent.
+
+        The committed term is named even when it is zero. The predicate always
+        includes it, so a message that named it conditionally would teach that
+        it is conditional; and "committed risk 0" distinguishes "realised alone
+        breached" from "the committed term pushed it over", which is the whole
+        point. The log schema's absent-not-null rule governs structured
+        ``extra=`` fields a consumer parses by key, not prose a human reads,
+        where an omitted term is invisible rather than absent.
+        """
+        position = long_position(
+            quantity="10",
+            entry="100",
+            stop_loss=stop_loss_level,
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+        )
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={"ETHUSDT": position.model_copy(update={"symbol": "ETHUSDT"})},
+        )
+        portfolio.record_realised_pnl(realised, now=NOW)
+        manager, _ = build_manager(
+            # Stops off so the `committed_is_zero` case reaches the limits: with
+            # them on, a position lacking a stop refuses at COMMITTED_RISK_UNKNOWN
+            # before any limit is consulted. Take-profit follows, because a
+            # take-profit with no stop is refused at config load.
+            config=risk_config(
+                max_daily_loss_percent="25.0",
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(enabled=False),
+            ),
+            provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+            pairs=multi_pairs(SYMBOL, "ETHUSDT"),
+        )
+
+        assessment = manager.evaluate(buy(), portfolio=portfolio)
+
+        assert assessment.decision is not None
+        assert assessment.decision.rule is RiskRule.DAILY_LOSS_HALT
+        reason = assessment.decision.reason
+        # equity is 1000 free + 10 * 100 mark = 2000; the cap is 25% of that.
+        equity, threshold = D("2000"), D("-500")
+        assert f"realised {realised}" in reason
+        assert f"committed risk {expected_committed}" in reason
+        assert f"is {realised + expected_committed}" in reason
+        assert f"25.0% of equity {equity}" in reason
+        # The message's own arithmetic reaches the predicate's verdict...
+        assert realised + expected_committed <= threshold
+        # ...and on the first case realised alone would not have, so the test
+        # cannot degenerate into one the old message would have got right.
+        assert (realised <= threshold) is (expected_committed == 0)
+
+    def test_committed_risk_is_computed_once_per_evaluation(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`evaluate` needs the uncomputable *count* before the limits and the
+        *sum* inside them, and it used to obtain each from its own pass over
+        every open position -- each discarding the half the other needed. The
+        module docstring claims the opposite economy for the adjacent quantity:
+        "evaluate computes equity once and reuses it rather than paying for it
+        twice."
+
+        Asserted on the call count rather than on the message, deliberately: the
+        cheaper fix -- leave the double computation and build the message from a
+        third pass -- produces a byte-identical message, so only this can tell
+        the two apart.
+        """
+        calls: list[object] = []
+        original = Portfolio.committed_risk
+
+        def counting(self: Portfolio, marks: object) -> object:
+            calls.append(marks)
+            return original(self, marks)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Portfolio, "committed_risk", counting)
+
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        manager, _ = build_manager(
+            provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+            pairs=multi_pairs(SYMBOL, "ETHUSDT"),
+        )
+
+        assessment = manager.evaluate(buy(), portfolio=portfolio)
+
+        assert assessment.approved
+        assert len(calls) == 1
 
     def test_a_signal_without_a_price_is_refused(self) -> None:
         """Every level and size derives from it, and Signal.price is optional."""

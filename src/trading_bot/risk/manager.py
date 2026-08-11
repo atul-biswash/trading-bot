@@ -284,8 +284,14 @@ class RiskManager(RiskManagerPort):
                     f"{', '.join(unpriced)}; equity is unknown, so no limit can be checked"
                 ),
             )
+        # NOTE: the uncomputable count is discarded here, so this path can
+        # approve an entry whose committed risk is unknown. `evaluate` checks
+        # it before the limits. This method is deleted by the commit that
+        # widens the port -- `evaluate` becomes the only entry point -- so the
+        # gap closes with the method rather than being patched here.
+        committed, _uncomputable = portfolio.committed_risk(marks)
         return self._approve(
-            signal, portfolio=portfolio, equity=portfolio.equity(marks), marks=marks
+            signal, portfolio=portfolio, equity=portfolio.equity(marks), committed=committed
         )
 
     def _approve(
@@ -294,7 +300,7 @@ class RiskManager(RiskManagerPort):
         *,
         portfolio: Portfolio,
         equity: Decimal,
-        marks: Mapping[str, Decimal],
+        committed: Decimal,
     ) -> RiskDecision:
         """Evaluate the limits against an already-computed ``equity``.
 
@@ -312,12 +318,17 @@ class RiskManager(RiskManagerPort):
         if equity <= 0:
             return refuse(RiskRule.NO_EQUITY, f"equity is {equity}; nothing to risk")
 
+        realised = portfolio.realised_today(now)
         if portfolio.daily_loss_exceeded(
-            limit_percent=limits.max_daily_loss_percent, equity=equity, now=now, marks=marks
+            limit_percent=limits.max_daily_loss_percent,
+            equity=equity,
+            now=now,
+            committed=committed,
         ):
             return refuse(
                 RiskRule.DAILY_LOSS_HALT,
-                f"realised P&L {portfolio.realised_today(now)} today breaches "
+                f"realised {realised} plus committed risk {committed} is "
+                f"{realised + committed}, which breaches "
                 f"{limits.max_daily_loss_percent}% of equity {equity}; halted until "
                 "the next UTC day",
             )
@@ -347,7 +358,8 @@ class RiskManager(RiskManagerPort):
             reason=(
                 f"within all risk limits: {portfolio.position_count}/"
                 f"{limits.max_open_positions} positions, equity {equity}, "
-                f"realised today {portfolio.realised_today(now)}"
+                f"realised {realised} plus committed risk {committed} "
+                f"is {realised + committed}"
             ),
         )
 
@@ -479,7 +491,7 @@ class RiskManager(RiskManagerPort):
         # realised-only. There is deliberately no RiskDecision here: no RiskRule
         # names this, which keeps NO_MARK_PRICE the single place the two
         # vocabularies coincide.
-        _committed, uncomputable = portfolio.committed_risk(marks)
+        committed, uncomputable = portfolio.committed_risk(marks)
         if uncomputable and self._config.stop_loss.enabled:
             return refuse(
                 f"{uncomputable} open position(s) have no computable stop while "
@@ -489,7 +501,7 @@ class RiskManager(RiskManagerPort):
             )
 
         equity = portfolio.equity(marks)
-        decision = self._approve(signal, portfolio=portfolio, equity=equity, marks=marks)
+        decision = self._approve(signal, portfolio=portfolio, equity=equity, committed=committed)
         if not decision.approved:
             return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 
