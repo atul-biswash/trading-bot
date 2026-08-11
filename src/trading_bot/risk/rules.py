@@ -83,10 +83,10 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, Decimal
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict
 
 from trading_bot.core.enums import PositionSide, StopType, TakeProfitType
-from trading_bot.core.models import Money
+from trading_bot.core.models import Money, ProtectiveLevels
 from trading_bot.utils.helpers import round_to_tick
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -128,57 +128,6 @@ class ExitReason(str, Enum):
     STOP_LOSS = "stop_loss"
     TAKE_PROFIT = "take_profit"
     TRAILING_STOP = "trailing_stop"
-
-
-class ProtectiveLevels(_Frozen):
-    """The stop-loss and take-profit computed for a position at entry.
-
-    ``None`` for either level is a legitimate, expected outcome (the rule is
-    disabled in config), representable rather than smuggled as a sentinel price.
-    The ``Money`` field types mean no level can be built from a ``float``.
-    """
-
-    symbol: str
-    side: PositionSide
-    entry_price: Money
-    stop_loss: Money | None = None
-    take_profit: Money | None = None
-    #: Realized (post-rounding) ``|entry - stop_loss|``; what an ``rr`` take-profit
-    #: and ``risk_per_trade`` sizing must both use. ``None`` iff no stop.
-    stop_distance: Money | None = None
-    basis: str
-
-    @model_validator(mode="after")
-    def _check_sides(self) -> ProtectiveLevels:
-        """Make "levels sit on the correct side of entry" a property of the type."""
-        if self.side is PositionSide.LONG:
-            if self.stop_loss is not None and not self.stop_loss < self.entry_price:
-                raise ValueError(
-                    f"long stop_loss {self.stop_loss} must be below entry {self.entry_price}"
-                )
-            if self.take_profit is not None and not self.take_profit > self.entry_price:
-                raise ValueError(
-                    f"long take_profit {self.take_profit} must be above entry {self.entry_price}"
-                )
-        elif self.side is PositionSide.SHORT:
-            if self.stop_loss is not None and not self.stop_loss > self.entry_price:
-                raise ValueError(
-                    f"short stop_loss {self.stop_loss} must be above entry {self.entry_price}"
-                )
-            if self.take_profit is not None and not self.take_profit < self.entry_price:
-                raise ValueError(
-                    f"short take_profit {self.take_profit} must be below entry {self.entry_price}"
-                )
-        else:
-            raise ValueError("ProtectiveLevels requires an open long or short position")
-
-        if (self.stop_loss is None) != (self.stop_distance is None):
-            raise ValueError("stop_loss and stop_distance must both be set or both be None")
-        if self.stop_loss is not None and self.stop_distance is not None:
-            expected = abs(self.entry_price - self.stop_loss)
-            if self.stop_distance != expected:
-                raise ValueError(f"stop_distance {self.stop_distance} != |entry - stop| {expected}")
-        return self
 
 
 class TrailingStopUpdate(_Frozen):
