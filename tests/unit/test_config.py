@@ -211,6 +211,44 @@ class TestRiskConfigCoherence:
             take_profit=TakeProfitConfig(enabled=False),
         )
 
+    def test_a_trailing_stop_without_a_stop_loss_is_refused(self) -> None:
+        """A trailing stop is a CLIENT-SIDE level with no venue counterpart.
+
+        Q-C section 3 fixes the order list at three legs -- the working
+        ``LIMIT``, ``STOP_LOSS`` and ``TAKE_PROFIT`` -- and section 5 retains
+        the trailing fields "pending the trailing milestone".
+        ``advance_trailing_stop`` has no call site in ``src/`` at all. So with
+        no stop leg nothing rests at the exchange, and the position is protected
+        only while this process is alive and evaluating.
+
+        Refused at load rather than corrected in prose: the locked claim that
+        stops-off degrades the committed-risk check to realised-only is true
+        again because this configuration can no longer be built.
+
+        Take-profit must also be disabled to reach this check -- with it enabled
+        the third refusal fires first. That is deliberate, not incidental.
+        """
+        with pytest.raises(ValueError, match=r"trailing_stop\.enabled is true"):
+            RiskConfig(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(enabled=False),
+                trailing_stop=TrailingStopConfig(enabled=True),
+            )
+
+    def test_both_disabled_with_no_trail_is_still_accepted(self) -> None:
+        """The fourth check's counterpart to `test_disabling_both_is_still_supported`.
+
+        It keys on the trailing stop WITH no stop-loss, never on the absence of
+        a stop alone. Broadening it to the latter would swallow the
+        owns-their-exits style that `SignalAction.CLOSE` exists to support, and
+        that style is locked as reachable.
+        """
+        RiskConfig(
+            stop_loss=StopLossConfig(enabled=False),
+            take_profit=TakeProfitConfig(enabled=False),
+            trailing_stop=TrailingStopConfig(enabled=False),
+        )
+
     def test_the_two_price_fields_are_decimal_and_the_three_durations_are_not(self) -> None:
         """The money rule applied field by field, not uniformly. A field becomes
         `Decimal` at the milestone that first multiplies it by money OR compares

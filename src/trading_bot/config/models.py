@@ -294,7 +294,8 @@ class RiskConfig(_Model):
     def _check_protective_coverage(self) -> RiskConfig:
         """Reject configurations whose protective coverage is incoherent.
 
-        Three checks, and the third is different **in kind** from the first two.
+        Four checks, and the third and fourth are different **in kind** from the
+        first two.
 
         The first two are arithmetic: an ``rr`` take-profit and
         ``risk_per_trade`` sizing both derive their number from the stop
@@ -315,9 +316,24 @@ class RiskConfig(_Model):
         because it is an opinion about configuration rather than a precondition
         for arithmetic.
 
+        The fourth is the **same kind as the third** -- a judgement about
+        coherence rather than a precondition for arithmetic -- and it refuses a
+        trailing stop with no stop-loss. A trailing stop is a *client-side*
+        level: it is computed on each closed bar and written onto the position,
+        and nothing places or amends an order for it at the exchange. Q-C
+        section 3 fixes the legs at three (the working ``LIMIT``, ``STOP_LOSS``
+        and ``TAKE_PROFIT``) and section 5 retains the trailing fields "pending
+        the trailing milestone". So with no stop leg nothing rests at the venue,
+        and the position is protected only while this process is alive and
+        evaluating -- which also contradicts what stops-off means, namely that
+        the operator owns their exits via ``SignalAction.CLOSE``.
+
         Order matters between the first and the third. The ``rr`` case is a
         strict subset of the take-profit-only case, so it is checked first to
         earn its more specific message; checked second it would be unreachable.
+        The fourth is independent of all three and is checked last, so an
+        operator disabling stops while leaving both a take-profit and a trail
+        enabled meets the third refusal first and this one after fixing it.
         """
         if (
             self.take_profit.enabled
@@ -349,6 +365,19 @@ class RiskConfig(_Model):
                 "exchange accepts this configuration, no filter forbids it, and this bot "
                 "accepted it until now. A wide stop_loss.percent expresses the same "
                 "intent and names the tolerance. Disabling both is still supported."
+            )
+        if self.trailing_stop.enabled and not self.stop_loss.enabled:
+            raise ValueError(
+                "trailing_stop.enabled is true while stop_loss.enabled is false. A "
+                "trailing stop is a CLIENT-SIDE level: it is computed on each closed "
+                "bar and written onto the position, and nothing places or amends an "
+                "order for it at the exchange -- Q-C places the working leg, the "
+                "STOP_LOSS leg and the TAKE_PROFIT leg only, and retains the trailing "
+                "fields 'pending the trailing milestone'. So with no stop leg, nothing "
+                "rests at the venue and the position is protected only while this "
+                "process is alive and evaluating. It also contradicts the meaning of "
+                "stops-off, which is that the operator owns their exits via "
+                "SignalAction.CLOSE. Enable stop_loss, or disable trailing_stop."
             )
         return self
 
