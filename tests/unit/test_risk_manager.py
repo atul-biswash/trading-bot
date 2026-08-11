@@ -42,9 +42,22 @@ from trading_bot.core.enums import (
 )
 from trading_bot.core.interfaces import MarketDataProvider
 from trading_bot.core.interfaces import RiskManager as RiskManagerPort
-from trading_bot.core.models import Candle, Position, RiskDecision, Signal, SymbolInfo
+from trading_bot.core.models import (
+    Candle,
+    Position,
+    ProtectiveLevels,
+    RiskDecision,
+    Signal,
+    SymbolInfo,
+)
 from trading_bot.core.portfolio import Portfolio
-from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager, TradeIntent
+from trading_bot.risk.manager import (
+    EntryIntent,
+    ExitIntent,
+    PairContext,
+    RiskAssessment,
+    RiskManager,
+)
 from trading_bot.risk.rules import ExitReason
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -225,6 +238,26 @@ def build_manager(
         clock=the_clock,
     )
     return manager, the_clock
+
+
+def entry_levels(*, entry: str = "100", symbol: str = SYMBOL) -> ProtectiveLevels:
+    """Levels priced at ``entry``, satisfying ProtectiveLevels' own side checks.
+
+    A long's stop sits below entry and its take-profit above, and
+    ``stop_distance`` must equal ``|entry - stop|`` exactly -- so the numbers
+    here are derived from ``entry`` rather than written twice.
+    """
+    price = D(entry)
+    stop = price * D("0.98")
+    return ProtectiveLevels(
+        symbol=symbol,
+        side=PositionSide.LONG,
+        entry_price=price,
+        stop_loss=stop,
+        take_profit=price * D("1.04"),
+        stop_distance=price - stop,
+        basis="test levels",
+    )
 
 
 def buy(price: str = "100.00", *, symbol: str = SYMBOL) -> Signal:
@@ -947,6 +980,119 @@ class TestThePortsShape:
         assert not hasattr(RiskManager, "approve")
 
 
+class TestTheIntentSplit:
+    """M5b split ``TradeIntent`` so an entry carries a limit and an exit does not.
+
+    Three of these pin arguments that had no test before this commit: the exit
+    line's absent fields, the union's non-coercion, and the ``side`` invariants.
+    """
+
+    def test_an_entry_limit_below_the_reference_is_refused(self) -> None:
+        """The slippage DIRECTION as a property of the type. Slippage on a buy
+        may only move the limit up, and this is the one invariant that could
+        silently invert -- it is unfakeable independently of whatever bound
+        ``max_entry_slippage`` carries in config."""
+        with pytest.raises(ValidationError, match="below reference_price"):
+            EntryIntent(
+                symbol=SYMBOL,
+                side=OrderSide.BUY,
+                quantity=D("1"),
+                reference_price=D("100"),
+                entry_limit=D("99.99"),
+                levels=entry_levels(entry="99.99"),
+            )
+
+    def test_an_entry_intent_requires_its_levels(self) -> None:
+        """Required, not optional: the four-way placement branch routes on which
+        levels are absent, and "neither enabled" is still a ProtectiveLevels
+        with both absent and a basis saying why.
+
+        Asserts the ``missing`` error type, not merely that *something* refused.
+        Giving the field a default makes ``_check_invariants`` read
+        ``self.levels.symbol`` off ``None``: an ``AttributeError`` raised on the
+        way to the check rather than the required-field check firing. Adding a
+        ``levels is None`` guard to that validator would convert the crash into
+        a clean ``ValidationError`` and a test matching on the message alone
+        would stop biting while the field was still optional.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            EntryIntent(
+                symbol=SYMBOL,
+                side=OrderSide.BUY,
+                quantity=D("1"),
+                reference_price=D("100"),
+                entry_limit=D("100"),
+            )
+        assert [(e["type"], e["loc"]) for e in excinfo.value.errors()] == [("missing", ("levels",))]
+
+    @pytest.mark.parametrize("kind", ["entry", "exit"], ids=["entry", "exit"])
+    def test_each_intent_pins_its_own_side(self, kind: str) -> None:
+        """An entry is a BUY and an exit is a SELL on spot. Locked for both, and
+        unpinned until this commit -- an unenforced invariant in a validator
+        reads as covered, which is worse than none."""
+        with pytest.raises(ValidationError, match="got OrderSide"):
+            if kind == "entry":
+                EntryIntent(
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=D("1"),
+                    reference_price=D("100"),
+                    entry_limit=D("100"),
+                    levels=entry_levels(),
+                )
+            else:
+                ExitIntent(
+                    symbol=SYMBOL,
+                    side=OrderSide.BUY,
+                    quantity=D("1"),
+                    reference_price=D("100"),
+                )
+
+    def test_the_assessment_preserves_which_intent_it_was_given(self) -> None:
+        """``RiskAssessment.intent`` is a union, and a consumer narrowing it with
+        ``isinstance`` depends on the member surviving construction. It does.
+
+        **This is a consequence, not an independent property, and the compound
+        that falsifies it is FOUR edits rather than the two first claimed.**
+        Measured across a sixteen-cell matrix; exactly one cell coerces, and it
+        needs all of: ``from_attributes=True`` on ``_Frozen``, the removal of
+        ``ExitIntent``'s ``BUY`` rejection, the union reordered to
+        ``ExitIntent | EntryIntent``, **and** ``union_mode="left_to_right"``.
+        Drop any one and the member survives.
+
+        The reason is that smart union matches an exact instance first, so
+        while an ``EntryIntent`` remains a valid ``EntryIntent`` no config
+        change can make it validate as anything else -- structural validation
+        and the side check are necessary but nowhere near sufficient. Only
+        abandoning smart union *and* putting ``ExitIntent`` first gets an
+        ``EntryIntent`` validated against it, at which point every one of
+        ``ExitIntent``'s four fields is present on it, and ``entry_limit`` and
+        ``levels`` are dropped with no error.
+
+        So the honest statement of what this pins is narrow: it holds as long as
+        the value handed over is a valid member of the union, which pydantic
+        guarantees structurally. Kept because a consumer narrowing with
+        ``isinstance`` depends on it and the cost is three lines -- not because
+        a reachable single edit breaks it.
+        """
+        exit_intent = ExitIntent(
+            symbol=SYMBOL, side=OrderSide.SELL, quantity=D("1"), reference_price=D("100")
+        )
+        entry_intent = EntryIntent(
+            symbol=SYMBOL,
+            side=OrderSide.BUY,
+            quantity=D("1"),
+            reference_price=D("100"),
+            entry_limit=D("100"),
+            levels=entry_levels(),
+        )
+        for given in (exit_intent, entry_intent):
+            assessment = RiskAssessment(
+                symbol=SYMBOL, approved=True, reason="ok", stage=None, intent=given
+            )
+            assert type(assessment.intent) is type(given)
+
+
 def _with_loss(portfolio: Portfolio, amount: Decimal) -> Portfolio:
     portfolio.record_realised_pnl(amount, now=NOW)
     return portfolio
@@ -1310,7 +1456,7 @@ class TestEvaluate:
         assert assessment.intent is not None
         assert assessment.intent.side is OrderSide.SELL
         assert assessment.intent.quantity == D("0.75")
-        assert assessment.intent.levels is None
+        assert not hasattr(assessment.intent, "levels")
 
     def test_close_with_nothing_open_is_refused(self) -> None:
         manager, _ = build_manager()
@@ -1472,23 +1618,51 @@ class TestComposedPath:
 class TestMoneyGuard:
     def test_trade_intent_rejects_a_float_quantity(self) -> None:
         with pytest.raises(ValidationError, match="must not be built from a float"):
-            TradeIntent(symbol=SYMBOL, side=OrderSide.BUY, quantity=1.5, price=D("100"))  # type: ignore[arg-type]
+            EntryIntent(
+                symbol=SYMBOL,
+                side=OrderSide.BUY,
+                quantity=1.5,  # type: ignore[arg-type]
+                reference_price=D("100"),
+                entry_limit=D("100"),
+                levels=entry_levels(),
+            )
 
     def test_trade_intent_rejects_a_numpy_float(self) -> None:
         """numpy.float64 is what DataFrame.iloc hands back -- the realistic leak
         path, and a float subclass, so the same guard catches it."""
         with pytest.raises(ValidationError, match="must not be built from a float"):
-            TradeIntent(
+            EntryIntent(
                 symbol=SYMBOL,
                 side=OrderSide.BUY,
                 quantity=np.float64(1.5),  # type: ignore[arg-type]
-                price=D("100"),
+                reference_price=D("100"),
+                entry_limit=D("100"),
+                levels=entry_levels(),
             )
 
-    def test_an_intent_must_carry_a_positive_quantity(self) -> None:
-        """'Do not trade' is an assessment with no intent, never a zero-size one."""
+    @pytest.mark.parametrize("kind", ["entry", "exit"], ids=["entry", "exit"])
+    def test_an_intent_must_carry_a_positive_quantity(self, kind: str) -> None:
+        """'Do not trade' is an assessment with no intent, never a zero-size one.
+
+        Locked for BOTH types, so pinned on both: the rule is not a property of
+        the entry shape."""
         with pytest.raises(ValidationError, match="positive quantity"):
-            TradeIntent(symbol=SYMBOL, side=OrderSide.BUY, quantity=D("0"), price=D("100"))
+            if kind == "entry":
+                EntryIntent(
+                    symbol=SYMBOL,
+                    side=OrderSide.BUY,
+                    quantity=D("0"),
+                    reference_price=D("100"),
+                    entry_limit=D("100"),
+                    levels=entry_levels(),
+                )
+            else:
+                ExitIntent(
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=D("0"),
+                    reference_price=D("100"),
+                )
 
     def test_levels_must_match_the_intent_they_protect(self) -> None:
         manager, _ = build_manager()
@@ -1497,11 +1671,12 @@ class TestMoneyGuard:
         assert assessment.intent.levels is not None
 
         with pytest.raises(ValidationError, match="priced at"):
-            TradeIntent(
+            EntryIntent(
                 symbol=SYMBOL,
                 side=OrderSide.BUY,
                 quantity=D("1"),
-                price=D("999"),
+                reference_price=D("999"),
+                entry_limit=D("999"),
                 levels=assessment.intent.levels,
             )
 
@@ -1535,7 +1710,7 @@ class TestMoneyGuard:
                 approved=True,
                 reason="fine",
                 stage=RefusalStage.LIMIT_REFUSED,
-                intent=TradeIntent(
-                    symbol=SYMBOL, side=OrderSide.BUY, quantity=D("1"), price=D("100")
+                intent=ExitIntent(
+                    symbol=SYMBOL, side=OrderSide.SELL, quantity=D("1"), reference_price=D("100")
                 ),
             )

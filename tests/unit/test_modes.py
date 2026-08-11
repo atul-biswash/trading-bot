@@ -35,6 +35,7 @@ from tests.unit.test_risk_manager import (
     build_manager,
     buy,
     candle,
+    entry_levels,
     long_position,
     multi_pairs,
     ohlcv,
@@ -42,6 +43,7 @@ from tests.unit.test_risk_manager import (
     symbol_info,
 )
 from trading_bot.config.models import StopLossConfig, TakeProfitConfig
+from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import (
     OrderSide,
     PositionSizingMethod,
@@ -654,11 +656,50 @@ class TestLogSchema:
         fields = _fields(record)
         assert fields["event"] == "intent_dispatched"
         assert fields["side"] == "BUY"
-        assert fields["entry"] == D("100.00")
+        assert fields["order_type"] == "LIMIT"
+        # NOT asserted equal to each other: `entry_limit` is a placeholder equal
+        # to the reference until the commit that derives it, and a test that
+        # pinned the equality would encode the placeholder as correct. That the
+        # two are distinct FIELDS from distinct sources is pinned below, on an
+        # intent built with them unequal.
+        assert fields["entry"] == assessment.intent.entry_limit
+        assert fields["reference"] == assessment.intent.reference_price
         assert fields["stop"] == D("98.00")
         assert fields["take_profit"] == D("104.00")
         assert "stage" not in fields
         assert "rule_fired" not in fields
+
+    async def test_the_entry_line_reports_the_limit_and_the_reference_separately(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Applied slippage must be visible in one record rather than inferred
+        from two, so `entry` and `reference` are two fields from two sources.
+
+        Built directly with them UNEQUAL, which the type permits -- the
+        invariant is `entry_limit >= reference_price`, not equality. The manager
+        cannot yet produce an unequal pair, so a test routed through it could
+        not tell one field read twice from two fields read once.
+        """
+        levels = entry_levels(entry="100.10")
+        intent = EntryIntent(
+            symbol=SYMBOL,
+            side=OrderSide.BUY,
+            quantity=D("1"),
+            reference_price=D("100.00"),
+            entry_limit=D("100.10"),
+            levels=levels,
+        )
+        assessment = RiskAssessment(
+            symbol=SYMBOL, approved=True, reason="ok", stage=None, intent=intent
+        )
+        signal = Signal(symbol=SYMBOL, action=SignalAction.BUY, price=D("100.00"), timestamp=NOW)
+
+        record = await _emit_one(caplog, signal, assessment, default_pairs())
+
+        fields = _fields(record)
+        assert fields["entry"] == D("100.10")
+        assert fields["reference"] == D("100.00")
+        assert fields["entry"] != fields["reference"]
 
     async def test_an_approved_exit_omits_the_protective_levels(
         self, caplog: pytest.LogCaptureFixture
@@ -677,8 +718,15 @@ class TestLogSchema:
         fields = _fields(record)
         assert fields["side"] == "SELL"
         assert fields["quantity"] == D("0.75")
+        assert fields["order_type"] == "MARKET"
         assert "stop" not in fields
         assert "take_profit" not in fields
+        # A CLOSE dispatches MARKET, so "at what price" is unknown until it
+        # fills and a field that would have to lie is omitted. Absent, not null.
+        # Until this commit nothing asserted these -- the exit line carried
+        # `entry` and no test would have failed if it stopped, or started.
+        assert "entry" not in fields
+        assert "reference" not in fields
 
     async def test_no_field_is_ever_null(self, caplog: pytest.LogCaptureFixture) -> None:
         """Absent, not null -- checked across every refusal path at once."""

@@ -8,10 +8,11 @@ performs no I/O.
 
 from trading_bot.risk.manager import (
     Clock,
+    EntryIntent,
+    ExitIntent,
     PairContext,
     RiskAssessment,
     RiskManager,
-    TradeIntent,
 )
 from trading_bot.risk.position_sizing import (
     calculate_position_size,
@@ -33,13 +34,14 @@ from trading_bot.risk.rules import (
 
 __all__ = [
     "Clock",
+    "EntryIntent",
     "ExitDecision",
+    "ExitIntent",
     "ExitReason",
     "PairContext",
     "ProtectiveLevels",
     "RiskAssessment",
     "RiskManager",
-    "TradeIntent",
     "TrailingStopUpdate",
     "calculate_position_size",
     "compute_protective_levels",

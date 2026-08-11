@@ -72,7 +72,12 @@ from datetime import datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from trading_bot.core.assessment import PairContext, RiskAssessment, TradeIntent
+from trading_bot.core.assessment import (
+    EntryIntent,
+    ExitIntent,
+    PairContext,
+    RiskAssessment,
+)
 from trading_bot.core.enums import (
     OrderSide,
     PositionSide,
@@ -109,10 +114,11 @@ _log = get_logger(__name__)
 
 __all__ = [
     "Clock",
+    "EntryIntent",
+    "ExitIntent",
     "PairContext",
     "RiskAssessment",
     "RiskManager",
-    "TradeIntent",
 ]
 
 #: Source of "now". Injected so the daily-loss and cooldown rules -- the only
@@ -434,11 +440,16 @@ class RiskManager(RiskManagerPort):
                 sizing=sizing,
             )
 
-        intent = TradeIntent(
+        intent = EntryIntent(
             symbol=symbol,
             side=OrderSide.BUY,
             quantity=sizing.quantity,
-            price=price,
+            reference_price=price,
+            # PLACEHOLDER. The commit that derives the marketable limit from
+            # `max_entry_slippage` replaces this, and re-prices `levels` with
+            # it, because EntryIntent requires levels.entry_price ==
+            # entry_limit. Equality satisfies the direction invariant here.
+            entry_limit=price,
             levels=levels,
         )
         _log.info(
@@ -476,11 +487,11 @@ class RiskManager(RiskManagerPort):
                 reason=f"nothing to close: no open position in {signal.symbol}",
                 stage=RefusalStage.NOTHING_TO_CLOSE,
             )
-        intent = TradeIntent(
+        intent = ExitIntent(
             symbol=signal.symbol,
             side=OrderSide.SELL,
             quantity=position.quantity,
-            price=price,
+            reference_price=price,
         )
         return RiskAssessment(
             symbol=signal.symbol,

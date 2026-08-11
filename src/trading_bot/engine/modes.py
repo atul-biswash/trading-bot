@@ -95,6 +95,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.exceptions import ConfigError
 from trading_bot.core.interfaces import (
     ExchangeClient,
@@ -210,19 +211,27 @@ class IntentLogger:
             extra.update(_common_fields(signal, self._pairs))
             extra["side"] = intent.side.value
             extra["quantity"] = intent.quantity
-            extra["entry"] = intent.price
-            levels = intent.levels
-            if levels is not None:
-                if levels.stop_loss is not None:
-                    extra["stop"] = levels.stop_loss
-                if levels.take_profit is not None:
-                    extra["take_profit"] = levels.take_profit
+            if isinstance(intent, EntryIntent):
+                extra["order_type"] = "LIMIT"
+                # `entry` is the price actually sent and `reference` the candle
+                # close, so applied slippage is visible in one record rather
+                # than inferred from two.
+                extra["entry"] = intent.entry_limit
+                extra["reference"] = intent.reference_price
+                if intent.levels.stop_loss is not None:
+                    extra["stop"] = intent.levels.stop_loss
+                if intent.levels.take_profit is not None:
+                    extra["take_profit"] = intent.levels.take_profit
+            else:
+                # No `entry`, no `reference`: "at what price" is genuinely
+                # unknown until it fills, and a field that would have to lie is
+                # omitted rather than nulled.
+                extra["order_type"] = "MARKET"
             _log.info(
-                "Intent %s %s %s @ %s",
+                "Intent %s %s %s",
                 intent.side.value,
                 intent.quantity,
                 intent.symbol,
-                intent.price,
                 extra=extra,
             )
             return
