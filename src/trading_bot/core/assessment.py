@@ -74,14 +74,12 @@ class EntryIntent(_Frozen):
     quantity: Money
     #: The closed candle's close: what the decision was computed against.
     reference_price: Money
-    #: The marketable limit actually sent.
-    #:
-    #: **PLACEHOLDER: equal to ``reference_price`` until the commit that derives
-    #: it from ``max_entry_slippage``.** That commit also re-prices the
-    #: protective levels, because ``levels.entry_price == entry_limit`` below
-    #: forces ``compute_protective_levels`` to be called with the limit rather
-    #: than the close. Equality satisfies the direction invariant trivially, and
-    #: no test asserts it -- they assert ``entry_limit >= reference_price``.
+    #: The marketable limit actually sent: the close widened by
+    #: ``max_entry_slippage`` and put on the tick with ``ROUND_CEILING``.
+    #: Derived by :func:`~trading_bot.risk.rules.derive_entry_limit`, which is
+    #: also what prices ``levels`` -- the equality below forces the two to
+    #: agree, and sizing shares the same basis so realised risk cannot exceed
+    #: the configured budget.
     entry_limit: Money
     #: Required: the four-way placement branch routes on which levels are
     #: absent, and "neither enabled" is still a ``ProtectiveLevels`` with both

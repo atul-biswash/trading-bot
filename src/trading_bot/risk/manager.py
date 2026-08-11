@@ -97,6 +97,7 @@ from trading_bot.risk.rules import (
     ProtectiveLevels,
     TrailingStopUpdate,
     compute_protective_levels,
+    derive_entry_limit,
     should_exit,
     update_trailing_stop,
 )
@@ -393,10 +394,19 @@ class RiskManager(RiskManagerPort):
                     decision=decision,
                 )
 
+        # Derived here, immediately before the levels that must be priced with
+        # it. A pure computation, not a stage: no refusal, no I/O, and no
+        # reachable raise, so the locked order of operations is unchanged.
+        entry_limit = derive_entry_limit(
+            price,
+            max_slippage=self._config.max_entry_slippage,
+            tick_size=context.symbol_info.price_tick,
+        )
+
         levels = compute_protective_levels(
             symbol=symbol,
             side=PositionSide.LONG,
-            entry_price=price,
+            entry_price=entry_limit,
             stop_loss=stop_loss,
             take_profit=self._config.take_profit,
             tick_size=context.symbol_info.price_tick,
@@ -416,7 +426,12 @@ class RiskManager(RiskManagerPort):
                 levels=levels,
             )
 
-        sizing = self.size_position(signal, equity=equity, price=price, stop_price=levels.stop_loss)
+        # Priced at the limit, not the close: sizing and the levels must share
+        # one basis, or the realised entry-to-stop distance differs from the one
+        # the quantity was derived from and realised risk exceeds the budget.
+        sizing = self.size_position(
+            signal, equity=equity, price=entry_limit, stop_price=levels.stop_loss
+        )
         if not sizing.is_tradeable:
             return refuse(
                 sizing.reason,
@@ -429,10 +444,10 @@ class RiskManager(RiskManagerPort):
         # Equity is total portfolio value; free balance is what can actually be
         # spent. The sizer documents that this check is the caller's job. Fees
         # are not modelled here -- execution applies them at dispatch.
-        cost = sizing.quantity * price
+        cost = sizing.quantity * entry_limit
         if cost > portfolio.free_quote:
             return refuse(
-                f"{sizing.quantity} at {price} costs {cost} {portfolio.quote_asset} but "
+                f"{sizing.quantity} at {entry_limit} costs {cost} {portfolio.quote_asset} but "
                 f"only {portfolio.free_quote} is free",
                 stage=RefusalStage.UNAFFORDABLE,
                 decision=decision,
@@ -445,18 +460,18 @@ class RiskManager(RiskManagerPort):
             side=OrderSide.BUY,
             quantity=sizing.quantity,
             reference_price=price,
-            # PLACEHOLDER. The commit that derives the marketable limit from
-            # `max_entry_slippage` replaces this, and re-prices `levels` with
-            # it, because EntryIntent requires levels.entry_price ==
-            # entry_limit. Equality satisfies the direction invariant here.
-            entry_limit=price,
+            entry_limit=entry_limit,
             levels=levels,
         )
+        # `entry_limit`, not `price`: the levels in `basis` are priced at the
+        # limit, so logging the close here made one line report two entries.
+        # The close is not lost -- it reaches the structured record beside this
+        # one as `reference`.
         _log.info(
             "Risk approved %s: %s at %s (%s)",
             symbol,
             sizing.quantity,
-            price,
+            entry_limit,
             levels.basis,
         )
         return RiskAssessment(

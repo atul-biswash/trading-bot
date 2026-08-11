@@ -1117,7 +1117,10 @@ class TestAtrBridge:
 
     def test_atr_stop_uses_the_computed_atr(self) -> None:
         """A constant 2.00 true range gives ATR 2.0, so a 2x stop sits 4 below
-        entry. The ATR value crosses as a float and lands as an exact Decimal."""
+        entry. The ATR value crosses as a float and lands as an exact Decimal.
+
+        Entry is the derived limit 100.10, so the stop is 96.10 -- the ATR
+        distance is unchanged at 4.00 and it is the reference that moved."""
         manager, _ = build_manager(
             config=self.atr_config(),
             provider=FakeProvider(frames={SYMBOL: ohlcv(50)}, candles={SYMBOL: candle()}),
@@ -1126,7 +1129,7 @@ class TestAtrBridge:
 
         assert assessment.approved
         assert assessment.levels is not None
-        assert assessment.levels.stop_loss == D("96.00")
+        assert assessment.levels.stop_loss == D("96.10")
         assert assessment.levels.stop_distance == D("4.00")
 
     def test_warmup_refuses_without_raising(self) -> None:
@@ -1572,7 +1575,8 @@ class TestComposedPath:
         realised = assessment.intent.quantity * assessment.levels.stop_distance
         assert realised == budget == D("100")
         assert assessment.intent.quantity == D("50")
-        assert assessment.levels.stop_loss == D("98.00")
+        # 2% below the derived limit 100.10, not below the close.
+        assert assessment.levels.stop_loss == D("98.10")
 
     def test_an_awkward_tick_keeps_realised_risk_inside_the_budget(self) -> None:
         """On a tick that does not divide the stop distance the stop rounds
@@ -1590,12 +1594,83 @@ class TestComposedPath:
         assert assessment.approved
         assert assessment.intent is not None
         assert assessment.levels is not None
-        assert assessment.levels.stop_loss == D("98.02")  # rounded up, toward entry
+        assert assessment.levels.stop_loss == D("98.15")  # rounded up, toward entry
         assert assessment.levels.stop_distance is not None
 
         budget = D("10000") * config.position_sizing.risk_per_trade
         realised = assessment.intent.quantity * assessment.levels.stop_distance
         assert realised <= budget
+
+    def test_the_levels_and_the_sizing_are_priced_at_the_limit_not_the_close(self) -> None:
+        """Q-C section 4: the limit is the reference for both protective levels
+        and sizing. Sizing off the close while the levels price off the limit
+        would make the realised entry-to-stop distance differ from the one the
+        quantity was derived from -- realised risk quietly exceeding configured.
+
+        The two assertions before the equality are the point. Reverting the
+        levels to the close raises ``ValidationError`` inside ``EntryIntent``,
+        so a test that only checked ``levels.entry_price == entry_limit`` would
+        be caught by the type's own validator rather than by its own claim.
+        Pinning that the limit has actually MOVED off the close is what makes
+        the equality mean something.
+        """
+        manager, _ = build_manager(config=risk_config(method=PositionSizingMethod.RISK_PER_TRADE))
+        assessment = manager.evaluate(buy("100.00"), portfolio=Portfolio(free_quote=D("10000")))
+
+        assert assessment.approved
+        assert assessment.intent is not None
+        assert assessment.levels is not None
+        assert isinstance(assessment.intent, EntryIntent)
+        # Pre-assertion: the limit is genuinely a different number.
+        assert assessment.intent.entry_limit == D("100.10")
+        assert assessment.intent.entry_limit != assessment.intent.reference_price
+        # ...and both consumers are priced at it, not at the close.
+        assert assessment.levels.entry_price == assessment.intent.entry_limit
+        assert assessment.sizing is not None
+        assert f"at {assessment.intent.entry_limit}" in assessment.sizing.reason
+
+    def test_affordability_is_checked_against_the_limit_not_the_close(self) -> None:
+        """The order is dispatched at the limit, so the limit is what it costs.
+
+        Free quote sits strictly BETWEEN the two costs: 0.999 units costs 99.9
+        at the close and 99.9999 at the limit, and 99.95 is free. Checking
+        against the close would approve an entry the account cannot pay for.
+
+        Equity is raised by an ETHUSDT position rather than by free quote,
+        because equity and free quote are the same number in a cash-only
+        portfolio -- lowering free quote would shrink the size along with it and
+        the knife edge would never be reached. Its stop is trusted so the case
+        refuses on affordability rather than on committed risk one guard
+        earlier, and ``fixed_amount`` sizing keeps the quantity independent of
+        the equity that position adds.
+        """
+        manager, _ = build_manager(
+            config=risk_config(method=PositionSizingMethod.FIXED_AMOUNT),
+            provider=FakeProvider(
+                frames={SYMBOL: ohlcv(50)},
+                candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")},
+            ),
+            pairs=multi_pairs(SYMBOL, "ETHUSDT"),
+        )
+        portfolio = Portfolio(
+            free_quote=D("99.95"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    quantity="100",
+                    entry="100",
+                    stop_loss=D("99"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+
+        assessment = manager.evaluate(buy("100.00"), portfolio=portfolio)
+
+        assert not assessment.approved
+        assert assessment.stage is RefusalStage.UNAFFORDABLE
+        # The message names the limit, not the close: 0.999 * 100.10.
+        assert "0.999 at 100.10 costs 99.99990" in assessment.reason
 
     def test_the_position_cap_binds_before_the_sizing_method(self) -> None:
         config = risk_config(
@@ -1606,8 +1681,11 @@ class TestComposedPath:
 
         assert assessment.approved
         assert assessment.intent is not None
-        # 20% of 10000 equity at 100 == 20 units, below the method's own 50.
-        assert assessment.intent.quantity == D("20")
+        # 20% of 10000 equity is a 2000 notional, and the notional is measured
+        # at the price the order is sent at: 2000 / 100.10 == 19.980 units,
+        # below the method's own 50. Measured at the close it would be 20, whose
+        # notional at the limit is 2002 -- over the cap the test is about.
+        assert assessment.intent.quantity == D("19.980")
         assert assessment.sizing is not None
         assert "capped" in assessment.sizing.reason
 

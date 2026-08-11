@@ -35,6 +35,7 @@ from trading_bot.risk.rules import (
     ProtectiveLevels,
     TrailingStopUpdate,
     compute_protective_levels,
+    derive_entry_limit,
     should_exit,
     stop_loss_level,
     take_profit_level,
@@ -185,6 +186,70 @@ _STOP_ROUNDING_CASES: list[tuple[str, str, str]] = [
     ("13",        "0.25",   "2.0"),   # step that is not a power of ten
 ]
 # fmt: on
+
+
+#: (reference, slippage, tick, expected limit). Deliberately NOT fenced: the
+#: layout mirrors no external contract, unlike `_STOP_ROUNDING_CASES` above.
+#: The BTC row is a measured tick and a real price, not an invented one.
+_ENTRY_LIMIT_CASES: list[tuple[str, str, str, str]] = [
+    ("100.00", "0.001", "0.01", "100.10"),  # raw lands exactly on the tick
+    ("100.005", "0.001", "0.01", "100.11"),  # raw off-grid: ceiling, not floor
+    ("64244.01", "0.001", "0.01", "64308.26"),  # BTCUSDT, measured tick
+    ("0.4523", "0.001", "0.0001", "0.4528"),  # cheap asset, fine tick
+]
+
+
+class TestDeriveEntryLimit:
+    """The marketable limit: the close widened by the configured slippage.
+
+    The rounding direction is the whole subject. It is ``ROUND_CEILING``, which
+    supersedes Q-C section 4's ``ROUND_FLOOR``, because ``EntryIntent`` locks
+    ``entry_limit >= reference_price`` as a *type* invariant -- and under floor
+    that holds only while the close sits on the tick grid.
+    """
+
+    @pytest.mark.parametrize(("reference", "slippage", "tick", "expected"), _ENTRY_LIMIT_CASES)
+    def test_the_limit_is_the_close_widened_and_put_on_the_tick(
+        self, reference: str, slippage: str, tick: str, expected: str
+    ) -> None:
+        limit = derive_entry_limit(D(reference), max_slippage=D(slippage), tick_size=D(tick))
+        assert limit == D(expected)
+
+    def test_the_limit_rounds_up_not_down_when_the_raw_price_is_off_grid(self) -> None:
+        """The discriminating case, and it has to be constructed deliberately.
+
+        On the default fixture ``100.00 x 1.001`` is ``100.1``, exactly on a
+        0.01 tick, so ceiling and floor agree and NOTHING in the suite can tell
+        the two modes apart. Here the raw price is ``100.105005``, where floor
+        would give 100.10.
+        """
+        limit = derive_entry_limit(D("100.005"), max_slippage=D("0.001"), tick_size=D("0.01"))
+        assert limit == D("100.11")
+
+    def test_an_off_grid_reference_still_satisfies_the_direction_invariant(self) -> None:
+        """Why ceiling is forced rather than preferred.
+
+        A reference off its own tick grid with a slippage smaller than one tick:
+        ``100.009 x 1.001 = 100.109009`` on a tick of 1 floors to **100**, which
+        is *below* the reference. That is ``EntryIntent``'s locked invariant
+        violated by the derivation itself -- a ``ValidationError`` raised on the
+        decision path, every bar, for a reason no operator could act on.
+        Ceiling gives 101 and the invariant holds by construction.
+        """
+        reference = D("100.009")
+        limit = derive_entry_limit(reference, max_slippage=D("0.001"), tick_size=D("1"))
+        assert limit >= reference
+        assert limit == D("101")
+
+    def test_a_non_positive_reference_raises(self) -> None:
+        """An incoherent *input* raises, matching compute_protective_levels.
+
+        Unreachable from ``evaluate`` -- the NO_REFERENCE_PRICE precondition
+        refuses such a signal first -- so this is the contract a direct caller
+        gets, and a direct call is the only way to pin it.
+        """
+        with pytest.raises(ValueError, match="reference_price"):
+            derive_entry_limit(D("0"), max_slippage=D("0.001"), tick_size=D("0.01"))
 
 
 class TestDirectionalRoundingInvariant:

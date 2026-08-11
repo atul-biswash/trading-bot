@@ -103,6 +103,7 @@ __all__ = [
     "ProtectiveLevels",
     "TrailingStopUpdate",
     "compute_protective_levels",
+    "derive_entry_limit",
     "should_exit",
     "stop_loss_level",
     "take_profit_level",
@@ -311,6 +312,41 @@ def take_profit_level(
 
     raw = entry_price + distance if side is PositionSide.LONG else entry_price - distance
     return _protective_level(raw, entry_price, tick_size)
+
+
+def derive_entry_limit(
+    reference_price: Decimal, *, max_slippage: Decimal, tick_size: Decimal
+) -> Decimal:
+    """The marketable limit an entry is actually sent at.
+
+    ``reference_price`` is the closed candle's close; the limit is that price
+    widened by ``max_slippage`` and put on the tick grid with ``ROUND_CEILING``.
+
+    **The direction is forced, not chosen.** ``EntryIntent`` requires
+    ``entry_limit >= reference_price``, and ceiling is the only rounding that
+    makes it hold *by construction*: the raw product is ``>= reference_price``
+    for non-negative slippage, and a ceiling never moves a value down, so the
+    invariant survives on any tick grid -- including one the reference does not
+    itself sit on. ``ROUND_FLOOR`` -- which Q-C section 4 originally specified --
+    holds only while the reference is on-grid, which is a property of the feed
+    rather than of this function; an off-grid close would produce a limit below
+    it and a ``ValidationError`` on the decision path.
+
+    The cost is stated rather than discovered: the limit may exceed
+    ``reference_price * (1 + max_slippage)`` by up to one tick, so
+    ``max_entry_slippage`` is not an enforceable ceiling on a symbol whose
+    ``tick / price`` ratio approaches it. The overshoot is bounded by that
+    ratio -- 1.6e-7 on BTCUSDT, 5.3e-6 on ETHUSDT, against a 1e-3 bound.
+
+    Raises:
+        ValueError: if ``reference_price`` is not strictly positive. Unreachable
+            from ``evaluate``, which refuses such a signal at its precondition;
+            kept as the contract check a direct caller gets, matching
+            :func:`compute_protective_levels`.
+    """
+    _require_positive("reference_price", reference_price)
+    raw = reference_price * (Decimal(1) + max_slippage)
+    return round_to_tick(raw, tick_size, rounding=ROUND_CEILING)
 
 
 def compute_protective_levels(

@@ -664,8 +664,9 @@ class TestLogSchema:
         # intent built with them unequal.
         assert fields["entry"] == assessment.intent.entry_limit
         assert fields["reference"] == assessment.intent.reference_price
-        assert fields["stop"] == D("98.00")
-        assert fields["take_profit"] == D("104.00")
+        # Priced off the derived limit 100.10, not the close: 2% and 4% of it.
+        assert fields["stop"] == D("98.10")
+        assert fields["take_profit"] == D("104.10")
         assert "stage" not in fields
         assert "rule_fired" not in fields
 
@@ -761,8 +762,11 @@ class TestLogSchema:
         assessment = manager.evaluate(signal, portfolio=Portfolio(free_quote=D("10000")))
         record = await _emit_one(caplog, signal, assessment, default_pairs())
 
-        assert "entry=100.00" in PlainFormatter("%(message)s").format(record)
-        assert '"entry": "100.00"' in JsonFormatter().format(record)
+        # 100.10, not 100.00: `entry` is the derived limit. The close is on the
+        # same record as `reference`, and both render exactly in both sinks.
+        assert "entry=100.10" in PlainFormatter("%(message)s").format(record)
+        assert '"entry": "100.10"' in JsonFormatter().format(record)
+        assert "reference=100.00" in PlainFormatter("%(message)s").format(record)
 
     async def test_no_log_field_collides_with_a_reserved_record_attribute(
         self, caplog: pytest.LogCaptureFixture
