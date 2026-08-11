@@ -33,17 +33,21 @@ error code that says nothing about the real cause.
 
 Boot order: all I/O before any socket exists
 --------------------------------------------
+0. Mode check -- pure, and before the client exists at all.
 1. REST client (injected, or built from settings).
 2. Pair contexts -- the *pure* duplicate-symbol check first, so a config
    mistake costs no network round trip, then one ``get_symbol_info`` per
    distinct symbol.
 3. Portfolio, seeded from ``get_balances``.
-4. Market-data provider (this is the first step that can open a WebSocket).
-5. Engine, 6. risk manager, 7. intent logger, 8. the one signal handler.
+4. Unmanaged base holdings -- a second ``get_balances``, then one
+   ``get_ticker`` per candidate asset. Warns; never refuses.
+5. Market-data provider (this is the first step that can open a WebSocket).
+6. Engine, 7. risk manager, 8. intent logger, 9. the one signal handler.
 
-Steps 2 and 3 are the fail-fast: everything that can refuse the boot does so
-before step 4, so a refusal has exactly one REST client to unwind and never a
-half-open feed.
+Steps 0 to 3 are the fail-fast: every boot refusal is raised there, before the
+first socket at step 5, so a refusal has exactly one REST client to unwind and
+never a half-open feed. Step 4 is the exception that proves the shape -- it is
+I/O on the same side of the socket, and it only warns.
 
 Ownership: this root closes the client unconditionally
 ------------------------------------------------------
@@ -67,10 +71,12 @@ stream) strictly before the client closes.
 
 The portfolio is a boot snapshot
 --------------------------------
-It is read once, at step 3, and **nothing mutates it in M4a** -- no fills, no
-realised P&L, no cooldowns, because nothing places an order yet. Every
-evaluation for the life of the process sees the balances the process started
-with. Execution is what makes it a ledger; until then it is a photograph.
+It is built at step 3 and written once more at step 4, where
+:func:`_snapshot_unmanaged_holdings` records the base the account already held.
+After that **nothing mutates it** -- no fills, no realised P&L, no cooldowns,
+because nothing places an order yet. Every evaluation for the life of the
+process sees the balances the process started with. Execution is what makes it
+a ledger; until then it is a photograph.
 
 The log schema
 --------------
@@ -136,8 +142,7 @@ class LiveSystem:
     ``client`` and ``provider`` are typed as their ports so a scripted fake
     satisfies them. ``risk`` is the **concrete** :class:`RiskManager`: the port
     of that name declares only ``size_position`` and ``approve``, while
-    ``evaluate`` -- the composed path this milestone exists to observe -- is
-    class-only. Widening the port is M5's business, not this milestone's.
+    ``evaluate`` -- the composed path this root exists to wire -- is class-only.
     """
 
     settings: Settings
@@ -284,8 +289,13 @@ def _build_signal_handler(
     quarantined. Each collaborator therefore gets its own ``try``, and its own
     name in the log line.
 
-    **No I/O.** Handlers are awaited sequentially from ``_on_candle``, so
-    anything slow here delays the candle pipeline itself.
+    **Bounded I/O, not none.** Handlers are awaited sequentially from
+    ``_on_candle``, itself awaited from the provider's ``_notify`` on the
+    stream's dispatch task, so handler latency is charged directly to the
+    candle pipeline. The rule is a budget, not an abstinence: the pipeline must
+    never be blocked by latency we do not bound ourselves. This handler happens
+    to perform no I/O because it has nothing to do yet -- the milestone that
+    places orders adds it under a deadline it sets itself.
     """
 
     async def handle(signal: Signal) -> None:
