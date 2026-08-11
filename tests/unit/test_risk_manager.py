@@ -12,6 +12,7 @@ exists to prevent.
 
 from __future__ import annotations
 
+import inspect
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -40,6 +41,7 @@ from trading_bot.core.enums import (
     StopType,
 )
 from trading_bot.core.interfaces import MarketDataProvider
+from trading_bot.core.interfaces import RiskManager as RiskManagerPort
 from trading_bot.core.models import Candle, Position, RiskDecision, Signal, SymbolInfo
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager, TradeIntent
@@ -305,7 +307,7 @@ class TestPortfolio:
 
     def test_realised_today_derives_the_new_day_without_writing(self) -> None:
         """The read paths are read-only, which is what two docstrings already
-        claim -- ``RiskManager.approve``'s port docstring ("It is read, never
+        claim -- ``RiskManager.evaluate``'s port docstring ("read, never
         mutated") and this class's own. Before M5b the day roll fired from
         ``realised_today``, so a documented read rewrote the ledger once per UTC
         day, on the first evaluation after midnight -- the path deciding whether
@@ -757,12 +759,24 @@ class TestPortfolio:
 
 
 # --------------------------------------------------------------------------
-# approve: each limit independently, with the clock advanced explicitly
+# The limits, each independently, with the clock advanced explicitly.
+#
+# Reached through `evaluate`, which is the only entry point since M5b widened
+# the port: `approve` was deleted rather than demoted, because it could
+# approve an entry whose committed risk was unknown.
 # --------------------------------------------------------------------------
-class TestApprove:
+class TestLimits:
+    def _decision(self, manager: RiskManager, portfolio: Portfolio) -> RiskDecision:
+        """The limit verdict `evaluate` reached, or fail saying where it stopped."""
+        assessment = manager.evaluate(buy(), portfolio=portfolio)
+        assert assessment.decision is not None, (
+            f"evaluate stopped before the limits, at {assessment.stage}"
+        )
+        return assessment.decision
+
     def test_approves_within_every_limit(self) -> None:
         manager, _ = build_manager()
-        decision = manager.approve(buy(), portfolio=Portfolio(free_quote=D("10000")))
+        decision = self._decision(manager, Portfolio(free_quote=D("10000")))
         assert decision.approved
         assert decision.rule is None
 
@@ -770,8 +784,20 @@ class TestApprove:
         portfolio = Portfolio(
             free_quote=D("1000"),
             positions={
-                "ETHUSDT": long_position(symbol="ETHUSDT"),
-                "BNBUSDT": long_position(symbol="BNBUSDT"),
+                # A computable, trusted stop on each: without one `evaluate`
+                # refuses at COMMITTED_RISK_UNKNOWN before any limit runs, so
+                # the state this test used to reach through `approve` is not
+                # reachable through the only entry point that remains.
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                ),
+                "BNBUSDT": long_position(
+                    symbol="BNBUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                ),
             },
         )
         manager, _ = build_manager(
@@ -782,7 +808,7 @@ class TestApprove:
             pairs=multi_pairs(SYMBOL, "ETHUSDT", "BNBUSDT"),
         )
 
-        decision = manager.approve(buy(), portfolio=portfolio)
+        decision = self._decision(manager, portfolio)
         assert not decision.approved
         assert decision.rule is RiskRule.MAX_OPEN_POSITIONS
         assert "2" in decision.reason
@@ -792,34 +818,42 @@ class TestApprove:
         portfolio = Portfolio(free_quote=D("10000"))
         portfolio.record_realised_pnl(D("-500"), now=NOW)
 
-        halted = manager.approve(buy(), portfolio=portfolio)
+        halted = self._decision(manager, portfolio)
         assert not halted.approved
         assert halted.rule is RiskRule.DAILY_LOSS_HALT
 
         # Still the same UTC day 11 hours on: still halted.
         clock.advance(hours=11)
-        assert not manager.approve(buy(), portfolio=portfolio).approved
+        assert not self._decision(manager, portfolio).approved
 
         # Past midnight UTC the ledger rolls and trading resumes.
         clock.advance(hours=2)
-        assert manager.approve(buy(), portfolio=portfolio).approved
+        assert self._decision(manager, portfolio).approved
 
     def test_cooldown(self) -> None:
         manager, clock = build_manager(config=risk_config(cooldown_minutes=15))
         portfolio = Portfolio(free_quote=D("10000"))
         portfolio.start_cooldown(SYMBOL, now=NOW, minutes=15)
 
-        blocked = manager.approve(buy(), portfolio=portfolio)
+        blocked = self._decision(manager, portfolio)
         assert not blocked.approved
         assert blocked.rule is RiskRule.COOLDOWN
 
         clock.advance(minutes=15)
-        assert manager.approve(buy(), portfolio=portfolio).approved
+        assert self._decision(manager, portfolio).approved
 
     def test_already_in_position(self) -> None:
         manager, _ = build_manager()
-        portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: long_position()})
-        decision = manager.approve(buy(), portfolio=portfolio)
+        # Stopped, for the reason given in test_max_open_positions.
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                SYMBOL: long_position(
+                    stop_loss=D("90"), protection=ProtectionState.ABSENT_BY_DESIGN
+                )
+            },
+        )
+        decision = self._decision(manager, portfolio)
         assert not decision.approved
         assert decision.rule is RiskRule.ALREADY_IN_POSITION
 
@@ -831,13 +865,14 @@ class TestApprove:
             pairs={SYMBOL: PairContext(timeframe=TIMEFRAME, symbol_info=symbol_info())},
         )
         portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: long_position()})
-        decision = manager.approve(buy(), portfolio=portfolio)
+        decision = self._decision(manager, portfolio)
         assert not decision.approved
         assert decision.rule is RiskRule.NO_MARK_PRICE
+        assert "no limit can be checked" in decision.reason
 
     def test_zero_equity(self) -> None:
         manager, _ = build_manager()
-        decision = manager.approve(buy(), portfolio=Portfolio(free_quote=D("0")))
+        decision = self._decision(manager, Portfolio(free_quote=D("0")))
         assert not decision.approved
         assert decision.rule is RiskRule.NO_EQUITY
 
@@ -850,7 +885,14 @@ class TestApprove:
             ),
             (
                 RiskRule.ALREADY_IN_POSITION,
-                lambda: Portfolio(free_quote=D("10000"), positions={SYMBOL: long_position()}),
+                lambda: Portfolio(
+                    free_quote=D("10000"),
+                    positions={
+                        SYMBOL: long_position(
+                            stop_loss=D("90"), protection=ProtectionState.ABSENT_BY_DESIGN
+                        )
+                    },
+                ),
             ),
             (
                 RiskRule.COOLDOWN,
@@ -864,10 +906,45 @@ class TestApprove:
         """A refusal an operator cannot act on is the failure RiskDecision
         exists to prevent: the rule and a human-readable reason, always."""
         manager, _ = build_manager()
-        decision = manager.approve(buy(), portfolio=portfolio_factory())
+        decision = self._decision(manager, portfolio_factory())
         assert not decision.approved
         assert decision.rule is rule
         assert decision.reason
+
+
+class TestThePortsShape:
+    """M5b widened the port, and the shape is the safety property.
+
+    ``docs/NEXT_MILESTONE.md`` P2: "when the port widens, no method on it may
+    approve an entry whose committed risk is unknown." That holds here by
+    construction rather than by a check -- ``size_position`` takes no
+    ``Portfolio`` and so has nothing to approve an entry against, leaving
+    ``evaluate`` as the only port method that sees one, and it refuses under
+    ``COMMITTED_RISK_UNKNOWN`` before any limit is consulted.
+    """
+
+    def test_the_port_declares_exactly_the_composed_path_and_sizing(self) -> None:
+        assert RiskManagerPort.__abstractmethods__ == frozenset({"evaluate", "size_position"})
+
+    def test_only_evaluate_takes_a_portfolio(self) -> None:
+        """The by-construction half. ``size_position`` cannot express the
+        violation because it is handed an equity figure, not the account."""
+        takes_portfolio = {
+            name
+            for name in RiskManagerPort.__abstractmethods__
+            if "portfolio" in inspect.signature(getattr(RiskManagerPort, name)).parameters
+        }
+        assert takes_portfolio == {"evaluate"}
+
+    def test_approve_is_deleted_not_demoted(self) -> None:
+        """P2 offered three shapes; the ruling took deletion. Keeping the method
+        private with the check added was rejected because the check would sit in
+        a method nothing calls -- so no test exercising ``evaluate`` could reach
+        it, and the duplicated guard would be unobservable rather than merely
+        redundant.
+        """
+        assert not hasattr(RiskManagerPort, "approve")
+        assert not hasattr(RiskManager, "approve")
 
 
 def _with_loss(portfolio: Portfolio, amount: Decimal) -> Portfolio:

@@ -128,14 +128,15 @@ class SignalAction(str, Enum):
 
 
 class RiskRule(str, Enum):
-    """Which risk rule refused a signal, reported by ``RiskManager.approve``.
+    """Which risk rule refused a signal, carried on ``RiskAssessment.decision``.
 
     Richer than a boolean for the same reason :class:`SignalAction` has no
     ``HOLD``: an operator staring at a bot that stopped entering needs to know
     *which* limit is holding it back, and "False" cannot say. It names only the
-    rules :meth:`~trading_bot.core.interfaces.RiskManager.approve` itself
-    evaluates -- sizing and protective-level refusals carry their own reasons on
-    ``SizingDecision`` / ``ProtectiveLevels``.
+    rules the limit check itself evaluates, reached through
+    :meth:`~trading_bot.core.interfaces.RiskManager.evaluate` -- sizing and
+    protective-level refusals carry their own reasons on ``SizingDecision`` /
+    ``ProtectiveLevels``.
 
     The first two are portfolio-wide states in which *no* entry is acceptable;
     the middle two are facts about one symbol; the last is the portfolio-wide

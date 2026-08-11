@@ -16,12 +16,12 @@ from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
+from trading_bot.core.assessment import RiskAssessment
 from trading_bot.core.models import (
     Balance,
     Candle,
     Order,
     OrderRequest,
-    RiskDecision,
     Signal,
     SizingDecision,
     SymbolInfo,
@@ -211,25 +211,36 @@ class RiskManager(ABC):
         """
 
     @abstractmethod
-    def approve(self, signal: Signal, *, portfolio: Portfolio) -> RiskDecision:
-        """Vet ``signal`` against the configured risk limits.
+    def evaluate(self, signal: Signal, *, portfolio: Portfolio) -> RiskAssessment:
+        """Turn ``signal`` into an intent to trade, or into the reason there is none.
 
-        ``portfolio`` supplies every fact the limits are evaluated against --
-        open positions, free balance, the day's realised P&L, per-symbol
-        cooldowns -- so this stays a pure function of its arguments and the
-        clock. It is read, never mutated: recording an entry or an exit belongs
-        to whoever actually places the order.
+        The composed path: preconditions, equity, the limits, the ATR bridge,
+        protective levels, sizing and affordability. Every refusal is a returned
+        value naming the
+        :class:`~trading_bot.core.enums.RefusalStage` it stopped at; nothing on
+        this path raises for a market condition.
 
-        Returns a :class:`~trading_bot.core.models.RiskDecision` rather than a
-        ``bool``. The reason is the one that produced ``SizingDecision`` and
-        ``ProtectiveLevels``: a refusal that cannot say *which* limit fired
-        leaves an operator staring at a silent bot with no way to tell a
-        daily-loss halt from a position cap. ``True``/``False`` was the
-        placeholder that made this method typeable before the portfolio type
-        existed; both halves of that placeholder are now gone.
+        **This is the only entry point.** A ``approve``-shaped method that
+        checked the limits alone used to sit beside it, and it could approve an
+        entry whose committed risk was unknown -- forward risk that cannot be
+        priced tells the daily-loss check that an unprotected position carries
+        none, which is the inverse of the truth. It is gone rather than guarded,
+        so the guarantee is a property of this port's shape: only one method
+        here takes a ``Portfolio``, and it refuses.
 
-        This vets *entries*. An exit must always be permitted -- a limit that
-        could trap an open position would be a risk rule that creates risk.
+        ``portfolio`` is **read, never mutated**: recording an entry or an exit
+        belongs to whoever actually places the order.
+
+        **Not a pure function of its arguments.** Marks come from an injected
+        market-data collaborator, not from ``portfolio``, so equity and
+        committed risk are computed against whatever bar has most recently
+        closed. The same signal and the same portfolio can evaluate differently
+        on two bars, and that is the intended behaviour rather than a caveat.
+
+        The **limits** vet entries only. A ``CLOSE`` is routed to an exit before
+        any limit is consulted: an exit must always be permitted, because a
+        limit that could trap an open position would be a risk rule that creates
+        risk.
         """
 
 

@@ -122,7 +122,7 @@ class Portfolio(BaseModel):
     """Open positions, free balance, and the limit state the risk rules read.
 
     Constructed by the composition root and passed to
-    :meth:`~trading_bot.core.interfaces.RiskManager.approve` per call. The risk
+    :meth:`~trading_bot.core.interfaces.RiskManager.evaluate` per call. The risk
     manager only ever *reads* it; the mutators below are called by execution
     when an order actually fills.
     """

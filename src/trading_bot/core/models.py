@@ -515,7 +515,9 @@ class RiskDecision(_Frozen):
     """Whether acting on a signal respects the configured risk limits -- and if
     not, which rule refused it.
 
-    Returned by :meth:`trading_bot.core.interfaces.RiskManager.approve`, which
+    Carried on :attr:`~trading_bot.core.assessment.RiskAssessment.decision`,
+    reached through
+    :meth:`~trading_bot.core.interfaces.RiskManager.evaluate`. The limit check
     returned a bare ``bool`` until Phase 5 M3. The change applies the same rule
     :class:`SizingDecision` and ``ProtectiveLevels`` already follow: "no trade"
     is a frozen value object carrying its reason, never a bare sentinel. A

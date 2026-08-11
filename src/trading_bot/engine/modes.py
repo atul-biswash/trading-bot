@@ -140,9 +140,10 @@ class LiveSystem:
     ``slots=True`` so a mistyped attribute raises instead of silently sticking.
 
     ``client`` and ``provider`` are typed as their ports so a scripted fake
-    satisfies them. ``risk`` is the **concrete** :class:`RiskManager`: the port
-    of that name declares only ``size_position`` and ``approve``, while
-    ``evaluate`` -- the composed path this root exists to wire -- is class-only.
+    satisfies them. ``risk`` is the **concrete** :class:`RiskManager` even
+    though ``evaluate`` is now on the port: the root builds the concrete object
+    and hands it over, and widening this field's type would buy nothing the
+    port does not already guarantee.
     """
 
     settings: Settings

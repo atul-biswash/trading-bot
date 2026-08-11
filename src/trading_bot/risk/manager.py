@@ -143,36 +143,7 @@ class RiskManager(RiskManagerPort):
         self._pairs = dict(pairs)
         self._clock = clock
 
-    # -- port: limits -------------------------------------------------------
-    def approve(self, signal: Signal, *, portfolio: Portfolio) -> RiskDecision:
-        """Vet ``signal`` against every configured limit. See the port docstring.
-
-        Equity is computed here from the portfolio's positions and the latest
-        closed candle for each, because the daily-loss threshold is a percentage
-        of it. :meth:`evaluate` computes equity once and reuses it rather than
-        paying for it twice.
-        """
-        marks, unpriced = self._mark_prices(portfolio)
-        if unpriced:
-            return RiskDecision(
-                symbol=signal.symbol,
-                approved=False,
-                rule=RiskRule.NO_MARK_PRICE,
-                reason=(
-                    "cannot value open position(s) "
-                    f"{', '.join(unpriced)}; equity is unknown, so no limit can be checked"
-                ),
-            )
-        # NOTE: the uncomputable count is discarded here, so this path can
-        # approve an entry whose committed risk is unknown. `evaluate` checks
-        # it before the limits. This method is deleted by the commit that
-        # widens the port -- `evaluate` becomes the only entry point -- so the
-        # gap closes with the method rather than being patched here.
-        committed, _uncomputable = portfolio.committed_risk(marks)
-        return self._approve(
-            signal, portfolio=portfolio, equity=portfolio.equity(marks), committed=committed
-        )
-
+    # -- limits -------------------------------------------------------------
     def _approve(
         self,
         signal: Signal,
@@ -357,7 +328,10 @@ class RiskManager(RiskManagerPort):
                 symbol=symbol,
                 approved=False,
                 rule=RiskRule.NO_MARK_PRICE,
-                reason=f"cannot value open position(s) {', '.join(unpriced)}",
+                reason=(
+                    "cannot value open position(s) "
+                    f"{', '.join(unpriced)}; equity is unknown, so no limit can be checked"
+                ),
             )
             return refuse(decision.reason, stage=RefusalStage.NO_MARK_PRICE, decision=decision)
 
