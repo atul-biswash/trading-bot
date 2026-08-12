@@ -1221,6 +1221,81 @@ they live here because this is the only file loaded into every session. Docs tha
 must be remembered to be read are how the four drifts found in the M3 audit got
 in.
 
+### What rotation compiles FROM — a finding lands at its commit, not at rotation
+
+M5b's closing rule, quoted from `docs/PHASE_HISTORY.md`: **"A finding destined for
+`PHASE_HISTORY.md` is written there at the commit that produced it — not carried
+to rotation. Rotation *compiles*; it must not be a finding's first contact with
+disk."**
+
+That entry nearly proved its own point by losing four of its findings. T, CC, EE
+and GG were generated in Phase 1 reports, never folded into a commit message, and
+therefore existed **only in chat** — one closed window from being irrecoverable.
+
+**The obligation attaches to the two-phase artefacts, and it is written here
+rather than left to a prompt.** Every Phase 1 report ends with a findings block,
+each finding carrying an **ID** and a **MEASURED / REASONED / UNMEASURED** mark.
+Every Phase 2 authorisation names **which finding lands in which commit message**.
+A rule that depends on an assistant remembering it is the `phase_5_` shape
+described below: build reasoning living outside the repo, invisible to every gate,
+grep and review.
+
+The commit message carries the block as the **last section of the body, before any
+trailer**, in one of two shapes:
+
+```
+Findings: none
+```
+
+```
+Findings:
+- <ID> — <one line>. <MEASURED | REASONED | UNMEASURED>.
+```
+
+**`Findings: none` is mandatory, never an absent section.** An absent section is
+indistinguishable from a forgotten one, which is M5b's failure exactly. This is
+the same decision already locked for `RiskAssessment.stage` — *required but
+nullable, no default, so every construction site says something and an approval
+says `None` deliberately* — one notch weaker, because there a validator enforces
+it and here nothing does.
+
+**The probe hole, closed explicitly.** A scratchpad probe changes no file and
+produces no commit, so *"the commit that produced it"* has no referent — and the
+milestones with the most probe-derived findings are exactly the ones where this
+matters. **A probe's findings land in the docs commit that records the
+measurement, and the Phase 2 authorisation for that probe names that commit in
+advance.** Without this clause, probe findings fall through the same hole M5b's
+four fell through, and they do it while looking compliant.
+
+**This is a DISCIPLINE attached to the Phase 1 / Phase 2 artefacts, not an
+enforced check. Nothing fails when it is skipped.** `.gitmessage` at the
+repository root pre-fills the block and is a **convenience, not enforcement**: it
+applies only to commits written through the editor, never to `git commit -m` or
+`-F`, and it does nothing until someone runs `git config commit.template
+.gitmessage`, which is per-machine config rather than tracked state.
+
+A `commit-msg` hook was **rejected**, and not for being unavailable. It enforces
+the block's *shape* and never its *truth* — `Findings: none` on a commit that
+produced four is invisible to it. Its installation is local config too
+(`core.hooksPath`), `--no-verify` bypasses it, a probe gives it no referent, and a
+hook that aborts a commit produces a commit its author believes landed and did
+not. That last failure is worse than the one it prevents.
+
+**Rotation reads the blocks with one command.** Its base is the previous
+milestone's closing SHA — the last row of that milestone's commit table in
+`docs/PHASE_HISTORY.md` — **looked up, never hardcoded here**, because a SHA
+written into this file is a count site by another name and would go stale the way
+the documented counts do:
+
+```bash
+git log "$(sed -n 's/^| [0-9]* | `\([0-9a-f]*\)`.*/\1/p' docs/PHASE_HISTORY.md | tail -1)..HEAD" --format='@@@%h %s%n%b' | awk '/^@@@/{h=substr($0,4);p=0;next} /^Findings:/{print "";print h;p=1} p'
+```
+
+It prints nothing when no commit in the range carries a block. That is the state
+every range was in before this rule, so an empty result means "not looked" as
+readily as "no findings" — read it against `git log --oneline` over the same
+range rather than alone.
+
 **The Claude.ai Project knowledge is a fourth drift surface, and nothing audits
 it.** It is outside the repo, so no gate, grep or review touches it —
 `MILESTONE_WORKFLOW.md` was referenced there for months while existing nowhere in

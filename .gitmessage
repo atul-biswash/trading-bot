@@ -1,0 +1,37 @@
+
+# ---------------------------------------------------------------------------
+# Subject: <type>(<scope>): <imperative, lower case, no trailing period>
+#
+# Body: the WHY, not the what. `git diff` already shows the what.
+# Keep mechanical changes (formatting, line endings, renames) in their own
+# commits, never mixed with semantic ones.
+# ---------------------------------------------------------------------------
+#
+# THIS TEMPLATE ENFORCES NOTHING. It is a convenience that pre-fills the block
+# below, and it is inert three ways over: git applies it only to commits
+# written through the editor and never to `git commit -m` or `-F`; it does
+# nothing at all until someone runs `git config commit.template .gitmessage`,
+# which is per-machine config rather than tracked state; and no check anywhere
+# reads the result. Nothing fails when the block is skipped.
+#
+# The obligation itself lives in CLAUDE.md's "Git workflow" section, attached
+# to the Phase 1 report and the Phase 2 authorisation. Read it there.
+#
+# ---------------------------------------------------------------------------
+# The Findings block is the LAST section of the body, before any trailer.
+#
+# `Findings: none` is MANDATORY -- never an absent section. An absent section
+# cannot be told apart from a forgotten one.
+#
+# Two shapes. Keep one, delete the other:
+#
+#   Findings: none
+#
+#   Findings:
+#   - <ID> — <one line>. <MEASURED | REASONED | UNMEASURED>.
+#
+# A finding found by a scratchpad probe has no commit of its own; it lands in
+# the docs commit that records the measurement. See CLAUDE.md.
+# ---------------------------------------------------------------------------
+
+Findings: none
