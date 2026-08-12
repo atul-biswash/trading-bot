@@ -822,6 +822,38 @@ data.
   > decision being unlocked, and it gets its own Phase 1 rather than a repair
   > improvised inside an annotation.
 
+  > **THE ANNOTATION ABOVE IS ITSELF WRONG, corrected here rather than deleted,
+  > because the rule it broke says so — a finding later found wrong is annotated
+  > in a subsequent block, never amended. This is that rule's first real use.**
+  >
+  > **The recovery rule is NOT falsified. It stands exactly as written.** Arm 10
+  > measured the live case directly: a list confirmed live by read-back
+  > immediately beforehand — `listOrderStatus: EXECUTING`, `listStatusType:
+  > EXEC_STARTED`, working leg `NEW`, both pendings `PENDING_NEW` — was
+  > resubmitted byte-identical and returned **`-2010`, HTTP 400, `"Duplicate
+  > order sent."`**. That is precisely the success signal Q-C §8 classifies, in
+  > precisely the state this recovery path runs in. *(TESTNET, BTCUSDT,
+  > 2026-08-12.)*
+  >
+  > **Why the earlier annotation was wrong, which is the transferable part.**
+  > Every arm of the first probe ran against a **terminated** original. The arm
+  > set was therefore **structurally incapable of distinguishing ID release from
+  > absence of deduplication** — the two hypotheses predict identical results in
+  > every state it sampled. All three acceptances were correct observations; they
+  > were observations of the wrong state. **The defect was in the design of the
+  > arm set, not in any measurement it made.**
+  >
+  > **The actual rule, measured: a client order ID is unique against LIVE orders
+  > only; a terminal order's ID is RELEASED and immediately reusable** — see Q-C
+  > §6. The re-place branch table against that rule is in Q-C §8; the one branch
+  > still not measured is a filled working leg with live pendings, which needs a
+  > fill.
+  >
+  > **`M5c-B` at `9c47858` is annotated by this commit and is not amended.** The
+  > worst case it names is not established and is now the *less* likely reading,
+  > since the pending legs' IDs remain live and a byte-identical re-place would
+  > collide with them.
+
   **That guarantee is MEASURED for a duplicate client order ID and UNMEASURED for a
   duplicate order *list*.** The recovery path's classifier depends on it. Settled by
   a rejection — resubmit an accepted list's exact parameters and read the error —

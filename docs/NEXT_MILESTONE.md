@@ -329,6 +329,31 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   > unchanged — the question must not be assumed in either direction** — and this
   > note is a data point, not an answer.
 
+- **A client order ID is NOT a unique key across time, and reconciliation is
+  keyed by ID. UNMEASURED, and it is M5d's foundation.** Measured at M5c: a
+  client order ID is unique against **live** orders only, and a terminal order's
+  ID is **released and immediately reusable** — identically for single orders and
+  for order lists (`docs/QC_PROTECTIVE_ORDERS.md` §6 and §8).
+
+  The consequence is not a collision at *placement* — that is settled, and the
+  generation segment handles the resting case. It is a question about *lookup*.
+  Two different orders can carry the same client order ID at different times, and
+  `CLAUDE.md` keys reconciliation off **what was requested**, by ID. **Nobody has
+  measured what a query by `origClientOrderId` returns when an ID has been used
+  twice: the live order, the most recent, or a stale terminal one.** A reconciler
+  that reads back the wrong order compares against the wrong truth, and the two
+  answers are indistinguishable in the payload.
+
+  **The mitigation is real and it is not an answer.** Q-C §6's scheme embeds
+  `entry_bar_time_ms`, so a repeat is only reachable within the *same entry bar* —
+  which bounds the collision to a narrow window and makes this a question rather
+  than a defect. It does not establish what the query does inside that window.
+
+  *Arming condition:* **the reconciler.** Nothing queries by client order ID
+  today. Settled by one **read-only** query against an ID that has been used
+  twice — and M5c's probe has already created exactly that condition on Testnet,
+  so the measurement costs a single call and no order.
+
 - **`MarketLotSize.max_qty` is parsed but not read.** The "0 means no constraint"
   convention is per-field, not filter-wide: both Testnet and mainnet report a real
   `maxQty` beside zeroed min/step, so applying one rule to all three would either

@@ -230,6 +230,17 @@ against a zero balance; the second produces a bounded, monitored exposure betwee
 two calls the client is actively making. **Unprotected-and-known is preferable to
 protected-against-nothing**, so cancel goes first.
 
+> **MEASURED at M5c: ONE cancel collapses the whole list.** Cancelling the
+> working leg alone auto-cancelled both pending legs; cancels subsequently issued
+> for those legs returned `-2011 'Unknown order sent.'`, and the list went to zero
+> open on both `get_open_orders` and `v3_get_open_order_list`. *(TESTNET,
+> BTCUSDT, 2026-08-12.)*
+>
+> So the cancel step of cancel → confirm → sell is **one call, not three**, and
+> the `-2011` from any redundant per-leg cancel is the benign row of the table
+> below rather than a failure. A close path written to drive three cancels to
+> success would treat its own normal teardown as two errors.
+
 **Cancel failure is classified, not retried blindly.**
 
 | Outcome | Meaning | Action |
@@ -451,6 +462,30 @@ The generation segment exists because re-placement after an unprotected divergen
 would otherwise collide with consumed IDs and return `-2010 'Duplicate order sent.'`
 (MEASURED).
 
+> **"Consumed" is narrower than it reads, and this is now MEASURED at M5c:**
+>
+> > **A client order ID is unique against LIVE orders only. A terminal order's ID
+> > is RELEASED and immediately reusable. This holds identically for single
+> > orders and for order lists.**
+>
+> *(TESTNET, BTCUSDT, 2026-08-12. Live single with a repeated `newClientOrderId`
+> → `-2010`; the same ID after cancelling that order → accepted with a new
+> `orderId`; a live order list resubmitted byte-identical → `-2010`; a terminated
+> list resubmitted byte-identical → accepted, new `orderListId`, new leg
+> `orderId`s, leg `clientOrderId`s honoured byte-for-byte. The full table and the
+> re-place branches are in §8.)*
+>
+> **What this means for the generation segment: it is still required, and its
+> justification narrows.** It is not needed to avoid colliding with *terminated*
+> orders — those IDs are free. It is needed for the case §7 actually describes: a
+> re-placement while the previous generation's legs are **still resting**, which
+> is exactly when a collision would occur and exactly when re-placing matters.
+>
+> **A consequence that is NOT a collision and is carried as an open item:** if
+> terminal IDs are released, a client order ID is not a unique key *across time*,
+> so two different orders can carry the same one. See
+> `docs/NEXT_MILESTONE.md` for the reconciliation question that raises.
+
 Prefix `tb1-` is required because `get_open_orders` returns **every** order on the
 symbol, ours and otherwise, and only a prefix distinguishes them. Note the library
 tag is *not* the reason: `create_order` auto-injects `x-HNA2TXFJ` plus a random
@@ -591,6 +626,20 @@ benign `OrderNotFoundError` on cancel paths; note `cancel_all_open_orders` raise
 Filter failures → `FilterRejectedError` carrying the parsed filter name. `-1106` →
 programming error, raise loudly. `-1158` / `-1159` / `-1128` → contract errors.
 
+> **`-2011` on a cancel path is CONFIRMED benign on a real OTO teardown, and the
+> teardown itself is a measurement worth keeping.** Cancelling the **working leg
+> alone auto-cancelled both pending legs**: the subsequent cancels for those two
+> returned `-2011 'Unknown order sent.'`, and the list went to **zero open** —
+> `get_open_orders` and `v3_get_open_order_list` both empty.
+> *(TESTNET, BTCUSDT, 2026-08-12.)*
+>
+> Two consequences. **One cancel collapses the list**, so a reconciler or the §4b
+> close path must not treat per-leg cancellation as three independent operations
+> to be driven to success. And **the `-2011` those follow-up cancels produce is
+> routine rather than exceptional** — the same shape §8 already records for
+> `cancel_all_open_orders` on an already-clear book, now observed on the exact
+> object this contract places.
+
 > **MEASURED at M5c, and it does NOT hold for order LISTS: an exact duplicate is
 > ACCEPTED.** The sentence above is a statement about a duplicate client order
 > ID. Resubmitting an *accepted order list's* byte-identical parameters produces
@@ -624,6 +673,53 @@ programming error, raise loudly. `-1158` / `-1159` / `-1128` → contract errors
 > least as present at the venue as a terminated one's. **Acceptance does not
 > generalise downward.** See `CLAUDE.md`'s timed-out-write annotation for what
 > that costs the recovery path.
+
+> **THE LIVE CASE IS NOW MEASURED, AND IT IS A REJECTION. The paragraph above is
+> corrected rather than deleted**, per the rule that a finding later found wrong
+> is annotated in a subsequent block. Its reasoning about the asymmetry was sound;
+> its conclusion about what that costs the recovery path was wrong, because the
+> missing measurement has since been taken.
+>
+> **A live order list, resubmitted byte-identical, is REJECTED with `-2010`,
+> HTTP 400, `"Duplicate order sent."`** The list was confirmed live by read-back
+> immediately beforehand: `listOrderStatus: EXECUTING`,
+> `listStatusType: EXEC_STARTED`, working leg `NEW`, both pendings `PENDING_NEW`.
+> *(TESTNET, BTCUSDT, 2026-08-12.)*
+>
+> **THE ACTUAL RULE, and it is not about lists at all:**
+>
+> > **A client order ID is unique against LIVE orders only. A terminal order's ID
+> > is RELEASED and immediately reusable. This holds identically for single
+> > orders and for order lists.**
+>
+> | State | Same ID resubmitted | Outcome |
+> |---|---|---|
+> | single `LIMIT`+`GTC`, resting | `newClientOrderId` | **`-2010` rejected** |
+> | same single, after cancel | `newClientOrderId` | **accepted**, new `orderId` |
+> | order list, live (`EXECUTING`) | byte-identical | **`-2010` rejected** |
+> | order list, terminated (`ALL_DONE`) | byte-identical | **accepted**, new `orderListId`, new leg `orderId`s, leg `clientOrderId`s honoured byte-for-byte |
+>
+> **Why the earlier reading was wrong is worth more than the correction.** Every
+> arm of the first probe ran against a *terminated* original, so the arm set could
+> not distinguish *ID release* from *absence of deduplication* — both hypotheses
+> predict the same result in every state it sampled. The acceptances were correct
+> observations of the wrong state; **the defect was in the design of the arm set,
+> not in any measurement it made.** The single-order arm is what discriminated
+> them, and it was not in the original design.
+>
+> **The re-place branch table, against the measurement:**
+>
+> | After a timed-out write | Re-place | Status |
+> |---|---|---|
+> | never placed | accepted | correct — nothing rested |
+> | placed, `FOK`-expired, nothing rests | accepted | correct — this *is* the "nothing rests" branch |
+> | placed and still live | **`-2010`** | the success signal, as designed |
+> | placed, working leg **filled**, pendings live | pendings' IDs are still live, so a byte-identical re-place collides | **REASONED, NOT MEASURED** — needs a fill |
+>
+> **One deviation, marked.** Arm 10's working leg was `LIMIT`+**`GTC`**, not §3's
+> `FOK`, because a `FOK` leg cannot rest and so cannot produce a live list without
+> a fill. Uniqueness is not a property of `timeInForce`, so the result should
+> generalise to a live `FOK` list — **INFERRED, NOT MEASURED.**
 
 ## 9. Costs
 
