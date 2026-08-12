@@ -173,6 +173,23 @@ src/trading_bot/
 scripts/         check_testnet.py · download_data.py
 ```
 
+### `__all__` declares importability, not authorship
+
+**A module's `__all__` says what a caller may import from it, not where the type
+was defined.** A type stays in a module's `__all__` while that module binds the
+name and holds the code producing or consuming it; `__module__` is the authority
+on where it lives.
+
+So a type may legitimately appear in **two** `__all__` lists — one because it is
+defined there, one because it is that package's public surface — and neither is a
+duplicate to be tidied away. `ProtectiveLevels` is the worked example: it is
+defined in `core/models.py` and re-exported by `risk/rules.py`, which is still
+where the code that computes it lives.
+
+The rule matters because the tempting reading is the opposite one — that `__all__`
+tracks definitions — and acting on it deletes a name a caller is importing. Settled
+at M5b commit 6 (`e99f3a7`) when `ProtectiveLevels` moved.
+
 ### Key seams
 
 - **`MarketDataProvider`** — `get_dataframe(symbol, timeframe)` (float64 OHLCV,
@@ -283,6 +300,26 @@ data.
 ---
 
 ## Locked decisions — do not re-litigate without an explicit reason
+
+**Ordering inside a multi-write method**
+- **The fallible step precedes the irreversible one, in every method that writes
+  more than one field.** Everything that can raise runs first, so a failure leaves
+  the object exactly as it was; only then are the writes committed. Stated on
+  `Portfolio.open_position` and `close_position`, but it binds every multi-write
+  method rather than those two: `record_realised_pnl` was the second instance
+  (M5b commits 2 and 3) and will not be the last.
+
+  The failure it prevents is a **half-applied** write, which is worse than a
+  refused one because nothing reports it. `record_realised_pnl` committed the day
+  roll before the accrual that could fail, so a failed accrual destroyed the
+  previous day's realised facts and zeroed a new day nothing was booked into.
+
+  Note the interaction with `validate_assignment=True`, because it is what makes
+  the ordering observable rather than merely tidy: each assignment re-validates,
+  so a method that writes twice is briefly observable between the two writes. That
+  is why `Position` may not carry a `model_validator` while
+  `advance_trailing_stop` writes twice, and why collapsing those writes is a
+  prerequisite rather than a cleanup.
 
 **Domain**
 - Value objects are **frozen** pydantic models; `Position` is mutable by design.
@@ -573,7 +610,10 @@ data.
   the applied slippage is visible in one record instead of inferred from two. On
   an exit there is **no `entry` field at all** — absent, not null, per the schema
   rule — and `order_type="MARKET"` says so, because "at what price" is genuinely
-  unknown until it fills. A field that would have to lie is omitted.
+  unknown until it fills. A field that would have to lie is omitted. `order_type`
+  is present on **both** branches, and that is what makes the absent `entry`
+  legible: `MARKET` says *why* there is no price, so a reader is not left
+  inferring absence from absence.
 
 **Protective orders (Q-C — full reasoning in `docs/QC_PROTECTIVE_ORDERS.md`)**
 - **Entry and protection are placed in one order-list call.** No client-side /
@@ -983,6 +1023,13 @@ examples in the paragraph above; those are prose about a past commit and must be
 left alone, which is easy to tell apart and impossible to notice if the grep
 never ran.
 
+**This rule has an inverse, and the two must be applied together.** Grepping the
+digits guards against *missing* a site; the inverse guards against *hitting one
+that is not a count*. Both live in `docs/NEXT_MILESTONE.md`'s process section, as
+a pair, because a rule and its inverse kept in separate documents is how one of
+them gets applied alone — which is exactly what nearly happened at M5b's
+rotation.
+
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:
 
@@ -1017,6 +1064,29 @@ The 3 integration tests are read-only against Binance **Testnet**, never place a
 order, and are gated by `tests/integration/credentials.py` (which reads through
 `Secrets()`, so `.env` works — not just environment variables).
 
+### Three harness traps, and each one hides its own evidence
+
+They belong together because they share a failure mode: the tool reports
+*something*, so nothing looks broken, and the missing part is what you needed.
+
+1. **`addopts` already carries `-q`, so `pytest -q` is `-qq` — and `-qq`
+   suppresses the summary line entirely.** Not shortens: removes. You get the
+   progress dots and no `N passed`. **Witnessed, repeatedly, during M5b:** several
+   `pytest ... -q | grep -E "passed|failed"` calls in that session returned
+   nothing at all and read as a hung or empty run, when the suite had passed. Run
+   the suite bare and let `addopts` supply the one `-q` it already has.
+2. **Run `ruff` and `mypy` from the project root**, or their configuration is not
+   the project's. Measured: `risk/manager.py` is clean from the root and reports
+   **15 `E501` errors** under default configuration, because this project sets
+   `line-length = 100` and ignores `E501`. The *mechanism* by which a wrong
+   working directory loses the config is not measured here and is not asserted —
+   what is measured is that the two configurations disagree loudly on a file that
+   is clean under ours.
+3. **`tests/unit/test_modes.py` imports its fixtures from
+   `tests/unit/test_risk_manager.py`.** An import-time break in the latter fails
+   both files, so a traceback naming `test_modes.py` may have nothing to do with
+   it. Nothing else in `tests/` couples two modules this way.
+
 ---
 
 ## Testing style
@@ -1035,6 +1105,20 @@ earlier test has left the root level low. `assert len(caplog.records) == 1`
 therefore passes for a file run alone and fails in the full suite — it did, for
 two tests, because `RiskManager.evaluate` emits its own `INFO` line. Filter with
 `[r for r in caplog.records if r.name == ...]`.
+
+### Name the test that pins each argument, and flag the ones with none
+
+**For every argument a report or a design note makes, name the test that pins it,
+and flag any argument that has none.** The flag is the point rather than the
+coverage: an unpinned argument is not a defect, but an unpinned argument nobody
+noticed is one waiting to happen — it reads as settled while nothing holds it.
+
+Adopted at M5b commit 9 and used in every report after. It pays twice. It
+separates *this is measured* from *this is reasoned*, which is the distinction
+this project's contracts are built on. And it surfaces the arguments that are
+**unpinnable** rather than merely unpinned — an absence proved by grep, a
+property that cannot fire until a milestone that does not exist — which are worth
+knowing about precisely because no future test will ever appear to cover them.
 
 ### Mutation-testing an anti-rot test
 
@@ -1143,6 +1227,19 @@ it.** It is outside the repo, so no gate, grep or review touches it —
 the tree. **This file is the authority.** Project knowledge should *point at* it,
 not restate it; anything restated there will eventually contradict the code, and
 the contradiction will be invisible from inside the repo.
+
+**Second instance, and it is worse than the first: `phase_5_`.** It was four
+milestones stale — announcing "Next: M4a" and reporting `pytest 569` — and it was
+the **first artefact each session read**, so every session began from a wrong
+milestone and a wrong count. No gate, grep or review in this project could see
+it; it was found only because a rotation went looking for the artefact by name
+and discovered it was not in the tree at all. Deleted from project knowledge at
+M5b's rotation.
+
+Two instances is the point. `MILESTONE_WORKFLOW.md` was a *dangling pointer* —
+harmless if never followed. `phase_5_` was **stale content presented as current**,
+which is the failure mode that actually misleads, and the one this surface will
+keep producing as long as anything is restated there.
 
 ---
 
@@ -1284,7 +1381,7 @@ cost on a real order, not to boot-time code whose only purpose is timing.
 **Still nothing places an order.** `IntentLogger` remains the terminal
 collaborator; `execution/` is still a pair of stubs.
 
-**M5b is complete, in thirteen commits, and it added no I/O.** Both of its
+**M5b is complete, in commits 0 through 13, and it added no I/O.** Both of its
 prerequisites — the **mutation-on-read** in the portfolio's lazy day-roll, and
 the requirement that the widened port not leave a path able to approve an entry
 whose committed risk is unknown — were met before the port moved. `TradeIntent`
