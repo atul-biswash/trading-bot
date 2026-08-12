@@ -1471,6 +1471,29 @@ name.
 > self-location — the property that justified namespacing in the first place — is
 > the whole of what would be lost.
 
+**A namespace extends to two characters when its letters run out: `…-Z`, then
+`…-AA`, `…-AB`, and so on, in the SAME namespace.** State the ordering
+explicitly, because it is obvious only to a reader who already knows it: **`Z`
+precedes `AA`**, exactly as a spreadsheet column does, not the string ordering
+that would put `AA` first.
+
+Two alternatives were rejected, and the reasons are the instructive part. **A
+second namespace** (`M5c2-`) invents a milestone that does not exist and destroys
+**self-location** — the one property that justified namespacing at all, since
+`M5c2-B` names no entry a reader can open. **Folding the remaining work into
+fewer commits** lets the ID scheme dictate the **commit grain**, which is
+backwards: the grain is a decision about reviewability, and an identifier is
+bookkeeping that must bend to it rather than the reverse.
+
+**A sequence was exhausted by counting twice in one milestone, and the second
+time it was caught before the last ID was spent.** The flat sequence ran out at
+`ZZ` and was discovered *at* exhaustion, with a ruling already written that could
+not be satisfied. The `M5c-` namespace was measured at 22 of 26 used **while
+three commits remained**, and the shortfall was raised then rather than on
+contact. That difference is the whole value of the earlier lesson, and it is
+recorded here so the next reader sees that checking remaining capacity is the
+practice, not that letters keep running out.
+
 **A verification baseline states its INSTRUMENT, not only its number.** The same
 concern one level down: `grep -c` counts matching **lines**, while a count of
 **occurrences** is a different quantity — in this file today the two differ by

@@ -49,6 +49,48 @@ class OrderError(ExchangeError):
     """An order was rejected or could not be created/canceled."""
 
 
+class MalformedRequestError(ExchangeError):
+    """The exchange could not parse the request. **This is our bug, not a market
+    condition.**
+
+    Binance returns ``-1100`` for a request whose parameters are ill-formed. The
+    measured instance is an over-long client order ID::
+
+        Illegal characters found in parameter 'workingClientOrderId';
+        legal range is '^[a-zA-Z0-9-_]{1,36}$'.
+
+    **The message MISLABELS its own cause, and that is measured**: 36 characters
+    are accepted and 37 rejected, so a *length* violation is reported as
+    "Illegal characters found". Anyone debugging it goes looking for a bad
+    character. The embedded regex is the only part of the text that discloses
+    the real rule, and it discloses both the length and the character class.
+
+    **It sits outside :class:`OrderError`, and it is the one family in the
+    classifier that does.** Every other refinement is the venue refusing a
+    *trade*, which a caller may reasonably handle -- retry, skip the signal, log
+    and continue. This is the venue refusing to *parse*, and there is nothing a
+    caller can do about it except stop. Under ``OrderError`` an
+    ``except OrderError`` written for routine rejections would swallow it, which
+    is precisely the failure Q-C section 8's "raise loudly" exists to prevent;
+    "loud" and "catchable as an ordinary order rejection" are contradictory.
+
+    It stays under :class:`ExchangeError` rather than going straight to
+    :class:`TradingBotError`, because it *did* arrive as an exchange response and
+    ``main.py``'s top-level ``except TradingBotError`` must still report it as a
+    message rather than a bare traceback.
+
+    ``parameter`` carries the offending parameter name as the exchange spelled
+    it, so a caller need not parse the message to know which field was wrong.
+
+    :param message: human-readable description.
+    :param parameter: the exchange's parameter name, e.g. ``"workingClientOrderId"``.
+    """
+
+    def __init__(self, message: str, *, parameter: str) -> None:
+        super().__init__(message)
+        self.parameter = parameter
+
+
 class OrderNotFoundError(OrderError):
     """The exchange has no record of the order this request named.
 

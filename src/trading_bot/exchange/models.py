@@ -46,6 +46,7 @@ from trading_bot.core.exceptions import (
     ExchangeError,
     FilterRejectedError,
     InsufficientBalanceError,
+    MalformedRequestError,
     OrderError,
     OrderNotFoundError,
     RateLimitError,
@@ -72,6 +73,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _RATE_LIMIT_CODE = -1003
 _UNKNOWN_ORDER_CODE = -2011
 _FILTER_FAILURE_CODE = -1013
+_MALFORMED_REQUEST_CODE = -1100
 # -2010 is OVERLOADED and the name says so. It carries at least two unrelated
 # meanings, both measured verbatim at M5c: "Account has insufficient balance for
 # requested action." and "Duplicate order sent." Only the message separates them,
@@ -514,6 +516,25 @@ _UNKNOWN_ORDER_RE = re.compile(r"^Unknown order sent\.$", re.IGNORECASE)
 _FILTER_FAILURE_RE = re.compile(r"^Filter failure: (?P<filter>[A-Z_]+)$")
 
 
+#: Matched against the message of a ``-1100``. **Only the narrow stable prefix**:
+#: the measured message ends with the venue's own regex --
+#: ``legal range is '^[a-zA-Z0-9-_]{1,36}$'`` -- which is pure metacharacters and
+#: MUST NEVER enter this pattern. Admitting it would require escaping a foreign
+#: regex correctly on every future reword, and getting that wrong silently stops
+#: the row matching at all.
+#:
+#: **This pattern claims a family MEMBER, not the family.** ``-1100`` is a
+#: general malformed-request code and other renderings certainly exist that this
+#: will not match; those fall through to today's behaviour and fire the loud
+#: guard, which is correct and is tested.
+_MALFORMED_PARAM_RE = re.compile(r"^Illegal characters found in parameter '(?P<param>[^']+)'")
+
+
+def _malformed_request(message: str, match: re.Match[str]) -> TradingBotError:
+    """Build a :class:`MalformedRequestError` carrying the offending parameter."""
+    return MalformedRequestError(message, parameter=match.group("param"))
+
+
 def _filter_rejected(message: str, match: re.Match[str]) -> TradingBotError:
     """Build a :class:`FilterRejectedError` carrying the captured filter name.
 
@@ -537,6 +558,9 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
     _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_RE, OrderNotFoundError),
     _ApiRule(_FILTER_FAILURE_CODE, _FILTER_FAILURE_RE, FilterRejectedError, _filter_rejected),
+    _ApiRule(
+        _MALFORMED_REQUEST_CODE, _MALFORMED_PARAM_RE, MalformedRequestError, _malformed_request
+    ),
 )
 
 

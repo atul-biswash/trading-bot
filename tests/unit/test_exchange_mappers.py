@@ -22,8 +22,10 @@ from trading_bot.core.exceptions import (
     DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
+    ExchangeError,
     FilterRejectedError,
     InsufficientBalanceError,
+    MalformedRequestError,
     OrderError,
     OrderNotFoundError,
     RateLimitError,
@@ -849,7 +851,92 @@ def test_the_rule_table_declares_its_order() -> None:
         (-2010, DuplicateOrderError),
         (-2011, OrderNotFoundError),
         (-1013, FilterRejectedError),
+        (-1100, MalformedRequestError),
     ]
+
+
+# --------------------------------------------------------------------------
+# Error translation -- -1100, the family that leaves OrderError
+#
+# `-1013` is the venue refusing a TRADE; `-1100` is the venue refusing to PARSE.
+# Both were OrderError through the reject set, and Q-C section 8 requires them
+# to separate sharply: one is a value a caller handles, one is our own bug.
+# `MalformedRequestError` therefore sits under ExchangeError, so an
+# `except OrderError` written for routine rejections cannot swallow it.
+# --------------------------------------------------------------------------
+def test_the_measured_malformed_message_maps_with_the_parameter_captured() -> None:
+    """MEASURED verbatim, Testnet, 2026-08-12: an over-long client order ID.
+
+    The embedded regex in the tail is deliberately outside the pattern, so the
+    fixture carries it to prove the prefix match survives a body full of
+    metacharacters.
+    """
+    exc = _api_error(
+        code=-1100,
+        status=400,
+        message=(
+            "Illegal characters found in parameter 'workingClientOrderId'; "
+            "legal range is '^[a-zA-Z0-9-_]{1,36}$'."
+        ),
+    )
+    result = m.translate_binance_error(exc)
+    assert type(result) is MalformedRequestError
+    assert result.parameter == "workingClientOrderId"
+
+
+def test_a_malformed_request_is_not_an_order_error() -> None:
+    """The one family in the classifier that is NOT under ``OrderError``.
+
+    Paired with the exact-type assertion above rather than standing alone: this
+    is the assertion that would silently stop biting if the parent changed, and
+    it is the whole point of the family, so it is asserted both ways.
+    """
+    exc = _api_error(
+        code=-1100, status=400, message="Illegal characters found in parameter 'symbol'; x"
+    )
+    result = m.translate_binance_error(exc)
+    assert type(result) is MalformedRequestError
+    assert not isinstance(result, OrderError)
+    assert isinstance(result, ExchangeError)
+
+
+def test_a_reworded_malformed_message_does_not_map_to_malformed_request() -> None:
+    """Prefix-anchored, so a reworded prefix fails it rather than squeezing past."""
+    exc = _api_error(code=-1100, status=400, message="Bad characters in parameter 'symbol'.")
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, MalformedRequestError)
+    assert type(result) is OrderError
+
+
+def test_a_different_1100_rendering_falls_through_loudly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The pattern claims a family MEMBER, not the family -- M5c-X, harder.
+
+    What is measured is ONE rendering of ``-1100``, from one parameter, in one
+    failure mode. ``-1100`` is a general malformed-request code and other
+    renderings certainly exist. They must fall through to today's behaviour AND
+    fire the guard, rather than being claimed by a pattern that never saw them.
+    """
+    exc = _api_error(code=-1100, status=400, message="Combination of optional parameters invalid.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        result = m.translate_binance_error(exc)
+
+    assert type(result) is OrderError
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "Combination of optional parameters invalid." in records[0].getMessage()
+
+
+def test_the_measured_1100_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Quiet on the happy path, per the arc's standard."""
+    exc = _api_error(
+        code=-1100, status=400, message="Illegal characters found in parameter 'symbol'; x"
+    )
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
 
 
 # --------------------------------------------------------------------------
@@ -989,17 +1076,32 @@ def test_the_measured_2011_message_does_not_log(caplog: pytest.LogCaptureFixture
 # reclassify when Binance rewords.
 # --------------------------------------------------------------------------
 def test_the_measured_duplicate_message_maps_to_duplicate_order_error() -> None:
-    """MEASURED verbatim, Testnet, 2026-08-12 -- single order and order list."""
+    """MEASURED verbatim, Testnet, 2026-08-12 -- single order and order list.
+
+    **Strengthened at C4** from ``isinstance`` to the exact type plus the
+    ancestry, matching C2 and C3. The pairing is what makes the ancestry claim
+    load-bearing: asserted alone it is blind (see the test below).
+    """
     exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
-    assert isinstance(m.translate_binance_error(exc), DuplicateOrderError)
+    result = m.translate_binance_error(exc)
+    assert type(result) is DuplicateOrderError
+    assert isinstance(result, OrderError)
 
 
 def test_duplicate_order_error_is_an_order_error() -> None:
-    """A refinement, not a reclassification: ``except OrderError`` still catches.
+    """DOCUMENTATION, NOT COVERAGE -- this assertion is blind by construction.
 
-    The venue did reject an order, so the subclass relationship is the same
-    argument ``FilterRejectedError`` rests on -- and it is what makes this
-    commit safe for any existing handler.
+    It states the intent: the venue did reject an order, so classifying a
+    duplicate under ``OrderError`` is a refinement and every existing
+    ``except OrderError`` keeps catching it.
+
+    **It pins nothing.** An ancestry-only assertion survives any mutation that
+    reclassifies its subject to another descendant of the same base, and this
+    one was *proved* blind at C3: a mutation that returned plain ``OrderError``
+    for this exact input broke eight tests and left this one passing. The
+    assertion it needs in order to bite lives in the test above, which now
+    carries both. Kept for the intent it records, marked so no reader counts it
+    as protection.
     """
     exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
     assert isinstance(m.translate_binance_error(exc), OrderError)
