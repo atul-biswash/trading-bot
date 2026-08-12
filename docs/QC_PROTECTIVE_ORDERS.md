@@ -331,6 +331,22 @@ explicitly **outside** the immutability rule — it is rewritten every bar by de
 > `should_exit` asks whether to exit **now**, `_binding_stop` asks what happens if
 > the bot **stops running**. Only the second is what committed risk means.
 
+> **"The trailing milestone" has no owner, and at M5c that stopped being an
+> oversight and became a finding.** This section defers the design to a milestone
+> that does not exist, while `CLAUDE.md` assigns *driving*
+> `advance_trailing_stop` to execution — so **the two documents have been
+> pointing at each other**, and a reader arriving at either was sent to the other.
+>
+> Neither can resolve it, because the question is prior to ownership: **does the
+> trailing level rest at the venue, or does it not exist?** §3 fixes the list at
+> three legs and none is a trailing leg, so today the answer is "it does not
+> exist" and a trailing level is client-side — which §1 rejected outright.
+>
+> **The single home for that question is `docs/NEXT_MILESTONE.md`'s item 2**, not
+> this section and not `CLAUDE.md`. Both now point *there* rather than at each
+> other. Answering it needs either an amendment to §3's leg set or a reopening of
+> §1, and **M5c did neither** — it named the question and stopped.
+
 **"Immutable once set", not "immutable after entry", and the difference is
 load-bearing.** §7 keys divergence off what was *requested*, so a position with
 nothing requested gives reconciliation nothing to compare: the reconciler is

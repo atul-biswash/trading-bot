@@ -558,6 +558,22 @@ data.
   manager; *driving* them from the candle subscription is execution's job, because
   an exit check is per-candle-per-position and `on_signal` skips quiet bars.
 
+  > **SCOPED at M5c to `check_exit` alone — the clause is annotated, not
+  > deleted, because it is correct about `check_exit` and about the seam.** It
+  > assigns execution the job of driving **two** methods, and the second one has
+  > no work to drive. Measured: `advance_trailing_stop` has **zero call sites in
+  > `src/`** and is `trailing_stop`'s **only** writer there, so what it writes is
+  > a level that nothing places, amends or cancels at the venue — Q-C §3 fixes
+  > the order list at three legs and none is a trailing leg. Driving it would
+  > produce a level no order rests on, which is precisely the client-side
+  > protection Q-C §1 rejected outright.
+  >
+  > So: **`check_exit` is execution's to drive; `advance_trailing_stop` is not
+  > assignable to anyone yet.** The blocking question is *does the trailing level
+  > rest at the venue, or does it not exist?* — stated in
+  > `docs/NEXT_MILESTONE.md`'s item 2, which is the single home for it. This
+  > annotation does **not** answer it and does **not** amend §3's leg set.
+
   **Q-C re-scoped this rule; it did not repeal it.** It governs *client-side*
   evaluation, where the bot chooses when to act. A protective order resting at the
   exchange triggers **intrabar**, and that fill is not a client decision — so the

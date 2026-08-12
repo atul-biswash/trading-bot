@@ -81,11 +81,37 @@ disagree if a balance changes between them.
 *Arming condition:* already live — it is two calls today. The disagreement window
 matters more once positions exist.
 
-### 2. The trailing milestone — undesigned, unassigned, unscheduled
+### 2. The trailing milestone — UNASSIGNABLE, and the blocking question named
 
-Q-C §5 defers the whole trailing design to "the trailing milestone".
-`CLAUDE.md` assigns *driving* `check_exit` / `advance_trailing_stop` to execution.
-**The two disagree about which milestone owns it, and nothing schedules either.**
+> **RULED at M5c. The earlier framing — "undesigned, unassigned, unscheduled" —
+> is superseded and the reason is recorded rather than the label changed.** It
+> read as an oversight, as though someone had merely forgotten to schedule it.
+> It is not: **nothing can own this until a prior question is answered**, and
+> assigning a milestone before that answer would be assigning work whose shape
+> is undetermined.
+
+**THE BLOCKING QUESTION, and ownership means nothing until it is answered:**
+**does the trailing level rest at the venue, or does it not exist?**
+
+**Why it is unassignable.** Under Q-C §3 the order list is **three legs** —
+working `LIMIT`+`FOK`, below `STOP_LOSS`, above `TAKE_PROFIT` — and **none of
+them is a trailing leg**. So a trailing level today has **no venue
+representation**: it is written onto a `Position` in memory and nothing places,
+amends or cancels an order for it. An owning milestone would first have to do one
+of two things, and both are decisions above its pay grade:
+
+1. **Amend Q-C §3's leg set**, so a trailing level rests at the exchange — which
+   reopens a measured contract, and §3's leg types are MEASURED (`MARKET` refused
+   as a working type, `-1159`; `LIMIT` refused in the pending-above slot,
+   `-1158`). **Not answered here.**
+2. **Accept a client-side trailing level** — which **Q-C §1 rejected outright**,
+   in these words: *"**Rejected — client-side protection.** Its failure is
+   unbounded: a crash, a lost socket or a deploy leaves an open position with
+   nothing watching it."*
+
+Option 2 is closed unless §1 is reopened; option 1 is open but is a contract
+amendment, not a milestone. That is the whole of why no milestone can pick this
+up as written.
 
 What exists: `update_trailing_stop` (pure), `RiskManager.advance_trailing_stop`
 (writes the level onto the position), `should_exit` (reads it). What does not
@@ -93,8 +119,11 @@ exist: any caller. `advance_trailing_stop` is `trailing_stop`'s **only** writer
 in `src/` and has no call site, so no production position can carry a trailing
 level today.
 
-*Arming condition:* whatever first drives the per-candle exit loop. Until then
-every trailing test exercises code nothing calls.
+*Arming condition:* **the blocking question above, not a milestone.** Until it is
+answered every trailing test exercises code nothing calls, and `CLAUDE.md`'s
+clause assigning execution the job of *driving* `advance_trailing_stop` assigns
+the driving of a method that writes a level nothing places — see the annotation
+on that clause.
 
 ### 3. Finding L — `realised_pnl` set with no `pnl_date`
 
@@ -141,6 +170,46 @@ level is non-`None` by definition — that is how the divergence was detected.
 level *selected* was a trailing level that rests nowhere. Same consequence,
 different cause, different discriminator — §7's is `ProtectionState`, commit 13's
 was level selection. Fixing either leaves the other.
+
+### 6. M5c's boundary — `execution/executor.py` STAYS A STUB
+
+> **RULED at M5c.** The heading of this file says M5c is "the adapter surface and
+> the first order", and "the first order" is ambiguous between *a probe
+> submission* and *`src/` becoming able to place*. It means the first: **M5c
+> submits to Binance in probes and wires nothing to the signal handler.**
+
+**M5c builds the adapter surface** — the port methods, the order-list request
+type and its mapper, the Q-C §6 client-order-ID scheme, the §8 message-text
+classifier — **and the probes exercise it.** Nothing wires it to the signal
+handler, and nothing dispatches from a signal. `execution/executor.py` and
+`execution/order_manager.py` remain docstring-only stubs at the end of M5c.
+
+**The reasoning, not only the boundary.** `docs/M5_NUMBERS.md:320` places the
+first order at M5e, in those words: *"Under M5e the first approved signal is also
+the first **order**"*. M5d is the reconciler. So wiring dispatch in M5c would put
+the first fill in front of a ledger that does not exist yet — **the first fill
+would have nothing to reconcile against**, no `last_reconciled_at` advancing, no
+divergence detector, and the recovery path for a timed-out write would be
+exercised for the first time with no reconciler behind it. The order M5-0 chose
+is surface, then ledger, then dispatch, and this keeps to it.
+
+**Two commit-grain rulings for this milestone — scope notes, not locked
+decisions.** They govern M5c's commits rather than the domain, so they live here
+and not in `CLAUDE.md`:
+
+- **Port declarations land WITH their implementation**, never as a
+  declarations-only commit. No commit may leave port surface with no caller —
+  `docs/PHASE_HISTORY.md`'s finding **GG** records `approve` sitting exactly that
+  way for two milestones, accumulating the P2 gap that made deleting it a
+  prerequisite rather than a tidy-up. Note that M5c's Phase 1 report listed
+  *"C5 before C8"* among the **FORCED** orderings: that is true **given the
+  split**, and the split was a choice, not a dependency. A forced ordering
+  manufactured by an optional split is not a constraint the tree imposes.
+- **The §8 classifier lands ONE COMMIT PER ERROR FAMILY** — the exception class,
+  its classifier branch and its test together. That keeps one concern per commit
+  without ever committing a class no caller catches, which is the same objection
+  `core/exceptions.py` already records in its own words: *"Re-add a risk
+  exception only alongside a caller that catches it."*
 
 ---
 
