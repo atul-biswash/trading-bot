@@ -882,6 +882,36 @@ data.
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
 - **All files are LF**, pinned by `.gitattributes`. Write LF.
+- **Text that LEAVES a document to be committed or executed is ASCII. Text that
+  stays in the document is house style, em dashes included.** This is a
+  **propagation boundary, not a file rule**, which is why the right answer can
+  differ between two paragraphs of the same file — and why "is CLAUDE.md ASCII?"
+  is the wrong question to ask of it.
+
+  **Commit messages: ASCII, mandatory.** They are an encoding surface — Windows,
+  PowerShell, `git commit -F` — and this project has already had a sweep script
+  crash mid-run on a console encoding error and leave `src/` **mutated on disk**,
+  caught only by the next command's checksum. Every commit message in this
+  repository is ASCII already; this records the reason rather than introducing
+  the practice.
+
+  **`.gitmessage`'s finding-line shape: ASCII**, for the same reason one step
+  removed — it is a placeholder *copied out* into a commit message, so it
+  inherits that surface. It is the shape that is covered, not the file.
+
+  **This file's own prose: house style, and the existing em dashes are NOT TO BE
+  SWEPT.** Said explicitly because the sweep has been forbidden twice in prompts
+  and recorded nowhere in the tree, which is exactly the `phase_5_` shape: an
+  instruction that exists only outside the repo and so cannot survive the session
+  that heard it. A normalising pass would be several hundred changed lines that
+  alter nothing and bury whatever else the commit carried.
+
+  **Why this clause exists — finding YY.** The instruction was scoped three
+  different ways across three consecutive authorisations, and the two conventions
+  now sit in **adjacent sections of this file**: `505efcd` added prose in house
+  style, `a7cf5e8` added pure ASCII. Nothing in the tree said which governed, so
+  each author guessed. Both guesses were defensible, which is what made the drift
+  invisible.
 - `ruff format` is a gate (`make check`). It runs over `src tests scripts` — the
   same paths as `ruff check` — so a formatting failure surfaces in seconds,
   before pytest.
