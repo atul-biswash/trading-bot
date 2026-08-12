@@ -792,6 +792,36 @@ data.
   `-2010 'Duplicate order sent.'`, which Q-C §8 classifies as a **success signal**.
   The re-place is idempotent *by the venue*, not by us.
 
+  > **FALSIFIED FOR ORDER LISTS at M5c. The sentence immediately above is the one
+  > that fails**, quoted so it cannot be mistaken for a neighbouring claim:
+  > *"Query failed ⇒ re-place anyway, because a duplicate lands as `-2010
+  > 'Duplicate order sent.'` … The re-place is idempotent by the venue, not by
+  > us."*
+  >
+  > **Measured: it is not.** An exact duplicate order list is **accepted** — a new
+  > `orderListId`, new leg `orderId`s, and the leg `clientOrderId`s honoured
+  > byte-for-byte — 0.647 s after the original, with both control arms also
+  > accepted, so neither the list ID nor the leg IDs are deduplicated. Full
+  > provenance and the table are in `docs/QC_PROTECTIVE_ORDERS.md` §8. **There is
+  > no venue-side idempotence for order lists to rest on.**
+  >
+  > **The asymmetry is what makes this fatal rather than partial.** The
+  > measurement was taken against a *terminated* original. A rejection there would
+  > have generalised **upward** to the live case; **acceptance does not generalise
+  > downward**. And the recovery path cannot know which state it is in — that
+  > ambiguity is the entire reason it exists. **So there is no state in which the
+  > rule is known safe**, rather than one uncovered corner.
+  >
+  > **The worst case, and it is UNMEASURED:** the original placed, its working leg
+  > filled, protection live — and the re-place opens a **second entry**. A double
+  > position, unprotected by anything that counted it, arriving through the path
+  > written to prevent exactly that. Nothing measured says the venue refuses it,
+  > and after the above there is no longer a reason to expect it to.
+  >
+  > **No replacement rule is written here, deliberately.** This is a locked
+  > decision being unlocked, and it gets its own Phase 1 rather than a repair
+  > improvised inside an annotation.
+
   **That guarantee is MEASURED for a duplicate client order ID and UNMEASURED for a
   duplicate order *list*.** The recovery path's classifier depends on it. Settled by
   a rejection — resubmit an accepted list's exact parameters and read the error —

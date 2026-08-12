@@ -480,6 +480,24 @@ comparing them manufactures divergence for the same reason (MEASURED, B2/B3/B4).
 `listClientOrderId` is deterministically `null` there when a list terminates in the
 same call, while the leg IDs in that same payload are correct (MEASURED, T1).
 
+> **Five earlier measurements RE-CONFIRMED at M5c — re-confirmations, not new
+> results, and listed together because they were taken in one run against a
+> different question.** *(TESTNET, BTCUSDT, 2026-08-12, the duplicate order-list
+> probe.)* Nothing here changes a decision; the value is that claims the design
+> rests on were re-observed on a later day, on a live venue, by a probe that was
+> not looking for them.
+>
+> 1. `contingencyType` reads **`"OTO"`** on every OTOCO payload and never once
+>    `"OTOCO"` — §7, above.
+> 2. `listClientOrderId` is **`null`** in the placement response and **present**
+>    in the `v3_get_order_list` read-back of the same list — §7, this paragraph.
+> 3. A `FOK` working leg that cannot fill expires the whole list: every leg
+>    `EXPIRED`, `expiryReason` `UNFILLED_FOK_ORDER_EXPIRED`, `ALL_DONE`, zero
+>    residue — §4.
+> 4. Leg `clientOrderId`s are honoured **byte-for-byte** — §6.
+> 5. The order-list endpoints are **raw passthrough and inject no library tag** —
+>    §6. Every returned `clientOrderId` was exactly what was sent.
+
 **A filled working order legitimately returns with pendings still `PENDING_NEW`**
 (DOCUMENTED; the fill path is UNMEASURED). Never escalate on the placement
 response. Re-query with a **BOUNDED DEADLINE**; escalate only if the pendings are
@@ -573,6 +591,40 @@ benign `OrderNotFoundError` on cancel paths; note `cancel_all_open_orders` raise
 Filter failures → `FilterRejectedError` carrying the parsed filter name. `-1106` →
 programming error, raise loudly. `-1158` / `-1159` / `-1128` → contract errors.
 
+> **MEASURED at M5c, and it does NOT hold for order LISTS: an exact duplicate is
+> ACCEPTED.** The sentence above is a statement about a duplicate client order
+> ID. Resubmitting an *accepted order list's* byte-identical parameters produces
+> no error at all — no `-2010`, no rejection of any kind.
+>
+> *Provenance: `POST /api/v3/orderList/otoco`, TESTNET, BTCUSDT, 2026-08-12,
+> resubmitted **0.647 s** after the original from the recorded request dict, never
+> from the response.*
+>
+> | | original | exact duplicate |
+> |---|---|---|
+> | `orderListId` | 72321 | **72322 — new** |
+> | leg `orderId`s | 2089800/01/02 | **2089803/04/05 — new** |
+> | leg `clientOrderId`s | `tb1-…-0-W` / `-SL` / `-TP` | **identical, byte-for-byte** |
+> | outcome | accepted | **accepted** |
+>
+> **Both control arms were also accepted**, so neither identity field is
+> deduplicated: a **fresh `listClientOrderId` with the same leg IDs** produced
+> list 72323, and the **same `listClientOrderId` with fresh leg IDs** produced
+> 72324. A consumed leg `clientOrderId` is therefore reusable, and the venue
+> honours it byte-for-byte on the reuse.
+>
+> **Scope, stated precisely.** The original was **terminal** at resubmission —
+> read back immediately beforehand as `listStatusType: ALL_DONE`,
+> `listOrderStatus: ALL_DONE`, every leg `EXPIRED` under `UNFILLED_FOK_ORDER_EXPIRED`.
+> So what is measured is that a *terminated* list's IDs are immediately reusable.
+> Whether a **live** list's resubmission is refused is UNMEASURED.
+>
+> The asymmetry matters and is not symmetric-looking: a *rejection* here would
+> have generalised **upward** to the live case, since a live order's ID is at
+> least as present at the venue as a terminated one's. **Acceptance does not
+> generalise downward.** See `CLAUDE.md`'s timed-out-write annotation for what
+> that costs the recovery path.
+
 ## 9. Costs
 
 Order-list domain type; `ProtectionState`; three error classes; a reconciler.
@@ -636,3 +688,23 @@ port move together.
   generation >= 100 on a 12-character symbol
   (`tb1-` + 12 + 13 + 3 separators + 3 + 1 = 36). One deliberately over-long
   rejected request would settle it, free. Not a Q-C blocker.
+
+  > **NOW MEASURED at M5c, and the assumed figure was right.** 36 characters is
+  > accepted; 37 is rejected with HTTP **400**, code **`-1100`**, and the venue
+  > states its own rule verbatim:
+  >
+  > ```
+  > Illegal characters found in parameter 'workingClientOrderId'; legal range is '^[a-zA-Z0-9-_]{1,36}$'.
+  > ```
+  >
+  > *Provenance: `POST /api/v3/orderList/otoco`, TESTNET, BTCUSDT, 2026-08-12,
+  > incrementing the working leg's ID length upward from 36 to the first
+  > rejection.*
+  >
+  > Two things the measurement adds beyond the number. The regex constrains the
+  > **character set** as well — `[a-zA-Z0-9-_]` — which §6's scheme satisfies,
+  > since it uses only alphanumerics and `-`. And the **sharp edge**: a **LENGTH**
+  > violation is reported as *"Illegal characters found"*, so anyone debugging a
+  > too-long ID reads the message and goes looking for a bad character. The regex
+  > in the message is the only thing that discloses the real cause, and it
+  > discloses both rules at once.

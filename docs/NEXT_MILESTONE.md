@@ -316,6 +316,19 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   window, a bot trading one symbol on a 1-minute bar reaches 20 in twenty minutes
   and then fails at submission for a reason no code path anticipates.
 
+  > **WEAK evidence from M5c's probe, and it does NOT settle this item.** The run
+  > created **five order lists on BTCUSDT in roughly two seconds** against the
+  > ceiling of 20, with **no rejection**, and `v3_get_open_order_list` returned
+  > **zero** immediately afterwards — every list having terminated on its `FOK`
+  > working leg. *(TESTNET, 2026-08-12.)*
+  >
+  > That leans toward the ceiling counting **live** lists only. **It is weak and
+  > must not be read as settling it**, for a reason this item states itself: five
+  > against twenty does not exercise the boundary. A run that terminated 25 lists
+  > and then placed a 26th would; nothing here did. **The instruction above stands
+  > unchanged — the question must not be assumed in either direction** — and this
+  > note is a data point, not an answer.
+
 - **`MarketLotSize.max_qty` is parsed but not read.** The "0 means no constraint"
   convention is per-field, not filter-wide: both Testnet and mainnet report a real
   `maxQty` beside zeroed min/step, so applying one rule to all three would either
@@ -334,6 +347,21 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   measured for a duplicate client order ID and **not** for a duplicate list.
   Settled by resubmitting an accepted list's exact parameters and reading the
   error — a rejection, so it costs nothing. **This is M5c's, not a soak question.**
+
+  > **SETTLED at M5c, and the answer was the opposite of the one this item
+  > assumed. "A rejection, so it costs nothing" is FALSIFIED — there was no
+  > rejection and no error.** The duplicate was **accepted**, and so were both
+  > control arms; see `docs/QC_PROTECTIVE_ORDERS.md` §8 for the measurement and
+  > `CLAUDE.md`'s timed-out-write annotation for what it costs.
+  >
+  > **The cost clause was wrong in its mechanism as well as its number.** The run
+  > created **five order lists rather than one** — the original, the exact
+  > duplicate, two control arms and the accepted 36-character ID test. All five
+  > terminated immediately and the account's balances were unchanged end to end,
+  > so the probe was in fact harmless — **but it was contained by `FOK`, not by
+  > the expected rejection.** A rule that reasons "this probe is free because the
+  > venue will refuse it" would have been wrong about *why* it was safe, and would
+  > have carried that reasoning to a probe where `FOK` was not in the design.
 
 ### Risk and refusal-path debt
 
