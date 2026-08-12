@@ -19,6 +19,7 @@ from binance.exceptions import (
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    ContractViolationError,
     DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
@@ -852,7 +853,75 @@ def test_the_rule_table_declares_its_order() -> None:
         (-2011, OrderNotFoundError),
         (-1013, FilterRejectedError),
         (-1100, MalformedRequestError),
+        (-1106, ContractViolationError),
+        (-1159, ContractViolationError),
+        (-1158, ContractViolationError),
     ]
+
+
+# --------------------------------------------------------------------------
+# Error translation -- the contract group, and the code that is NOT in it
+#
+# CODE-ONLY rows: no verbatim message text for -1106/-1158/-1159 exists in this
+# repository, so these rows key on the code alone, following -1003's precedent.
+# The three mandated string tests are therefore UNWRITABLE for this family and
+# are not faked -- there is no measured string to map and no rewording to miss.
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize("code", [-1106, -1159, -1158])
+def test_a_contract_code_maps_to_contract_violation_with_the_code_kept(code: int) -> None:
+    """Exact type, not ancestry alone, and the code preserved.
+
+    The code is the only identity these errors have: their message text was
+    never captured, so what each row MEANS lives in
+    ``ContractViolationError``'s docstring and nowhere else.
+    """
+    exc = _api_error(code=code, status=400, message="whatever the venue said")
+    result = m.translate_binance_error(exc)
+    assert type(result) is ContractViolationError
+    assert result.code == code
+    assert not isinstance(result, OrderError)
+
+
+def test_1128_is_deliberately_unclassified_and_keeps_its_code() -> None:
+    """RULED (b): ``-1128`` is NOT classified, and this test is what enforces it.
+
+    Two arguments were rejected and both are instructive. Classifying it with
+    the group is an argument from **adjacency** -- it appears beside the other
+    three in one sentence of one document, and that is the whole of the case;
+    ``EXPIRED_IN_MATCH`` is on the record that moving a meaning requires a
+    measurement, not an argument from a name. Measuring it first is not a
+    request but a **search**: no call is known to provoke it, forbidden fields
+    yield ``-1106``, so finding one is an unbounded discovery loop for a code
+    with no consumer.
+
+    Nothing is lost by leaving it: ``ExchangeAPIError`` carries the code, so an
+    operator sees ``-1128`` and can look it up. **Arming condition: the first
+    time a ``-1128`` is actually observed.**
+
+    Without this test the ruling is recorded and unenforced -- a later hand
+    could add ``-1128`` to ``_CONTRACT_VIOLATION_CODES`` and nothing would say
+    it had classified a code nobody has ever seen.
+    """
+    exc = _api_error(code=-1128, status=400, message="whatever the venue said")
+    result = m.translate_binance_error(exc)
+    assert type(result) is ExchangeAPIError
+    assert result.code == -1128
+
+
+def test_a_contract_code_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """The guard cannot fire for a code-only row, and this documents the gap.
+
+    The loud guard reports a *pattern* that failed. A row with no pattern always
+    returns on its code, so it never reaches the guard -- which means this
+    family is the one place in the classifier where a second meaning arriving on
+    a known code would be classified as the first with nothing firing. Recorded
+    as a finding rather than resolved here.
+    """
+    exc = _api_error(code=-1106, status=400, message="anything at all")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
 
 
 # --------------------------------------------------------------------------

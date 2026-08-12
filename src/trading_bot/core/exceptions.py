@@ -49,6 +49,39 @@ class OrderError(ExchangeError):
     """An order was rejected or could not be created/canceled."""
 
 
+class ContractViolationError(ExchangeAPIError):
+    """The request is structurally wrong for this endpoint. **Our bug, not a
+    market condition.**
+
+    Three measured codes, and the *conditions* are recorded here because the
+    exchange's message text for them was never captured -- this prose is the
+    only record of what each row means:
+
+    * ``-1106`` -- a forbidden field was sent. Measured on the OTOCO/OTO
+      endpoints for ``pendingAbovePrice``, ``pendingAboveTimeInForce``,
+      ``pendingBelowPrice`` and ``pendingBelowTimeInForce``
+      (``docs/QC_PROTECTIVE_ORDERS.md`` section 3).
+    * ``-1159`` -- ``MARKET`` refused as a working type (section 3).
+    * ``-1158`` -- ``LIMIT`` refused in the pending-above slot (section 3).
+
+    **A sibling of :class:`MalformedRequestError` in condition, a nephew in the
+    tree, and the difference is deliberate.** Both are "we built a request the
+    endpoint cannot accept", and neither belongs under :class:`OrderError` --
+    there is no market state to respond to and nothing a caller can do but stop.
+    They are not the *same* class because the payloads differ: ``-1100`` names an
+    offending parameter, while ``-1158``/``-1159`` reject a *value in a slot* and
+    have no parameter name to carry. Forcing one would be a payload that lies.
+
+    It derives from :class:`ExchangeAPIError` rather than directly from
+    :class:`ExchangeError` so that it inherits ``code`` -- the only identity
+    these errors have, absent their text -- and so that this is a **refinement**
+    of where the three codes already landed rather than a move.
+
+    **No dedicated catcher yet**, and the reclassification changes nothing:
+    measured, there is no ``except ExchangeAPIError`` anywhere in ``src/``.
+    """
+
+
 class MalformedRequestError(ExchangeError):
     """The exchange could not parse the request. **This is our bug, not a market
     condition.**

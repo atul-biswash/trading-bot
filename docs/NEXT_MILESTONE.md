@@ -354,6 +354,30 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   twice — and M5c's probe has already created exactly that condition on Testnet,
   so the measurement costs a single call and no order.
 
+- **`-1128` is DELIBERATELY UNCLASSIFIED, and that is a ruling rather than an
+  omission.** M5c's classifier arc classified `-1106`, `-1159` and `-1158` as
+  `ContractViolationError`; `-1128` is named beside them in Q-C §8 and is **not**
+  classified with them.
+
+  **Why not, and both rejected options are the instructive part.** Classifying it
+  with the group is an argument from **adjacency** — it appears next to the other
+  three in one sentence of one document, and that is the entire case for it.
+  `EXPIRED_IN_MATCH` is already on the record for exactly this shape: *moving it
+  requires a measurement, not an argument from its name.* Measuring it first is
+  not a request but a **search** — no call is known to provoke `-1128`, forbidden
+  fields yield `-1106`, so finding one means guessing invalid parameter
+  combinations with no bound on attempts, for a code that has no consumer. That
+  is the discovery-loop trap `CLAUDE.md` records from Q-C's schema walk.
+
+  **Nothing is lost by leaving it.** `ExchangeAPIError` carries `code=`, so a
+  `-1128` reaches an operator as `-1128` and can be looked up. A test asserts the
+  fall-through, so the ruling is enforced rather than merely recorded: adding
+  `-1128` to `_CONTRACT_VIOLATION_CODES` fails it.
+
+  *Arming condition:* **the first time a `-1128` is actually observed.** At that
+  point there is a message to match and a condition to name, and it joins the
+  group — or does not, on its own evidence.
+
 - **`MarketLotSize.max_qty` is parsed but not read.** The "0 means no constraint"
   convention is per-field, not filter-wide: both Testnet and mainnet report a real
   `maxQty` beside zeroed min/step, so applying one rule to all three would either

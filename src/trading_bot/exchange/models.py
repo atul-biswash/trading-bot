@@ -40,6 +40,7 @@ from binance.exceptions import (
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    ContractViolationError,
     DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
@@ -74,6 +75,11 @@ _RATE_LIMIT_CODE = -1003
 _UNKNOWN_ORDER_CODE = -2011
 _FILTER_FAILURE_CODE = -1013
 _MALFORMED_REQUEST_CODE = -1100
+# The contract group: our request is structurally wrong for the endpoint.
+# CODE-ONLY rows, because no verbatim message text for any of them exists in
+# this repository and acquiring one is an unbounded search. What each MEANS is
+# recorded on ContractViolationError, which is the only record there is.
+_CONTRACT_VIOLATION_CODES = (-1106, -1159, -1158)
 # -2010 is OVERLOADED and the name says so. It carries at least two unrelated
 # meanings, both measured verbatim at M5c: "Account has insufficient balance for
 # requested action." and "Duplicate order sent." Only the message separates them,
@@ -473,9 +479,14 @@ class _ApiRule(NamedTuple):
     #: it is what the declared-order test asserts.
     produces: type[TradingBotError]
     #: Used instead of ``produces(message)`` when the exception needs something
-    #: parsed out of the message. ``None`` for every row whose type takes the
-    #: message alone.
-    build: Callable[[str, re.Match[str]], TradingBotError] | None = None
+    #: parsed out of the MESSAGE. Only ever called on a row that has a pattern,
+    #: so the match is guaranteed non-``None``. Renamed from ``build`` at C5 for
+    #: symmetry with ``from_code`` below; no behaviour changed.
+    from_match: Callable[[str, re.Match[str]], TradingBotError] | None = None
+    #: Used instead of ``produces(message)`` when the exception needs the CODE.
+    #: This is the code-only row's hook: such a row has no pattern, so there is
+    #: no match to parse and the code is the only identity the error carries.
+    from_code: Callable[[str, int | None], TradingBotError] | None = None
 
     def keys_on(self, code: object) -> bool:
         """Whether this row is about ``code`` at all."""
@@ -530,6 +541,23 @@ _FILTER_FAILURE_RE = re.compile(r"^Filter failure: (?P<filter>[A-Z_]+)$")
 _MALFORMED_PARAM_RE = re.compile(r"^Illegal characters found in parameter '(?P<param>[^']+)'")
 
 
+def _contract_violation(message: str, code: int | None) -> TradingBotError:
+    """Build a :class:`ContractViolationError` carrying the code.
+
+    **A CODE-ONLY row, and the qualifier matters more than the row.** It is
+    valid only while its code carries ONE meaning, and there is no measurement
+    saying these do -- only an absence of evidence that they do not. ``-2010``
+    was not known overloaded either until M5c measured two meanings on it.
+
+    **The way it fails is SILENT**: a second meaning arriving on ``-1106``,
+    ``-1158`` or ``-1159`` would be classified as the first, with nothing firing
+    -- the loud guard reports an unmatched *pattern*, and a row with no pattern
+    cannot reach it. So this is the one family in the classifier outside the
+    guard's reach.
+    """
+    return ContractViolationError(message, code=code)
+
+
 def _malformed_request(message: str, match: re.Match[str]) -> TradingBotError:
     """Build a :class:`MalformedRequestError` carrying the offending parameter."""
     return MalformedRequestError(message, parameter=match.group("param"))
@@ -560,6 +588,10 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_FILTER_FAILURE_CODE, _FILTER_FAILURE_RE, FilterRejectedError, _filter_rejected),
     _ApiRule(
         _MALFORMED_REQUEST_CODE, _MALFORMED_PARAM_RE, MalformedRequestError, _malformed_request
+    ),
+    *(
+        _ApiRule(code, None, ContractViolationError, None, _contract_violation)
+        for code in _CONTRACT_VIOLATION_CODES
     ),
 )
 
@@ -594,8 +626,10 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
             if rule.pattern is not None and match is None:
                 keyed_but_unmatched = True
                 continue
-            if rule.build is not None and match is not None:
-                return rule.build(message, match)
+            if rule.from_match is not None and match is not None:
+                return rule.from_match(message, match)
+            if rule.from_code is not None:
+                return rule.from_code(message, code if isinstance(code, int) else None)
             return rule.produces(message)
         if keyed_but_unmatched:
             # A code we claim to classify by message, carrying a message none of
