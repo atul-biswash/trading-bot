@@ -1729,6 +1729,179 @@ superseded that rule with a bounded-I/O one.
 
 ---
 
+## Phase 5 M5b — the intent split and the widened port
+
+The second M5 milestone to change `src/`, and the second with no I/O in it.
+`TradeIntent` split, the assessment family moved to `core/`, the port widened to
+carry `evaluate`, and `entry_limit` became a derived price. Commits 0 through 13,
+plus five rotation commits.
+
+**Planned as commits 0 through 7 and closed at commits 0 through 13.** The delta
+is not a slippage figure, and recording it as one would hide what happened. Six
+commits were unplanned — **2, 3, 4, 11, 12, 13** — and four planned ones changed
+shape: planned 0 split into 0 and 1; planned 1 split into 6 and 7; planned 5 was
+folded into 9; planned 6 closed by construction at 8.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 0 | `9472e30` | P1's read path: `realised_today` derives the day instead of assigning it (finding J) |
+| 1 | `37a9ee1` | The ledger's day comparison tests lateness, not difference — a `now` moved backwards no longer reads as a new day |
+| 2 | `7e5cd5c` | `close_position` writes nothing until everything fallible has run (finding K) |
+| 3 | `5adefc0` | `record_realised_pnl` commits the roll only once the accrual can succeed — the same discipline, second instance |
+| 4 | `fd00af4` | The daily-loss message reports the basis the predicate uses (finding N), and `_approve`'s approval reason with it (finding V) |
+| 5 | `7cdeb40` | `modes.py`'s docstrings describe the tree they are in — the "No I/O." handler clause superseded by the bounded-I/O rule |
+| 6 | `e99f3a7` | `ProtectiveLevels` moves to `core/models.py`; the `__all__` policy settled; finding BB discharged |
+| 7 | `d1c11df` | The assessment family moves to `core/assessment.py`, closing the import cycle |
+| 8 | `8f0c5ee` | The port carries `evaluate` and `approve` is **deleted**; P2 resolved; `NO_MARK_PRICE`'s divergence closed by construction |
+| 9 | `43fe377` | `TradeIntent` splits into `EntryIntent` / `ExitIntent`; the log line follows the split |
+| 10 | `dcf4a93` | `entry_limit` derived from `max_entry_slippage` under `ROUND_CEILING` (finding A) |
+| 11 | `dfd1a4d` | `derive_entry_limit` joins the package surface — the one exception to commit 6's policy |
+| 12 | `8f8c2f3` | A trailing stop with no stop-loss is refused at load (finding U) |
+| 13 | `4926705` | Committed risk prices off what rests at the venue (row 2) |
+
+Rotation, corrections before additions: `dacec7b` (the statements M5b made
+false), `6343f2e` (the counts, alone), `f342847` (three `src/` docstrings),
+`f24dce9` (the rules M5b produced), `a84e400` (`NEXT_MILESTONE` rewritten for
+M5c).
+
+### Six additions, and where they came from
+
+Every one came from a Phase 1 report finding something the prompt did not name.
+That is the milestone's characteristic result and the argument for the
+report-before-implement shape: **J** (the day-roll's mutation on read), **K's
+real scope** (the ordering discipline binds every multi-write method, not the one
+named), **N** (the daily-loss message reporting a basis the predicate does not
+use), **row 2** (committed risk priced off a level that rests nowhere), **Q-C §4's
+`ROUND_FLOOR` contradiction**, and **Finding U** (a trailing stop with no
+stop-loss falsifying a locked claim).
+
+Finding U qualifies by the same test as the others: found while investigating
+something else, measured rather than supposed, and producing a contradiction with
+a locked claim that no gate step would surface.
+
+### Build reasoning
+
+**T — a commit changed another method's justification without touching it.**
+Commit 0 silently made `_roll_day` single-use: two callers before, one after.
+That is what made commit 3's inlining a simplification rather than a
+duplication. Discoverable only by grepping, and nothing in the diff of either
+commit says so.
+
+**CC — the import-proof set was insufficient for a commit that adds a module.**
+The four-entry-point set passed against a counterfactual tree *without* commit 6,
+supporting the wrong conclusion that the cycle was not exercised. The new module
+is itself an entry point; adding `trading_bot.core.assessment` produced the
+`ImportError` that justified the commit. **A defect in the instrument, not in the
+tree** — the same shape as the line-ending measurement at M5a, where the
+instrument had to be validated against a known non-zero answer before its zero
+could be believed.
+
+**EE — `ruff` config discovery is CWD-dependent, and that is where A3's second
+trap came from.** `--stdin-filename` resolves relative to the CWD, so from the
+scratchpad no `pyproject.toml` is found and ruff falls back to line-length 88
+instead of the project's 100 — producing a large reformat diff that vanished when
+the same command ran from the project root.
+
+**GG — `approve` was dead production code for two milestones.** From M4b to
+commit 8 it had zero callers in `src/` and `scripts/`, with `evaluate` bypassing
+it via `self._approve`. The M4b entry above notes the bypass; nothing tracked
+that a **port** method sat with no production caller across two milestones,
+accumulating the P2 gap that made deleting it a prerequisite rather than a
+tidy-up.
+
+**II — pydantic's smart union preserves an exact instance, and the falsifier is
+four edits, not two.** Measured across a sixteen-cell matrix over
+`from_attributes`, `revalidate_instances`, the side check, annotation order and
+union mode: exactly one cell coerces, and it needs all of `from_attributes=True`,
+`ExitIntent`'s side check removed, the union reordered, and
+`union_mode="left_to_right"`. While an `EntryIntent` remains a valid
+`EntryIntent`, no configuration change makes it validate as anything else. This
+replaced two earlier and wrong accounts of the same property.
+
+**L's finding (iii) — two documents disagree about who owns the trailing
+milestone.** Q-C §5 defers the design to "the trailing milestone"; `CLAUDE.md`
+assigns the *driving* of `check_exit` / `advance_trailing_stop` to execution.
+`NEXT_MILESTONE` schedules neither. Carried to M5c with its arming condition.
+
+### The prediction instrument, and its three failure modes
+
+Predicting the gate counts before running it was worth more in its disagreements
+than in its agreements. **The three failures were different in kind and are kept
+distinct**, because collapsing them into "the prediction was wrong sometimes"
+loses the only useful part:
+
+1. **A corrected expectation** (commit 8) — the figure moved because the *change
+   set* moved. Not an error in the instrument.
+2. **A miscount of an authorised set** (commit 9) — the change set was fixed and
+   the arithmetic over it was wrong, by one parametrized case.
+3. **A miscount inherited from a report** (commit 10) — a Phase 1 report summed
+   its own five-row table as seven cases when it enumerated eight, and the
+   ruling that followed inherited the figure without re-deriving it.
+
+The third is the instructive one: a wrong number passed from implementer to
+reviewer and back, and was caught only by the run. Its mirror image occurred at
+the corrections pass, where a figure travelled the other way — see below.
+
+### Plan drift, recorded because the labels stopped being usable
+
+Two scheduling labels in `NEXT_MILESTONE` were wrong by the end.
+`NO_MARK_PRICE` was planned as "M5b commit 6" and closed at commit 8;
+`modes.py`'s "No I/O." docstring was planned as "commit 7" and landed at commit
+5. Both items landed; neither landed where the plan said.
+
+The numbering diverged at the very first reshaping and **no document noticed**:
+`e99f3a7`'s own message calls it *"M5b commit 6, mechanical"* while the plan
+called commit **1** the mechanical move. A plan that renumbers itself silently is
+one whose labels cannot be used to check whether an item landed, which is what
+they exist for.
+
+Related, and introduced by the reviewer rather than the implementer: `CLAUDE.md`
+acquired *"M5b is complete, in thirteen commits"* during the **corrections**
+pass. The commits are numbered 0 through 13, so the cardinal was an off-by-one on
+a zero-indexed sequence. It was caught because the number was verified rather
+than transcribed, and it is why the ordinal form is now the rule. **A pass whose
+subject is false statements can introduce one.**
+
+### The rule this entry exists to record
+
+**A finding destined for `PHASE_HISTORY.md` is written there at the commit that
+produced it — not carried to rotation.** Rotation *compiles*; it must not be a
+finding's first contact with disk.
+
+This entry nearly proved the point by losing four of its own findings. T, CC, EE
+and GG were generated in Phase 1 reports, never folded into a commit message, and
+therefore existed **only in chat**. Across M5b's sessions the only findings that
+reached the tree are the ones a commit message happened to name — U, V, BB, A and
+II survived for exactly that reason. T, CC, EE and GG survived solely because the
+conversation was still open when rotation ran, and writing them here required the
+reviewer to supply them back from context that no tool in this project can read.
+
+**That is the same drift class as `phase_5_`** — build reasoning living outside
+the repo, invisible to every gate, grep and review — and unlike `phase_5_` it has
+now cost something: a rotation commit blocked, and four findings one closed
+window away from being irrecoverable.
+
+### A third class of protected digit
+
+`f24dce9` introduced `569` into `CLAUDE.md` for the first time outside the D3 and
+M4a illustrations, quoting the stale count `phase_5_` reported. It is historical
+prose and must not be swept up by a future count pass — which is governed by the
+rule the same rotation wrote: **edit count sites by surrounding context, never by
+digit pattern.**
+
+The rule's first test was the commit that wrote it. The corrections pass wrote
+*"a 58% understatement"* into the `_binding_stop` annotation, and the counts
+commit that followed substituted `58 → 59` for mypy's file count. A digit-wide
+substitution would have rewritten a measured figure into a fabricated one, inside
+an annotation whose entire subject is a measurement. It survived because the
+count sites were edited by context. The pair — grep the digits, then edit by
+context — is recorded together in `NEXT_MILESTONE`'s process section, with a
+pointer from `CLAUDE.md`.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**
