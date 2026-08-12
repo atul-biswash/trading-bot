@@ -1369,6 +1369,30 @@ happened in M5c the committed `PP` kept its ID and the chat-only one was renamed
 annotate-never-delete applies to IDs too, and the copy on disk is the one with an
 identity to protect.
 
+**From M5d onward an ID names its milestone — `M5d-A`, `M5d-B`, and so on.** The
+paragraph above describes the flat sequence, and this supersedes it going
+forward rather than correcting it: what was true of the flat scheme stays true of
+the findings that used it. The reason is that namespacing *dissolves* the problem
+instead of shrinking it — cross-milestone collision becomes **structurally
+impossible** rather than a property nothing verifies, which is what finding TT
+requires given that nothing checks uniqueness. An ID also becomes
+**self-locating**: `M5d-C` says which entry to open.
+
+**M5c finishes on the flat sequence**, deliberately. Splitting one milestone's
+entry across two schemes costs more than it saves, and the scheme changing at a
+milestone boundary is legible in a way that changing mid-entry would not be. **The
+flat IDs `JJ` through `ZZ` keep their identity permanently** — annotate-never-delete
+applies to IDs, they are on disk, and later blocks already reference them by
+name.
+
+**A verification baseline states its INSTRUMENT, not only its number.** The same
+concern one level down: `grep -c` counts matching **lines**, while a count of
+**occurrences** is a different quantity — in this file today the two differ by
+**8**. Quoting one and verifying against the other manufactures a delta that
+nothing added. That is finding ZZ, and it was caught only because the baseline
+happened to be taken twice; re-deriving a number is not sufficient when the
+instrument itself can silently change.
+
 **An authorisation states its precondition as a CHECK TO RUN FIRST, not as an
 instruction to whoever pastes it.** Three M5c findings share one shape -- MM, NN
 and RR -- a premise asserted in prose that nothing verifies; the third was an
