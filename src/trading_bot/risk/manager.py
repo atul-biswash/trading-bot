@@ -25,7 +25,12 @@ Order of operations -- fixed, and the reason it is fixed
 multiplies that same distance, and an ATR stop needs a market statistic that
 does not exist during warmup. Only one order satisfies all three::
 
-    preconditions -> equity -> approve -> ATR -> levels -> size -> affordability
+    preconditions -> equity -> _approve -> ATR -> levels -> stop gate -> size
+    -> affordability -> intent
+
+Nine steps. This read as seven until M5b's rotation -- the stop gate and the
+intent were missing, and ``_approve`` was written as the public ``approve``
+deleted at M5b commit 8 when the port widened to carry :meth:`evaluate`.
 
 Every step can refuse, and **a refusal is a value, not an exception**. The
 engine isolates a raising handler and logs it, so a raise here would not

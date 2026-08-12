@@ -49,6 +49,15 @@ first socket at step 5, so a refusal has exactly one REST client to unwind and
 never a half-open feed. Step 4 is the exception that proves the shape -- it is
 I/O on the same side of the socket, and it only warns.
 
+**There are FIVE boot refusals, and they are not homogeneous** -- which is why
+they were documented as four until M5b's rotation. Four raise ``ConfigError``
+here: a mode with no composition root, an empty enabled-pair set, a duplicate
+symbol on two timeframes, and a quote asset the account does not hold. The fifth
+is a symbol the exchange does not know, which **propagates** out of
+``get_symbol_info`` inside :func:`_prime_pairs` rather than being raised by this
+module. Counting the ``raise ConfigError`` sites therefore finds four and misses
+the one that is a refusal this file does not write.
+
 Ownership: this root closes the client unconditionally
 ------------------------------------------------------
 ``BufferedMarketDataProvider`` closes a client only when it built one itself

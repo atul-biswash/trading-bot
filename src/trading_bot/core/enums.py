@@ -156,7 +156,7 @@ class RefusalStage(str, Enum):
 
     One value per refusal path, in the order ``evaluate`` reaches them, and
     reported by ``evaluate`` itself on
-    :attr:`~trading_bot.risk.manager.RiskAssessment.stage`. Nothing infers it:
+    :attr:`~trading_bot.core.assessment.RiskAssessment.stage`. Nothing infers it:
     four of the refusals return every component as ``None`` -- unknown pair,
     unusable price, ``SELL``, nothing-to-close -- so an outside observer could
     tell them apart only by re-deriving ``evaluate``'s control flow, which is
