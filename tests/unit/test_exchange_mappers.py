@@ -22,6 +22,7 @@ from trading_bot.core.exceptions import (
     DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
+    FilterRejectedError,
     InsufficientBalanceError,
     OrderError,
     OrderNotFoundError,
@@ -745,9 +746,19 @@ def test_insufficient_balance_maps_specifically() -> None:
     assert isinstance(m.translate_binance_error(exc), InsufficientBalanceError)
 
 
-def test_filter_failure_maps_to_order_error() -> None:
+def test_filter_failure_maps_to_filter_rejected_with_the_name_captured() -> None:
+    """Retargeted at C3 -- the arc-wide ``isinstance`` ruling's first real bite.
+
+    This asserted ``isinstance(result, OrderError)``, which C3 hollows out:
+    ``FilterRejectedError`` **is** an ``OrderError``, so the assertion would keep
+    passing while exercising nothing. It now asserts the exact type, the captured
+    name, and the ancestry the refinement must preserve.
+    """
     exc = _api_error(code=-1013, status=400, message="Filter failure: LOT_SIZE")
-    assert isinstance(m.translate_binance_error(exc), OrderError)
+    result = m.translate_binance_error(exc)
+    assert type(result) is FilterRejectedError
+    assert result.filter_name == "LOT_SIZE"
+    assert isinstance(result, OrderError)
 
 
 def test_generic_api_error_preserves_code() -> None:
@@ -832,12 +843,80 @@ def test_the_rule_table_declares_its_order() -> None:
     two rows share ``-2010``, so a code-only assertion could no longer tell them
     apart -- which is the moment this test stops being pedantry.
     """
-    assert [(rule.code, rule.factory) for rule in m._API_RULES] == [
+    assert [(rule.code, rule.produces) for rule in m._API_RULES] == [
         (-1003, RateLimitError),
         (-2010, InsufficientBalanceError),
         (-2010, DuplicateOrderError),
         (-2011, OrderNotFoundError),
+        (-1013, FilterRejectedError),
     ]
+
+
+# --------------------------------------------------------------------------
+# Error translation -- -1013, the first row that CAPTURES
+#
+# "Filter failure: NOTIONAL" is the first measured message with a variable tail,
+# so this row parses rather than anchoring on the whole string. The captured
+# spelling is what makes a parsed venue rejection and `_enforce`'s local refusal
+# legible as the same condition -- `_enforce` raises filter_name="PRICE_FILTER"
+# and the capture yields "PRICE_FILTER" byte-for-byte.
+# --------------------------------------------------------------------------
+def test_the_captured_filter_name_matches_the_local_refusals_spelling() -> None:
+    """The legibility constraint, asserted rather than left to inspection.
+
+    ``BinanceClient._enforce`` raises ``FilterRejectedError(...,
+    filter_name="PRICE_FILTER")`` locally. A venue rejection naming the same
+    filter must produce the same string, or one condition has two spellings and
+    an operator correlating them cannot tell they are the same thing.
+    """
+    exc = _api_error(code=-1013, status=400, message="Filter failure: PRICE_FILTER")
+    result = m.translate_binance_error(exc)
+    assert type(result) is FilterRejectedError
+    assert result.filter_name == "PRICE_FILTER"
+
+
+def test_a_reworded_filter_failure_does_not_map_to_filter_rejected() -> None:
+    """Anchored either side of the capture, so a reworded prefix or tail fails it."""
+    exc = _api_error(code=-1013, status=400, message="Order failed filter: LOT_SIZE")
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, FilterRejectedError)
+    assert type(result) is OrderError
+
+
+def test_a_1013_matching_no_rule_falls_through_to_the_reject_set() -> None:
+    """``-1013`` with an unrecognised message keeps today's classification."""
+    exc = _api_error(code=-1013, status=400, message="Some other -1013 condition.")
+    assert type(m.translate_binance_error(exc)) is OrderError
+
+
+def test_a_filter_name_outside_the_character_class_falls_through_loudly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The capture's OWN failure mode, which nothing else pins.
+
+    ``[A-Z_]+`` is justified by the eleven filter names ``exchangeInfo`` reports,
+    but their rendering inside a ``-1013`` is measured for ``NOTIONAL`` alone. A
+    name carrying anything else -- a digit, a hyphen, lower case -- must fall
+    through **loudly**, because silently degrading to a generic order error is
+    exactly what the guard exists to prevent.
+    """
+    exc = _api_error(code=-1013, status=400, message="Filter failure: LOT_SIZE_2")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        result = m.translate_binance_error(exc)
+
+    assert type(result) is OrderError
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "LOT_SIZE_2" in records[0].getMessage()
+
+
+def test_the_measured_1013_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Quiet on the happy path, per the arc's standard."""
+    exc = _api_error(code=-1013, status=400, message="Filter failure: NOTIONAL")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
 
 
 # --------------------------------------------------------------------------

@@ -44,6 +44,7 @@ from trading_bot.core.exceptions import (
     ExchangeAPIError,
     ExchangeConnectionError,
     ExchangeError,
+    FilterRejectedError,
     InsufficientBalanceError,
     OrderError,
     OrderNotFoundError,
@@ -70,6 +71,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # a generic ExchangeAPIError that carries the original code.
 _RATE_LIMIT_CODE = -1003
 _UNKNOWN_ORDER_CODE = -2011
+_FILTER_FAILURE_CODE = -1013
 # -2010 is OVERLOADED and the name says so. It carries at least two unrelated
 # meanings, both measured verbatim at M5c: "Account has insufficient balance for
 # requested action." and "Duplicate order sent." Only the message separates them,
@@ -463,15 +465,19 @@ class _ApiRule(NamedTuple):
 
     code: int | None
     pattern: re.Pattern[str] | None
-    factory: Callable[[str], TradingBotError]
+    #: What this row classifies as. Named for the classification rather than for
+    #: the call, because a row that needs the match uses ``build`` instead -- so
+    #: this field stays the answer to "what does this row mean?" either way, and
+    #: it is what the declared-order test asserts.
+    produces: type[TradingBotError]
+    #: Used instead of ``produces(message)`` when the exception needs something
+    #: parsed out of the message. ``None`` for every row whose type takes the
+    #: message alone.
+    build: Callable[[str, re.Match[str]], TradingBotError] | None = None
 
     def keys_on(self, code: object) -> bool:
         """Whether this row is about ``code`` at all."""
         return self.code is None or code == self.code
-
-    def text_matches(self, message: str) -> bool:
-        """Whether ``message`` satisfies this row's pattern (vacuously if none)."""
-        return self.pattern is None or self.pattern.search(message) is not None
 
 
 #: Matched against the message of a ``-2010``. Kept as a narrow fragment rather
@@ -496,6 +502,30 @@ _DUPLICATE_ORDER_RE = re.compile(r"^Duplicate order sent\.$", re.IGNORECASE)
 #: auto-cancelled both pending legs and the follow-up cancels each returned it).
 _UNKNOWN_ORDER_RE = re.compile(r"^Unknown order sent\.$", re.IGNORECASE)
 
+#: The first message with a VARIABLE TAIL, so the first row that captures
+#: rather than anchoring on the whole string. Measured shape:
+#: "Filter failure: NOTIONAL" (MEASURED, Testnet, on a stop leg below
+#: min_notional). The character class is justified by the ELEVEN filter names
+#: ``exchangeInfo`` reports for BTCUSDT -- every one matches ``[A-Z_]+`` --
+#: but note what is and is not measured: the NAMES are measured from
+#: ``exchangeInfo``, while their RENDERING inside a -1013 is measured for
+#: ``NOTIONAL`` alone. A name outside the class falls through and is logged,
+#: which is the guard's case and is pinned by its own test.
+_FILTER_FAILURE_RE = re.compile(r"^Filter failure: (?P<filter>[A-Z_]+)$")
+
+
+def _filter_rejected(message: str, match: re.Match[str]) -> TradingBotError:
+    """Build a :class:`FilterRejectedError` carrying the captured filter name.
+
+    The captured spelling is the exchange's own, which is what makes a parsed
+    venue rejection and ``BinanceClient._enforce``'s local refusal legible as
+    the same condition: ``_enforce`` raises ``filter_name='PRICE_FILTER'``,
+    and this capture yields ``'PRICE_FILTER'`` byte-for-byte from
+    "Filter failure: PRICE_FILTER".
+    """
+    return FilterRejectedError(message, filter_name=match.group("filter"))
+
+
 #: The dispatch table, consulted in order; first match wins. Anything unmatched
 #: falls through to the ladder below, which is still the authority for the
 #: order-reject code set and for the generic case. Rows are added here as each
@@ -506,6 +536,7 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_OVERLOADED_ORDER_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
     _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
     _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_RE, OrderNotFoundError),
+    _ApiRule(_FILTER_FAILURE_CODE, _FILTER_FAILURE_RE, FilterRejectedError, _filter_rejected),
 )
 
 
@@ -535,9 +566,13 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
         for rule in _API_RULES:
             if not rule.keys_on(code):
                 continue
-            if rule.text_matches(message):
-                return rule.factory(message)
-            keyed_but_unmatched = True
+            match = rule.pattern.search(message) if rule.pattern is not None else None
+            if rule.pattern is not None and match is None:
+                keyed_but_unmatched = True
+                continue
+            if rule.build is not None and match is not None:
+                return rule.build(message, match)
+            return rule.produces(message)
         if keyed_but_unmatched:
             # A code we claim to classify by message, carrying a message none of
             # its rules recognise. Silently falling through is the failure mode
