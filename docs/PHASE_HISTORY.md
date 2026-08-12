@@ -1734,7 +1734,25 @@ superseded that rule with a bounded-I/O one.
 The second M5 milestone to change `src/`, and the second with no I/O in it.
 `TradeIntent` split, the assessment family moved to `core/`, the port widened to
 carry `evaluate`, and `entry_limit` became a derived price. Commits 0 through 13,
-plus five rotation commits.
+plus **six** rotation commits.
+
+> **CORRECTED at M5c (finding MM). This read "plus five rotation commits", and
+> six landed.** The sixth is `8d76c6a`, added to the list below. Measured:
+> `4926705..e0f94fa~1` -- the range as it stood immediately before M5c's first
+> commit -- contains six.
+>
+> **The cause is structural and is worth more than the correction.** A rotation
+> cannot count itself, because the count is written before the commit that
+> writes it exists. `8d76c6a` is the commit that wrote this entry, so at the
+> moment this sentence was typed there were five and the sixth was the act of
+> typing it. Every rotation that states its own commit count will be short by at
+> least one for the same reason, and it will look like carelessness rather than
+> like arithmetic.
+>
+> **UNFIXED, and deliberately not fixed here.** The remedy -- the milestone's
+> commit table and count completed by the FINAL rotation commit, the only one
+> that can see all the others -- is a change to the rotation procedure, so it
+> belongs in `CLAUDE.md` and not in this build log. Named, left.
 
 **Planned as commits 0 through 7 and closed at commits 0 through 13.** The delta
 is not a slippage figure, and recording it as one would hide what happened. Six
@@ -1764,7 +1782,13 @@ folded into 9; planned 6 closed by construction at 8.
 Rotation, corrections before additions: `dacec7b` (the statements M5b made
 false), `6343f2e` (the counts, alone), `f342847` (three `src/` docstrings),
 `f24dce9` (the rules M5b produced), `a84e400` (`NEXT_MILESTONE` rewritten for
-M5c).
+M5c), and `8d76c6a` (this entry itself).
+
+> **`8d76c6a` added at M5c (finding MM); the other five are unchanged.** It is
+> last because it is the commit that wrote this list, which is exactly why it
+> was absent -- see the correction above. Recorded here rather than left to be
+> inferred from `git log`, because this list is what a reader checks the count
+> against.
 
 ### Six additions, and where they came from
 
