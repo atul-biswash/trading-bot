@@ -1385,6 +1385,30 @@ flat IDs `JJ` through `ZZ` keep their identity permanently** — annotate-never-
 applies to IDs, they are on disk, and later blocks already reference them by
 name.
 
+> **FALSIFIED BY EXHAUSTION one commit later, and annotated rather than
+> rewritten, because the decision was made and then broken by arithmetic nobody
+> ran.** `ZZ` was the last flat ID. M5c's next findings — the duplicate
+> order-list probe's — had nowhere to go, so *"M5c finishes on the flat
+> sequence"* was unsatisfiable from the moment it was written.
+>
+> **The remainder of M5c uses `M5c-A`, `M5c-B`, and so on.** M5d onward is
+> unchanged at `M5d-A`. `JJ` through `ZZ` still keep their identity permanently —
+> that half is untouched.
+>
+> **Why it failed is the part worth carrying: "do not split a milestone across
+> two schemes" was a PREFERENCE, not a constraint, and it was stated without
+> checking the remaining capacity.** A preference asserted as though it were a
+> constraint reads exactly like one, and nothing distinguishes them at the point
+> of writing. This is ZZ's class — a claim whose instrument was never run — one
+> level up: ZZ was a number verified against the wrong instrument, this was a
+> capacity never measured at all.
+>
+> **A probe's findings do NOT open the next milestone's namespace.** They belong
+> to the milestone that produced them. Filing them under `M5d-` because they
+> concern M5d's subject matter would make the ID name the wrong entry, and
+> self-location — the property that justified namespacing in the first place — is
+> the whole of what would be lost.
+
 **A verification baseline states its INSTRUMENT, not only its number.** The same
 concern one level down: `grep -c` counts matching **lines**, while a count of
 **occurrences** is a different quantity — in this file today the two differ by
