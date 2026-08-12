@@ -1,11 +1,18 @@
 """Exchange-specific mapping: Binance REST payloads <-> domain models.
 
-Every function here is **pure** and free of I/O: given a Binance response
-(already parsed into Python dicts/lists by ``python-binance``) it returns one of
-the frozen, ``Decimal``-based domain models from
-:mod:`trading_bot.core.models`; given an :class:`OrderRequest` it produces the
-keyword arguments for a Binance order call. Keeping these transformations pure
-makes them exhaustively testable against recorded JSON with no mocking.
+Every **mapper** here is pure and free of I/O: given a Binance response (already
+parsed into Python dicts/lists by ``python-binance``) it returns one of the
+frozen, ``Decimal``-based domain models from :mod:`trading_bot.core.models`;
+given an :class:`OrderRequest` it produces the keyword arguments for a Binance
+order call. Keeping these transformations pure makes them exhaustively testable
+against recorded JSON with no mocking.
+
+**The one exception is :func:`translate_binance_error`, and the claim is scoped
+rather than quietly broken.** It emits a single ``ERROR`` log line when a code it
+classifies by message arrives with a message none of its rules recognise -- the
+alternative being to reclassify silently, which is the failure message-matching
+exists to prevent. It is still a pure function of its argument in every other
+respect: same input, same returned exception, no I/O on any classifying path.
 
 Money is parsed straight from Binance's decimal *strings* into
 :class:`decimal.Decimal` — never through ``float`` — so no precision is lost.
@@ -33,6 +40,7 @@ from binance.exceptions import (
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
     ExchangeError,
@@ -51,13 +59,21 @@ from trading_bot.core.models import (
     SymbolInfo,
     Ticker,
 )
+from trading_bot.utils.logger import get_logger
+
+_log = get_logger(__name__)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 # Binance error codes we can classify precisely; anything else falls through to
 # a generic ExchangeAPIError that carries the original code.
 _RATE_LIMIT_CODE = -1003
-_INSUFFICIENT_BALANCE_CODE = -2010
+# -2010 is OVERLOADED and the name says so. It carries at least two unrelated
+# meanings, both measured verbatim at M5c: "Account has insufficient balance for
+# requested action." and "Duplicate order sent." Only the message separates them,
+# which is why this code needs message rules rather than a single mapping -- and
+# why the constant is no longer named after one of its meanings.
+_OVERLOADED_ORDER_CODE = -2010
 _ORDER_REJECT_CODES = frozenset({-1013, -1100, -1111, -2010, -2011})
 _RATE_LIMIT_STATUS = frozenset({429, 418})
 
@@ -447,10 +463,13 @@ class _ApiRule(NamedTuple):
     pattern: re.Pattern[str] | None
     factory: Callable[[str], TradingBotError]
 
-    def matches(self, code: object, message: str) -> bool:
-        if self.code is not None and code != self.code:
-            return False
-        return not (self.pattern is not None and self.pattern.search(message) is None)
+    def keys_on(self, code: object) -> bool:
+        """Whether this row is about ``code`` at all."""
+        return self.code is None or code == self.code
+
+    def text_matches(self, message: str) -> bool:
+        """Whether ``message`` satisfies this row's pattern (vacuously if none)."""
+        return self.pattern is None or self.pattern.search(message) is not None
 
 
 #: Matched against the message of a ``-2010``. Kept as a narrow fragment rather
@@ -461,6 +480,14 @@ class _ApiRule(NamedTuple):
 #: distinguishing this meaning of -2010 from the others that share the code.
 _INSUFFICIENT_BALANCE_RE = re.compile("insufficient balance", re.IGNORECASE)
 
+#: Matched against the message of a ``-2010`` that is *not* a balance failure.
+#: Anchored on the **complete** measured message, which has no variable part:
+#: "Duplicate order sent." (MEASURED, Testnet, 2026-08-12 -- identical for a
+#: single order and for an order list). Anchoring is affordable precisely
+#: because the string is whole; a rewording must fail this pattern rather than
+#: squeeze past it, which is what the near-miss tests pin.
+_DUPLICATE_ORDER_RE = re.compile(r"^Duplicate order sent\.$", re.IGNORECASE)
+
 #: The dispatch table, consulted in order; first match wins. Anything unmatched
 #: falls through to the ladder below, which is still the authority for the
 #: order-reject code set and for the generic case. Rows are added here as each
@@ -468,7 +495,8 @@ _INSUFFICIENT_BALANCE_RE = re.compile("insufficient balance", re.IGNORECASE)
 #: it.
 _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_RATE_LIMIT_CODE, None, RateLimitError),
-    _ApiRule(_INSUFFICIENT_BALANCE_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
+    _ApiRule(_OVERLOADED_ORDER_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
+    _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
 )
 
 
@@ -494,9 +522,31 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
         # matching. Checked first, exactly where the ladder checked it.
         if status in _RATE_LIMIT_STATUS:
             return RateLimitError(message)
+        keyed_but_unmatched = False
         for rule in _API_RULES:
-            if rule.matches(code, message):
+            if not rule.keys_on(code):
+                continue
+            if rule.text_matches(message):
                 return rule.factory(message)
+            keyed_but_unmatched = True
+        if keyed_but_unmatched:
+            # A code we claim to classify by message, carrying a message none of
+            # its rules recognise. Silently falling through is the failure mode
+            # message-matching exists to prevent -- Binance rewords, the pattern
+            # stops matching, and a family quietly becomes a generic error. So
+            # say so, loudly, and then fall through anyway.
+            #
+            # Logged, never raised, and deliberately not an `assert`: this runs
+            # inside error handling, where raising would replace the caller's
+            # real failure with ours. Same shape as `IntentLogger`'s
+            # `stage is None` branch.
+            _log.error(
+                "Unclassified message for Binance code %s: %r. A rule keys on this "
+                "code but no pattern matched, so it falls through to a generic "
+                "error -- the wording may have changed at the venue.",
+                code,
+                message,
+            )
         if code in _ORDER_REJECT_CODES:
             return OrderError(message)
         return ExchangeAPIError(message, code=code if isinstance(code, int) else None)

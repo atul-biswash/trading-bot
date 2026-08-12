@@ -49,6 +49,34 @@ class OrderError(ExchangeError):
     """An order was rejected or could not be created/canceled."""
 
 
+class DuplicateOrderError(OrderError):
+    """The exchange reported that this order or order list was already sent.
+
+    Binance returns ``-2010 'Duplicate order sent.'`` when a submission reuses a
+    client order ID that is still attached to a **live** order -- measured for a
+    single order and for an order list alike, and measured *not* to fire once
+    the original has reached a terminal state, because a terminal order's ID is
+    released (see ``docs/QC_PROTECTIVE_ORDERS.md`` sections 6 and 8).
+
+    **Named for what the venue reported, not for how a caller reads it.** The
+    timed-out-write recovery path treats this as its *success* signal -- a
+    re-place that collides proves the original landed and is still working -- but
+    that is an interpretation made by the caller. What this class asserts is only
+    that the exchange refused a duplicate.
+
+    A subclass of :class:`OrderError` rather than a sibling, for the reason
+    :class:`FilterRejectedError` is: the venue did reject an order, so every
+    existing ``except OrderError`` keeps catching it and this commit refines a
+    classification rather than moving one.
+
+    **It has no dedicated catcher yet**, and that is deliberate rather than
+    overlooked: it is raised by a live classifier branch on every matching venue
+    response and is caught today by ``except TradingBotError`` in ``main.py``, so
+    it is *latent*, not dead. The recovery path that reads it as success arrives
+    with M5e.
+    """
+
+
 class FilterRejectedError(OrderError):
     """An order violates a named exchange filter.
 

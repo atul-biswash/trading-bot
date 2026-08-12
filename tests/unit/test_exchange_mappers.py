@@ -19,6 +19,7 @@ from binance.exceptions import (
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    DuplicateOrderError,
     ExchangeAPIError,
     ExchangeConnectionError,
     InsufficientBalanceError,
@@ -800,19 +801,23 @@ def test_rate_limit_status_wins_over_a_reject_code() -> None:
     assert isinstance(m.translate_binance_error(exc), RateLimitError)
 
 
-def test_a_2010_without_the_balance_text_falls_through_to_the_reject_set() -> None:
+def test_a_2010_matching_no_rule_falls_through_to_the_reject_set() -> None:
     """``-2010`` is overloaded, and the message is what separates its meanings.
 
-    The balance rule is narrow on purpose, so a ``-2010`` carrying any other
-    meaning falls past it. ``"Duplicate order sent."`` is the measured example
-    (Testnet, 2026-08-12) and is the case a later commit reclassifies -- so
-    this test pins today's behaviour precisely where that change will land,
-    and must be updated deliberately rather than drifting.
+    Both rules are narrow on purpose, so a ``-2010`` carrying a third meaning
+    falls past both to the reject set.
+
+    **Retargeted at C1, deliberately.** This test was written at C0 using
+    ``"Duplicate order sent."``, whose docstring said it pinned today's
+    behaviour "precisely where that change will land, and must be updated
+    deliberately rather than drifting". C1 is that change: the duplicate now
+    has its own rule, so the fall-through case needs a message that matches
+    neither rule, or the test would silently stop testing fall-through while
+    still passing -- ``DuplicateOrderError`` is an ``OrderError``.
     """
-    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    exc = _api_error(code=-2010, status=400, message="Some other -2010 condition.")
     result = m.translate_binance_error(exc)
-    assert isinstance(result, OrderError)
-    assert not isinstance(result, InsufficientBalanceError)
+    assert type(result) is OrderError
 
 
 def test_the_rule_table_declares_its_order() -> None:
@@ -821,5 +826,96 @@ def test_the_rule_table_declares_its_order() -> None:
     Reordering the rows is the mutation this exists to catch: it produces a
     wrong *classification* rather than an error, which no other test in this
     file would report.
+
+    **The factory is asserted alongside the code, not the code alone.** From C1
+    two rows share ``-2010``, so a code-only assertion could no longer tell them
+    apart -- which is the moment this test stops being pedantry.
     """
-    assert [rule.code for rule in m._API_RULES] == [-1003, -2010]
+    assert [(rule.code, rule.factory) for rule in m._API_RULES] == [
+        (-1003, RateLimitError),
+        (-2010, InsufficientBalanceError),
+        (-2010, DuplicateOrderError),
+    ]
+
+
+# --------------------------------------------------------------------------
+# Error translation -- the -2010 split, and the anti-rot pair per family
+#
+# `-2010` carries two unrelated meanings, both measured verbatim at M5c. Only
+# the message separates them. Each family gets: the measured string maps, and a
+# REWORDED NEAR-MISS does not. The near-miss is the one that matters -- a
+# pattern loose enough to survive a rewording is a pattern that will silently
+# reclassify when Binance rewords.
+# --------------------------------------------------------------------------
+def test_the_measured_duplicate_message_maps_to_duplicate_order_error() -> None:
+    """MEASURED verbatim, Testnet, 2026-08-12 -- single order and order list."""
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    assert isinstance(m.translate_binance_error(exc), DuplicateOrderError)
+
+
+def test_duplicate_order_error_is_an_order_error() -> None:
+    """A refinement, not a reclassification: ``except OrderError`` still catches.
+
+    The venue did reject an order, so the subclass relationship is the same
+    argument ``FilterRejectedError`` rests on -- and it is what makes this
+    commit safe for any existing handler.
+    """
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    assert isinstance(m.translate_binance_error(exc), OrderError)
+
+
+def test_a_reworded_duplicate_message_does_not_map_to_duplicate() -> None:
+    """The pattern is anchored on the whole measured string, so a rewording fails it.
+
+    This is the anti-rot half. If Binance ever appends to the message, this
+    stops matching and the caller gets a generic order error plus a loud log --
+    which is the intended failure, and is strictly better than a pattern loose
+    enough to keep matching something it no longer understands.
+    """
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent for this symbol.")
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, DuplicateOrderError)
+    assert type(result) is OrderError
+
+
+def test_a_reworded_balance_message_does_not_map_to_insufficient_balance() -> None:
+    """The balance rule is a narrow fragment, and a rewording still has to contain it.
+
+    ``"Account balance is insufficient ..."`` carries the same meaning to a human
+    and does not contain the fragment ``"insufficient balance"``, so it falls
+    through rather than being silently classified on a guess.
+    """
+    exc = _api_error(
+        code=-2010, status=400, message="Account balance is insufficient for requested action."
+    )
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, InsufficientBalanceError)
+    assert type(result) is OrderError
+
+
+def test_an_unmatched_message_on_a_keyed_code_logs_loudly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A silent-reclassification guard whose own failure is silent is worth nothing.
+
+    Selected by logger name rather than by position: ``caplog.at_level`` lowers
+    the capture handler's level globally, so any collaborator logging on its own
+    lands in the same buffer.
+    """
+    exc = _api_error(code=-2010, status=400, message="Some unrecognised wording.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "-2010" in records[0].getMessage()
+    assert "Some unrecognised wording." in records[0].getMessage()
+
+
+def test_a_matched_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """The guard must stay quiet on the happy path, or it trains an operator to skim it."""
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
