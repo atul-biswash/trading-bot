@@ -18,10 +18,11 @@ failures in domain terms.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+import re
+from collections.abc import Callable, Sequence
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
+from typing import Any, NamedTuple
 
 import aiohttp
 from binance.exceptions import (
@@ -426,6 +427,51 @@ def order_request_to_params(
 # --------------------------------------------------------------------------
 # Error translation
 # --------------------------------------------------------------------------
+class _ApiRule(NamedTuple):
+    """One row of the ``BinanceAPIException`` dispatch table.
+
+    ``code`` and ``pattern`` are each optional and are ANDed: a row with both
+    matches only when the code equals *and* the message matches. ``pattern`` is
+    searched, not fullmatched, so a row can key on a stable fragment of a
+    message whose tail varies.
+
+    A row exists so the **order** of classification is data rather than the
+    shape of an ``if`` ladder. That matters because the order here is
+    load-bearing and always was -- ``-2010`` reaches
+    :class:`InsufficientBalanceError` only because its message rule is
+    consulted before the order-reject fallback, and inverting the two silently
+    reclassifies a balance failure as a generic order rejection.
+    """
+
+    code: int | None
+    pattern: re.Pattern[str] | None
+    factory: Callable[[str], TradingBotError]
+
+    def matches(self, code: object, message: str) -> bool:
+        if self.code is not None and code != self.code:
+            return False
+        return not (self.pattern is not None and self.pattern.search(message) is None)
+
+
+#: Matched against the message of a ``-2010``. Kept as a narrow fragment rather
+#: than the whole sentence deliberately: the measured text is "Account has
+#: insufficient balance for requested action." (MEASURED, Testnet, 2026-08-12,
+#: identical for a BUY exceeding quote and a SELL exceeding base), and matching
+#: the fragment survives a rewording of the surrounding sentence while still
+#: distinguishing this meaning of -2010 from the others that share the code.
+_INSUFFICIENT_BALANCE_RE = re.compile("insufficient balance", re.IGNORECASE)
+
+#: The dispatch table, consulted in order; first match wins. Anything unmatched
+#: falls through to the ladder below, which is still the authority for the
+#: order-reject code set and for the generic case. Rows are added here as each
+#: error family lands; nothing is removed from the fallback until a row covers
+#: it.
+_API_RULES: tuple[_ApiRule, ...] = (
+    _ApiRule(_RATE_LIMIT_CODE, None, RateLimitError),
+    _ApiRule(_INSUFFICIENT_BALANCE_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
+)
+
+
 def translate_binance_error(exc: Exception) -> TradingBotError:
     """Map a ``python-binance`` / transport exception onto the domain hierarchy.
 
@@ -434,15 +480,23 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
     * filter / precision / order-reject codes -> :class:`OrderError`
     * any other API error -> :class:`ExchangeAPIError` (carries the code)
     * transport failures -> :class:`ExchangeConnectionError`
+
+    ``BinanceAPIException`` is dispatched through :data:`_API_RULES` first and
+    falls through to the ladder below; every other family is ladder-only,
+    because none of them carries a code to key a row on.
     """
     if isinstance(exc, BinanceAPIException):
         code = getattr(exc, "code", None)
         status = getattr(exc, "status_code", None)
         message = getattr(exc, "message", "") or str(exc)
-        if status in _RATE_LIMIT_STATUS or code == _RATE_LIMIT_CODE:
+        # Not a (code, message) rule and so not a row: 429/418 classify on the
+        # HTTP status alone, and such a response carries no body worth
+        # matching. Checked first, exactly where the ladder checked it.
+        if status in _RATE_LIMIT_STATUS:
             return RateLimitError(message)
-        if code == _INSUFFICIENT_BALANCE_CODE and "insufficient balance" in message.lower():
-            return InsufficientBalanceError(message)
+        for rule in _API_RULES:
+            if rule.matches(code, message):
+                return rule.factory(message)
         if code in _ORDER_REJECT_CODES:
             return OrderError(message)
         return ExchangeAPIError(message, code=code if isinstance(code, int) else None)

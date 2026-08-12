@@ -779,3 +779,47 @@ def test_connection_error_maps_to_connection_error() -> None:
 
 def test_timeout_maps_to_connection_error() -> None:
     assert isinstance(m.translate_binance_error(TimeoutError()), ExchangeConnectionError)
+
+
+# --------------------------------------------------------------------------
+# Error translation -- dispatch ORDER, not merely each mapping
+#
+# The classifier's order is load-bearing and was implicit in an if-ladder until
+# it became a rule table. These three pin the order itself, so a reordering
+# fails here rather than silently reclassifying a live venue response.
+# --------------------------------------------------------------------------
+def test_rate_limit_status_wins_over_a_reject_code() -> None:
+    """A 429 carrying an order-reject code is a rate limit, not an order error.
+
+    Pins the status guard ahead of the rule table and the reject set. The
+    existing status tests pair 418/429 with ``-1003``, where both conditions
+    point the same way and the order is unobservable; this one makes them
+    disagree.
+    """
+    exc = _api_error(code=-2010, status=429, message="Too many requests")
+    assert isinstance(m.translate_binance_error(exc), RateLimitError)
+
+
+def test_a_2010_without_the_balance_text_falls_through_to_the_reject_set() -> None:
+    """``-2010`` is overloaded, and the message is what separates its meanings.
+
+    The balance rule is narrow on purpose, so a ``-2010`` carrying any other
+    meaning falls past it. ``"Duplicate order sent."`` is the measured example
+    (Testnet, 2026-08-12) and is the case a later commit reclassifies -- so
+    this test pins today's behaviour precisely where that change will land,
+    and must be updated deliberately rather than drifting.
+    """
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    result = m.translate_binance_error(exc)
+    assert isinstance(result, OrderError)
+    assert not isinstance(result, InsufficientBalanceError)
+
+
+def test_the_rule_table_declares_its_order() -> None:
+    """The table's order is data, and this asserts the data.
+
+    Reordering the rows is the mutation this exists to catch: it produces a
+    wrong *classification* rather than an error, which no other test in this
+    file would report.
+    """
+    assert [rule.code for rule in m._API_RULES] == [-1003, -2010]
