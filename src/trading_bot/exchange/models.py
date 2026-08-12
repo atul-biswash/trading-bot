@@ -46,6 +46,7 @@ from trading_bot.core.exceptions import (
     ExchangeError,
     InsufficientBalanceError,
     OrderError,
+    OrderNotFoundError,
     RateLimitError,
     TradingBotError,
 )
@@ -68,6 +69,7 @@ _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 # Binance error codes we can classify precisely; anything else falls through to
 # a generic ExchangeAPIError that carries the original code.
 _RATE_LIMIT_CODE = -1003
+_UNKNOWN_ORDER_CODE = -2011
 # -2010 is OVERLOADED and the name says so. It carries at least two unrelated
 # meanings, both measured verbatim at M5c: "Account has insufficient balance for
 # requested action." and "Duplicate order sent." Only the message separates them,
@@ -488,6 +490,12 @@ _INSUFFICIENT_BALANCE_RE = re.compile("insufficient balance", re.IGNORECASE)
 #: squeeze past it, which is what the near-miss tests pin.
 _DUPLICATE_ORDER_RE = re.compile(r"^Duplicate order sent\.$", re.IGNORECASE)
 
+#: Matched against the message of a ``-2011``. Anchored on the complete measured
+#: message for the same reason the duplicate is: "Unknown order sent." (MEASURED,
+#: Testnet, 2026-08-12, on an OTO teardown -- cancelling the working leg
+#: auto-cancelled both pending legs and the follow-up cancels each returned it).
+_UNKNOWN_ORDER_RE = re.compile(r"^Unknown order sent\.$", re.IGNORECASE)
+
 #: The dispatch table, consulted in order; first match wins. Anything unmatched
 #: falls through to the ladder below, which is still the authority for the
 #: order-reject code set and for the generic case. Rows are added here as each
@@ -497,6 +505,7 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_RATE_LIMIT_CODE, None, RateLimitError),
     _ApiRule(_OVERLOADED_ORDER_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
     _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
+    _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_RE, OrderNotFoundError),
 )
 
 

@@ -24,6 +24,7 @@ from trading_bot.core.exceptions import (
     ExchangeConnectionError,
     InsufficientBalanceError,
     OrderError,
+    OrderNotFoundError,
     RateLimitError,
 )
 from trading_bot.core.models import OrderRequest
@@ -835,7 +836,68 @@ def test_the_rule_table_declares_its_order() -> None:
         (-1003, RateLimitError),
         (-2010, InsufficientBalanceError),
         (-2010, DuplicateOrderError),
+        (-2011, OrderNotFoundError),
     ]
+
+
+# --------------------------------------------------------------------------
+# Error translation -- -2011, the cancel path's routine answer
+#
+# MEASURED on a real OTO teardown: cancelling the working leg auto-cancelled
+# both pending legs, and the follow-up cancels for those two each returned
+# "Unknown order sent." So section 4b's cancel step is ONE call, not three, and
+# a close path driving three cancels to success would read its own normal
+# teardown as two errors. That is why this family is benign rather than
+# exceptional -- on a cancel path.
+# --------------------------------------------------------------------------
+def test_the_measured_unknown_order_message_maps_to_order_not_found() -> None:
+    """The exact type AND the ancestry, both asserted, per the arc-wide ruling.
+
+    ``type(...) is`` is the arc's default because every family here is a
+    subclass refinement and ``isinstance`` is structurally blind to it. Where
+    the subclass relation is genuinely wanted -- as it is here, since ``-2011``
+    already classified as an ``OrderError`` and this commit must not move it --
+    both are asserted so the intent is visible rather than inferred from the
+    weaker one.
+    """
+    exc = _api_error(code=-2011, status=400, message="Unknown order sent.")
+    result = m.translate_binance_error(exc)
+    assert type(result) is OrderNotFoundError
+    assert isinstance(result, OrderError)
+
+
+def test_a_reworded_unknown_order_message_does_not_map_to_order_not_found() -> None:
+    """Anchored on the whole measured string, so a rewording fails it loudly."""
+    exc = _api_error(code=-2011, status=400, message="Unknown order sent for this symbol.")
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, OrderNotFoundError)
+    assert type(result) is OrderError
+
+
+def test_a_2011_matching_no_rule_falls_through_to_the_reject_set() -> None:
+    """``-2011`` with an unrecognised message keeps today's classification."""
+    exc = _api_error(code=-2011, status=400, message="Some other -2011 condition.")
+    assert type(m.translate_binance_error(exc)) is OrderError
+
+
+def test_an_unmatched_2011_message_logs_loudly(caplog: pytest.LogCaptureFixture) -> None:
+    """The guard covers every keyed code, and that is asserted per family."""
+    exc = _api_error(code=-2011, status=400, message="Some other -2011 condition.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "-2011" in records[0].getMessage()
+
+
+def test_the_measured_2011_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Quiet on the happy path: a guard that fired every call would train a skim."""
+    exc = _api_error(code=-2011, status=400, message="Unknown order sent.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
 
 
 # --------------------------------------------------------------------------

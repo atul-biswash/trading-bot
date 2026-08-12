@@ -49,6 +49,37 @@ class OrderError(ExchangeError):
     """An order was rejected or could not be created/canceled."""
 
 
+class OrderNotFoundError(OrderError):
+    """The exchange has no record of the order this request named.
+
+    Binance returns ``-2011 'Unknown order sent.'``. Measured at M5c on a real
+    OTO teardown: cancelling the working leg **auto-cancelled both pending
+    legs**, and the follow-up cancels for those two each returned this.
+
+    **Benign is a property of the CALL SITE, not of this class, which is why it
+    subclasses ``OrderError`` rather than sitting outside the order hierarchy.**
+    On a cancel path it is the expected result of a list that already collapsed
+    -- ``docs/QC_PROTECTIVE_ORDERS.md`` section 8 says "benign ... *on cancel
+    paths*", and the qualifier is load-bearing. On a **query** path it is the
+    opposite: a reconciler that asks for a tracked order by ID and is told no
+    such order exists has found a divergence, not a non-event. Same code, same
+    message, opposite significance.
+
+    Encoding "benign" in the hierarchy would bake one caller's reading into the
+    type and mislead the other, so the class states what the venue reported --
+    the order was not found -- and leaves the significance to whoever asked.
+    That is the same principle :class:`DuplicateOrderError` is named under.
+
+    Subclassing :class:`OrderError` also keeps this a **refinement**: ``-2011``
+    already classified as an ``OrderError``, so no existing catcher changes
+    behaviour.
+
+    **No dedicated catcher yet**, deliberately: the cancel path that reads it as
+    routine is M5e's. It is raised by a live classifier branch and caught today
+    by ``except TradingBotError`` in ``main.py`` -- latent, not dead.
+    """
+
+
 class DuplicateOrderError(OrderError):
     """The exchange reported that this order or order list was already sent.
 
