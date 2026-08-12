@@ -1283,12 +1283,46 @@ measurement, and the Phase 2 authorisation for that probe names that commit in
 advance.** Without this clause, probe findings fall through the same hole M5b's
 four fell through, and they do it while looking compliant.
 
+**A findings block may be AMENDED only while the commit is unpushed, and only for
+a finding that commit itself produced. Push closes the window.** State the reason
+with the rule, because the rule is unreadable without it: without the window,
+"amend it in later" is available to every commit, and the discipline degrades
+back into exactly the deferral it replaced -- a finding written at rotation,
+which is what M5b lost four of. A finding some *other* commit produced is not
+covered: it is recorded late, in the block of the commit that notices it, naming
+the commit that should have carried it. Reaching back for it would make the
+precedent the window exists to bound.
+
+**An ID is allocated when it is WRITTEN TO DISK.** A finding named only in chat
+holds no ID until it lands. The IDs are a flat unnamespaced sequence and nothing
+checks uniqueness -- not the template, not the extractor, not the gate -- so two
+sessions can spend the same letter on different findings and the collision is
+silent, visible only to a reader holding both the chat and the log. When that
+happened in M5c the committed `PP` kept its ID and the chat-only one was renamed:
+annotate-never-delete applies to IDs too, and the copy on disk is the one with an
+identity to protect.
+
+**An authorisation states its precondition as a CHECK TO RUN FIRST, not as an
+instruction to whoever pastes it.** Three M5c findings share one shape -- MM, NN
+and RR -- a premise asserted in prose that nothing verifies; the third was an
+authorisation premised on work that had not in fact happened. A precondition
+written as a sentence is read by the party who already believes it. Written as a
+command it is read by the party who can falsify it.
+
 **This is a DISCIPLINE attached to the Phase 1 / Phase 2 artefacts, not an
 enforced check. Nothing fails when it is skipped.** `.gitmessage` at the
 repository root pre-fills the block and is a **convenience, not enforcement**: it
 applies only to commits written through the editor, never to `git commit -m` or
 `-F`, and it does nothing until someone runs `git config commit.template
 .gitmessage`, which is per-machine config rather than tracked state.
+
+**Do not read this section's LENGTH as enforcement.** It is accumulating
+conditions -- the mandatory `none`, the probe hole, the amend window, the ID
+rule, the precondition rule -- and NOT ONE OF THEM CAN FAIL. Each is held up by
+whoever is reading it, and the only thing that ever reports is a person
+noticing. A longer rule is not a stronger one; the growth of this section is
+evidence about how much is being asked of the discipline, not evidence that
+anything has begun checking it.
 
 A `commit-msg` hook was **rejected**, and not for being unavailable. It enforces
 the block's *shape* and never its *truth* — `Findings: none` on a commit that
