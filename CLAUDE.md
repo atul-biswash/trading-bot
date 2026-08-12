@@ -43,6 +43,25 @@ raises `ValidationError`. `numpy.float64` is caught by the same check — it is 
 `float` subclass and is what `DataFrame.iloc` returns, which is the realistic
 leak path. `int` and `str` pass through because both convert exactly.
 
+**A `Money` field has TWO guards, and the line above shows one.** The second is
+pydantic's own `allow_inf_nan=False` default for `Decimal`, which rejects
+`Decimal("NaN")`, `Decimal("Infinity")` and `Decimal("-Infinity")` *after*
+`_reject_float` has passed them — measured, all three raise. It is load-bearing
+rather than incidental: `Portfolio.record_realised_pnl` already depends on it in
+those words, *"the assignment raises on a non-finite result — `Money` rejects
+those independently of the float guard"*, which is half of what makes a failed
+accrual leave the ledger untouched. A reader who knows only `_reject_float`
+would think a non-finite total lands silently.
+
+**"`int` and `str` pass through" is true of a `Money` FIELD and false of `Money`
+ARITHMETIC**, and the two are one line apart in practice. At the field both
+convert exactly, as stated. In arithmetic `int` still works — `Decimal("2") * 5`
+is `Decimal("10")` — but `str` raises, and with a message that points at the
+wrong thing: `can't multiply sequence by non-int of type 'decimal.Decimal'`,
+because Python read the `str` as a sequence to repeat. Note the neighbouring
+hazard that makes this worth stating: `"5.5" * 2` **succeeds**, silently, as
+string repetition.
+
 `Decimal * float` raises `TypeError`, so any config value used in money
 arithmetic needs a deliberate conversion boundary.
 
@@ -136,7 +155,8 @@ Files marked † are **docstring-only stubs**. Check before assuming behaviour.
 ```
 src/trading_bot/
   main.py        CLI entry point (run · backtest · strategies)
-  core/          models · enums · interfaces (ports) · portfolio · exceptions
+  core/          models · enums · interfaces (ports) · portfolio · assessment
+                 · exceptions
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
   data/          market_data · historical† · repository†
@@ -168,7 +188,9 @@ scripts/         check_testnet.py · download_data.py
   is logged and cannot stop the others or the feed.
 - **`RiskManager.evaluate(signal, *, portfolio) -> RiskAssessment`** — the seam
   execution picks up. `assessment.intent` is the approved, sized, protected
-  `TradeIntent`; `None` with a `reason` is a normal, expected answer.
+  `EntryIntent` or `ExitIntent`; `None` with a `reason` is a normal, expected
+  answer. (This read `TradeIntent` until M5b commit 9 split the type; the name
+  is corrected here rather than the seam changing.)
 
 ### A composition root closes what it hands over — injected or not
 
@@ -405,6 +427,30 @@ data.
   off a level that is no longer operative, and it would **overstate**, refusing
   entries for risk that is not there. Two components disagreeing about which stop
   protects a position is the defect M4b existed to remove.
+
+  > **SUPERSEDED at M5b commit 13 — the paragraph above is correct about its
+  > mechanism and wrong about this system.** It holds only if the trailing level
+  > is operative, and it landed before the design that would have made it so.
+  > Nothing places or amends an order for a trailing level: Q-C §3 fixes the list
+  > at three legs and none is a trailing leg, Q-C §5 retains the fields "pending
+  > the trailing milestone", and `advance_trailing_stop` is `trailing_stop`'s only
+  > writer in `src/` and has no caller. A trailed position whose process dies is
+  > protected at `stop_loss`, not at the trail.
+  >
+  > **The rule is now: committed risk prices off what RESTS AT THE VENUE.**
+  > `_binding_stop` returns `position.stop_loss`. The resting set is a consequence
+  > of Q-C §3's three legs rather than a preference, so venue-side trailing becomes
+  > eligible later without re-opening this. Measured: `sl=88, tr=95, mark=100,
+  > qty=10` booked `-50` where what rests gives `-120` — a 58% understatement,
+  > under a config shaped like the shipped one.
+  >
+  > **What SURVIVES:** the last sentence. Two components disagreeing about which
+  > stop protects a position is still the defect to avoid — and `should_exit` still
+  > preferring the trail is not such a disagreement, because the two answer
+  > different questions. `should_exit` asks whether to exit **now**;
+  > `_binding_stop` asks what happens if the bot **stops running**. Only the second
+  > is what committed risk means, and a test pins the asymmetry so it is not
+  > "fixed" into consistency.
 - **An uncomputable committed risk is a refusal, not a zero — and the
   discriminator is `stop_loss.enabled`.** A position with no computable stop
   contributes `0` to the sum, which tells the limit check that an *unprotected*
@@ -421,6 +467,21 @@ data.
   to realised-only, documented, and honest *because the operator opted out*. Same
   discriminator already locked for the sub-tick case: `stop_loss.enabled`
   distinguishes "stops are off" from "no level fits right now".
+
+  > **This claim was FALSE when written and was restored true at M5b commit 12 —
+  > by making its counterexample unreachable, not by amending the prose above.**
+  > `RiskConfig(stop_loss.enabled=False, trailing_stop.enabled=True)` loaded, and a
+  > position carrying only a trailing stop priced committed risk off it: measured
+  > `total=-50, uncomputable=0`, so the check did **not** degrade to realised-only
+  > and `COMMITTED_RISK_UNKNOWN` did not fire either, because nothing was
+  > uncomputable.
+  >
+  > Commit 12 added a **fourth** check to `_check_protective_coverage` refusing a
+  > trailing stop with no stop-loss, so that configuration can no longer be built
+  > and the sentence above is true again. Both-disabled stays reachable — the check
+  > keys on the trailing stop *with* no stop-loss, never on the absence of a stop
+  > alone. It is reachable only once take-profit is also disabled, since the third
+  > check fires first, so an operator meets two refusals in sequence.
 - **A protective level rounds toward its reference** so its realised distance can
   only shrink — the initial stop toward entry (realised loss ≤ the
   `risk_per_trade` budget), the trailing stop toward the high-water mark, the
@@ -443,7 +504,9 @@ data.
   `Portfolio` is mutable with `validate_assignment=True` and never reads a clock —
   every time-dependent method takes `now`, and a naive `datetime` raises.
 - **The manager's order of operations is forced, not chosen:** preconditions →
-  equity → `approve` → ATR → levels → stop gate → size → affordability → intent.
+  equity → `_approve` → ATR → levels → stop gate → size → affordability → intent.
+  (Nine steps, and `_approve` is private: the public `approve` was deleted at M5b
+  commit 8 when the port widened to carry `evaluate`.)
 - **A stop that is enabled but not placeable this bar skips the entry — for every
   sizing method**, not just `risk_per_trade`. The operator asked for a stop; the
   state is transient. `stop_loss.enabled` distinguishes "stops are off" from "no
@@ -465,14 +528,16 @@ data.
   consequence is recorded rather than hidden: `backtesting/` must model intrabar
   triggering to keep backtest and live on one code path, and that is the largest
   cost Q-C carries. See `docs/QC_PROTECTIVE_ORDERS.md`.
-- **`TradeIntent` is not an `OrderRequest`** — no take-profit field, and
+- **An intent is not an `OrderRequest`** — no take-profit field, and
   `stop_price` there means "this order's trigger". Mapping intent → orders is
   execution's job. Under Q-C the target of that mapping is an **order-list
   request** for three of the four branches; `OrderRequest` expresses only the
   neither-enabled single `LIMIT`, for which M5a gave it the `time_in_force` field
   it lacked. The request's own field wins over `order_request_to_params`'
   keyword, which stays as the fallback for requests that state nothing — so a
-  working `LIMIT` leg that must be `FOK` says so itself.
+  working `LIMIT` leg that must be `FOK` says so itself. (This bullet read
+  `TradeIntent` until M5b commit 9 deleted that type; the argument is about the
+  intent family and is unchanged by the split described immediately below.)
 - **`TradeIntent` splits into `EntryIntent` and `ExitIntent`; it does not fork a
   field.** Under Q-C an entry carries `entry_limit` — a derived, marketable limit
   — while a `CLOSE` dispatches `MARKET` and has no limit price at all. One field
@@ -778,6 +843,25 @@ data.
   them) and **never reach for `# noqa` to keep a wire row on one line**: the
   suppression rule is not relaxed for fixtures, and the reason to fence is that
   the *grouping* mirrors the contract, which survives wrapping perfectly well.
+
+  > **CORRECTED at M5b's rotation: the enforcement half is FALSE.** `E501` is in
+  > `pyproject.toml`'s `ignore` list (`"E501", # line length is the formatter's
+  > job`), so a long row does **not** fail `ruff check`. Measured: a 146-character
+  > line passes, exit 0. Inside a `# fmt: off` fence nothing objects to it at all —
+  > the formatter is suppressed and the lint rule is off.
+  >
+  > **What SURVIVES is everything except that sentence**, and it survives on its
+  > original reasoning rather than on enforcement: hand-lay each row anyway,
+  > because the *grouping* is what mirrors the contract, and that is the whole
+  > reason to fence. Do not reach for `# noqa` — now for the stronger reason that
+  > it would suppress nothing. The `# fmt: off`-is-not-a-lint-suppression
+  > distinction is still true and still worth knowing; only its worked consequence
+  > was wrong.
+  >
+  > Note what this means for the gate: **line length is enforced by
+  > `ruff format --check`, not by `ruff check`.** The formatter rewraps what it
+  > can, and a fenced region is exactly where it cannot — so a fence is the one
+  > place in this tree where an over-long line survives all four gate steps.
 - **Fence only where layout is the sole carrier of a correspondence to an
   external contract.** Six fenced fixtures across five files:
 
@@ -1079,9 +1163,15 @@ client, primes a `PairContext` per distinct symbol, seeds a `Portfolio` from
 `get_balances()`, then the provider, engine, `RiskManager` and `IntentLogger`,
 registers **one** signal handler, and tears the whole thing down in three nested
 scopes. `main.py` drives it with `async with`; that is the only production call
-site. Four conditions refuse the boot before any socket exists — a duplicate
-symbol, an unprimeable symbol, a missing quote asset, and a mode with no
-composition root — plus an empty enabled-pair set.
+site. **Five** conditions refuse the boot before any socket exists — a duplicate
+symbol, an unprimeable symbol, a missing quote asset, a mode with no composition
+root, and an empty enabled-pair set.
+
+The five are **not homogeneous**, which is what got the count written as four:
+four raise `ConfigError` inside `engine/modes.py`, while the unprimeable symbol
+**propagates** out of `client.get_symbol_info` and is documented only on
+`_prime_pairs`. Counting the `raise ConfigError` sites therefore finds four and
+misses the one that is not a refusal this file writes.
 
 **Nothing places an order.** `IntentLogger` is the terminal collaborator and it
 logs: three events (`risk_refused`, `intent_dispatched`, `collaborator_failed`)
@@ -1194,14 +1284,24 @@ cost on a real order, not to boot-time code whose only purpose is timing.
 **Still nothing places an order.** `IntentLogger` remains the terminal
 collaborator; `execution/` is still a pair of stubs.
 
-Next: **M5b**, the intent split and the widened port — `TradeIntent` becomes
-`EntryIntent` / `ExitIntent`, `entry_limit` gets derived, the `RiskManager` port
-widens to carry `evaluate`, and `RiskAssessment` moves to `core/`. Still no I/O.
-**It has two prerequisites that are NOT met**, both stated at the top of
-`docs/NEXT_MILESTONE.md` rather than filed among the open items, because M5b
-moves the very port that carries them: a **mutation-on-read** in the portfolio's
-lazy day-roll, and the requirement that the widened port must not leave a path
-able to approve an entry whose committed risk is unknown.
+**M5b is complete, in thirteen commits, and it added no I/O.** Both of its
+prerequisites — the **mutation-on-read** in the portfolio's lazy day-roll, and
+the requirement that the widened port not leave a path able to approve an entry
+whose committed risk is unknown — were met before the port moved. `TradeIntent`
+split into `EntryIntent` / `ExitIntent`, the assessment family moved to
+`core/assessment.py`, the `RiskManager` port widened to carry `evaluate` and the
+public `approve` was deleted, `entry_limit` became a derived marketable limit
+under `ROUND_CEILING`, and `derive_entry_limit` joined the package surface.
+
+Two tail commits closed defects found while measuring those: a trailing stop with
+no stop-loss is now refused at config load, and **committed risk prices off what
+rests at the venue** rather than off a trailing level that rests nowhere.
+
+The gate as M5b left it, at `4926705`: `ruff check` clean, 85 files formatted,
+mypy clean over 59 source files, 778 passed credentialed. **Those four figures
+are pinned to that commit and are not a live count** — like the D3 and M4a
+illustrations in the count-coupling section, they record a past run and are not
+to be updated by a later gate.
 
 **Q-A** stays unscheduled: its thresholds need soak data and nothing has
 dispatched an order yet, so the `collaborator_failed` lines it would be

@@ -175,6 +175,33 @@ take-profit is a PRE-SLIPPAGE target. Neither is exact.
 `entry_limit = round_to_tick(close x (1 + max_entry_slippage), ROUND_FLOOR)` — a
 marketable limit. Slippage is bounded by an operator-chosen number, not by the book.
 
+> **SUPERSEDED in its rounding mode only — annotation added at M5b's rotation.**
+> Transcribed verbatim from commit `dcf4a93`'s message:
+>
+> > Section 4's `ROUND_FLOOR` is superseded by `ROUND_CEILING` at M5b commit
+> > 10. `ROUND_FLOOR` enforces the configured bound but makes
+> > `entry_limit >= reference_price` a property of the feed rather than of the
+> > function — an off-grid close produces a limit below the close and a
+> > `ValidationError` on the decision path. D3 locked that comparison as a type
+> > invariant afterwards, and an invariant contingent on the feed is not one.
+> > The cost, stated rather than discovered: `max_entry_slippage` is no longer
+> > an enforceable ceiling; the overshoot is bounded by `tick/price`.
+> > Everything in section 4's second paragraph survives unchanged.
+>
+> **The paragraph immediately below this annotation is that second paragraph, and
+> it SURVIVES UNCHANGED.** `entry_limit` remains the reference for both the
+> protective levels and sizing; commit 10 implemented exactly that, and the
+> realised-distance guarantee it states is what the `risk_per_trade` budget rests
+> on. Only the rounding mode moved. The derivation now lives in
+> `risk.rules.derive_entry_limit`.
+>
+> One consequence worth recording, because no measurement in this project would
+> have caught it: the existing suite **cannot discriminate the two rounding
+> modes**. On the default fixture `100.00 x 1.001` is `100.1`, exactly on a 0.01
+> tick, so ceiling and floor agree — the whole change set was measured under both
+> and produced an identical blast radius. Reading this document is what found the
+> contradiction.
+
 **`entry_limit` is the reference for both protective levels and for sizing.** Using
 the bar close would let a fill at `entry_limit` produce a realised entry-to-stop
 distance larger than the one sizing used — realised risk silently exceeding
@@ -281,6 +308,28 @@ because "no stage" is a real state, while `protection` has a member for every st
 set**. What rests is queried, never cached. `trailing_stop` / `highest_price` /
 `lowest_price` retained pending the trailing milestone, and `trailing_stop` is
 explicitly **outside** the immutability rule — it is rewritten every bar by design.
+
+> **STILL TRUE, and it acquired a second consequence at M5b commit 13.** Nothing
+> above is superseded: the trailing fields are still retained pending the trailing
+> milestone, and `trailing_stop` is still outside the immutability rule.
+>
+> What commit 13 added is that **committed risk no longer prices off
+> `trailing_stop`**. `Portfolio._binding_stop` returns the resting level only. The
+> rule is *committed risk prices off what rests at the venue*, and the resting set
+> is a consequence of §3's three legs — none of which is a trailing leg — so today
+> that set is exactly `{stop_loss}`. When venue-side trailing lands, a trailing
+> level starts resting and becomes eligible without re-opening the decision.
+>
+> The defect that forced it: a trailed position priced its forward risk off a
+> level held only in memory, understating it by 58% on the measured fixture
+> (`sl=88, tr=95, mark=100, qty=10` gave `-50` where what rests gives `-120`), so
+> the daily-loss check permitted entries on protection that does not exist. It is
+> latent only because `advance_trailing_stop` is `trailing_stop`'s sole writer in
+> `src/` and has no caller.
+>
+> `should_exit` still prefers the trail, and that asymmetry is deliberate:
+> `should_exit` asks whether to exit **now**, `_binding_stop` asks what happens if
+> the bot **stops running**. Only the second is what committed risk means.
 
 **"Immutable once set", not "immutable after entry", and the difference is
 load-bearing.** §7 keys divergence off what was *requested*, so a position with
@@ -446,6 +495,26 @@ The uncomputable-risk discriminator cannot see it: that test is `stop_loss is No
 scoped by `stop_loss.enabled`, and here `stop_loss` is not `None`. `ProtectionState`
 can see it, which is the argument for keying the uncomputable count off `protection`
 as well as off `stop_loss`.
+
+> **NARROWED at M5b's rotation: "`ProtectionState` can see it" is true of THIS
+> state — the site-3 divergence — and of nothing wider.** The sentence above reads
+> as though `protection` discriminates the whole class of "the binding level does
+> not rest". It does not, and the over-generalisation reached a ruling at M5b
+> commit 13 before measurement rejected it.
+>
+> The counter-case is a **trailed** position: its `STOP_LOSS` leg rests exactly as
+> requested, so it is `ACTIVE` in every sense this enum will mean, and yet its
+> committed risk was priced off a trailing level that rests nowhere. Neither
+> branch of `protection` helps — admitting `ACTIVE` to `_TRUSTED_PROTECTION` counts
+> it and counts it wrong, while leaving `ACTIVE` untrusted refuses every entry
+> portfolio-wide for a healthy position. The error there is in **level selection**,
+> not in protection state, and commit 13 fixed it there.
+>
+> So the two defects are siblings, not one: same consequence (understated
+> committed risk), different cause, different discriminator. Commit 13 closed the
+> selection half and **this section's defect is untouched by it** — a position
+> whose *requested* stop is not resting still prices off that stop, because that
+> level is non-`None` by definition. **Still M5d's, still open.**
 
 **Latent, not live.** The site-3 state requires a detected divergence *and* a failed
 re-place, and the reconciler that produces it does not exist yet. That bounds how
