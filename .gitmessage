@@ -28,7 +28,7 @@
 #   Findings: none
 #
 #   Findings:
-#   - <ID> — <one line>. <MEASURED | REASONED | UNMEASURED>.
+#   - <ID> -- <one line>. <MEASURED | REASONED | UNMEASURED>.
 #
 # A finding found by a scratchpad probe has no commit of its own; it lands in
 # the docs commit that records the measurement. See CLAUDE.md.

@@ -1249,7 +1249,7 @@ Findings: none
 
 ```
 Findings:
-- <ID> — <one line>. <MEASURED | REASONED | UNMEASURED>.
+- <ID> -- <one line>. <MEASURED | REASONED | UNMEASURED>.
 ```
 
 **`Findings: none` is mandatory, never an absent section.** An absent section is
