@@ -968,6 +968,34 @@ once hiding a failing test. Both times the truncated output also discarded the
 diagnostic that named the cause. Run it bare, let it print its own summary, and
 read its own exit code.
 
+**The gate enforces that itself, and there is a documented override this section
+used to omit.** `scripts/check.py` refuses a piped stdout -- only a FIFO, since a
+regular file (`> gate.log`) preserves both the exit status and every line -- and
+the refusal is bypassed by the environment variable `CHECK_ALLOW_PIPE`, defined
+at `scripts/check.py:170` and applied at `:220` as
+`pipe_refusal(st_mode, allow_pipe=bool(os.environ.get(_ALLOW_PIPE_ENV)))`.
+
+**The trigger is PRESENCE, not value, and the spelling invites the opposite
+reading.** `CHECK_ALLOW_PIPE=0` **permits** the pipe, because `bool()` of a
+non-empty string is true -- the file says so at `:168`, on the grounds that a
+parser for falsey spellings would be a second thing to keep true for no gain.
+Anyone who exports it as `0` believing they have disabled it has in fact enabled
+it, and nothing reports that.
+
+It is not an oversight. `:107` gives the reason: a legitimate non-interactive
+consumer that reads the process's own status -- CI, a pre-commit hook, an editor
+task -- needs a way through, because **no portable test distinguishes a pipe to
+`tail` from a pipe to a log collector**. It is an environment variable rather
+than a flag deliberately, since `--allow-pipe | tail` would be one keystroke from
+the habit the guard exists to break, and there is no automatic `CI=true`
+exemption because a developer with `CI` exported for another tool would be
+silently unguarded.
+
+**Everything above is unchanged by this: the hatch is for a consumer that reads
+the exit status, never for reading the gate's output.** Do not set it while
+running the gate for a commit -- a count quoted from a run that needed it is a
+count whose exit status nobody checked.
+
 The four steps, and what each reports when green:
 
 ```
@@ -1292,6 +1320,15 @@ which is what M5b lost four of. A finding some *other* commit produced is not
 covered: it is recorded late, in the block of the commit that notices it, naming
 the commit that should have carried it. Reaching back for it would make the
 precedent the window exists to bound.
+
+**A finding later found WRONG is annotated in a subsequent block, never amended
+-- even where the amend window above is open.** The window governs
+**completeness**: a finding the commit produced and omitted. It does not govern
+**correctness**. State the reason with the rule, because the two look
+interchangeable: an amended finding leaves no trace that a finding on disk was
+ever wrong, so the next reader learns nothing from it, in a log whose whole value
+is recording what was believed and when. JJ at `8b7c688` is the worked example --
+its measurement was sound and the inference drawn from it was not.
 
 **An ID is allocated when it is WRITTEN TO DISK.** A finding named only in chat
 holds no ID until it lands. The IDs are a flat unnamespaced sequence and nothing
