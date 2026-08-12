@@ -1,156 +1,185 @@
-# Current milestone — M5b: the intent split and the widened port
+# Current milestone — M5c: the adapter surface and the first order
 
-**M5 is six milestones, not one.** M5-0 (decisions) and M5a (the vocabulary) are
-complete. M5b is the second that changes `src/`, and — like M5a — it adds no I/O.
-Nothing in it can place an order.
+**M5 is six milestones, not one.** M5-0 (decisions), M5a (the vocabulary) and M5b
+(the intent split and the widened port) are complete. **M5c is the first
+milestone in this project that can place an order**, which changes what a mistake
+costs: everything before it was recoverable by editing a file.
 
-Read first: `docs/QC_PROTECTIVE_ORDERS.md` §4 and §9 (the entry reference and the
-port), `docs/M5_NUMBERS.md` §1 (`max_entry_slippage`), `docs/QB_ESCALATION.md`.
-The decisions themselves are locked in `CLAUDE.md`; this file is the task list and
-the single home for live open items.
-
----
-
-## Prerequisites — TWO, and NEITHER IS MET
-
-M5a's equivalent section read *"Prerequisite, already met"*. This one does not.
-Both live here rather than among the open items below, and the placement is
-deliberate: **M5b moves the very port that carries them.** Filed as open items
-they read as advisory, and the whole point is that they are not.
-
-### P1 — `Portfolio` mutates on read, and two docstrings say it does not
-
-**Confirmed by execution**, not inferred:
-
-```
-before:  realised_pnl=-500  pnl_date=2026-08-07
-  -> daily_loss_exceeded(limit_percent=5, equity=10000,
-                         now=2026-08-08T00:01Z, marks={})  -> False
-after :  realised_pnl=0     pnl_date=2026-08-08
-```
-
-`daily_loss_exceeded` → `realised_today` → `_roll_day`, which **assigns**
-`realised_pnl` and `pnl_date` when the UTC day turns. A documented read performs
-a write.
-
-**Two statements of the false clause, and both travel into `core/` when the port
-moves:**
-
-| File | Text |
-|---|---|
-| `core/interfaces.py` (`RiskManager.approve`) | *"It is read, never mutated: recording an entry or an exit belongs to whoever actually places the order."* |
-| `core/portfolio.py` (`Portfolio`) | *"The risk manager only ever reads it; the mutators below are called by execution when an order actually fills."* |
-
-**What is NOT wrong, stated so the fix does not overshoot.** `_roll_day` honours
-the no-clock rule — the turn is driven by the caller's `now`, never by a wall
-clock — and lazy rolling is itself correct: a bot that trades nothing overnight
-would otherwise carry yesterday's halt into a new day with nothing to poke it.
-Every individual site looks right. What is wrong is that **a lazy accrual mutates
-on read**, it fires **once per UTC day** on the **first evaluation after
-midnight**, and that evaluation is on the path deciding whether the bot may open a
-position. A suite whose fixtures all sit inside one day never sees it.
-
-**Why it must be settled BEFORE the mechanical move, not after.** The likely
-resolution is behavioural — an explicit `roll_day(now)` called once per candle,
-with the read paths made genuinely read-only — and that touches the callers of
-`realised_today` / `daily_loss_exceeded`, which sit among exactly the construction
-sites the move relocates. Settling it first is one edit; settling it after is the
-same edit applied across a moved file plus a second review of the move itself.
-
-So it is **commit 0**, and it may change behaviour.
-
-### P2 — the widened port must not admit an entry whose committed risk is unknown
-
-`evaluate` refuses under `COMMITTED_RISK_UNKNOWN` when
-`portfolio.committed_risk(marks)` reports positions it could not price and
-`stop_loss.enabled` is true. **The port's `approve` does not.** It computes
-`marks`, delegates to `_approve`, and `_approve` consults `daily_loss_exceeded`
-and never `committed_risk` — so a caller reaching `approve` can be told
-`approved=True` for an entry whose committed risk is unknown. That is the exact
-inversion the refusal exists to prevent: an unprotected position reported as
-carrying no forward risk.
-
-It is latent today because `approve` has **zero production callers** — which is
-also why M5a declined to give `COMMITTED_RISK_UNKNOWN` a `RiskRule` twin, on the
-grounds that the widened port replaces `approve` this milestone. **That reasoning
-is only sound if M5b actually closes the gap.**
-
-**Binding requirement, not a task: when the port widens, no method on it may
-approve an entry whose committed risk is unknown.** Three ways to satisfy it, and
-choosing between them is M5b's:
-
-1. `approve` gains the check (and `COMMITTED_RISK_UNKNOWN` gains its `RiskRule`
-   twin after all, eroding the stated property that `NO_MARK_PRICE` is the single
-   place the two vocabularies coincide);
-2. `approve` leaves the port entirely, so `evaluate` is the only entry point;
-3. `approve` becomes private to `RiskManager`, off the port but still callable
-   internally.
-
-Option 2 is the cheapest to reason about and the most disruptive to the port's
-shape. **Do not default to it silently** — whichever is chosen, record why.
+Read first: `docs/QC_PROTECTIVE_ORDERS.md` §3 (leg types and full parameter
+sets), §6 (client order IDs), §8 (errors) and §4b (the discretionary close path);
+`docs/M5_NUMBERS.md`; `docs/QB_ESCALATION.md`. The decisions themselves are
+locked in `CLAUDE.md`; this file is the task list and the single home for live
+open items.
 
 ---
 
-## What M5b delivers
+## Closed by M5b — recorded so they are not re-raised
 
-Commit 0 is the prerequisite above. The rest, in order:
+- **P1 — `Portfolio` mutates on read.** Met before the port moved. `realised_today`
+  now derives the day by comparing `pnl_date` rather than assigning it, and both
+  false docstrings are corrected. Commits 0 and 1.
+- **P2 — the widened port must not admit an entry whose committed risk is
+  unknown.** Met at commit 8, when `evaluate` joined the port and `approve` was
+  deleted rather than widened.
+- **The port's second false clause** — `approve`'s *"pure function of its
+  arguments and the clock"*. Folded into commit 8 as planned; the method it
+  described no longer exists.
+- **`NO_MARK_PRICE`'s two divergent reason strings — closed by CONSTRUCTION, not
+  by reconciliation.** Deleting `approve` removed one of the two speakers, and
+  the **richer** message was preserved by choice: one site remains,
+  `risk/manager.py:344`, carrying *"equity is unknown, so no limit can be
+  checked"*. **Its scheduling label was wrong** — planned as "M5b commit 6", it
+  closed at commit 8.
+- **`engine/modes.py`'s "No I/O." handler docstring** — replaced by the bounded-I/O
+  rule. **Its scheduling label was wrong too** — planned as "M5b commit 7", it
+  landed at commit 5 (`7cdeb40`).
 
-| # | Commit | Kind |
-|---|---|---|
-| 0 | **Settle P1** — `roll_day` made explicit; read paths made read-only; both docstrings corrected | **semantic, may change behaviour** |
-| 1 | Move `RiskAssessment`, the `TradeIntent` family and `PairContext` to `core/` | **mechanical — byte-identical, its own commit** |
-| 2 | Widen the `RiskManager` port: `evaluate` joins it; **resolve P2**; correct the false purity clause (see below) | semantic |
-| 3 | `TradeIntent` → `EntryIntent` + `ExitIntent`, with the invariants locked in `CLAUDE.md` | semantic |
-| 4 | `entry_limit` derived from `reference_price` and `max_entry_slippage` | semantic |
-| 5 | `IntentLogger` narrows the union; the log line follows the split | semantic |
-| 6 | Collapse `NO_MARK_PRICE`'s two divergent reason strings *(M5a carryover)* | semantic |
-| 7 | `engine/modes.py`'s handler docstring: "No I/O" → the bounded-I/O rule *(M5a carryover)* | correction, `src/` |
-
-**Commit 1 is mechanical and must not carry anything else.** The move is the one
-change in this milestone a reviewer can verify by checksum rather than by reading.
-
-**`entry_limit >= reference_price` is the invariant that earns its place.** It
-makes Q-C §4's slippage *direction* a property of the type, unfakeable
-independently of whatever bound `max_entry_slippage` carries in config. It is the
-one thing here that could silently invert.
-
-**The log line follows the split.** On an entry, `entry` is the `entry_limit` —
-the price actually sent — and a sibling `reference` carries the candle close, so
-applied slippage is visible in one record. On an exit there is **no `entry` field
-at all** (absent, not null, per the schema rule) and `order_type="MARKET"` says
-why: the price is genuinely unknown until it fills.
-
-### Folded into commit 2 — the port's second false clause
-
-Distinct from P1 and settled by wording alone, so it is a task rather than a
-prerequisite. `RiskManager.approve`'s port docstring claims it *"stays a pure
-function of its arguments and the clock."* It is not: the concrete `approve` calls
-`_mark_prices(portfolio)`, which reads `self._provider.last_candle(...)` — a
-collaborator injected at construction, not an argument, and one whose value
-changes bar to bar. Correct it where the port is being edited anyway; do not open
-a separate commit for a sentence.
+**The two wrong labels are kept rather than silently corrected, because they are
+evidence about how the plan drifted.** Both items landed; neither landed where
+the plan said. The numbering diverged at the very first reshaping and no document
+noticed — `e99f3a7`'s own message calls it "M5b commit 6, mechanical" while this
+file's plan called commit **1** the mechanical move. A plan that renumbers itself
+silently is one whose labels cannot be used to check whether an item landed.
 
 ---
 
-## Closed by M5a's rotation — recorded so they are not re-raised
+## What M5c delivers
 
-- **`OrderStatus.is_open`'s direction.** Decided: a blacklist of terminal states.
-  The window closed as predicted when `PENDING_NEW` landed.
-- **The four items absorbed into M5a's scope** — `free_quote` `ge=0`,
-  `_exit_assessment`'s missing test, and `_enforce`'s `min_notional` /
-  effective-filter blindness. **Two others were absorbed and did NOT land; they
-  are carried below rather than allowed to vanish**, which is the hazard an
-  absorbed item creates.
-- **The `PHASE_HISTORY` debt from `7c1af17`** — discharged in the M5a entry.
-- **S3's salvage, both halves.** The `src/` docstring pass produced four
-  promotions, all landed. Two were *undercounted by the plan and corrected by
-  reading the code*: idempotence is nine sites in three spellings, not six, and
-  handler isolation is three layers, not two.
-- **The line-ending note.** Re-measured 2026-08-09 with the instrument validated
-  against a known non-zero answer and a negative control: **105 tracked files,
-  zero CR bytes.** The note is updated with today's measurement and the
-  overstating index line is corrected. The cause of the change from the
-  2026-08-02 mixed state is **undetermined and was not reconstructed**.
+Each item carries its **arming condition** — the event that turns it from latent
+into live — because several of these are harmless today and dangerous the moment
+something else lands.
+
+### 1. Finding I and Finding X, together
+
+They edit the same code — `live_system`'s priming loop — and splitting them means
+touching it twice.
+
+**Finding I — refuse a symbol whose tick is coarse relative to the configured
+slippage.** `entry_limit` is derived under `ROUND_CEILING`, so it may exceed
+`reference_price × (1 + max_entry_slippage)` by up to one tick, and
+`max_entry_slippage` is therefore not an enforceable ceiling where `tick / price`
+approaches it. Measured on the configured pairs: BTCUSDT `1.557e-7`, ETHUSDT
+`5.303e-6`, both four orders of magnitude below the `1e-3` bound, so the excess
+is immaterial *there*. At a 0.10 price on a 0.01 tick the realised slippage is
+**10% against a 0.1% bound**.
+
+The check is `tick / price > max_entry_slippage`, against a **live** price —
+`PRICE_FILTER.maxPrice` is not a market price — and it is a **boot** refusal, not
+a per-signal one: a per-signal check fires every bar on a symbol that can never
+satisfy it. It belongs at boot because the tick is not known until `exchangeInfo`
+is read.
+
+*Arming condition:* a cheap symbol with a coarse tick is configured. Not reachable
+on BTCUSDT or ETHUSDT.
+
+**Finding X — the boot calls `get_balances()` twice, unmemoised.**
+`engine/modes.py:449` in `_seed_portfolio` and `:509` for the unmanaged-holdings
+snapshot. `get_symbol_info` is memoised per client instance; `get_balances` is
+not, so the boot pays two round trips for one fact and the two snapshots can
+disagree if a balance changes between them.
+
+*Arming condition:* already live — it is two calls today. The disagreement window
+matters more once positions exist.
+
+### 2. The trailing milestone — undesigned, unassigned, unscheduled
+
+Q-C §5 defers the whole trailing design to "the trailing milestone".
+`CLAUDE.md` assigns *driving* `check_exit` / `advance_trailing_stop` to execution.
+**The two disagree about which milestone owns it, and nothing schedules either.**
+
+What exists: `update_trailing_stop` (pure), `RiskManager.advance_trailing_stop`
+(writes the level onto the position), `should_exit` (reads it). What does not
+exist: any caller. `advance_trailing_stop` is `trailing_stop`'s **only** writer
+in `src/` and has no call site, so no production position can carry a trailing
+level today.
+
+*Arming condition:* whatever first drives the per-candle exit loop. Until then
+every trailing test exercises code nothing calls.
+
+### 3. Finding L — `realised_pnl` set with no `pnl_date`
+
+`Portfolio(free_quote=…, realised_pnl=D("-77"))` leaves `pnl_date=None`, and
+`realised_today` then returns `Decimal(0)`: a booked loss reads as zero. **The
+direction is permissive** — the loss is hidden from the daily-loss check, which
+permits entries an account is halted for.
+
+**No validator can enforce the pairing while `record_realised_pnl` writes twice.**
+Measured: adding the obvious `model_validator` produces **21 test failures**, and
+it breaks the very first accrual — `record_realised_pnl` assigns `realised_pnl`
+at one statement and `pnl_date` at the next, so with `validate_assignment=True`
+the object is briefly in exactly the invalid state the validator forbids. Both
+`mode="before"` and `mode="after"` re-run on assignment, so neither placement
+escapes it.
+
+**Prescribed shape: make the pair a single value object**, so the two fields
+cannot be set independently and the invalid state is unrepresentable rather than
+merely rejected.
+
+*Arming condition:* **`persistence/` landing.** Today `src/` constructs
+`Portfolio` in exactly one place (`modes.py:443`), passing only `quote_asset` and
+`free_quote`, and no test constructs the invalid pair. A restore-from-disk path
+that rehydrates `realised_pnl` without its date is precisely the shape that arms
+it.
+
+### 4. Collapse the multi-statement writes on `Position` and `Portfolio`
+
+L's precondition, and already `CLAUDE.md`'s prescription for `Position`:
+`advance_trailing_stop` writes `highest_price`/`lowest_price` and then
+`trailing_stop`, and `record_realised_pnl` writes `realised_pnl` and then
+`pnl_date`. Under `validate_assignment=True` each is observable mid-write, which
+is why neither model may carry a cross-field `model_validator` today.
+
+*Arming condition:* none — this is a precondition, not a defect. It blocks item 3
+and the `ABSENT_BY_DESIGN`-implies-both-levels-absent invariant.
+
+### 5. Not M5c's, and explicitly not closed
+
+**Q-C §7's site-3 defect remains M5d's.** A position whose *requested* stop was
+found not to be resting still prices committed risk off that stop, because that
+level is non-`None` by definition — that is how the divergence was detected.
+**M5b commit 13 did not close it.** Commit 13 closed the sibling defect: the
+level *selected* was a trailing level that rests nowhere. Same consequence,
+different cause, different discriminator — §7's is `ProtectionState`, commit 13's
+was level selection. Fixing either leaves the other.
+
+---
+
+## Observations carried into the open items — states, not decisions
+
+Recorded because they are known and unresolved. **None is a rule**, and none
+should be written into `CLAUDE.md` as one.
+
+- **W — 25 `type: ignore` sites across nine test files, and not all are the
+  sanctioned kind.** `CLAUDE.md` sanctions one use: documenting a deliberate
+  violation under test, such as passing a `float` where `Money` is expected. That
+  covers the `[misc]` and `[arg-type]` cases. It does not obviously cover the
+  `[method-assign]` and `[attr-defined]` monkeypatching in `test_main_shutdown.py`
+  and `test_config.py`. `tests/` is outside mypy, so every one of them is inert as
+  far as the gate is concerned — which is why the inventory grew without anything
+  reporting it. **Undecided:** whether the sanctioned-use clause should widen to
+  name monkeypatching, or the monkeypatching should change shape.
+
+- **Three private `_Frozen` copies** — `core/assessment.py:39`,
+  `core/models.py:124`, `risk/rules.py:121`. A shared public base was named at
+  M5b commit 7 as the right long-term answer and deliberately deferred: it makes
+  a base class part of the public surface, which is a decision about the domain
+  layer rather than a tidy-up. The count is **unchanged at three** across M5b —
+  `risk/manager.py`'s copy was deleted when the assessment family moved, and
+  `core/assessment.py` gained one.
+
+- **AA — `risk/__init__.py` re-exports 20 names and NOTHING imports the package
+  surface.** Measured: no `from trading_bot.risk import …` anywhere in `src/`,
+  `tests/` or `scripts/`; every consumer imports from the submodules.
+  **Its own figure drifted while it sat here** — recorded as 18 when first
+  observed, it is 20 now, because commit 9's `EntryIntent`/`ExitIntent` split
+  added one net and commit 11's `derive_entry_limit` added another. An
+  observation about an unused surface grew by 11% without anyone touching the
+  question.
+
+  **The remedy is deliberately NOT recorded.** Nobody has established whether the
+  package surface is intended API for a future consumer, and deleting 20
+  re-exports on the strength of "nothing imports them today" is the kind of
+  cleanup that is only obviously right until someone needed one.
 
 ---
 
@@ -350,6 +379,12 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   hands a recipe a pipe or an inherited descriptor has not been measured here.
   Measure it in the same run rather than assuming.
 
+  **First-hand evidence that the refusal works, from M5b's rotation:** the guard
+  fired on an assistant-issued `python scripts/check.py 2>&1 | tail -12` and
+  printed its own instructions instead of running. So the refusal is exercised
+  and correct. **It still says nothing about `make`** — that path remains
+  unmeasured, and this evidence must not be read as covering it.
+
 - **`make cov` and `make format` do not honour `$(PYTHON)`.** They call bare
   `pytest` / `ruff`, so `make PYTHON=... cov` silently uses a different
   interpreter than `make PYTHON=... check` would. Outside the gate, so left alone;
@@ -384,6 +419,28 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   were pytest's — and a pass that had updated "the lines I changed" would have
   been correct by luck. Worth a check that reads the numbers from a live run, but
   it must not become a gate that fails for a reason unrelated to the code.
+
+  **THE INVERSE HAZARD, and it belongs beside this one rather than in another
+  document.** Grepping the digits guards against *missing* a count site. The
+  inverse guards against *hitting one that is not a count* — because a prose
+  commit can plant digits that a later count commit sweeps up.
+
+  M5b's rotation is the worked example, and it nearly fired. The corrections pass
+  wrote **"a 58% understatement"** into `CLAUDE.md`'s `_binding_stop` annotation;
+  the counts commit that followed substituted `58 → 59` for mypy's file count. A
+  digit-wide substitution would have rewritten a measured figure into a fabricated
+  one — inside an annotation whose whole subject is a measurement. It survived
+  only because the count sites were edited **by surrounding context rather than by
+  pattern**.
+
+  Note that the ordering *created* the exposure. Corrections-before-additions is
+  right, and it is right for a reason unrelated to this: a new rule written into a
+  document that still contains false statements inherits their credibility. The
+  cost of that ordering is that the prose pass runs first and can plant the
+  hazard the count pass then walks into. So the two rules are a pair — grep the
+  digits, then edit by context — and `CLAUDE.md`'s count-coupling section carries
+  a pointer here saying so, because a rule and its inverse kept in separate
+  documents is how one of them gets applied alone.
 
 - **`ruff` and `mypy` are unpinned while every runtime dependency is pinned
   `==`.** `requirements-dev.txt` floats the two tools that *produce the numbers
