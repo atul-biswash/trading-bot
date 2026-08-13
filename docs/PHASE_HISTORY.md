@@ -1926,6 +1926,189 @@ pointer from `CLAUDE.md`.
 
 ---
 
+## Phase 5 M5c — the milestone that bought certainty and no code
+
+M5c set out to build the adapter surface. **It did not.** Its own Phase 1 put the
+weight on the order-list port methods, the request type and mapper, and the Q-C
+§6 ID scheme; none of the three exists. What landed instead is the Q-C §8 error
+classifier and four Testnet probes. **Twenty-one numbered commits, plus five
+rotation commits — this one included.**
+
+That gap is the entry's headline rather than a footnote, because M5c's own scope
+confusion started the same way: the heading of `NEXT_MILESTONE` promised "the
+adapter surface and the first order" while its delivery list contained neither,
+and the first Phase 1 report had to answer *which reading the tree supports*
+before any work could begin.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `8b7c688` | Findings land at their commit; `.gitmessage` and the clause that says it enforces nothing |
+| 2 | `5afbe5c` | The finding-line shape is ASCII, matching every commit message in the tree |
+| 3 | `505efcd` | Trailing is UNASSIGNABLE with its blocking question named; M5c stops at the adapter surface |
+| 4 | `a7cf5e8` | The amend window; IDs allocated on disk; a precondition is a check, not a sentence |
+| 5 | `5215350` | M5b's rotation count corrected from five to six (finding MM) |
+| 6 | `3d0b251` | The gate's pipe guard has a documented override, and presence is the trigger |
+| 7 | `0e793fa` | The ASCII rule is a propagation boundary, not a file rule |
+| 8 | `36f5d2f` | Finding IDs name their milestone from M5d; a baseline states its instrument |
+| 9 | `240353c` | The flat-sequence ruling falsified by exhaustion, annotated not rewritten |
+| 10 | `9c47858` | The duplicate order-list probe recorded — **and its central claim was wrong** |
+| 11 | `5aba5c7` | ID uniqueness is live-only; the recovery rule stands; `9c47858` corrected |
+| 12 | `6d19c58` | The classifier dispatches from a rule table (mechanical, zero behaviour change) |
+| 13 | `d7abd85` | `-2010` splits into duplicate and insufficient-balance on message text |
+| 14 | `975d863` | `-2011` → `OrderNotFoundError` |
+| 15 | `c42cbf7` | `-1013` → `FilterRejectedError` with the filter name captured |
+| 16 | `15907d4` | `-1100` → `MalformedRequestError`, the one family outside `OrderError` |
+| 17 | `2498bee` | The contract group → `ContractViolationError`; `-1128` deliberately unclassified |
+| 18 | `6979b1d` | `-1111` unclassified and its code survives |
+| 19 | `1715b37` | The hierarchy pass: every classified venue error carries its code |
+| 20 | `bfafae0` | `InsufficientBalanceError` is an `OrderError`; M5c-AJ's remedy |
+| 21 | `6502acf` | The rules M5c produced, counted rather than quoted |
+
+Rotation: `efcc5e3` (Current state), `6cee268` (the counts, alone), `bc45b45`
+(`README`'s build state), `5660924` (`NEXT_MILESTONE` rewritten for M5d), **and
+this commit**, which records the milestone.
+
+### The rotation fix, and the version that does not work
+
+MM's cause is structural: **a rotation cannot count itself, because the count is
+written before the commit that writes it exists.** M5b's entry said "five" and six
+had landed.
+
+**The fix carried for six turns — "the commit table and count are completed by the
+FINAL rotation commit" — does not work, and the wrong fix is part of the
+finding.** Any commit that writes the count is uncounted by it, so moving the
+write to the last commit moves the defect with it.
+
+What makes the real fix small is that **the table was never the problem.** M5b's
+table covered the *numbered* commits; the rotation commits lived in prose below
+it. MM was entirely a prose defect. So:
+
+> **The `PHASE_HISTORY` entry is the final rotation commit, and it counts itself
+> deliberately: it writes N *including* itself, and names the last commit as
+> "this commit" rather than by SHA — because a commit cannot know its own SHA
+> before it exists.**
+
+This entry is the first to do it: five rotation commits, four with SHAs and one
+named as itself.
+
+**WW's coupling rule lands with it, because this entry creates the next
+instance as it is written.** A count and its list are a *coupled pair*, hand-synced
+and unenforced, and a milestone entry contains two of them — the numbered count
+against the table, and the rotation count against the rotation list. At M5b the
+first held and the second drifted. **Self-reference predicts which side drifts:**
+not the longer list, not the older one, but the one whose subject is the rotation
+writing it.
+
+### The order of rotation is now load-bearing, and NN(3) is why
+
+The extractor's base is `tail -1` of the last commit table. **The moment this
+entry lands, that base jumps from `4926705` to `6502acf`** and every block this
+entry compiles falls out of range. So the extractor was run *before* this commit
+was written — 25 blocks, 59 findings across 31 commits — and the entry written
+from what it returned.
+
+That is a workaround, not a fix. NN's remedy is carried to M5d unruled.
+
+### What the probes bought, including the one that was wrong
+
+Four Testnet probes, all read-only or self-cancelling, none filling.
+
+**The duplicate order-list probe concluded the opposite of the truth, and the
+correction is the most instructive result of the milestone.** Arms 1–9 resubmitted
+an accepted list's byte-identical parameters and were accepted every time, so
+`9c47858` recorded that order lists are not deduplicated and annotated
+`CLAUDE.md`'s timed-out-write recovery as falsified. Arms 10–11 then measured the
+**live** case directly: a list confirmed `EXECUTING` by read-back, resubmitted
+byte-identical, returned `-2010` HTTP 400 `"Duplicate order sent."`
+
+**The rule is: a client order ID is unique against LIVE orders only; a terminal
+order's ID is released and immediately reusable** — identically for single orders
+and for lists. Q-C §8's classification holds and the recovery rule **stands as
+written**.
+
+**The defect was in the arm set's design, not in any measurement it made.** Every
+one of the nine arms sampled a terminated original, and ID-release and
+absence-of-deduplication predict identical results in that state — including both
+control arms built to isolate *which field* was keyed, which isolated the wrong
+axis. The discriminating arm was a plain single order, which the original design
+did not contain.
+
+Also measured: the 36-character client-order-ID limit and its regex
+`^[a-zA-Z0-9-_]{1,36}$`, where a *length* violation is reported as "Illegal
+characters found"; the insufficient-balance message, byte-identical for a BUY
+exceeding quote and a SELL exceeding base; and that **cancelling one leg of an OTO
+collapses the whole list**, so §4b's cancel step is one call rather than three.
+
+### The classifier, and the pass that made it coherent
+
+Six families landed one per commit — class, branch and test together — on a rule
+table introduced by a mechanical commit that changed no behaviour and was proved
+so by the eleven existing translation tests passing untouched.
+
+**The hierarchy pass is the part M5d will feel.** Decided one at a time, each
+family was locally sound; seen together, two defects were visible that no single
+diff contained. **Six of seven classified outcomes discarded the exchange's code
+while the unclassified fallthrough kept it** — so the better we classified, the
+less machine-readable identity survived. And **there was no way to catch "our bug"
+as a class**, because `MalformedRequestError` and `ContractViolationError` had
+`ExchangeError` as their nearest common ancestor. Both were fixed as one
+principle: `ExchangeAPIError` means the exchange returned an error response and
+carries its identifier, and every classified venue error descends from it.
+
+**Three inherited classifications were found, all the same shape** — a value
+placed by a commit that argued nothing, inheriting the intent of the container it
+sat in: `-1111` inside `_ORDER_REJECT_CODES` from a commit whose entire message
+is "phase 2"; the reject set's own membership; and
+`InsufficientBalanceError`'s placement outside `OrderError`. What found all three
+was asking one question per member rather than reading the collection.
+
+### What the mutation discipline learned about itself
+
+The reject-set mutation ran at 8, 11, 11, 11 and then, at the hierarchy pass,
+predicted 18 and observed 14. **The reasoning was never wrong: the intended
+variant gives exactly 18.** The anchor had been restructured, the harness
+re-anchored a few lines lower — inside the rule loop rather than ahead of it —
+and the prediction carried across unchanged.
+
+So **a re-anchored mutation is a new mutation**, and **anchor drift is invisible to
+a checksum by construction**, since both anchors produce a file that differs from
+baseline. M5c-M's own remedy — assert the mutated md5 differs — proves that *a*
+mutation applied, not that *the* mutation applied. Both rules are now in
+`CLAUDE.md`, and this milestone's later proofs print their mutated line.
+
+**A rule distilled from a finding can outrun it.** C4 marked an ancestry-only
+assertion "documentation, not coverage" and wrote that it "pins nothing"; the
+follow-on excluded it from a mutation's expected failure set on that basis and
+observed three failures against two. It bit. An ancestry-only assertion is blind
+to a *sideways* move and **not** to a move *out* of the base — weak, not inert —
+and the docstring was corrected rather than left.
+
+### The findings discipline, measured
+
+**59 findings across 21 numbered commits, and every commit carried a block**,
+including the two that carried `Findings: none`. That is the rule landed at
+`8b7c688` surviving its own milestone end to end, against M5b having lost four
+findings to exactly the gap it closes.
+
+It is also a measurement of the mechanism rather than a fact about the milestone:
+**59 is more than twice the flat scheme's entire remaining capacity when M5c
+began.** The sequence exhausted twice — once at `ZZ`, discovered *at* exhaustion
+with a ruling already written that could not be satisfied, and once in the `M5c-`
+namespace, caught at 22 of 26 with three commits still to run. The difference
+between those two is the whole value of the lesson.
+
+### Do not tidy these
+
+Four annotations read as untidy and are the record's value: `9c47858`'s corrected
+claims; the flat-sequence ruling annotated as falsified by exhaustion; `M5c-B`,
+annotated by `M5c-H` rather than amended; and `M5c-AO`'s docstring correction.
+Each records a belief that was held, acted on, and then measured false. A log that
+shows only the corrected view teaches nothing about how it was reached.
+
+---
+
 ## Known open items
 
 **Live open items are tracked in `docs/NEXT_MILESTONE.md`, not here.**

@@ -1473,6 +1473,30 @@ renames) in **separate commits** from semantic ones. Never mix them.
    carried an instruction that had already been executed. A reader arriving cold at
    either would have built something nothing adopted.
 
+**The `PHASE_HISTORY` entry is written LAST, and it COUNTS ITSELF.** A rotation
+cannot count itself if it writes the count before the commit that writes it
+exists — M5b's entry said "five rotation commits" and six had landed (finding
+MM). The fix that suggests itself, *completing the count in the final rotation
+commit*, **does not work**: whichever commit writes the count is uncounted by it.
+
+What makes the real fix small is that the **table** was never the problem — it
+covers the *numbered* commits, and the rotation commits live in prose beneath it.
+So the entry writes N **including itself** and names the last one as **"this
+commit"** rather than by SHA, because a commit cannot know its own SHA before it
+exists.
+
+**Run the extraction command BEFORE writing that entry.** Its base is `tail -1`
+of the last commit table, so the moment the entry lands the base jumps to the
+current milestone's last numbered commit and every block the entry compiles falls
+out of range. That is NN's third case, and running the extractor first is a
+workaround rather than its remedy.
+
+**A count and its list are a COUPLED PAIR (finding WW), and a milestone entry
+contains two of them** — the numbered count against the table, and the rotation
+count against the rotation list. At M5b the first held and the second drifted.
+**Self-reference predicts which side drifts**: not the longer list, not the older
+one, but the one whose subject is the rotation writing it.
+
 There is no separate workflow document; these four steps are the procedure, and
 they live here because this is the only file loaded into every session. Docs that
 must be remembered to be read are how the four drifts found in the M3 audit got
