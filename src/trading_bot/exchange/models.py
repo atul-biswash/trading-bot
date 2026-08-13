@@ -86,7 +86,23 @@ _CONTRACT_VIOLATION_CODES = (-1106, -1159, -1158)
 # which is why this code needs message rules rather than a single mapping -- and
 # why the constant is no longer named after one of its meanings.
 _OVERLOADED_ORDER_CODE = -2010
-_ORDER_REJECT_CODES = frozenset({-1013, -1100, -1111, -2010, -2011})
+# THE LADDER'S THIRD BAND, and what it catches is easy to lose: A KEYED CODE
+# WHOSE MESSAGE MATCHED NO ROW. The rows above fire only on a match; a reworded
+# or unrecognised message on one of these four falls past them to here.
+#
+# **All four members are live and ten tests depend on this.** Three
+# falls-through-to-the-reject-set tests, five near-miss tests and the two
+# loud-fallthrough tests all assert that such a message stays an ``OrderError``
+# rather than degrading to ``ExchangeAPIError``. That is what makes the arc's
+# near-miss behaviour A REFUSAL TO GUESS rather than a reclassification: we stop
+# claiming to know which meaning arrived, without pretending we no longer know
+# it was an order rejection.
+#
+# ``-1111`` was removed at M5c C6. It was never observed, never documented and
+# never tested -- it arrived inside this set in a commit whose entire message is
+# "phase 2" -- so it now falls to ``ExchangeAPIError``, which PRESERVES its code
+# where ``OrderError`` discarded it.
+_ORDER_REJECT_CODES = frozenset({-1013, -1100, -2010, -2011})
 _RATE_LIMIT_STATUS = frozenset({429, 418})
 
 # Exceptions the client layer should catch and route through

@@ -908,6 +908,27 @@ def test_1128_is_deliberately_unclassified_and_keeps_its_code() -> None:
     assert result.code == -1128
 
 
+def test_1111_is_unclassified_and_its_code_survives() -> None:
+    """The counterpart to ``-1128``'s test, from the opposite direction.
+
+    ``-1128`` was never classified and M5c ruled not to start. ``-1111`` WAS
+    classified -- silently, inside ``_ORDER_REJECT_CODES``, by a commit whose
+    entire message is "phase 2" -- and was never observed, documented or tested.
+    Ruling them differently would have made the ``-1128`` ruling a preference
+    rather than a rule.
+
+    **The gain is the identifier surviving**, which is why the code's VALUE is
+    asserted and not merely the presence of the attribute: ``OrderError`` takes
+    no code and discarded it, ``ExchangeAPIError`` carries it. This is not
+    "classify it less" -- it is stop asserting a meaning and start reporting the
+    fact.
+    """
+    exc = _api_error(code=-1111, status=400, message="whatever the venue said")
+    result = m.translate_binance_error(exc)
+    assert type(result) is ExchangeAPIError
+    assert result.code == -1111
+
+
 def test_a_contract_code_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
     """The guard cannot fire for a code-only row, and this documents the gap.
 
