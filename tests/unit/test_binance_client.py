@@ -13,6 +13,7 @@ from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock
 
+import aiohttp
 import pytest
 from binance.exceptions import BinanceAPIException
 from freezegun import freeze_time
@@ -562,6 +563,58 @@ async def test_close_and_context_manager() -> None:
         assert entered is bc
 
     client.close_connection.assert_awaited_once()
+
+
+async def test_close_translates_a_transport_failure() -> None:
+    """A transport failure at close arrives classified, not raw.
+
+    ``close()`` is reached from ``live_system``'s unconditional ``finally``
+    (``engine/modes.py:635``), so a raw ``aiohttp.ClientError`` here propagates
+    over the boot error that caused the teardown -- the masking the nested
+    teardown exists to prevent. Four of the five ``close()`` call sites sit in a
+    ``finally`` or a failure path, so this is the ordinary case rather than a
+    corner.
+
+    ``aiohttp.ClientConnectionError`` rather than a bare ``ConnectionError``
+    deliberately: it is the family the defect was recorded against, and the one
+    ``translate_binance_error`` is measured on elsewhere in this suite.
+    """
+    client = AsyncMock()
+    client.close_connection.side_effect = aiohttp.ClientConnectionError("session gone")
+    bc = _make(client)
+
+    with pytest.raises(ExchangeConnectionError):
+        await bc.close()
+
+    # One attempt, not four: `idempotent=False` keeps `ExchangeConnectionError`
+    # out of the retry predicate, so no backoff is spent inside a teardown.
+    assert client.close_connection.await_count == 1
+
+
+async def test_close_is_safe_to_call_twice() -> None:
+    """A regression guard on our own future code, not on the adapter today.
+
+    ``close()``'s idempotence is **inherited**, not implemented: it rests
+    entirely on ``AsyncClient.close_connection()`` tolerating a second call,
+    which ``engine/modes.py:69-70`` asserts and whose nested teardown depends
+    on -- and **nothing in the unit suite pins it**. This test does, so a
+    ``close()`` that later grows state cannot break teardown silently.
+
+    It deliberately does **not** bite on the ``_call`` routing: an ``AsyncMock``
+    neither raises nor is routed differently, so it abstains on that mutation by
+    construction. That is stated rather than discovered, per the rule that a
+    test absent from every mutation's failure set is abstaining, not passing.
+    """
+    client = AsyncMock()
+    bc = _make(client)
+
+    await bc.close()
+    await bc.close()  # must not raise
+
+    # Passed through both times: the idempotence is the underlying client's, and
+    # papering over it with a "did I already close?" flag would be a second
+    # source of truth for a fact that object already owns.
+    assert client.close_connection.await_count == 2
 
 
 # --------------------------------------------------------------------------

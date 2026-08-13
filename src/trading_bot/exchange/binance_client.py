@@ -193,7 +193,18 @@ class BinanceClient(BaseExchangeClient):
         await self._call(self._client.ping)
 
     async def close(self) -> None:
-        await self._client.close_connection()
+        # The one method that used to reach the client without `_call`, so a
+        # transport failure here escaped as a raw `aiohttp.ClientError`.
+        # `live_system` closes in an unconditional `finally`, where such a raise
+        # propagates over the boot error that caused the teardown -- the exact
+        # masking the nested-teardown design exists to prevent.
+        #
+        # `idempotent=False` reads backwards and is not: the flag means "is a
+        # connection failure safe to retry", not "is this operation idempotent".
+        # `_IDEMPOTENT_RETRY` contains `ExchangeConnectionError`, so `True` would
+        # retry the very failure this classification exists to surface, spending
+        # backoff inside the teardown and lengthening the masking window.
+        await self._call(self._client.close_connection, idempotent=False)
 
     async def __aenter__(self) -> BinanceClient:
         return self
