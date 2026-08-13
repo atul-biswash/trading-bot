@@ -493,16 +493,23 @@ class _ApiRule(NamedTuple):
     #: the call, because a row that needs the match uses ``build`` instead -- so
     #: this field stays the answer to "what does this row mean?" either way, and
     #: it is what the declared-order test asserts.
-    produces: type[TradingBotError]
-    #: Used instead of ``produces(message)`` when the exception needs something
-    #: parsed out of the MESSAGE. Only ever called on a row that has a pattern,
-    #: so the match is guaranteed non-``None``. Renamed from ``build`` at C5 for
-    #: symmetry with ``from_code`` below; no behaviour changed.
-    from_match: Callable[[str, re.Match[str]], TradingBotError] | None = None
-    #: Used instead of ``produces(message)`` when the exception needs the CODE.
-    #: This is the code-only row's hook: such a row has no pattern, so there is
-    #: no match to parse and the code is the only identity the error carries.
-    from_code: Callable[[str, int | None], TradingBotError] | None = None
+    produces: type[ExchangeAPIError]
+    #: Used instead of ``produces(message, code=code)`` when the exception needs
+    #: something parsed out of the message.
+    #:
+    #: **ONE hook, taking everything a row can classify on.** C3 added a
+    #: message-shaped hook and C5 added a code-shaped one; the hierarchy pass
+    #: retired both rather than widening the pair a third time, because two hooks
+    #: made the caller choose which axis mattered when the answer is "either, and
+    #: sometimes both". ``match`` is ``None`` exactly on a code-only row.
+    #:
+    #: **The invariant a row must satisfy:** if ``produces`` needs more than
+    #: ``(message, code)`` -- as :class:`FilterRejectedError` and
+    #: :class:`MalformedRequestError` do -- the row MUST supply ``build``.
+    #: Nothing enforces it structurally; a row that broke it would raise
+    #: ``TypeError`` on its first matching response rather than fail silently,
+    #: and every row has a test.
+    build: Callable[[str, int | None, re.Match[str] | None], TradingBotError] | None = None
 
     def keys_on(self, code: object) -> bool:
         """Whether this row is about ``code`` at all."""
@@ -557,7 +564,9 @@ _FILTER_FAILURE_RE = re.compile(r"^Filter failure: (?P<filter>[A-Z_]+)$")
 _MALFORMED_PARAM_RE = re.compile(r"^Illegal characters found in parameter '(?P<param>[^']+)'")
 
 
-def _contract_violation(message: str, code: int | None) -> TradingBotError:
+def _contract_violation(
+    message: str, code: int | None, _match: re.Match[str] | None
+) -> TradingBotError:
     """Build a :class:`ContractViolationError` carrying the code.
 
     **A CODE-ONLY row, and the qualifier matters more than the row.** It is
@@ -574,12 +583,18 @@ def _contract_violation(message: str, code: int | None) -> TradingBotError:
     return ContractViolationError(message, code=code)
 
 
-def _malformed_request(message: str, match: re.Match[str]) -> TradingBotError:
+def _malformed_request(
+    message: str, code: int | None, match: re.Match[str] | None
+) -> TradingBotError:
     """Build a :class:`MalformedRequestError` carrying the offending parameter."""
-    return MalformedRequestError(message, parameter=match.group("param"))
+    # A pattern row always has a match; this narrows the Optional for mypy.
+    assert match is not None
+    return MalformedRequestError(message, parameter=match.group("param"), code=code)
 
 
-def _filter_rejected(message: str, match: re.Match[str]) -> TradingBotError:
+def _filter_rejected(
+    message: str, code: int | None, match: re.Match[str] | None
+) -> TradingBotError:
     """Build a :class:`FilterRejectedError` carrying the captured filter name.
 
     The captured spelling is the exchange's own, which is what makes a parsed
@@ -588,7 +603,9 @@ def _filter_rejected(message: str, match: re.Match[str]) -> TradingBotError:
     and this capture yields ``'PRICE_FILTER'`` byte-for-byte from
     "Filter failure: PRICE_FILTER".
     """
-    return FilterRejectedError(message, filter_name=match.group("filter"))
+    # A pattern row always has a match; this narrows the Optional for mypy.
+    assert match is not None
+    return FilterRejectedError(message, filter_name=match.group("filter"), code=code)
 
 
 #: The dispatch table, consulted in order; first match wins. Anything unmatched
@@ -605,10 +622,7 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(
         _MALFORMED_REQUEST_CODE, _MALFORMED_PARAM_RE, MalformedRequestError, _malformed_request
     ),
-    *(
-        _ApiRule(code, None, ContractViolationError, None, _contract_violation)
-        for code in _CONTRACT_VIOLATION_CODES
-    ),
+    *(_ApiRule(code, None, ContractViolationError) for code in _CONTRACT_VIOLATION_CODES),
 )
 
 
@@ -642,11 +656,18 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
             if rule.pattern is not None and match is None:
                 keyed_but_unmatched = True
                 continue
-            if rule.from_match is not None and match is not None:
-                return rule.from_match(message, match)
-            if rule.from_code is not None:
-                return rule.from_code(message, code if isinstance(code, int) else None)
-            return rule.produces(message)
+            code_int = code if isinstance(code, int) else None
+            if rule.pattern is None:
+                # CAPTURE, not detection. A code-only row has no message
+                # expectation, so the loud guard below cannot reach it and
+                # these codes are the one family without rot detection. There
+                # is nothing to detect -- but the message can be RECORDED, and
+                # the first one seen in the wild is exactly what would let
+                # someone write a pattern row and close the gap.
+                _log.debug("Binance code %s classified without a message rule: %r", code, message)
+            if rule.build is not None:
+                return rule.build(message, code_int, match)
+            return rule.produces(message, code=code_int)
         if keyed_but_unmatched:
             # A code we claim to classify by message, carrying a message none of
             # its rules recognise. Silently falling through is the failure mode

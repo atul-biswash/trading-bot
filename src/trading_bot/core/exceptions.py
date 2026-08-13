@@ -26,10 +26,28 @@ class ExchangeConnectionError(ExchangeError):
 
 
 class ExchangeAPIError(ExchangeError):
-    """The exchange returned an error response.
+    """The exchange returned an error response, and it carries the exchange's
+    own identifier for it.
+
+    **This is the base of every classified venue error**, which is one principle
+    rather than a convenience: if the exchange told us something, the thing it
+    told us has a code, and a classification that discards the code leaves an
+    operator holding our vocabulary instead of Binance's. Before M5c's hierarchy
+    pass, six of seven classified outcomes dropped it -- so the *better* we
+    classified, the less machine-readable identity survived, which is backwards.
+
+    **``code`` is ``int | None``, and "carries the code" is weaker than it
+    reads.** Two ``src/`` sites raise this with **no** code --
+    ``BinanceClient._fetch_symbol_info`` on an unknown symbol, and
+    ``to_symbol_info`` on a malformed payload -- because both are *client-side*
+    refusals where no venue response exists. **A caller reading ``.code`` must
+    therefore handle ``None``**, and the field is deliberately not tightened to
+    ``int``: doing so would require splitting those two off into a separate
+    type, which would assert a distinction neither of them needs.
 
     :param message: human-readable description.
-    :param code: exchange-specific error code, if provided.
+    :param code: exchange-specific error code, or ``None`` for a client-side
+        refusal that never reached the venue.
     """
 
     def __init__(self, message: str, *, code: int | None = None) -> None:
@@ -37,15 +55,15 @@ class ExchangeAPIError(ExchangeError):
         self.code = code
 
 
-class RateLimitError(ExchangeError):
+class RateLimitError(ExchangeAPIError):
     """A rate limit or IP ban was hit; back off before retrying."""
 
 
-class InsufficientBalanceError(ExchangeError):
+class InsufficientBalanceError(ExchangeAPIError):
     """Not enough free balance to place the requested order."""
 
 
-class OrderError(ExchangeError):
+class OrderError(ExchangeAPIError):
     """An order was rejected or could not be created/canceled."""
 
 
@@ -64,25 +82,31 @@ class ContractViolationError(ExchangeAPIError):
     * ``-1159`` -- ``MARKET`` refused as a working type (section 3).
     * ``-1158`` -- ``LIMIT`` refused in the pending-above slot (section 3).
 
-    **A sibling of :class:`MalformedRequestError` in condition, a nephew in the
-    tree, and the difference is deliberate.** Both are "we built a request the
-    endpoint cannot accept", and neither belongs under :class:`OrderError` --
-    there is no market state to respond to and nothing a caller can do but stop.
-    They are not the *same* class because the payloads differ: ``-1100`` names an
-    offending parameter, while ``-1158``/``-1159`` reject a *value in a slot* and
-    have no parameter name to carry. Forcing one would be a payload that lies.
+    **This is the PARENT of :class:`MalformedRequestError`, decided at M5c's
+    hierarchy pass.** C5 landed the two as a nephew and an uncle and observed
+    only that they resembled each other; seeing all six families together showed
+    the cost -- their nearest common ancestor was :class:`ExchangeError`, which
+    also catches rate limits and order rejections, so **there was no way to catch
+    "our bug" as a class at all.** ``except ContractViolationError`` now does.
 
-    It derives from :class:`ExchangeAPIError` rather than directly from
-    :class:`ExchangeError` so that it inherits ``code`` -- the only identity
-    these errors have, absent their text -- and so that this is a **refinement**
-    of where the three codes already landed rather than a move.
+    ``-1100`` is a contract violation that happens to name a parameter, so the
+    payload difference is an argument *for* the relation rather than against it:
+    a child adding ``parameter`` to a parent's ``code`` is what subclassing is
+    for. Two resembling siblings would have been right only if neither
+    generalised the other, and this one does.
+
+    Neither belongs under :class:`OrderError`: there is no market state to
+    respond to and nothing a caller can do but stop.
+
+    It derives from :class:`ExchangeAPIError` so that it carries ``code`` -- the
+    only identity these errors have, absent their text.
 
     **No dedicated catcher yet**, and the reclassification changes nothing:
     measured, there is no ``except ExchangeAPIError`` anywhere in ``src/``.
     """
 
 
-class MalformedRequestError(ExchangeError):
+class MalformedRequestError(ContractViolationError):
     """The exchange could not parse the request. **This is our bug, not a market
     condition.**
 
@@ -107,10 +131,13 @@ class MalformedRequestError(ExchangeError):
     is precisely the failure Q-C section 8's "raise loudly" exists to prevent;
     "loud" and "catchable as an ordinary order rejection" are contradictory.
 
-    It stays under :class:`ExchangeError` rather than going straight to
-    :class:`TradingBotError`, because it *did* arrive as an exchange response and
-    ``main.py``'s top-level ``except TradingBotError`` must still report it as a
-    message rather than a bare traceback.
+    **It sits under :class:`ContractViolationError` as of M5c's hierarchy
+    pass**, not directly under :class:`ExchangeError` as C4 landed it. It is a
+    contract violation that happens to name a parameter, so it specialises that
+    class rather than resembling it, and it inherits ``code`` in the process --
+    which C4's placement discarded. It remains under :class:`ExchangeError`
+    transitively, so ``main.py``'s top-level ``except TradingBotError`` still
+    reports it as a message rather than a bare traceback.
 
     ``parameter`` carries the offending parameter name as the exchange spelled
     it, so a caller need not parse the message to know which field was wrong.
@@ -119,8 +146,8 @@ class MalformedRequestError(ExchangeError):
     :param parameter: the exchange's parameter name, e.g. ``"workingClientOrderId"``.
     """
 
-    def __init__(self, message: str, *, parameter: str) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, *, parameter: str, code: int | None = None) -> None:
+        super().__init__(message, code=code)
         self.parameter = parameter
 
 
@@ -199,8 +226,8 @@ class FilterRejectedError(OrderError):
     :param filter_name: the exchange's filter name, e.g. ``"PRICE_FILTER"``.
     """
 
-    def __init__(self, message: str, *, filter_name: str) -> None:
-        super().__init__(message)
+    def __init__(self, message: str, *, filter_name: str, code: int | None = None) -> None:
+        super().__init__(message, code=code)
         self.filter_name = filter_name
 
 

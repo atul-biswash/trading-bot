@@ -929,6 +929,120 @@ def test_1111_is_unclassified_and_its_code_survives() -> None:
     assert result.code == -1111
 
 
+# --------------------------------------------------------------------------
+# The hierarchy pass -- claims the arc made and never pinned
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("code", "message", "expected"),
+    [
+        (-1003, "too much request weight used", RateLimitError),
+        (-2010, "Account has insufficient balance for requested action.", InsufficientBalanceError),
+        (-2010, "Duplicate order sent.", DuplicateOrderError),
+        (-2011, "Unknown order sent.", OrderNotFoundError),
+        (-1013, "Filter failure: NOTIONAL", FilterRejectedError),
+        (-1100, "Illegal characters found in parameter 'symbol'; x", MalformedRequestError),
+        (-1106, "whatever the venue said", ContractViolationError),
+    ],
+)
+def test_every_classified_venue_error_preserves_the_code(
+    code: int, message: str, expected: type[Exception]
+) -> None:
+    """The defect the hierarchy pass exists to fix, and it had no test.
+
+    Before the pass, SIX of seven classified outcomes discarded the exchange's
+    code while the *unclassified* fallthrough kept it -- so the better we
+    classified, the less machine-readable identity survived. An exception
+    reaches a log line as ``type(exc).__name__`` plus ``str(exc)``, and for the
+    measured families the message is a fixed English sentence containing no
+    digits, so an operator correlating with Binance's tables had our vocabulary
+    and not theirs.
+
+    Asserts the code's VALUE, not that the attribute exists: the surviving
+    identifier is the whole point.
+    """
+    exc = _api_error(code=code, status=400, message=message)
+    result = m.translate_binance_error(exc)
+    assert type(result) is expected
+    assert result.code == code
+
+
+def test_duplicate_order_error_is_catchable_without_catching_every_order_error() -> None:
+    """M5e's recovery path depends on this and nothing pinned it.
+
+    Q-C section 8 makes ``-2010 'Duplicate order sent.'`` a *success* signal for
+    the timed-out-write recovery: a re-place that collides proves the original
+    landed and is still working. That is only usable if the duplicate can be
+    caught on its own -- catching it via ``OrderError`` would also swallow
+    genuine rejections and turn a failure into a success.
+
+    Verified by execution in a Phase 1 report, which is not a test.
+    """
+    duplicate = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    other = _api_error(code=-2011, status=400, message="Unknown order sent.")
+
+    try:
+        raise m.translate_binance_error(duplicate)
+    except DuplicateOrderError as exc:
+        assert exc.code == -2010
+    else:  # pragma: no cover - defensive
+        pytest.fail("the duplicate was not catchable as DuplicateOrderError")
+
+    with pytest.raises(OrderNotFoundError):
+        try:
+            raise m.translate_binance_error(other)
+        except DuplicateOrderError:  # pragma: no cover - must not catch
+            pytest.fail("except DuplicateOrderError swallowed a -2011")
+
+
+def test_contract_violation_catches_a_malformed_request() -> None:
+    """ "Catch our bug as a class" was inexpressible until this pass.
+
+    Their nearest common ancestor was ``ExchangeError``, which also catches rate
+    limits and order rejections. ``-1100`` is a contract violation that happens
+    to name a parameter, so it specialises rather than resembles.
+    """
+    exc = _api_error(code=-1100, status=400, message="Illegal characters found in parameter 'a'; b")
+    result = m.translate_binance_error(exc)
+    assert type(result) is MalformedRequestError
+    assert isinstance(result, ContractViolationError)
+    assert result.parameter == "a"
+    assert result.code == -1100
+
+
+def test_a_code_only_row_captures_its_message_at_debug(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """CAPTURE, not detection -- the answer to the guard hole M5c-AC recorded.
+
+    A code-only row has no message expectation, so the loud ERROR guard cannot
+    reach it and these codes are the one family without rot detection. There is
+    nothing to *detect*; but the message can be RECORDED, and the first one seen
+    in the wild is exactly what would let someone write a pattern row and close
+    the gap. That makes a permanent hole a self-closing one.
+    """
+    exc = _api_error(code=-1106, status=400, message="some wording nobody has seen")
+    with caplog.at_level("DEBUG", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "some wording nobody has seen" in records[0].getMessage()
+
+
+def test_a_pattern_row_does_not_capture_at_debug(caplog: pytest.LogCaptureFixture) -> None:
+    """The negative case: a capture that fired on every call would capture nothing.
+
+    Pattern rows already know their message, so recording it is noise -- and a
+    positive-only test would pass for a log statement placed outside the
+    code-only branch entirely.
+    """
+    exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    with caplog.at_level("DEBUG", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
+
+
 def test_a_contract_code_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
     """The guard cannot fire for a code-only row, and this documents the gap.
 
