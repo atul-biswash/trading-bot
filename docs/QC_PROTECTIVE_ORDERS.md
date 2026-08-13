@@ -585,6 +585,32 @@ as well as off `stop_loss`.
 > whose *requested* stop is not resting still prices off that stop, because that
 > level is non-`None` by definition. **Still M5d's, still open.**
 
+> **THE MECHANISM STATED FOUR PARAGRAPHS ABOVE IS STALE, and it is the sentence
+> "the uncomputable-risk discriminator cannot see it: that test is `stop_loss is
+> None`, scoped by `stop_loss.enabled`" that fails.** Annotated at M5d, not
+> amended, per the rule that a finding later found wrong is annotated in a
+> subsequent block.
+>
+> **The discriminator has a third clause.** `core/portfolio.py:444` reads
+> `stop is None or mark is None or position.protection not in
+> _TRUSTED_PROTECTION`. The `protection` clause was added at M5a, and this
+> section's own M5a annotation below records it — *"keying off `protection` is
+> already wired"* — but the defect paragraph was never brought into line, so the
+> two halves of this section disagree about what the code does.
+>
+> **What follows is narrower than the stale text implies, and sharper.** The
+> discriminator sees *everything except one pairing*: `ABSENT_BY_DESIGN` with a
+> non-`None` `stop_loss`. Under `UNKNOWN` the position is already counted
+> uncomputable. So site 3 does not escape because the discriminator is blind to
+> protection state; it escapes through a single **incoherent** pair —
+> `ABSENT_BY_DESIGN` asserts no protection is expected, and a requested stop
+> contradicts it. Measured at M5d over the full space: 0 of 16 `(protection,
+> level)` pairings reach the pricing arm once that pair is excluded, so the
+> incoherent pair is not an edge case but the **whole** of the pricing arm.
+>
+> Pinned by `test_an_absent_by_design_position_with_a_requested_stop_is_priced`
+> (M5d commit 1a), whose docstring says closing site 3 inverts it.
+
 **Latent, not live.** The site-3 state requires a detected divergence *and* a failed
 re-place, and the reconciler that produces it does not exist yet. That bounds how
 alarming this is today; it does not bound how alarming it is once M5d lands.
@@ -616,6 +642,36 @@ the natural fix and is deliberately **not** prescribed here.
 > it is right. That is the intended direction: the error that refuses an entry
 > costs a missed trade, the error that trusts a stop that is not there costs the
 > position.
+
+> **"The reconciler is M5d's" IS A SCHEDULING CLAIM MADE INSIDE A CONTRACT
+> DOCUMENT, and it is superseded by `docs/NEXT_MILESTONE.md`.** Annotated at M5d;
+> the sentence stays where it is.
+>
+> **Not because the schedule changed — because a contract is the wrong home for
+> one.** This document decides *where the protective levels live*. Which
+> milestone builds a given component is live planning, and this project keeps
+> live planning in exactly one place: `NEXT_MILESTONE.md`, *"the single home for
+> live open items"*. A schedule recorded in a decided document is a fact with no
+> owner: rotation re-reads the contracts for superseded prose, but nothing
+> prompts a re-read when a *milestone* moves, because the milestone that moved it
+> was editing different files.
+>
+> It had already drifted. This sentence said M5d while `NEXT_MILESTONE.md`
+> scoped M5d to the adapter surface and listed no reconciler — a disagreement
+> reported at M5d's opening Phase 1 and left unadjudicated until then. **Read
+> `NEXT_MILESTONE.md` for the schedule; read this document for the decision.**
+>
+> The current answer, for readers arriving here first: the reconciler lands as
+> **M5e's opening block, before any order**, and site 3 is deferred to it because
+> the fix requires `ACTIVE` — a `ProtectionState` member that cannot exist before
+> a writer does. Both are recorded in `NEXT_MILESTONE.md` with their reasoning.
+>
+> **What SURVIVES from the paragraph above, unchanged:** everything except the
+> milestone name. The note's purpose — that M5a must not lock a `committed_risk`
+> signature which forecloses the fix — was served and is discharged; the
+> `(total, uncomputable)` shape is in place. And the choice it declines to
+> prescribe, *uncomputable (refuse)* versus *mispriced (understate)*, is still
+> deliberately unprescribed here.
 
 ## 8. Errors
 

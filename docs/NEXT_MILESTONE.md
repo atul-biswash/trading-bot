@@ -260,6 +260,67 @@ level *selected* was a trailing level that rests nowhere. Same consequence,
 different cause, different discriminator — §7's is `ProtectionState`, commit 13's
 was level selection. Fixing either leaves the other.
 
+> **DEFERRED at M5d, and the reason is SEPARABILITY, NOT LATENCY — the heading
+> above is annotated rather than rewritten, because "now M5d's, not deferred
+> again" was a commitment made in good faith and the record of why it could not
+> be kept is the useful part.**
+>
+> **The fix is not separable from the vocabulary it needs.** Closing site 3 means
+> the incoherent pair stops being trusted. But `_TRUSTED_PROTECTION` contains
+> exactly one member, `ABSENT_BY_DESIGN`, and that member is the *only* route
+> into `committed_risk`'s pricing arm — measured over the full space, **0 of 16
+> `(protection, level)` pairings reach it once that pair is excluded**, because a
+> coherent `ABSENT_BY_DESIGN` position has `stop_loss is None` and is already
+> uncomputable. So the fix needs a trusted state a *coherent protected* position
+> can hold, which is `ACTIVE`, and `CLAUDE.md` forbids creating an enum member
+> before something writes it. **No writer exists until the reconciler.**
+>
+> **What attempting it anyway would have cost**, stated so this is not re-tried on
+> the assumption it was merely unpopular: the pricing arm becomes unreachable;
+> `MAX_OPEN_POSITIONS`, `ALREADY_IN_POSITION` and affordability are shadowed
+> portfolio-wide behind `COMMITTED_RISK_UNKNOWN` **in production, not only in
+> tests**; and `4926705`'s anti-rot test — the one holding the mark-to-stop
+> decision in place — is retired. Fourteen tests change, and two of the fixtures
+> carry comments explaining that they were written to pass the very gate the fix
+> closes.
+>
+> **What DID land: M5d commit 1a**, a characterisation test pinning the incoherent
+> pair as it behaves today, whose docstring says closing site 3 inverts it. The
+> defect is now legible rather than merely known.
+>
+> **This is the THIRD deferral, and what distinguishes it is that the obstacle is
+> now named and dated.** M5b deferred it by fixing the sibling defect and saying
+> so; M5c deferred it by not reaching it. Both left "why not now" implicit, which
+> is what let it be re-scheduled twice as though it were merely unstarted. This
+> one names the blocking object (`ACTIVE`), the rule that blocks it (an enum
+> member is not written until something writes it), and the milestone that
+> unblocks both.
+>
+> *Arming condition:* **the reconciler's milestone — which is also when the fix
+> becomes possible.** Those are the same event, and that coincidence is why
+> deferring costs nothing: site 3 cannot arm before the machinery that would let
+> it be closed exists. Confirmed from the tree at `4866719`: `Position` is
+> constructed nowhere in `src/`, nothing assigns `Position.protection`, and no
+> M5d work item creates either.
+
+> **THE RECONCILER IS A HARD PRECONDITION OF THE FIRST DISPATCH, and it lands as
+> M5e's OPENING block — before any order.** Recorded here because it is a
+> scheduling constraint that three documents now depend on and none stated.
+>
+> The mechanism, per `M5d-014`: with only two `ProtectionState` members, no
+> *coherently* protected position can ever be priced. A real protected position
+> would be `ACTIVE`, which does not exist, so pre-reconciler it carries `UNKNOWN`,
+> which is untrusted, which makes `uncomputable >= 1`, which under
+> `stop_loss.enabled: true` refuses **every** entry portfolio-wide at
+> `risk/manager.py:360`. **The first position M5e opens would stop all subsequent
+> entries.**
+>
+> **Ruled as a CONSTRAINT, not a defect — an interlock firing correctly.** The bot
+> declining to trade on a ledger it cannot price is the behaviour the
+> uncomputable count was built to produce. What it is not is a wedge to be worked
+> around: the answer is that the reconciler ships first, not that the interlock
+> is loosened.
+
 ---
 
 ## Observations carried into the open items — states, not decisions

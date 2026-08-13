@@ -863,6 +863,42 @@ data.
   inside one call, and under an inline handler that is charged to the pipeline. A
   retry policy is a property of what is being asked, not of who is asking, and one
   client should not need a twin to say "this one is a write on the hot path".
+
+  > **THE `~14s` DOES NOT REPRODUCE, and it is not loose prose — it is this
+  > rule's stated evidence.** Annotated at M5d, not deleted, because a figure
+  > removed leaves no trace that the rule ever rested on it.
+  >
+  > **It reproduces as none of the three quantities that exist.** Backoff alone is
+  > **3.5 s**: `base.py:72` builds `stop_after_attempt(self._retry_attempts)` and
+  > passes the configured `4` straight through with no `+1`, so four attempts mean
+  > three waits, and `tenacity 9.1.4` computes
+  > `multiplier * exp_base ** (attempt_number - 1)` — `0.5, 1.0, 2.0` — with
+  > `max=8.0` never binding. A single attempt bounded by
+  > `exchange.requests_timeout_s` is **10 s**. The worst case for a write is
+  > **43.5 s** (4 x 10 + 3.5). MEASURED twice over: by reading the stop
+  > construction, and by driving the real `_call` with a recording sleep against a
+  > permanently failing `RateLimitError`, which reported 4 attempts and waits
+  > `[0.5, 1.0, 2.0]`. **The derivation of `~14s` is unrecorded** and is not
+  > reconstructed here.
+  >
+  > **The rule's PRINCIPLED half stands, untouched** — a retry policy is a property
+  > of what is being asked, not of who is asking. **Its EMPIRICAL half now rests on
+  > the corrected accounting**, which is a different argument reaching the same
+  > place: the masking window is backoff *plus* attempt latency, and
+  > `requests_timeout_s` binds **per attempt**, not per `_call`
+  > (`BaseClient._get_request_kwargs` applies `self._requests_params` inside
+  > `AsyncClient._request`, one HTTP round trip; `aiohttp 3.14.2` coerces a bare
+  > number to `ClientTimeout(total=...)`, so it takes effect — MEASURED). On that
+  > accounting a write exceeds `dispatch_deadline_s = 9.0` **with no retry at all**,
+  > which is a stronger case for the rule than `~14s` was.
+  >
+  > **A caution the correction earned:** the first attempt to re-derive this
+  > compared 3.5 s of backoff against 9.0 s and concluded the empirical half was
+  > defused. That was wrong because it accounted for backoff and omitted latency.
+  > **Note also that WHICH budget applies is unstated** — `D = 9.0`, or the
+  > per-candle-handler pipeline budget `alpha x T_min = 30 s`. 43.5 s exceeds both,
+  > so nothing turns on it here; it is flagged so the next reader does not pick one
+  > without noticing there was a choice.
 - **Fills are observed by polling, and the trigger is deliberately not the
   position's own bar.** Reconciliation runs over **every** open position on **any**
   pair's candle, so staleness is bounded by the *shortest* configured timeframe
