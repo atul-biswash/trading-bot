@@ -70,17 +70,29 @@ builds, across six milestones: the vocabulary first, then the entry reference,
 the adapter, the ledger, dispatch, and the discretionary close. Only the fifth
 can cause a fill.
 
-**M5a — the vocabulary — is complete, and it added no I/O.** The five safety
-fields are on `RiskConfig`, and **five of the six numbers are placeholders that
-have not been measured**; the docstrings and `config.yaml` say so in those words,
-because a rationale is not a sample. `AppConfig` now refuses at load a dispatch
-budget that cannot fit inside the shortest configured bar, and refuses a
-take-profit configured with no stop. `Position` and `Portfolio` carry the fields
-the protective-order contract needs, `SymbolInfo` models three exchange filters
-nobody had read, and three defects were fixed in `_enforce`, the last-line filter
-check — most notably that it now **rejects** an off-tick stop trigger instead of
-rounding it, since rounding one down moves a long's stop *away* from entry and
-quietly widens the risk it exists to bound.
+**M5a, M5b and M5c are complete, and not one of them placed an order.** M5a built
+the vocabulary — the five safety fields on `RiskConfig`, of which **five of the
+six numbers are placeholders that have not been measured** and say so in those
+words, because a rationale is not a sample — plus a config-load refusal for a
+dispatch budget that cannot fit the shortest bar, and three fixes to `_enforce`.
+M5b split the trade intent and widened the risk port.
+
+**M5c specified the adapter surface and did not build it, and that distinction is
+the honest headline.** It set out to build the order-list methods, the request
+mapper and the client-order-ID scheme; none of those exist. What it produced
+instead is the Binance error classifier — six families dispatched from a rule
+table, every classified error now carrying the exchange's own code — and four
+Testnet probes that turned assumptions into measurements: the 36-character
+client-order-ID limit, the insufficient-balance message, the fact that cancelling
+one leg of an order list collapses the whole list, and the rule that **a client
+order ID is unique only against live orders, because a terminal order's ID is
+released**. The first probe concluded the opposite of that last one and was
+corrected by a later arm; both readings are on the record.
+
+So the next milestone starts from a fully specified surface and an empty
+`execution/`. That is a better position than it sounds — every parameter set and
+error meaning it needs is now measured rather than assumed — but it is not
+progress toward a fill.
 
 ## Install
 
