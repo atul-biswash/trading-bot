@@ -1846,6 +1846,47 @@ are pinned to that commit and are not a live count** — like the D3 and M4a
 illustrations in the count-coupling section, they record a past run and are not
 to be updated by a later gate.
 
+**M5c is complete, in 21 commits, and it bought CERTAINTY rather than code.**
+Its Phase 1 put the milestone's weight on the adapter surface — the order-list
+port methods, the request type and mapper, the Q-C §6 ID scheme. **None of those
+exist.** What landed instead is the Q-C §8 error classifier and four Testnet
+probes, and the gap between the two is M5d's actual starting position rather
+than a slippage figure.
+
+**The classifier is six families, dispatched from a rule table.** `-2010` splits
+on message text into `InsufficientBalanceError` and `DuplicateOrderError`;
+`-2011` is `OrderNotFoundError`; `-1013` is `FilterRejectedError` with the filter
+name captured; `-1100` is `MalformedRequestError`, the one family outside
+`OrderError` because it is our bug rather than a refused trade; and
+`-1106`/`-1158`/`-1159` are `ContractViolationError` on **code-only** rows,
+because no message text for them exists in this repository. **Two codes are
+deliberately UNclassified** — `-1128`, never observed, and `-1111`, which was
+silently classified by a commit whose entire message is "phase 2" — and both are
+pinned by tests, so a ruling not to act is enforced rather than recorded.
+
+**The hierarchy pass is the part that will matter to M5d.** Every classified
+venue error now descends from `ExchangeAPIError` and carries the exchange's code:
+before it, six of seven classified outcomes discarded the code while the
+*unclassified* fallthrough kept it, so the better we classified the less
+machine-readable identity survived. `ContractViolationError` became
+`MalformedRequestError`'s parent, which is what makes `except
+ContractViolationError` — "catch our bug as a class" — expressible at all.
+
+**Four probes converted assumed facts into measured ones**, and the first of them
+was wrong in a way worth remembering. Arms 1–9 concluded that duplicate order
+lists are not deduplicated; arms 10–11 measured the opposite for a **live** list.
+The rule is **a client order ID is unique against LIVE orders only; a terminal
+order's ID is released and immediately reusable**, identically for single orders
+and lists — so `CLAUDE.md`'s timed-out-write recovery **stands as written**, and
+the annotation that briefly called it falsified is itself annotated rather than
+deleted. Also measured: the 36-character client-order-ID limit and its regex, the
+insufficient-balance message, and that cancelling one leg of an OTO collapses the
+whole list.
+
+**Still nothing places an order.** `execution/` is 15 lines of docstring-only
+stubs, `IntentLogger` is still the terminal collaborator, and the adapter has no
+order-list method. M5c specified the surface; M5d builds it.
+
 **Q-A** stays unscheduled: its thresholds need soak data and nothing has
 dispatched an order yet, so the `collaborator_failed` lines it would be
 calibrated from do not exist. See `docs/NEXT_MILESTONE.md`.
