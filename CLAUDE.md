@@ -1181,6 +1181,35 @@ decision, and the one that mattered most, since `check_testnet.py` connects to
 Binance with real credentials. Note mypy uses `files`, not `packages`: the two
 keys are mutually exclusive and mypy errors if both are set.
 
+**THE FOUR STEPS ARE NOT A LADDER OF INCREASING STRICTNESS. They are four
+instruments with different blind spots, which is why all four run to completion
+before any is read (M5c-AN).** The run-all default reads like a convenience; it
+is not. Measured at M5c: `core/exceptions.py` was left **unimportable** — a class
+listed its own base before that base was defined, and class bases are evaluated
+at runtime — and **mypy reported `Success`**, because it resolves symbols
+order-insensitively and is structurally incapable of seeing it. `ruff` caught it
+as `F821`; pytest failed collection in **sixteen** files.
+
+So **a green step does not subsume a weaker-looking one**, and "mypy passed" is
+not evidence the code runs. This is the complement of the interpreter guard's
+lesson: there, a green gate had measured the wrong environment; here, a green
+step measured the right tree and could not see the defect in it.
+
+**Every verification in this project is a PROXY, and the failure mode is the
+proxy holding while the thing it stands for does not.** Four instances this
+milestone, each caught only by something downstream: an md5 held while the
+mutation had drifted to a different anchor; a `grep` count held while the code it
+implied was absent — four docstring hits, zero executable clauses; a documented
+count held while the *instrument* differed, `grep -c` counting lines against a
+count of occurrences; and mypy held while the module could not be imported.
+
+The actionable half, and it is what keeps this from being an aphorism: **name
+what the proxy stands for, and where a direct observation is available at
+comparable cost, take it.** All four had one going spare — print the mutated
+content rather than its hash; enumerate `except` clauses rather than grep lines;
+state the instrument beside the number; import the module rather than type-check
+it. Each cost one command.
+
 **mypy and ruff must report ZERO.** This is a hard gate, not a baseline to diff
 against. Any new finding is a regression.
 
@@ -1241,6 +1270,42 @@ earlier test has left the root level low. `assert len(caplog.records) == 1`
 therefore passes for a file run alone and fails in the full suite — it did, for
 two tests, because `RiskManager.evaluate` emits its own `INFO` line. Filter with
 `[r for r in caplog.records if r.name == ...]`.
+
+### Asserting a classification: the exact type, and what ancestry is worth
+
+**`type(result) is X` is the default; `isinstance` is not.** Where a family of
+types refines a common base — the error classifier is the worked example —
+`isinstance(result, Base)` keeps passing the moment a subclass lands, while
+exercising nothing. Measured at M5c C3: a test asserting `isinstance(result,
+OrderError)` on `-1013` would have survived `FilterRejectedError`'s arrival
+unchanged (M5c-Q).
+
+**An ancestry assertion is WEAK, NOT INERT, and the difference was itself got
+wrong (M5c-AO).** It is blind to a **sideways** move — reclassify the subject to
+another descendant of the same base and it still passes — and **not** blind to a
+move **out** of the base, which it catches immediately. Both halves are measured:
+a mutation returning plain `OrderError` left such a test passing while breaking
+eight others; lifting `DuplicateOrderError` off `OrderError` failed it at once.
+
+The rule that follows: **where the subclass relation is the point, assert the
+exact type AND the ancestry in one place.** An ancestry-only assertion may stand
+alone only if its docstring says what it does and does not pin — and it must say
+the narrow thing, not "it pins nothing", which is the over-statement M5c-AO
+recorded.
+
+**Every message-matching family carries a NEAR-MISS test (M5c-AA).** The measured
+string mapping is the easy half; the test that earns its place is the one
+asserting a *reworded* message does **not** acquire the family's type. A pattern
+loose enough to survive a rewording is a pattern that will silently reclassify
+when the venue rewords, which is the whole failure message-matching exists to
+prevent.
+
+**A ruling NOT to act is testable exactly when the thing has an observable shape
+(M5c-AE).** `-1128` is deliberately unclassified, and a test asserts it reaches
+`ExchangeAPIError` carrying its code — so a later hand adding it to the classified
+set fails immediately. Without such a test the ruling is prose and nothing
+reports its reversal. Most of this project's disciplines cannot be checked; when
+one *can*, check it.
 
 ### Name the test that pins each argument, and flag the ones with none
 
@@ -1305,6 +1370,36 @@ intended variant gives exactly 18, and the four tests the drifted variant spared
 are precisely the four whose rows never reach a check placed inside the loop.
 **The prediction was correct for the mutation described and wrong for the
 mutation applied**, and nothing in the output distinguished the two.
+
+**Predicting which tests a mutation breaks means enumerating EVERY test
+downstream of the mutated point, not only those testing the behaviour you have
+in mind (M5c-U).** Moving the classifier's reject-set check ahead of its rule
+loop was predicted to fail the three mapping tests it short-circuits and failed
+five: the two loud-guard tests share the loop's path, so anything returning
+before the loop disables the guard as silently as it disables the
+classification. **A guard cannot report on a path that never reaches it** — and
+that coupling was invisible until a prediction was wrong about it. Predicted
+cardinalities of 1, 2, 3, 5, 8, 9, 11 and 18 have since held; the discipline is
+to state the number *and* the list before running.
+
+**A test absent from EVERY mutation's failure set is abstaining, not passing
+(M5c-AB).** It is the cheapest audit available once several mutations have run:
+collect the union of their failure sets and look at what never appears. Note
+"every" is load-bearing — a test appearing in one mutation's set and not
+another's is weak, not inert, which is the distinction M5c-AO cost a wrong
+prediction to establish.
+
+**An arm set that varies only one state cannot discriminate a state-dependent
+behaviour (M5c-I).** M5c's duplicate order-list probe ran nine arms, every one
+against a *terminated* original, and concluded that order lists are not
+deduplicated. They are: a **live** list is refused. All nine observations were
+correct and all nine were of the wrong state, because ID-release and
+absence-of-deduplication predict identical results in every state that arm set
+sampled — including both control arms designed to isolate which *field* was
+keyed, which isolated the wrong axis entirely. **The defect was in the arm set's
+design, not in any measurement it made.** So before concluding from a set of
+arms, ask which states they did **not** vary; and where a claim depends on a
+state, a discrimination run must vary that state.
 
 Coverage found this way comes in three kinds, and they are not equivalent: an
 assertion that catches the mutation; an *implication* that makes an ordinary
