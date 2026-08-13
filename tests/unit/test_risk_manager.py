@@ -680,6 +680,50 @@ class TestPortfolio:
         assert uncomputable == 1
         assert total == D("0")
 
+    def test_an_absent_by_design_position_with_a_requested_stop_is_priced(self) -> None:
+        """CHARACTERISATION OF A KNOWN DEFECT -- Q-C section 7's site 3, finding
+        `M5d-011`. This pins what the code does TODAY, not what it should do.
+
+        `ABSENT_BY_DESIGN` asserts that *no protection is expected here*, so a
+        non-`None` `stop_loss` contradicts it. The pair is representable because
+        `CLAUDE.md` forbids the `Position` `model_validator` that would forbid it
+        in M5, and `committed_risk` treats it as TRUSTED: it prices the position
+        off a stop whose resting status nothing has established.
+
+        **It is also the ONLY route into the pricing arm**, which is what makes
+        this a characterisation rather than an edge case. A *coherent*
+        `ABSENT_BY_DESIGN` position has `stop_loss is None`, so `_binding_stop`
+        returns `None` and the first clause already counts it uncomputable; and
+        `UNKNOWN`, the only other member, is outside `_TRUSTED_PROTECTION`. So
+        every position this function prices is in the incoherent state.
+
+        **Closing site 3 INVERTS this test.** The fix needs `ACTIVE` -- a
+        `ProtectionState` member that cannot be created before a writer exists --
+        so it belongs to the milestone that lands the reconciler. When it does,
+        this pairing becomes untrusted and the expected values become
+        ``total == 0, uncomputable == 1``. Inverting it then is correct;
+        deleting it is not, because the change of behaviour is the thing worth
+        recording.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="10",
+                    entry="100",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                )
+            },
+        )
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+        # The count first, as in the test above: being TRUSTED is the claim, and
+        # the priced total is its consequence. Asserted the other way round, a
+        # change that stopped trusting the pair would fail on the total and
+        # never reach the count that says why.
+        assert uncomputable == 0
+        assert total == D("-100")  # (90 - 100) * 10, off a stop nothing confirms
+
     def test_should_exit_still_prefers_the_trail(self) -> None:
         """The asymmetry is deliberate and must stay: `should_exit` asks whether
         to exit NOW and prefers the trail, which is the level a live bot acts on;
