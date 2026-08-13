@@ -1,55 +1,144 @@
-# Current milestone — M5c: the adapter surface and the first order
+# Current milestone — M5d: build the adapter surface M5c specified
 
-**M5 is six milestones, not one.** M5-0 (decisions), M5a (the vocabulary) and M5b
-(the intent split and the widened port) are complete. **M5c is the first
-milestone in this project that can place an order**, which changes what a mistake
-costs: everything before it was recoverable by editing a file.
+**THE BRIEF IS THE GAP, and it is stated first because a brief that describes the
+milestone we planned rather than the one we ran is how M5c's own scope confusion
+started.**
+
+M5c set out to build the adapter surface. **It did not.** There are no order-list
+port methods, no request type, no mapper, no `tb1-` client-order-ID scheme, and
+`execution/` is still 15 lines of docstring-only stubs. What M5c produced instead
+is the Q-C §8 error classifier and four Testnet probes.
+
+**So M5c bought CERTAINTY and no code, and that is M5d's starting position.**
+Every parameter set, error meaning, ID rule and teardown semantic the surface
+needs is now *measured* rather than assumed — which is a better position than it
+sounds, and is not progress toward a fill. M5d builds what M5c specified.
 
 Read first: `docs/QC_PROTECTIVE_ORDERS.md` §3 (leg types and full parameter
-sets), §6 (client order IDs), §8 (errors) and §4b (the discretionary close path);
-`docs/M5_NUMBERS.md`; `docs/QB_ESCALATION.md`. The decisions themselves are
-locked in `CLAUDE.md`; this file is the task list and the single home for live
-open items.
+sets), §6 (client order IDs — **rewritten by measurement at M5c**), §8 (errors —
+**also rewritten**) and §4b (the discretionary close); `docs/M5_NUMBERS.md`;
+`docs/QB_ESCALATION.md`. The decisions are locked in `CLAUDE.md`; this file is
+the task list and the single home for live open items.
 
 ---
 
-## Closed by M5b — recorded so they are not re-raised
+## Closed by M5c — recorded so they are not re-raised
 
-- **P1 — `Portfolio` mutates on read.** Met before the port moved. `realised_today`
-  now derives the day by comparing `pnl_date` rather than assigning it, and both
-  false docstrings are corrected. Commits 0 and 1.
-- **P2 — the widened port must not admit an entry whose committed risk is
-  unknown.** Met at commit 8, when `evaluate` joined the port and `approve` was
-  deleted rather than widened.
-- **The port's second false clause** — `approve`'s *"pure function of its
-  arguments and the clock"*. Folded into commit 8 as planned; the method it
-  described no longer exists.
-- **`NO_MARK_PRICE`'s two divergent reason strings — closed by CONSTRUCTION, not
-  by reconciliation.** Deleting `approve` removed one of the two speakers, and
-  the **richer** message was preserved by choice: one site remains,
-  `risk/manager.py:344`, carrying *"equity is unknown, so no limit can be
-  checked"*. **Its scheduling label was wrong** — planned as "M5b commit 6", it
-  closed at commit 8.
-- **`engine/modes.py`'s "No I/O." handler docstring** — replaced by the bounded-I/O
-  rule. **Its scheduling label was wrong too** — planned as "M5b commit 7", it
-  landed at commit 5 (`7cdeb40`).
-
-**The two wrong labels are kept rather than silently corrected, because they are
-evidence about how the plan drifted.** Both items landed; neither landed where
-the plan said. The numbering diverged at the very first reshaping and no document
-noticed — `e99f3a7`'s own message calls it "M5b commit 6, mechanical" while this
-file's plan called commit **1** the mechanical move. A plan that renumbers itself
-silently is one whose labels cannot be used to check whether an item landed.
+- **The Q-C §8 classifier exists.** Six families dispatched from a rule table:
+  `-2010` splits on message text into `InsufficientBalanceError` and
+  `DuplicateOrderError`; `-2011` to `OrderNotFoundError`; `-1013` to
+  `FilterRejectedError` with the filter name captured; `-1100` to
+  `MalformedRequestError`, outside `OrderError` because it is our bug rather than
+  a refused trade; `-1106`/`-1158`/`-1159` to `ContractViolationError` on
+  code-only rows.
+- **The hierarchy is coherent and every classified venue error carries the
+  exchange's code.** Before the pass, six of seven classified outcomes discarded
+  it while the *unclassified* fallthrough kept it.
+- **The 36-character client-order-ID limit is MEASURED**, and so is its regex:
+  36 accepted, 37 rejected with `-1100` and `^[a-zA-Z0-9-_]{1,36}$`. A length
+  violation is reported as "Illegal characters found", which is the sharp edge.
+- **The duplicate order-LIST question is settled, and the first answer was
+  wrong.** Arms 1-9 concluded lists are not deduplicated; arms 10-11 measured a
+  **live** list being refused with `-2010 'Duplicate order sent.'` The rule is
+  **a client order ID is unique against LIVE orders only; a terminal order's ID
+  is released and immediately reusable**, identically for single orders and
+  lists. `CLAUDE.md`'s timed-out-write recovery **stands as written**.
+- **`-1111` is no longer silently classified** and `-1128` is deliberately not
+  classified; both are pinned by tests.
 
 ---
 
-## What M5c delivers
+## Dissolved — investigated and dismissed, recorded so it does not look forgotten
+
+- **`BinanceRequestException` dropping the code is NOT a defect.** It was carried
+  as "the last surviving instance of what the hierarchy pass fixed everywhere
+  else". Measured: `BinanceRequestException.__init__(self, message)` — it has
+  **no `code` attribute at all**. It is a library-side request/parse failure, not
+  a venue error response, so `code=None` is *correct*, exactly as for the two
+  client-side `ExchangeAPIError` raises at `binance_client.py:149` and
+  `models.py:203`.
+
+  **The claim it dissolved was the assistant's own**, made in the sentence
+  handing the work over, and it is M5c-AO's shape once more: a distillation
+  broader than the evidence behind it. An item that disappears with no record
+  looks like an item that was forgotten, which is why this entry exists rather
+  than a deletion.
+
+---
+
+## Before M5d starts — one decision, and the third time this lesson is stated prospectively
+
+**The `M5d-` finding namespace starts at 26 IDs and M5c consumed 59.** It will
+exhaust, and the two-character extension (`M5d-Z`, then `M5d-AA`) is already
+ruled, so the mechanism exists. What is worth deciding *before* the milestone
+rather than at the moment of exhaustion is whether 26 single letters plus an
+extension is the right shape at all when one milestone can produce 59 findings.
+
+That is `240353c`'s lesson — check the remaining capacity before spending it —
+stated ahead of the need for the third time. The first two were stated *at*
+exhaustion, and one of them shipped a ruling that could not be satisfied.
+
+---
+
+## What M5d delivers
 
 Each item carries its **arming condition** — the event that turns it from latent
 into live — because several of these are harmless today and dangerous the moment
 something else lands.
 
-### 1. Finding I and Finding X, together
+### 1. THE ADAPTER SURFACE — what M5c specified and did not build
+
+This is the milestone's weight and it is listed first for that reason. Nothing
+below it matters if this does not land.
+
+**What does not exist**, measured at M5c's rotation: no order-list method on
+`ExchangeClient` or on `_AsyncBinanceAPI`; no order-list request type; no mapper
+to Q-C §3's 16-parameter OTOCO or 13-parameter OTO sets; no `tb1-` ID generator.
+`python-binance 1.0.37` exposes `v3_post_order_list_oto`,
+`v3_post_order_list_otoco`, `v3_get_order_list` and `v3_delete_order_list`, so
+the library half is present and the adapter half is absent.
+
+**What is already measured and must not be re-derived:** §3's parameter sets and
+forbidden fields; §6's ID scheme and the live-only uniqueness rule; §8's error
+meanings, now implemented; that one cancel collapses an order list; the
+36-character ID limit.
+
+**Two commit-grain rulings from M5c carry forward** — they were scope notes for
+the classifier arc and they generalise: **port declarations land WITH their
+implementation**, so no commit leaves port surface with no caller (finding GG);
+and a family lands as **class, branch and test together**.
+
+*Arming condition:* none — this is the milestone.
+
+### 2. `close()` bypasses `_call`, and it is NOT purely latent
+
+`BinanceClient.close()` at `binance_client.py:196` calls
+`self._client.close_connection()` directly. It is the **only** client method that
+does not route through `_call`, so a transport failure there raises a raw
+`aiohttp.ClientError` rather than a domain error.
+
+**Why it is not merely latent:** `live_system` closes the client unconditionally
+in a `finally`. A boot that fails at step 2, 3 or 4 and *then* fails to close
+would propagate the close error and **mask the real boot error** — the exact
+failure the nested-teardown design exists to prevent.
+
+*Arming condition:* any teardown that must classify a close failure — M5e's
+dispatch path is the first. **It can mask a boot error today.**
+
+### 3. NN's remedy — the extraction command's four indistinguishable empties
+
+The rotation extractor returns nothing in four cases and they cannot be told
+apart: the lookup matched no row; it matched the *wrong* row; the current
+milestone's table has already been appended so `tail -1` has moved on; or the
+range genuinely holds no blocks. **Unruled** — the remedy was never decided,
+only the defect recorded.
+
+*Arming condition:* the next rotation whose extractor returns empty and someone
+must decide whether that means "no findings" or "not looked". **M5c's rotation
+ran the extractor before appending its table precisely to avoid case three**,
+which is a workaround, not a fix.
+
+### 4. Finding I and Finding X, together
 
 They edit the same code — `live_system`'s priming loop — and splitting them means
 touching it twice.
@@ -81,7 +170,7 @@ disagree if a balance changes between them.
 *Arming condition:* already live — it is two calls today. The disagreement window
 matters more once positions exist.
 
-### 2. The trailing milestone — UNASSIGNABLE, and the blocking question named
+### 5. The trailing milestone
 
 > **RULED at M5c. The earlier framing — "undesigned, unassigned, unscheduled" —
 > is superseded and the reason is recorded rather than the label changed.** It
@@ -125,7 +214,7 @@ clause assigning execution the job of *driving* `advance_trailing_stop` assigns
 the driving of a method that writes a level nothing places — see the annotation
 on that clause.
 
-### 3. Finding L — `realised_pnl` set with no `pnl_date`
+### 6. Finding L
 
 `Portfolio(free_quote=…, realised_pnl=D("-77"))` leaves `pnl_date=None`, and
 `realised_today` then returns `Decimal(0)`: a booked loss reads as zero. **The
@@ -150,7 +239,7 @@ merely rejected.
 that rehydrates `realised_pnl` without its date is precisely the shape that arms
 it.
 
-### 4. Collapse the multi-statement writes on `Position` and `Portfolio`
+### 7. Collapse the multi-statement
 
 L's precondition, and already `CLAUDE.md`'s prescription for `Position`:
 `advance_trailing_stop` writes `highest_price`/`lowest_price` and then
@@ -161,7 +250,7 @@ is why neither model may carry a cross-field `model_validator` today.
 *Arming condition:* none — this is a precondition, not a defect. It blocks item 3
 and the `ABSENT_BY_DESIGN`-implies-both-levels-absent invariant.
 
-### 5. Not M5c's, and explicitly not closed
+### 8. Q-C section 7's site-3 defect — now M5d's, not deferred again
 
 **Q-C §7's site-3 defect remains M5d's.** A position whose *requested* stop was
 found not to be resting still prices committed risk off that stop, because that
@@ -170,46 +259,6 @@ level is non-`None` by definition — that is how the divergence was detected.
 level *selected* was a trailing level that rests nowhere. Same consequence,
 different cause, different discriminator — §7's is `ProtectionState`, commit 13's
 was level selection. Fixing either leaves the other.
-
-### 6. M5c's boundary — `execution/executor.py` STAYS A STUB
-
-> **RULED at M5c.** The heading of this file says M5c is "the adapter surface and
-> the first order", and "the first order" is ambiguous between *a probe
-> submission* and *`src/` becoming able to place*. It means the first: **M5c
-> submits to Binance in probes and wires nothing to the signal handler.**
-
-**M5c builds the adapter surface** — the port methods, the order-list request
-type and its mapper, the Q-C §6 client-order-ID scheme, the §8 message-text
-classifier — **and the probes exercise it.** Nothing wires it to the signal
-handler, and nothing dispatches from a signal. `execution/executor.py` and
-`execution/order_manager.py` remain docstring-only stubs at the end of M5c.
-
-**The reasoning, not only the boundary.** `docs/M5_NUMBERS.md:320` places the
-first order at M5e, in those words: *"Under M5e the first approved signal is also
-the first **order**"*. M5d is the reconciler. So wiring dispatch in M5c would put
-the first fill in front of a ledger that does not exist yet — **the first fill
-would have nothing to reconcile against**, no `last_reconciled_at` advancing, no
-divergence detector, and the recovery path for a timed-out write would be
-exercised for the first time with no reconciler behind it. The order M5-0 chose
-is surface, then ledger, then dispatch, and this keeps to it.
-
-**Two commit-grain rulings for this milestone — scope notes, not locked
-decisions.** They govern M5c's commits rather than the domain, so they live here
-and not in `CLAUDE.md`:
-
-- **Port declarations land WITH their implementation**, never as a
-  declarations-only commit. No commit may leave port surface with no caller —
-  `docs/PHASE_HISTORY.md`'s finding **GG** records `approve` sitting exactly that
-  way for two milestones, accumulating the P2 gap that made deleting it a
-  prerequisite rather than a tidy-up. Note that M5c's Phase 1 report listed
-  *"C5 before C8"* among the **FORCED** orderings: that is true **given the
-  split**, and the split was a choice, not a dependency. A forced ordering
-  manufactured by an optional split is not a constraint the tree imposes.
-- **The §8 classifier lands ONE COMMIT PER ERROR FAMILY** — the exception class,
-  its classifier branch and its test together. That keeps one concern per commit
-  without ever committing a class no caller catches, which is the same objection
-  `core/exceptions.py` already records in its own words: *"Re-add a risk
-  exception only alongside a caller that catches it."*
 
 ---
 
@@ -390,6 +439,14 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   generation >= 100 on a 12-character symbol. One deliberately over-long rejected
   request would settle it, free, and it is not a blocker.
 
+  > **MEASURED at M5c and CLOSED — the assumed figure was right.** 36 characters
+  > are accepted, 37 rejected with `-1100`, HTTP 400, and the venue states its
+  > own rule: `^[a-zA-Z0-9-_]{1,36}$`. The character class is measured with the
+  > length, and a LENGTH violation is reported as "Illegal characters found",
+  > which is the sharp edge. Kept here rather than deleted because the item
+  > recorded a claim that was ASSUMED for two milestones, and that it turned out
+  > correct is not the same as its having been known.
+
 - **A duplicate order *LIST* is UNMEASURED where a duplicate order *ID* is
   measured.** Q-C §8 classifies `-2010 'Duplicate order sent.'` as a *success*
   signal, and the timed-out-write recovery path depends on it. That guarantee is
@@ -411,6 +468,20 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   > the expected rejection.** A rule that reasons "this probe is free because the
   > venue will refuse it" would have been wrong about *why* it was safe, and would
   > have carried that reasoning to a probe where `FOK` was not in the design.
+
+  > **CORRECTED AGAIN AT M5c, AND THE ANNOTATION ABOVE IS THE ONE THAT WAS
+  > WRONG. Now CLOSED.** Arms 1-9 all ran against a *terminated* original and
+  > concluded that order lists are not deduplicated. Arms 10-11 measured the
+  > live case directly: a list confirmed `EXECUTING` by read-back, resubmitted
+  > byte-identical, returned **`-2010` HTTP 400 "Duplicate order sent."** So
+  > Q-C §8's classification holds and `CLAUDE.md`'s recovery rule **stands as
+  > written**.
+  >
+  > The rule is **a client order ID is unique against LIVE orders only; a
+  > terminal order's ID is released and immediately reusable**, identically for
+  > single orders and lists. The defect was in the ARM SET's design, not in any
+  > measurement it made: every arm sampled one state, and ID-release and
+  > absence-of-deduplication predict identical results in that state.
 
 ### Risk and refusal-path debt
 
