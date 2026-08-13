@@ -966,6 +966,42 @@ def test_every_classified_venue_error_preserves_the_code(
     assert result.code == code
 
 
+def test_both_2010_meanings_are_siblings_under_order_error() -> None:
+    """``-2010``'s two measured meanings now land in ONE branch, not two.
+
+    Until M5c's hierarchy follow-on, ``InsufficientBalanceError`` sat outside
+    ``OrderError`` while ``DuplicateOrderError`` sat inside it -- so an
+    ``except OrderError`` caught one meaning of ``-2010`` and not the other, for
+    a reason nobody recorded. This pins the coherence, not just the placement:
+    the assertion is about the PAIR.
+    """
+    balance = m.translate_binance_error(
+        _api_error(code=-2010, status=400, message="Account has insufficient balance for x.")
+    )
+    duplicate = m.translate_binance_error(
+        _api_error(code=-2010, status=400, message="Duplicate order sent.")
+    )
+    assert type(balance) is InsufficientBalanceError
+    assert type(duplicate) is DuplicateOrderError
+    assert isinstance(balance, OrderError)
+    assert isinstance(duplicate, OrderError)
+
+
+def test_insufficient_balance_still_preserves_its_code() -> None:
+    """The hierarchy pass's principle surviving its own first follow-on.
+
+    Moving a class is exactly when a payload gets dropped by accident, and the
+    pass's principle -- every classified venue error carries the exchange's
+    identifier -- has to hold through the move. It does, because ``OrderError``
+    is itself an ``ExchangeAPIError``.
+    """
+    result = m.translate_binance_error(
+        _api_error(code=-2010, status=400, message="Account has insufficient balance for x.")
+    )
+    assert type(result) is InsufficientBalanceError
+    assert result.code == -2010
+
+
 def test_duplicate_order_error_is_catchable_without_catching_every_order_error() -> None:
     """M5e's recovery path depends on this and nothing pinned it.
 
@@ -1299,13 +1335,20 @@ def test_duplicate_order_error_is_an_order_error() -> None:
     duplicate under ``OrderError`` is a refinement and every existing
     ``except OrderError`` keeps catching it.
 
-    **It pins nothing.** An ancestry-only assertion survives any mutation that
-    reclassifies its subject to another descendant of the same base, and this
-    one was *proved* blind at C3: a mutation that returned plain ``OrderError``
-    for this exact input broke eight tests and left this one passing. The
-    assertion it needs in order to bite lives in the test above, which now
-    carries both. Kept for the intent it records, marked so no reader counts it
-    as protection.
+    **It pins exactly one thing, and "pins nothing" -- as this docstring read
+    until M5c's hierarchy follow-on -- was too strong.** An ancestry-only
+    assertion is blind to a SIDEWAYS move: reclassify the subject to another
+    descendant of the same base and it still passes, which was *proved* at C3
+    where a mutation returning plain ``OrderError`` for this exact input broke
+    eight tests and left this one passing. It is **not** blind to a move OUT of
+    the base -- lifting ``DuplicateOrderError`` off ``OrderError`` fails it
+    immediately, measured.
+
+    So it is weak, not inert, and the distinction cost a wrong prediction: the
+    hierarchy follow-on excluded it from a mutation's expected failure set on
+    the strength of the old wording and observed three failures against two
+    predicted. The assertion that catches the sideways case lives in the test
+    above, which carries both.
     """
     exc = _api_error(code=-2010, status=400, message="Duplicate order sent.")
     assert isinstance(m.translate_binance_error(exc), OrderError)

@@ -59,12 +59,37 @@ class RateLimitError(ExchangeAPIError):
     """A rate limit or IP ban was hit; back off before retrying."""
 
 
-class InsufficientBalanceError(ExchangeAPIError):
-    """Not enough free balance to place the requested order."""
-
-
 class OrderError(ExchangeAPIError):
     """An order was rejected or could not be created/canceled."""
+
+
+class InsufficientBalanceError(OrderError):
+    """Not enough free balance to place the requested order.
+
+    **Placed under :class:`OrderError` at M5c's hierarchy follow-on, by the
+    discriminator that decided every other family rather than on its own
+    merits.** That test is whether the venue is refusing a *trade* -- something a
+    caller may reasonably handle -- or refusing to *parse*, where nothing can be
+    done. Insufficient balance is the most handleable rejection there is: resize,
+    skip the signal, or halt entries. It is account state, not our bug.
+
+    **The placement it replaces was inherited, not argued** -- the third instance
+    of that shape in this milestone, after ``-1111`` and the reject set. It sat
+    directly under :class:`ExchangeError` from the scaffold, and the hierarchy
+    pass moved it to :class:`ExchangeAPIError` only as a side effect of giving
+    every classified error its code.
+
+    **It also removes a real incoherence in ``-2010``.** That code carries two
+    measured meanings separated only by message text, and until this change they
+    landed in two different branches: an ``except OrderError`` caught the
+    duplicate and not the balance failure, for a reason nobody recorded. They are
+    now siblings under one parent -- one code, two meanings, both order
+    rejections -- which is what the tree should have said all along.
+
+    ``code`` survives the move: :class:`OrderError` is itself an
+    :class:`ExchangeAPIError`, so the hierarchy pass's principle holds through
+    its own first follow-on.
+    """
 
 
 class ContractViolationError(ExchangeAPIError):

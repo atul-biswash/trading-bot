@@ -1280,6 +1280,32 @@ round-trips newlines and produced a byte mismatch against this LF-pinned tree �
 content-identical, checksum-different, and indistinguishable from a real
 corruption until diffed. Never restore by re-reading and re-writing.
 
+**A mutation proof asserts the mutated CONTENT, not merely that content
+changed.** Verifying by checksum proves that **a** mutation applied; it does not
+prove that **the** mutation applied, and the difference has already cost a wrong
+result. So before running the suite, the harness prints or asserts the mutated
+region — the inserted or altered lines, with enough surrounding context to
+locate them — so the mutation that ran is identifiable from the output rather
+than inferred from a hash. This **amends** the md5 discipline below rather than
+replacing it: the checksum is still what proves the restore, and it is still
+what catches a harness that silently did nothing.
+
+**A RE-ANCHORED MUTATION IS A NEW MUTATION.** Its predicted failure set is
+re-derived, never carried from the anchor it replaced. **Anchor drift is
+invisible to a checksum by construction** — both the old and the new anchor
+produce a file that differs from baseline, so every hash-based check passes
+while the experiment quietly changes.
+
+The worked example is M5c's hierarchy pass. The same reject-set mutation had run
+at 8, 11, 11 and 11 across four commits; the fifth commit restructured the code
+the anchor sat in, the harness was re-anchored a few lines lower — *inside* the
+rule loop rather than ahead of it — and the prediction of 18 was carried across
+unchanged. It observed 14. The reasoning was never wrong: re-running the
+intended variant gives exactly 18, and the four tests the drifted variant spared
+are precisely the four whose rows never reach a check placed inside the loop.
+**The prediction was correct for the mutation described and wrong for the
+mutation applied**, and nothing in the output distinguished the two.
+
 Coverage found this way comes in three kinds, and they are not equivalent: an
 assertion that catches the mutation; an *implication* that makes an ordinary
 case double as the check (where one condition strictly implies another, the
