@@ -417,6 +417,41 @@ no order.
 
 **Status: PLACEHOLDER — NOT MEASURED.**
 
+> **THE CALL THIS NUMBER IS BUDGETED FROM CANNOT RETURN WHAT RECONCILIATION
+> NEEDS, and the correction runs CHEAPER rather than dearer.** Annotated at
+> M5d; the working value is untouched, because what changes is the call it
+> prices, not the latency of that call.
+>
+> `T_recon` is defined below as "one `v3_get_order_list` per position".
+> **MEASURED at M5d: that endpoint returns each leg as an identity triple** --
+> `{symbol, orderId, clientOrderId}`, no `status`, no `executedQty`, no
+> `origQty`, no prices. Q-C §7's compare set is not in it, at any cost.
+>
+> **`get_open_orders` is where the compare set lives**, and it returns full
+> order objects for **all three legs including pendings in `PENDING_NEW`**
+> (MEASURED at M5d against a live OTOCO). Crucially it is keyed by **symbol**,
+> not by position, and §6's `tb1-` prefix separates our legs from everyone
+> else's in the result.
+>
+> **So the per-position term is the wrong shape.** One call per SYMBOL is
+> amortised across every position on that symbol, where `N_max x T_recon`
+> charges one call per POSITION. On the shipped `config.yaml` -- two symbols,
+> `max_open_positions = 3` -- the constraint currently reserves for three calls
+> where two suffice, so the coherence budget has headroom nobody has spent.
+>
+> **A mid-milestone finding briefly proposed the opposite** -- one list query
+> plus one per-order query per leg, four calls per position -- and it was
+> wrong: it measured correctly that the read-back is the wrong endpoint and
+> then priced the wrong replacement. Recorded because the erroneous figure is
+> the more alarming one, and a reader meeting it first should know it was
+> superseded by measurement rather than by preference.
+>
+> **NOT re-derived here.** Restating the constraint needs the reconciler's real
+> shape -- how many symbols it visits per pass, and whether a pass is
+> per-symbol or per-position -- which is the milestone that builds it. What
+> this annotation fixes is the DEFINITION the number is attached to, so the
+> next derivation does not start from a call that cannot answer.
+
 ---
 
 ## The coherence constraint
