@@ -1170,10 +1170,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  85 files already formatted
-mypy                                   Success: no issues found in 59 source files
-pytest                                 818 passed, 3 skipped
-                                       (821 passed with Testnet credentials present)
+ruff format --check src tests scripts  87 files already formatted
+mypy                                   Success: no issues found in 60 source files
+pytest                                 941 passed, 3 skipped
+                                       (944 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1182,14 +1182,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `821 passed` on a machine with Binance Testnet credentials in `.env`
-- `818 passed, 3 skipped` on a machine without them
+- `944 passed` on a machine with Binance Testnet credentials in `.env`
+- `941 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 818 and must not read it as a regression against a documented
-821. Quote the count with its condition, never bare.
+runner will see 941 and must not read it as a regression against a documented
+944. Quote the count with its condition, never bare.
 
-Only the `821` is measured here; `818` is `821` minus the three `skipif`-gated
+Only the `944` is measured here; `941` is `944` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -1204,7 +1204,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 818, so **treat a lone
+output was read. The unit suite is deterministic at 941, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -1249,8 +1249,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 85 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 59 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 87 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 60 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
