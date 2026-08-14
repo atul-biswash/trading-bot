@@ -318,6 +318,139 @@ class Order(_Frozen):
     order_list_id: str | None = None
 
 
+class OtocoOrderListRequest(_Frozen):
+    """An entry with both protective legs: Q-C section 2's ``stop + TP`` row.
+
+    **Sixteen wire parameters, five domain facts, and the compression is the
+    point.** Section 3's OTOCO set spells one quantity twice
+    (``workingQuantity`` and ``pendingQuantity``), fixes six values that are
+    design constants rather than caller decisions (``workingType=LIMIT``,
+    ``workingSide=BUY``, ``workingTimeInForce=FOK``, ``pendingSide=SELL``,
+    ``pendingAboveType=TAKE_PROFIT``, ``pendingBelowType=STOP_LOSS``), and
+    carries four client order IDs that section 6 makes *derivable*. None of
+    those is a fact about the trade, so none is a field here. A domain type
+    holding ``pendingAboveStopPrice`` under that name would have leaked the wire
+    inward; the mapper owns the spelling.
+
+    **The four forbidden fields are unrepresentable, not rejected.**
+    ``pendingAbovePrice``, ``pendingAboveTimeInForce``, ``pendingBelowPrice``
+    and ``pendingBelowTimeInForce`` each yield ``-1106``. Both protective legs
+    are stop-market, so each carries exactly **one** price here and there is no
+    second price field to become a limit; and this type has **no** time-in-force
+    field at all. A mapper enumerating these fields has nothing to emit them
+    from -- which is stronger than a check, because a check can be deleted.
+
+    **Two types rather than one with an optional take-profit.** Section 2 calls
+    the arity branch irreducible, and it dispatches to a different endpoint, so
+    the shape is a *type* distinction. An optional field would push that branch
+    into every consumer and make "OTOCO with no take-profit" representable --
+    a request the venue has no endpoint for.
+
+    They do not share a base. The shared part is five field declarations, not
+    logic: the invariants differ, and a public base in the domain layer is a
+    decision `CLAUDE.md` records as deliberately deferred.
+    """
+
+    symbol: str
+    quantity: Money
+    #: The working leg's price -- a derived marketable limit, not the bar close.
+    entry_limit: Money
+    #: The below leg's trigger. Below ``entry_limit`` for a long.
+    stop_price: Money
+    #: The above leg's trigger. Above ``entry_limit`` for a long.
+    take_profit: Money
+    #: Identity seed, with :attr:`generation`. Section 6 derives all four client
+    #: order IDs from ``(symbol, entry_bar_time, generation, leg)``, so carrying
+    #: the IDs themselves would put four wire strings in the domain and create a
+    #: second source of truth for something guaranteed derivable.
+    entry_bar_time: datetime
+    #: Bounded below only. The 0..99 ceiling is derived from the venue's
+    #: 36-character client-order-ID limit and lives in ``exchange/ids.py``;
+    #: ``core/`` must not encode a venue constraint. A request above it
+    #: constructs and fails at ID generation, at the boundary that owns it.
+    generation: int = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> OtocoOrderListRequest:
+        _check_order_list_entry(self.quantity, self.entry_limit, self.entry_bar_time)
+        if self.stop_price <= 0:
+            raise ValueError(f"stop_price must be > 0, got {self.stop_price}")
+        if self.take_profit <= 0:
+            raise ValueError(f"take_profit must be > 0, got {self.take_profit}")
+        # The ORDERING is what makes the leg assignment unfakeable. Swap the two
+        # and the mapper would place the stop above and the target below --
+        # accepted by the venue, and the position would be closed at a loss the
+        # moment it moved in our favour.
+        if self.stop_price >= self.entry_limit:
+            raise ValueError(
+                f"stop_price {self.stop_price} is not below entry_limit "
+                f"{self.entry_limit}; a long's stop is the BELOW leg"
+            )
+        if self.take_profit <= self.entry_limit:
+            raise ValueError(
+                f"take_profit {self.take_profit} is not above entry_limit "
+                f"{self.entry_limit}; a long's target is the ABOVE leg"
+            )
+        return self
+
+
+class OtoOrderListRequest(_Frozen):
+    """An entry with a stop and no target: Q-C section 2's ``stop only`` row.
+
+    Thirteen wire parameters, four domain facts. Identical to
+    :class:`OtocoOrderListRequest` minus the above leg -- and note the wire
+    spelling differs by more than that omission: section 3's OTO set uses the
+    plain ``pending*`` prefix where OTOCO uses ``pendingAbove*``/
+    ``pendingBelow*``. That difference is the mapper's to know; nothing here
+    mirrors it.
+
+    The ``TP only`` row of section 2's table has no type because it is refused
+    at config load, and the ``neither`` row has none because it stays a plain
+    :class:`OrderRequest` -- M5a gave that type ``time_in_force`` precisely so a
+    working ``LIMIT`` leg could ask for ``FOK`` itself.
+    """
+
+    symbol: str
+    quantity: Money
+    entry_limit: Money
+    #: The pending leg's trigger. Below ``entry_limit`` for a long.
+    stop_price: Money
+    #: See :attr:`OtocoOrderListRequest.entry_bar_time`.
+    entry_bar_time: datetime
+    generation: int = Field(0, ge=0)
+
+    @model_validator(mode="after")
+    def _check_invariants(self) -> OtoOrderListRequest:
+        _check_order_list_entry(self.quantity, self.entry_limit, self.entry_bar_time)
+        if self.stop_price <= 0:
+            raise ValueError(f"stop_price must be > 0, got {self.stop_price}")
+        if self.stop_price >= self.entry_limit:
+            raise ValueError(
+                f"stop_price {self.stop_price} is not below entry_limit "
+                f"{self.entry_limit}; a long's stop is the BELOW leg"
+            )
+        return self
+
+
+def _check_order_list_entry(quantity: Money, entry_limit: Money, entry_bar_time: datetime) -> None:
+    """The working-leg invariants both order-list shapes share.
+
+    A free function rather than a shared base class: what the two types have in
+    common is these three checks, and factoring the *logic* leaves the field
+    declarations readable top-to-bottom in each type.
+    """
+    if quantity <= 0:
+        raise ValueError(f"quantity must be > 0, got {quantity}")
+    if entry_limit <= 0:
+        raise ValueError(f"entry_limit must be > 0, got {entry_limit}")
+    # This field's whole purpose is to seed a RESTART-STABLE identity. A naive
+    # value would be read as local time and shift the millisecond segment by the
+    # host's offset, so the same bar would derive a different ID on a different
+    # machine -- and the recovery path's premise is that it does not.
+    if entry_bar_time.tzinfo is None or entry_bar_time.tzinfo.utcoffset(entry_bar_time) is None:
+        raise ValueError(f"entry_bar_time must be timezone-aware, got naive {entry_bar_time!r}")
+
+
 class Trade(_Frozen):
     """A completed fill (or an aggregated round-trip in backtests)."""
 

@@ -9,7 +9,14 @@ import pytest
 from pydantic import ValidationError
 
 from trading_bot.core.enums import PositionSide, ProtectionState, SignalAction
-from trading_bot.core.models import Balance, Position, Signal, Ticker
+from trading_bot.core.models import (
+    Balance,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
+    Position,
+    Signal,
+    Ticker,
+)
 
 #: A fixed bar close, so `entry_bar_time` is deterministic across a run.
 BAR_TIME = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
@@ -354,3 +361,154 @@ def test_metadata_error_names_the_offending_key() -> None:
 
 def test_empty_metadata_is_still_the_default() -> None:
     assert Signal(symbol="BTCUSDT", action=SignalAction.BUY).metadata == {}
+
+
+# --------------------------------------------------------------------------
+# Order-list requests -- Q-C section 2's OTOCO and OTO rows
+# --------------------------------------------------------------------------
+def _otoco(**overrides: object) -> OtocoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.5"),
+        "entry_limit": Decimal("100"),
+        "stop_price": Decimal("90"),
+        "take_profit": Decimal("120"),
+        "entry_bar_time": BAR_TIME,
+    }
+    kwargs.update(overrides)
+    return OtocoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def _oto(**overrides: object) -> OtoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.5"),
+        "entry_limit": Decimal("100"),
+        "stop_price": Decimal("90"),
+        "entry_bar_time": BAR_TIME,
+    }
+    kwargs.update(overrides)
+    return OtoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def test_an_otoco_request_carries_exactly_the_five_domain_facts_and_two_seeds() -> None:
+    """Section 3's OTOCO set is SIXTEEN wire parameters; this is seven fields.
+
+    Pinned as an exact set rather than a subset. A subset assertion would not
+    notice a wire name arriving later -- and a domain type growing
+    ``pendingAboveStopPrice`` is precisely the leak this commit exists to
+    prevent.
+    """
+    assert set(OtocoOrderListRequest.model_fields) == {
+        "symbol",
+        "quantity",
+        "entry_limit",
+        "stop_price",
+        "take_profit",
+        "entry_bar_time",
+        "generation",
+    }
+
+
+def test_an_oto_request_is_the_otoco_set_minus_the_above_leg() -> None:
+    """Thirteen wire parameters, six fields. The difference between the two
+    types is exactly one domain fact, even though the wire spelling also
+    changes prefix (``pending*`` versus ``pendingAbove*``/``pendingBelow*``)."""
+    otoco = set(OtocoOrderListRequest.model_fields)
+    oto = set(OtoOrderListRequest.model_fields)
+
+    assert otoco - oto == {"take_profit"}
+    assert oto - otoco == set()
+
+
+@pytest.mark.parametrize(
+    "forbidden",
+    [
+        "pendingAbovePrice",
+        "pendingAboveTimeInForce",
+        "pendingBelowPrice",
+        "pendingBelowTimeInForce",
+    ],
+)
+@pytest.mark.parametrize(
+    "model", [OtocoOrderListRequest, OtoOrderListRequest], ids=["otoco", "oto"]
+)
+def test_the_minus_1106_fields_are_unrepresentable(model: type, forbidden: str) -> None:
+    """UNREPRESENTABLE, not rejected -- which is stronger, because a check can
+    be deleted and a missing field cannot be read.
+
+    Both protective legs are stop-market, so each carries exactly one price and
+    there is no second price field to become a limit; and neither type has a
+    time-in-force field at all. A mapper enumerating these fields has nothing to
+    emit ``-1106`` from.
+    """
+    assert forbidden not in model.model_fields
+    # The general form, not just these four spellings: no field mentions a
+    # limit price or a time in force on a pending leg.
+    assert not any("time_in_force" in name for name in model.model_fields)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"quantity": Decimal("0")}, "quantity must be > 0"),
+        ({"entry_limit": Decimal("0")}, "entry_limit must be > 0"),
+        ({"stop_price": Decimal("0")}, "stop_price must be > 0"),
+        ({"take_profit": Decimal("0")}, "take_profit must be > 0"),
+        ({"stop_price": Decimal("100")}, "not below entry_limit"),
+        ({"take_profit": Decimal("100")}, "not above entry_limit"),
+        ({"entry_bar_time": datetime(2026, 7, 25, 12, 0)}, "timezone-aware"),
+        ({"generation": -1}, "greater than or equal to 0"),
+    ],
+    ids=["qty", "entry", "stop", "tp", "stop_above_entry", "tp_below_entry", "naive", "generation"],
+)
+def test_an_incoherent_otoco_request_is_refused(overrides: dict[str, object], match: str) -> None:
+    """The two ORDERING rules are the ones that matter. Swap stop and target and
+    the venue accepts the list happily -- it has no idea which leg we meant --
+    and the position closes at a loss the moment it moves in our favour."""
+    with pytest.raises(ValidationError, match=match):
+        _otoco(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"quantity": Decimal("0")}, "quantity must be > 0"),
+        ({"entry_limit": Decimal("0")}, "entry_limit must be > 0"),
+        ({"stop_price": Decimal("0")}, "stop_price must be > 0"),
+        ({"stop_price": Decimal("100")}, "not below entry_limit"),
+        ({"entry_bar_time": datetime(2026, 7, 25, 12, 0)}, "timezone-aware"),
+    ],
+    ids=["qty", "entry", "stop", "stop_above_entry", "naive"],
+)
+def test_an_incoherent_oto_request_is_refused(overrides: dict[str, object], match: str) -> None:
+    with pytest.raises(ValidationError, match=match):
+        _oto(**overrides)
+
+
+@pytest.mark.parametrize(
+    "field", ["quantity", "entry_limit", "stop_price", "take_profit"], ids=lambda f: str(f)
+)
+def test_every_price_and_quantity_is_money_not_decimal(field: str) -> None:
+    """The one boundary where a ``numpy.float64`` from indicator maths could
+    reach a submitted order price. ``Money`` is what stops it; a bare
+    ``Decimal`` annotation would take the float and round-trip it silently."""
+    with pytest.raises(ValidationError, match="float"):
+        _otoco(**{field: 1.5})
+
+
+def test_generation_defaults_to_zero_and_carries_no_venue_ceiling() -> None:
+    """Bounded below only. The 0..99 ceiling is derived from the venue's
+    36-character ID limit and lives in ``exchange/ids.py``; ``core/`` must not
+    encode a venue constraint, and a request above it fails at ID generation --
+    the boundary that owns it."""
+    assert _otoco().generation == 0
+    # Constructs happily: this type has no opinion about 500.
+    assert _otoco(generation=500).generation == 500
+
+
+@pytest.mark.parametrize("build", [_otoco, _oto], ids=["otoco", "oto"])
+def test_an_order_list_request_is_frozen(build: object) -> None:
+    request = build()  # type: ignore[operator]
+    with pytest.raises(ValidationError):
+        request.quantity = Decimal("1")
