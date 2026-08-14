@@ -413,6 +413,30 @@ data.
   *risk semantics* off `OrderType` and side, and what a level means is risk's
   business. Note this **converts** the defect rather than closing it — `_enforce`
   detects that an upstream failed to protect the trigger; it does not protect it.
+
+  > **THE `price` HALF IS STILL TRUE OF `OrderRequest` AND DOES NOT GENERALISE
+  > TO AN ORDER LIST.** Annotated rather than corrected, because nothing above
+  > is wrong -- only its scope was never stated.
+  >
+  > The asymmetry rests on `price` being "legitimately *derived* at dispatch".
+  > **That premise expired for order lists at M5b commit 10**, when
+  > `entry_limit` began arriving from `risk.rules.derive_entry_limit` ALREADY
+  > tick-rounded under `ROUND_CEILING`. Rounding it DOWN at dispatch would move
+  > it below the reference price and invert `EntryIntent`'s
+  > `entry_limit >= reference_price` -- the one invariant D3 identified as able
+  > to invert silently.
+  >
+  > So order-list enforcement **rejects all three prices and rounds only the
+  > quantity**, where `_enforce` rounds one and rejects one. `_enforce` itself is
+  > unchanged and remains correct for the `OrderRequest` it takes.
+  >
+  > **The transferable part is the shape, not the instance:** a justification
+  > that depends on a fact established elsewhere goes stale silently when that
+  > fact moves, because nothing at the justification's site re-checks it. Two
+  > instances landed one commit apart at M5d (this, and the committed-risk
+  > lowest-leg check), which is a pattern rather than a coincidence -- so a
+  > justification resting on a distant invariant should NAME the invariant at
+  > its own site.
 - **The independent last line of defence must not be WEAKER than the sizing it
   re-checks.** `_enforce` read raw `LOT_SIZE` while sizing used the **effective**
   filters, so a quantity the sizer would have refused could pass the guard meant
@@ -976,6 +1000,24 @@ data.
 - Enums are `str, Enum`, not `StrEnum` (`UP042` suppressed deliberately:
   `StrEnum` changes `str(member)` from `"OrderSide.BUY"` to `"BUY"`, which would
   alter logs and persisted strings).
+
+  > **THE TRAP IS CONDITIONAL ON THE INTERPOLATION FORM, and the clause above
+  > states it without the condition.** MEASURED on Python 3.12.10: `str(m)`,
+  > `f"{m}"`, `format(m)` and `"%s" % m` all yield `L.STOP_LOSS`, but `m + ""`
+  > yields `SL`. **Concatenation is safe and formatting is not.**
+  >
+  > **That asymmetry makes it worse than a uniform trap, which is why it is
+  > worth an annotation rather than a footnote.** An author who reaches for
+  > concatenation produces a correct string BY ACCIDENT and learns the hazard is
+  > not real; the next author uses an f-string and ships a broken value. So "it
+  > worked when I tried it" is not evidence here, and the rule cannot be
+  > verified by spot-checking one call site.
+  >
+  > It also manifests as a **length** error rather than a character error --
+  > `OrderListLeg.STOP_LOSS` is 22 characters -- so on a client order ID it
+  > arrives as `-1100`'s misdiagnosis by a second route (M5c-C). The defence is
+  > `.value` at every interpolation plus a guard that re-validates the result,
+  > which is what `exchange/ids.py` does.
 - No quoted annotations in new code (files carry `from __future__ import annotations`).
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
