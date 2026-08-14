@@ -66,6 +66,7 @@ from trading_bot.core.models import (
     Ticker,
 )
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
+from trading_bot.utils.helpers import round_price, round_step_size
 from trading_bot.utils.logger import get_logger
 
 _log = get_logger(__name__)
@@ -804,3 +805,111 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
         return ExchangeConnectionError(str(exc))
 
     return ExchangeError(str(exc))
+
+
+# --------------------------------------------------------------------------
+# Order-list filter enforcement -- per leg, pure
+# --------------------------------------------------------------------------
+def _enforce_order_list_legs(
+    symbol: str,
+    quantity: Decimal,
+    legs: Sequence[tuple[str, Decimal]],
+    info: SymbolInfo,
+) -> Decimal:
+    """Check every leg against the symbol's filters and return the sized quantity.
+
+    Pure, and separate from any client method on purpose: the decision is
+    testable without an ``AsyncMock``, and the ``await get_symbol_info`` that
+    feeds it belongs to whoever dispatches.
+
+    **Every price is REJECTED off-tick; none is rounded.** ``_enforce`` rounds
+    an ``OrderRequest``'s ``price`` because that price is *derived at dispatch*
+    -- a candle close times a slippage multiplier. That premise expired at M5b
+    commit 10: ``entry_limit`` now arrives from ``risk.rules.derive_entry_limit``
+    already tick-rounded under ``ROUND_CEILING``. Rounding it DOWN here would
+    move it below the reference price and invert ``EntryIntent``'s
+    ``entry_limit >= reference_price`` invariant -- the one thing D3 identified
+    as able to invert silently. The protective triggers arrive rounded toward
+    their reference for the older reason: ``ROUND_DOWN`` on a long's stop moves
+    it *away* from entry and grows the realised stop distance, an unbooked
+    breach of ``risk_per_trade`` arriving through the guard meant to catch it.
+    Rejecting names the upstream break instead of papering over it.
+
+    **The notional is checked against the LOWEST leg price, once.** For a long
+    the request type already guarantees ``stop_price < entry_limit <
+    take_profit``, so the below leg carries the smallest notional and is the
+    only leg that can bind -- a per-leg loop would add two branches that cannot
+    fire while that invariant holds. This is ``binding_price = min(price,
+    stop_price)`` generalised to three legs.
+
+    **``effective_*``, never raw ``LOT_SIZE``.** The stricter of ``LOT_SIZE``
+    and ``MARKET_LOT_SIZE`` is what ``risk.position_sizing`` sizes against, so
+    reading the raw fields would make this guard weaker than the sizing it
+    re-checks. Whether ``MARKET_LOT_SIZE`` binds a *triggered* stop is
+    UNRESOLVED (Q-C section 10); this is the reading that survives either
+    answer, because relaxing later widens what is accepted while tightening
+    later means everything in between was checked by a weaker guard.
+    """
+    for leg, price in legs:
+        if round_price(price, info.price_tick) != price:
+            raise FilterRejectedError(
+                f"{leg} price {price} for {symbol} is not a multiple of tickSize "
+                f"{info.price_tick}; order-list prices arrive tick-rounded, so this "
+                "is an upstream contract violation rather than a market state",
+                filter_name="PRICE_FILTER",
+            )
+
+    sized = round_step_size(quantity, info.effective_step_size)
+    if sized <= 0:
+        raise OrderError(f"Quantity for {symbol} rounds to zero at step {info.effective_step_size}")
+    if sized < info.effective_min_qty:
+        raise OrderError(f"Quantity {sized} below min_qty {info.effective_min_qty} for {symbol}")
+
+    if info.min_notional > 0:
+        leg, price = min(legs, key=lambda item: item[1])
+        notional = sized * price
+        if notional < info.min_notional:
+            raise OrderError(
+                f"Notional {notional} on the {leg} leg is below min_notional "
+                f"{info.min_notional} for {symbol}"
+            )
+
+    return sized
+
+
+def enforce_otoco_filters(
+    request: OtocoOrderListRequest, info: SymbolInfo
+) -> OtocoOrderListRequest:
+    """Filter-check all three OTOCO legs, returning the request with a sized quantity.
+
+    One quantity is shared by every leg, so it is rounded once and the result
+    applies to all three -- which is also why the wire spells it twice from a
+    single field.
+    """
+    sized = _enforce_order_list_legs(
+        request.symbol,
+        request.quantity,
+        [
+            ("working", request.entry_limit),
+            ("below", request.stop_price),
+            ("above", request.take_profit),
+        ],
+        info,
+    )
+    return request.model_copy(update={"quantity": sized})
+
+
+def enforce_oto_filters(request: OtoOrderListRequest, info: SymbolInfo) -> OtoOrderListRequest:
+    """Filter-check both OTO legs, returning the request with a sized quantity.
+
+    Its own function rather than a branch shared with OTOCO: the caller knows
+    which shape it built, and a single checker over a union would need an
+    ``else`` that cannot occur.
+    """
+    sized = _enforce_order_list_legs(
+        request.symbol,
+        request.quantity,
+        [("working", request.entry_limit), ("pending", request.stop_price)],
+        info,
+    )
+    return request.model_copy(update={"quantity": sized})

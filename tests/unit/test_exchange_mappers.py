@@ -651,6 +651,16 @@ def test_a_request_that_states_nothing_keeps_the_translation_default() -> None:
 # OrderRequest -> Binance params
 # --------------------------------------------------------------------------
 def test_market_order_params_are_minimal() -> None:
+    """Minimality is the stated subject; ASSIGNMENT COVERAGE IS THE SIDE EFFECT.
+
+    The exact-dict comparison below is the ONLY assertion in this file that pins
+    which domain field reaches which wire key for `symbol`, `side`, `type` and
+    `quantity` -- no test on the LIMIT, STOP_LOSS_LIMIT or STOP_LOSS paths
+    asserts any of the four. Replacing it with key spot-checks, the obvious
+    modernisation, would delete that coverage for the whole mapper and nothing
+    would report the loss. See M5d-037; adding the other three paths' own
+    assertions is a rotation item, not this commit's.
+    """
     req = OrderRequest(
         symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.MARKET, quantity=Decimal("0.001")
     )
@@ -1664,3 +1674,196 @@ def test_the_oto_prices_land_on_the_legs_they_belong_to() -> None:
     assert params["workingQuantity"] == "0.5"
     assert params["pendingQuantity"] == params["workingQuantity"]
     assert params["pendingStopPrice"] == "90"
+
+
+# --------------------------------------------------------------------------
+# Order-list filter enforcement, per leg
+# --------------------------------------------------------------------------
+#: A symbol whose MARKET_LOT_SIZE minQty is stricter than LOT_SIZE's while the
+#: two step sizes agree, so a quantity can clear the raw minimum and fail the
+#: effective one. Composed rather than measured, and deliberately so: the point
+#: is to make the two filters DISAGREE, which the configured symbols do not.
+SYMBOL_STRICT_MARKET_MIN = {
+    "symbol": "BTCUSDT",
+    "baseAsset": "BTC",
+    "quoteAsset": "USDT",
+    "filters": [
+        {"filterType": "PRICE_FILTER", "tickSize": "0.01000000"},
+        {"filterType": "LOT_SIZE", "stepSize": "0.00001000", "minQty": "0.00100000"},
+        {"filterType": "NOTIONAL", "minNotional": "5.00000000"},
+        {
+            "filterType": "MARKET_LOT_SIZE",
+            "minQty": "0.01000000",
+            "maxQty": "100.00000000",
+            "stepSize": "0.00001000",
+        },
+    ],
+}
+
+INFO = m.to_symbol_info(SYMBOL_NOTIONAL)  # tick 0.01, step/minQty 0.00001, minNotional 5
+INFO_MARKET_STEP = m.to_symbol_info(SYMBOL_MARKET_LOT_POPULATED)  # market step 0.001 is stricter
+INFO_MARKET_MIN = m.to_symbol_info(SYMBOL_STRICT_MARKET_MIN)  # market minQty 0.01 is stricter
+
+
+def test_a_conforming_otoco_passes_through_unchanged() -> None:
+    request = _otoco_req(quantity=Decimal("0.5"))
+
+    assert m.enforce_otoco_filters(request, INFO) == request
+
+
+def test_a_conforming_oto_passes_through_unchanged() -> None:
+    request = _oto_req(quantity=Decimal("0.5"))
+
+    assert m.enforce_oto_filters(request, INFO) == request
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(entry_limit=Decimal("100.005")), INFO),
+        lambda: m.enforce_oto_filters(_oto_req(entry_limit=Decimal("100.005")), INFO),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_an_off_tick_entry_limit_is_rejected_not_rounded(call: object) -> None:
+    """REJECTED, never rounded, and that distinction is the commit.
+
+    ``_enforce`` rounds an ``OrderRequest``'s price because that price is
+    derived at dispatch -- a candle close times a slippage multiplier. The
+    premise expired at M5b commit 10: ``entry_limit`` arrives from
+    ``derive_entry_limit`` already tick-rounded under ``ROUND_CEILING``, so
+    rounding it DOWN here would move it below the reference price and invert
+    ``EntryIntent``'s ``entry_limit >= reference_price`` -- the one invariant D3
+    named as able to invert silently.
+    """
+    with pytest.raises(FilterRejectedError) as excinfo:
+        call()  # type: ignore[operator]
+
+    assert excinfo.value.filter_name == "PRICE_FILTER"
+    assert "working" in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    ("call", "leg"),
+    [
+        (lambda: m.enforce_otoco_filters(_otoco_req(stop_price=Decimal("90.005")), INFO), "below"),
+        (
+            lambda: m.enforce_otoco_filters(_otoco_req(take_profit=Decimal("120.005")), INFO),
+            "above",
+        ),
+        (lambda: m.enforce_oto_filters(_oto_req(stop_price=Decimal("90.005")), INFO), "pending"),
+    ],
+    ids=["otoco_below", "otoco_above", "oto_pending"],
+)
+def test_an_off_tick_trigger_is_rejected_and_names_its_leg(call: object, leg: str) -> None:
+    """``ROUND_DOWN`` on a long's stop moves it AWAY from entry and grows the
+    realised stop distance -- an unbooked breach of ``risk_per_trade`` arriving
+    through the guard that exists to catch it. On the target it runs the other
+    way, shrinking realised gain. Rejecting covers both without the guard having
+    to know which direction a given leg runs.
+    """
+    with pytest.raises(FilterRejectedError) as excinfo:
+        call()  # type: ignore[operator]
+
+    assert excinfo.value.filter_name == "PRICE_FILTER"
+    assert leg in str(excinfo.value)
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(quantity=Decimal("0.1234567")), INFO),
+        lambda: m.enforce_oto_filters(_oto_req(quantity=Decimal("0.1234567")), INFO),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_enforcement_never_moves_a_price(call: object) -> None:
+    """The write set is the quantity alone; every price comes back identical.
+
+    DECLARED ABSTAINER on the reject-becomes-round mutation: a *conforming*
+    price is unmoved by rounding, so this passes under both variants. It guards
+    a different claim -- that enforcement writes one field -- and what it would
+    catch is a version that rounded a conforming price under a coarser tick.
+    """
+    result = call()  # type: ignore[operator]
+
+    assert result.entry_limit == Decimal("100")
+    assert result.stop_price == Decimal("90")
+    assert result.quantity == Decimal("0.12345")  # the one field that moved
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(quantity=Decimal("0.1234")), INFO_MARKET_STEP),
+        lambda: m.enforce_oto_filters(_oto_req(quantity=Decimal("0.1234")), INFO_MARKET_STEP),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_the_effective_step_is_used_not_the_raw_lot_size(call: object) -> None:
+    """THE LOCKED RULE: this guard must not be weaker than the sizing it
+    re-checks. ``risk.position_sizing`` sizes against the stricter of
+    ``LOT_SIZE`` and ``MARKET_LOT_SIZE``; reading the raw fields would let a
+    quantity the sizer refused pass the guard meant to catch it.
+
+    The fixture makes them disagree on purpose -- raw step 0.00001, market step
+    0.001 -- so they cannot agree by coincidence, which is how the original
+    defect survived: on the configured symbols the market filter reports zeroed
+    min/step and the two are identical.
+    """
+    assert call().quantity == Decimal("0.123")  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(quantity=Decimal("0.000001")), INFO),
+        lambda: m.enforce_oto_filters(_oto_req(quantity=Decimal("0.000001")), INFO),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_a_quantity_rounding_to_zero_is_refused(call: object) -> None:
+    """Checked before the minimum, because zero is not "too small" -- it is
+    nothing, and the message an operator needs names the step it vanished at."""
+    with pytest.raises(OrderError, match="rounds to zero"):
+        call()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(quantity=Decimal("0.005")), INFO_MARKET_MIN),
+        lambda: m.enforce_oto_filters(_oto_req(quantity=Decimal("0.005")), INFO_MARKET_MIN),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_a_quantity_under_the_effective_minimum_is_refused(call: object) -> None:
+    """0.005 clears raw ``LOT_SIZE`` minQty 0.001 and fails ``MARKET_LOT_SIZE``
+    minQty 0.01, so raw and effective give OPPOSITE answers on this input. Under
+    the raw filters it would pass -- which is exactly the defect M5a fixed in
+    ``_enforce``, and this is what stops it recurring here.
+    """
+    with pytest.raises(OrderError, match="below min_qty"):
+        call()  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: m.enforce_otoco_filters(_otoco_req(quantity=Decimal("0.05")), INFO),
+        lambda: m.enforce_oto_filters(_oto_req(quantity=Decimal("0.05")), INFO),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_the_notional_is_checked_against_the_lowest_leg_price(call: object) -> None:
+    """0.05 x entry 100 is exactly 5.0 and CLEARS min_notional 5; 0.05 x stop 90
+    is 4.5 and does not. So this input passes on the entry and fails on the stop,
+    which is what makes it discriminate.
+
+    For a long the request type guarantees ``stop < entry < take_profit``, so the
+    below leg carries the smallest notional and is the only leg that can bind --
+    a per-leg loop would add branches that cannot fire. Observed live at M5a: a
+    Testnet probe took ``-1013 Filter failure: NOTIONAL`` on exactly this shape.
+    """
+    with pytest.raises(OrderError, match="below min_notional"):
+        call()  # type: ignore[operator]
