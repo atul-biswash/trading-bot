@@ -89,6 +89,20 @@ order ID is unique only against live orders, because a terminal order's ID is
 released**. The first probe concluded the opposite of that last one and was
 corrected by a later arm; both readings are on the record.
 
+**M5d built the surface M5c specified, and placed exactly one order to prove
+it.** The adapter now maps a protective entry end to end — request type, filter
+enforcement per leg, parameter mapper, placement call, response mapper — plus
+the deterministic client-order-ID scheme the recovery path depends on. A single
+Testnet OTOCO was placed and cancelled within seconds: the venue accepted 15 of
+16 parameters straight from our own mapper and honoured every generated ID
+byte-for-byte, and the same order answered the milestone's best open question by
+showing that pending protective legs **are** visible while still `PENDING_NEW`.
+Balances were identical before and after.
+
+**It still does not trade.** The port declaration and its first caller land
+together at M5e, because nothing yet calls a placement method and declaring an
+interface nobody uses is the failure this project has already paid for once.
+
 So the next milestone starts from a fully specified surface and an empty
 `execution/`. That is a better position than it sounds — every parameter set and
 error meaning it needs is now measured rather than assumed — but it is not

@@ -2065,9 +2065,41 @@ deleted. Also measured: the 36-character client-order-ID limit and its regex, th
 insufficient-balance message, and that cancelling one leg of an OTO collapses the
 whole list.
 
-**Still nothing places an order.** `execution/` is 15 lines of docstring-only
-stubs, `IntentLogger` is still the terminal collaborator, and the adapter has no
-order-list method. M5c specified the surface; M5d builds it.
+**Still nothing placed an order at M5c's close.** `execution/` was 15 lines of
+docstring-only stubs, `IntentLogger` the terminal collaborator, and the adapter
+had no order-list method. M5c specified the surface; M5d built it.
+
+**M5d is complete, in 11 commits, and the adapter surface exists.** The chain
+runs end to end in `exchange/`: `OtocoOrderListRequest` / `OtoOrderListRequest`
+(frozen, `Money`-typed, the four `-1106` fields **unrepresentable** rather than
+rejected) → per-leg filter enforcement → the two parameter mappers → the two
+`BinanceClient` placement methods → `to_order_list`. Alongside it, the Q-C §6 ID
+scheme in `exchange/ids.py`: generation-0 IDs derivable by pure computation, a
+list-level form §6 never defined, and an output guard that distinguishes a
+LENGTH violation from a CHARACTER-CLASS one — which the venue's own message
+cannot, since it reports the first as the second.
+
+**One Testnet order was placed and cancelled**, and it validated the chain: 15
+of 16 parameters came from our own mapper and the venue accepted every one,
+including all four generated IDs byte-for-byte. It also answered the milestone's
+best open question — **`get_open_orders` returns pending protective legs in
+`PENDING_NEW`**, so a recovery path asking "does anything rest" sees protection
+that has not activated. A read-only probe before it captured the first real
+order-list payload this repository has ever held.
+
+**The `ExchangeClient` ABC is untouched across all 11 commits**, verified by an
+empty diff rather than asserted. Nothing in `src/` places an order list except
+an executor, and `execution/` is still stubs — so declaring port surface would
+leave it uncalled, which is the harm finding GG names. The declaration lands
+with its caller at M5e.
+
+**Two defects were found by measurement and closed inside the milestone.** The
+response mapper read the leg array under an assumed key and mapped ZERO legs
+from a three-leg payload without raising — and a test asserting the empty result
+defended it. Both were corrected against a captured artefact. Separately, Q-C
+§7's site-3 defect was **deferred** rather than fixed: closing it needs a
+`ProtectionState` member no writer exists for, and attempting it would have
+shadowed the entire limit layer behind `COMMITTED_RISK_UNKNOWN`.
 
 **Q-A** stays unscheduled: its thresholds need soak data and nothing has
 dispatched an order yet, so the `collaborator_failed` lines it would be
