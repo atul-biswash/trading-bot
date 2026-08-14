@@ -1467,6 +1467,71 @@ collect the union of their failure sets and look at what never appears. Note
 another's is weak, not inert, which is the distinction M5c-AO cost a wrong
 prediction to establish.
 
+**CHECK EVERY CANDIDATE TEST'S FIXTURE FOR EXPRESSIVENESS BEFORE PREDICTING,
+not after.** A test cannot fail on a mutation its fixture cannot express, and
+that is a property of the *fixture*, not of the test's subject. The failure set
+is therefore determined by inputs, not by intent: a test named for the very
+thing being mutated will abstain if its input already conforms.
+
+Worked twice at M5d. A reject-becomes-round mutation is invisible to every test
+whose input is already *conforming*, so the test called
+`test_enforcement_never_moves_a_price` abstained. And a leg-reordering mutation
+is invisible to a test selecting `orders[1]`, because reversing three elements
+leaves the middle fixed — which is worse than abstention, since under a mapper
+that *did* reorder it would keep asserting against the right leg by accident.
+
+**Doing the check changed the TESTS, not merely the predictions**, on both
+occasions — a positional selector became a code-based one, and a missing
+assignment assertion was written. That is why it is a step rather than a
+caution. **Partly mechanisable**: nothing can decide expressiveness, but "the
+abstention is declared in the docstring" is greppable, and declaring it is the
+half that stops the same discovery being made twice.
+
+**AN AGREEMENT IS EVIDENCE ONLY WHEN DISAGREEMENT WAS POSSIBLE AND WOULD HAVE
+BEEN NOTICED.** Two independent derivations reaching the same answer tells you
+the answer was obvious, not that it was right — if the second could not have
+been contradicted by the first, because it did not know of it, then nothing was
+tested. M5d's worked example: the list-ID suffix `-L` was chosen at commit 4 and
+had already been sent by M5c's probe, and it is tempting to read the match as
+convergent confirmation. It is not; `-L` for "list" is simply obvious. **Not
+mechanisable** — nothing can detect that two derivations were independent, which
+is exactly why it has to be asked out loud.
+
+**WHERE A CONSTRAINT IS UNMEASURED, TAKE THE READING WHOSE WRONG ANSWER IS
+REVERSIBLE.** The two errors are rarely symmetric, and the asymmetry usually
+decides. M5d's case: whether `MARKET_LOT_SIZE` binds a *triggered* stop is
+UNRESOLVED, so enforcement uses the stricter effective filters. If that turns
+out to be unnecessary, relaxing later is a **widening** and nothing previously
+accepted becomes rejected. Had we read the raw filters and it does bind, every
+order in between was checked by a guard **weaker than the sizer** — and no later
+edit can un-place them. **Not mechanisable**: which error is recoverable is a
+judgement, and it is the judgement worth making explicitly rather than
+defaulting to whichever reading is cheaper today.
+
+**THE PIPE RULE'S REAL SCOPE IS ANY COMMAND WHOSE OUTPUT CANNOT BE
+REGENERATED**, not `check.py`. The gate is merely the instance with a guard. A
+command with **side effects** is exactly such a command: M5d piped a probe that
+had just placed a real order through `head`, destroying its teardown output on a
+script that could not be re-run without placing a second. Recovery was possible
+only because the teardown happened to be independently observable. **Partly
+mechanisable** — `scripts/check.py`'s FIFO refusal is the working precedent, and
+a probe harness can refuse a piped stdout the same way.
+
+**A MUTATION ANCHOR WRITTEN AGAINST PRE-FORMAT SOURCE IS INVALID, AND THIS IS A
+TOOLCHAIN PROPERTY RATHER THAN A DISCIPLINE.** The gate *rewrites source*:
+`ruff format` runs over `src tests scripts` and will reflow a call, so an anchor
+recorded before a format pass may match zero times after it. That will recur
+whenever a mutation is planned before its target is formatted.
+
+**The correct response is to assert the anchor count and abort with the tree
+restored** — never re-anchor and carry the prediction across, because a
+re-anchored mutation is a new mutation whose failure set must be re-derived, and
+anchor drift is invisible to a checksum by construction. M5d's harness did
+exactly this and refused to run, which is the rule surfacing as a **refusal**
+rather than as a post-hoc explanation of a wrong number. **Mechanised, and it
+stays mechanised**: read the anchor out of the formatted file immediately before
+mutating, and assert its count.
+
 **An arm set that varies only one state cannot discriminate a state-dependent
 behaviour (M5c-I).** M5c's duplicate order-list probe ran nine arms, every one
 against a *terminated* original, and concluded that order lists are not
@@ -1716,6 +1781,21 @@ three commits remained**, and the shortfall was raised then rather than on
 contact. That difference is the whole value of the earlier lesson, and it is
 recorded here so the next reader sees that checking remaining capacity is the
 practice, not that letters keep running out.
+
+**CITE A DOCUMENT BY CONTENT, NEVER BY LINE NUMBER — and note what makes this
+more than tidiness: annotating a document is precisely what invalidates its line
+numbers.** So the act this project performs most often on its contracts is the
+act that rots every citation into them, and a rotation that annotates several
+sections invalidates its own brief as it goes.
+
+Measured three times at M5d, each a citation that had drifted before it was
+used: `M5_NUMBERS.md:433` for a row at `:434`, Q-C `:101`/`:118` for labels at
+`:102`/`:116`, and Q-C `:592` for a sentence moved to `:618` **by this
+milestone's own earlier commit**. Grep the sentence; a line number is a proxy
+for it, and the cheapest instrument is the direct one.
+
+It shares its shape with the rule immediately below — a number and a position
+are both proxies, and both go stale silently while continuing to look precise.
 
 **A verification baseline states its INSTRUMENT, not only its number.** The same
 concern one level down: `grep -c` counts matching **lines**, while a count of
