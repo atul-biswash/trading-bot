@@ -1,129 +1,173 @@
-# Current milestone — M5d: build the adapter surface M5c specified
+# Current milestone — M5e: the first dispatch
 
-**THE BRIEF IS THE GAP, and it is stated first because a brief that describes the
-milestone we planned rather than the one we ran is how M5c's own scope confusion
-started.**
+**THE RECONCILER SHIPS BEFORE THE FIRST ORDER, and that is a hard precondition
+rather than a preference.** It is stated first because every other item here
+assumes it.
 
-M5c set out to build the adapter surface. **It did not.** There are no order-list
-port methods, no request type, no mapper, no `tb1-` client-order-ID scheme, and
-`execution/` is still 15 lines of docstring-only stubs. What M5c produced instead
-is the Q-C §8 error classifier and four Testnet probes.
+M5d built the adapter surface: request types, per-leg enforcement, both
+parameter mappers, both placement methods, the response mapper and the Q-C §6 ID
+scheme. **Nothing calls any of it.** M5e wires it to the decision path — which
+means it is the milestone that first sends an order the bot decided to send.
 
-**So M5c bought CERTAINTY and no code, and that is M5d's starting position.**
-Every parameter set, error meaning, ID rule and teardown semantic the surface
-needs is now *measured* rather than assumed — which is a better position than it
-sounds, and is not progress toward a fill. M5d builds what M5c specified.
-
-Read first: `docs/QC_PROTECTIVE_ORDERS.md` §3 (leg types and full parameter
-sets), §6 (client order IDs — **rewritten by measurement at M5c**), §8 (errors —
-**also rewritten**) and §4b (the discretionary close); `docs/M5_NUMBERS.md`;
-`docs/QB_ESCALATION.md`. The decisions are locked in `CLAUDE.md`; this file is
-the task list and the single home for live open items.
+Read first: `docs/QC_PROTECTIVE_ORDERS.md` §4 (entry mechanics), §4b (the
+discretionary close), §7 (reconciliation) and §8 (errors and the re-place branch
+table); `docs/M5_NUMBERS.md`, whose `T_recon` definition was corrected at M5d's
+rotation; `docs/QB_ESCALATION.md`. The decisions are locked in `CLAUDE.md`; this
+file is the task list and the single home for live open items.
 
 ---
 
-## Closed by M5c — recorded so they are not re-raised
+## Before M5e starts — the namespace, settled in advance this time
 
-- **The Q-C §8 classifier exists.** Six families dispatched from a rule table:
-  `-2010` splits on message text into `InsufficientBalanceError` and
-  `DuplicateOrderError`; `-2011` to `OrderNotFoundError`; `-1013` to
-  `FilterRejectedError` with the filter name captured; `-1100` to
-  `MalformedRequestError`, outside `OrderError` because it is our bug rather than
-  a refused trade; `-1106`/`-1158`/`-1159` to `ContractViolationError` on
-  code-only rows.
-- **The hierarchy is coherent and every classified venue error carries the
-  exchange's code.** Before the pass, six of seven classified outcomes discarded
-  it while the *unclassified* fallthrough kept it.
-- **The 36-character client-order-ID limit is MEASURED**, and so is its regex:
-  36 accepted, 37 rejected with `-1100` and `^[a-zA-Z0-9-_]{1,36}$`. A length
-  violation is reported as "Illegal characters found", which is the sharp edge.
-- **The duplicate order-LIST question is settled, and the first answer was
-  wrong.** Arms 1-9 concluded lists are not deduplicated; arms 10-11 measured a
-  **live** list being refused with `-2010 'Duplicate order sent.'` The rule is
-  **a client order ID is unique against LIVE orders only; a terminal order's ID
-  is released and immediately reusable**, identically for single orders and
-  lists. `CLAUDE.md`'s timed-out-write recovery **stands as written**.
-- **`-1111` is no longer silently classified** and `-1128` is deliberately not
-  classified; both are pinned by tests.
+**M5e's finding namespace is `M5e-001` onward: three digits, zero-padded,
+per-milestone, capacity 999.**
+
+Per-milestone rather than carrying, because `CLAUDE.md`'s whole justification
+for namespacing is **self-location** — `M5d-053` tells a reader which entry to
+open, and a cumulative counter would destroy that. M5d consumed 89 of 999, so
+capacity is not a live question and **no extension rule should be invented in
+advance**; the two-character letter extension does not apply and lexical and
+numeric ordering coincide across the whole range.
+
+This is stated here because it is the obligation that was owed before M5d's
+first commit, was not discharged, and cost two turns at the start of the
+milestone. It should not be owed again.
 
 ---
 
-## Dissolved — investigated and dismissed, recorded so it does not look forgotten
+## The five decisions M5e inherits, with arming conditions
 
-- **`BinanceRequestException` dropping the code is NOT a defect.** It was carried
-  as "the last surviving instance of what the hierarchy pass fixed everywhere
-  else". Measured: `BinanceRequestException.__init__(self, message)` — it has
-  **no `code` attribute at all**. It is a library-side request/parse failure, not
-  a venue error response, so `code=None` is *correct*, exactly as for the two
-  client-side `ExchangeAPIError` raises at `binance_client.py:149` and
-  `models.py:203`.
+Named rather than rediscovered. Each was a deliberate deferral, not an
+oversight.
 
-  **The claim it dissolved was the assistant's own**, made in the sentence
-  handing the work over, and it is M5c-AO's shape once more: a distillation
-  broader than the evidence behind it. An item that disappears with no record
-  looks like an item that was forgotten, which is why this entry exists rather
-  than a deletion.
+### 1. The `ExchangeClient` port declaration, with its first caller — `M5d-073`
+
+The ABC is **untouched across all 11 of M5d's commits**, verified by an empty
+diff rather than asserted. That was deliberate: finding GG binds a port
+declaration to its implementation *and its production caller*, and the only
+honest caller for a placement method is an executor. There is not even a
+validation caller available — Binance offers **no test endpoint for order
+lists** (MEASURED: `create_test_order` and `v3_post_order_test` are
+single-order).
+
+Manufacturing a caller would defeat GG while appearing to honour it. So the
+declaration lands **with** the executor, in one commit, and the concrete methods
+that already exist stop being adapter-only surface at that moment.
+
+*Arming condition:* the executor. **This is the commit GG has been saved for.**
+
+### 2. The per-call retry budget — `M5d-074`
+
+`CLAUDE.md` requires the dispatch retry budget **per call, not per client**, and
+`_call` has no per-call retry parameter. The placement methods therefore inherit
+`retry_attempts=4`, whose worst case is `4 × requests_timeout_s + 3.5 s` of
+backoff = **43.5 s**, against a `dispatch_deadline_s` of **9.0**. A *single*
+attempt at the configured timeout is 10 s and already exceeds it.
+
+Adding the parameter belongs at the dispatch site, because that is where the
+budget is known. The method docstrings record the gap so it is not inherited
+silently.
+
+*Arming condition:* the first dispatch. **It is over budget today and the
+methods say so.**
+
+### 3. Whether to consume `orderReports` — `M5d-078`
+
+**The case for.** The placement response is the **only** moment at which the
+request and the venue's account of it can be compared without a second call.
+After it, every confirmation is against what we *believe* we sent, reconstructed
+from derivable IDs. Declining `orderReports` therefore makes the first
+confirmation an *inference* rather than an observation, and every later one cost
+a call.
+
+**The case against.** Consuming it means `OrderList` holds two leg
+representations, or two types exist for one concept — and the richer one is
+available from exactly one endpoint, which invites callers to depend on data the
+read path cannot supply.
+
+*Arming condition:* M5e's confirmation step, **which is the thing that knows
+whether it is call-bound.** The decision is M5e's; the argument is written so it
+does not have to be re-derived.
+
+### 4. Whether a filled leg stays visible to `get_open_orders` — `M5d-072`
+
+UNMEASURED, and **a probe question rather than an implementation choice**.
+`executedQty` on a *resting* order is a different observation from a *filled*
+order appearing at all, and M5d measured only the first.
+
+Nothing built at M5d depends on the answer: `get_own_open_orders` is scoped to
+what **rests**, and a filled leg's absence is the correct answer to that
+question. It bites only a caller that reads absence as "never existed".
+
+*Arming condition:* a fill. Settling it needs an order that actually executes,
+which is an irreversible action and belongs to whoever authorises one.
+
+### 5. `get_order_list` and M5c-K — **RULED, see R13 below**
 
 ---
 
-## Before M5d starts — one decision, and the third time this lesson is stated prospectively
+## R13 — the "did it place" query uses `v3_get_all_order_list`
 
-**The `M5d-` finding namespace starts at 26 IDs and M5c consumed 59.** It will
-exhaust, and the two-character extension (`M5d-Z`, then `M5d-AA`) is already
-ruled, so the mechanism exists. What is worth deciding *before* the milestone
-rather than at the moment of exhaustion is whether 26 single letters plus an
-extension is the right shape at all when one milestone can produce 59 findings.
+**RULED.** M5e's timed-out-write recovery asks *did it place?* — and it must
+**not** ask by our own client order ID.
 
-That is `240353c`'s lesson — check the remaining capacity before spending it —
-stated ahead of the need for the third time. The first two were stated *at*
-exhaustion, and one of them shipped a ruling that could not be satisfied.
+**Why.** `get_order_list(list_client_order_id=…)` becomes `origClientOrderId` on
+the wire, and **M5c-K records that a point query on an ID used twice has an
+undefined answer**: the live order, the most recent, or a stale terminal one,
+indistinguishable in the payload. That is not a remote corner — **`M5d-013`
+measured that generation-0 IDs repeat within one dispatch by construction**,
+because the ID is derivable from `(symbol, entry_bar_time)` and every attempt in
+one bar derives the same one. The recovery path is precisely where the collision
+is reachable.
+
+**`v3_get_all_order_list` returns every list with its ID and status**, letting
+the caller disambiguate rather than trusting the venue's choice — measured at
+M5d returning all six of M5c's terminal lists, intact, after 1d16h.
+
+**A correction this ruling rests on.** M5d commit 8's message claims
+`get_order_list` is *"the only view of a terminated list"*. **It is not** —
+`v3_get_all_order_list` and a per-leg `get_order` both show terminated state,
+and probe 1 measured both. The claim was made from the endpoints then wired
+rather than from the endpoints that exist (`M5d-086`).
+
+**M5c-K stays UNMEASURED and is no longer a blocker**, because under this ruling
+nothing load-bearing depends on it. It remains worth settling: one **read-only**
+query against an ID that has been used twice, and M5c's probe already created
+that condition on Testnet — though `M5d-054` bounds retention only from below,
+so the cost is a query plus the risk the condition has aged out.
 
 ---
 
-## What M5d delivers
+## Closed by M5d — recorded so they are not re-raised
 
-Each item carries its **arming condition** — the event that turns it from latent
-into live — because several of these are harmless today and dangerous the moment
-something else lands.
+- **The adapter surface exists.** Request types (the four `-1106` fields
+  unrepresentable, not rejected), per-leg filter enforcement, both parameter
+  mappers, both `BinanceClient` placement methods, the response mapper, and the
+  Q-C §6 ID scheme with a guard that separates a LENGTH violation from a
+  CHARACTER-CLASS one. Nothing calls any of it — that is M5e's.
+- **`close()` routes through `_call`.** It was the only client method that did
+  not, so a transport failure at teardown could propagate over the boot error
+  that caused it. `idempotent=False`, because the flag means *is a connection
+  failure safe to retry*, not *is this operation idempotent*.
+- **The leg-array key and the leg type were wrong and are fixed.** The response
+  mapper read an assumed key and mapped **zero legs from a three-leg payload
+  without raising**; a test asserting the empty result defended it. Both
+  corrected against a **captured** payload — the first this repository holds.
+- **`get_open_orders` returns pending protective legs in `PENDING_NEW`**, so a
+  recovery path asking "does anything rest" sees protection that has not
+  activated. MEASURED for a `GTC`-working list; INFERRED for a §3-conformant
+  `FOK` one, per arm 10's precedent.
+- **The enumeration-versus-point-query question is settled by measurement.**
+  `get_open_orders` carries §7's compare set; the list read-back returns
+  identity triples and cannot. Enumeration is leg-level, the point query is
+  list-level, and the four documents that disagreed were each describing one
+  half.
+- **The namespace decision was owed and is now discharged** — see the top of
+  this file.
 
-### 1. THE ADAPTER SURFACE — what M5c specified and did not build
+---
 
-This is the milestone's weight and it is listed first for that reason. Nothing
-below it matters if this does not land.
-
-**What does not exist**, measured at M5c's rotation: no order-list method on
-`ExchangeClient` or on `_AsyncBinanceAPI`; no order-list request type; no mapper
-to Q-C §3's 16-parameter OTOCO or 13-parameter OTO sets; no `tb1-` ID generator.
-`python-binance 1.0.37` exposes `v3_post_order_list_oto`,
-`v3_post_order_list_otoco`, `v3_get_order_list` and `v3_delete_order_list`, so
-the library half is present and the adapter half is absent.
-
-**What is already measured and must not be re-derived:** §3's parameter sets and
-forbidden fields; §6's ID scheme and the live-only uniqueness rule; §8's error
-meanings, now implemented; that one cancel collapses an order list; the
-36-character ID limit.
-
-**Two commit-grain rulings from M5c carry forward** — they were scope notes for
-the classifier arc and they generalise: **port declarations land WITH their
-implementation**, so no commit leaves port surface with no caller (finding GG);
-and a family lands as **class, branch and test together**.
-
-*Arming condition:* none — this is the milestone.
-
-### 2. `close()` bypasses `_call`, and it is NOT purely latent
-
-`BinanceClient.close()` at `binance_client.py:196` calls
-`self._client.close_connection()` directly. It is the **only** client method that
-does not route through `_call`, so a transport failure there raises a raw
-`aiohttp.ClientError` rather than a domain error.
-
-**Why it is not merely latent:** `live_system` closes the client unconditionally
-in a `finally`. A boot that fails at step 2, 3 or 4 and *then* fails to close
-would propagate the close error and **mask the real boot error** — the exact
-failure the nested-teardown design exists to prevent.
-
-*Arming condition:* any teardown that must classify a close failure — M5e's
-dispatch path is the first. **It can mask a boot error today.**
+## Carried forward from M5d's list — unchanged, still open
 
 ### 3. NN's remedy — the extraction command's four indistinguishable empties
 
