@@ -25,16 +25,24 @@ from trading_bot.core.models import (
     Balance,
     Candle,
     Order,
+    OrderList,
     OrderRequest,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
     SymbolInfo,
     Ticker,
 )
 from trading_bot.exchange.base import BaseExchangeClient, SleepFn
 from trading_bot.exchange.models import (
+    enforce_oto_filters,
+    enforce_otoco_filters,
     order_request_to_params,
+    oto_request_to_params,
+    otoco_request_to_params,
     to_balances,
     to_candles,
     to_order,
+    to_order_list,
     to_symbol_info,
     to_ticker,
 )
@@ -61,6 +69,8 @@ class _AsyncBinanceAPI(Protocol):
     async def create_order(self, **params: Any) -> dict[str, Any]: ...
     async def create_test_order(self, **params: Any) -> dict[str, Any]: ...
     async def cancel_order(self, **params: Any) -> dict[str, Any]: ...
+    async def v3_post_order_list_otoco(self, **params: Any) -> dict[str, Any]: ...
+    async def v3_post_order_list_oto(self, **params: Any) -> dict[str, Any]: ...
     async def get_open_orders(self, **params: Any) -> list[dict[str, Any]]: ...
     async def close_connection(self) -> None: ...
 
@@ -186,6 +196,68 @@ class BinanceClient(BaseExchangeClient):
             params["symbol"] = symbol
         raw = await self._call(self._client.get_open_orders, **params)
         return [to_order(o) for o in raw]
+
+    # -- order lists --------------------------------------------------------
+    async def create_otoco_order_list(self, request: OtocoOrderListRequest) -> OrderList:
+        """Place a three-leg OTOCO list: working ``LIMIT``, below stop, above target.
+
+        **Its own method rather than a branch shared with OTO**, mirroring the
+        two mappers. Q-C section 2 calls the arity branch irreducible and it
+        dispatches to a different endpoint, so the caller selects by selecting
+        the request type it built -- and there is no ``else`` here that cannot
+        occur.
+
+        ``idempotent=False``, and this is the write the rule was written for: a
+        connection timeout **may have landed**, so it must not be resent. The
+        recovery is to QUERY the IDs we would have sent, which Q-C section 6
+        makes derivable by pure computation. Only ``RateLimitError`` is retried,
+        because a 429 is rejected before acceptance.
+
+        **The dispatch retry budget is NOT supplied here, and that is a gap
+        rather than a decision.** `CLAUDE.md` requires it per call rather than
+        per client, and ``_call`` has no per-call retry parameter -- so this
+        method inherits the client's ``retry_attempts=4``, whose worst case is
+        4 x ``requests_timeout_s`` + 3.5s of backoff = 43.5s against a
+        ``dispatch_deadline_s`` of 9.0 (M5d-008). Supplying it belongs at the
+        dispatch site, with the executor.
+
+        Returns an :class:`OrderList`. The placement response carries both
+        ``orders`` and ``orderReports``; :func:`to_order_list` reads the former,
+        whose shape is MEASURED identical to the read-back's. ``orderReports``
+        -- which carries section 7's whole compare set, free, at the one moment
+        it is offered -- is deliberately **not consumed**; a caller that needs
+        leg detail re-reads. That is a recorded loss, not an oversight.
+        """
+        params = await self._prepare_otoco(request)
+        raw = await self._call(self._client.v3_post_order_list_otoco, idempotent=False, **params)
+        return to_order_list(raw)
+
+    async def create_oto_order_list(self, request: OtoOrderListRequest) -> OrderList:
+        """Place a two-leg OTO list: working ``LIMIT`` and a stop, no target.
+
+        See :meth:`create_otoco_order_list` for the retry classification and the
+        response mapping; both apply unchanged. The only difference is the
+        endpoint and the parameter set -- thirteen rather than sixteen, under
+        section 3's plain ``pending*`` prefix.
+        """
+        params = await self._prepare_oto(request)
+        raw = await self._call(self._client.v3_post_order_list_oto, idempotent=False, **params)
+        return to_order_list(raw)
+
+    async def _prepare_otoco(self, request: OtocoOrderListRequest) -> dict[str, Any]:
+        """Filter-check and map, so nothing reaches the wire unchecked."""
+        info = await self.get_symbol_info(request.symbol)
+        prepared = enforce_otoco_filters(request, info) if self._enforce_filters else request
+        params = otoco_request_to_params(prepared)
+        params["recvWindow"] = self._recv_window
+        return params
+
+    async def _prepare_oto(self, request: OtoOrderListRequest) -> dict[str, Any]:
+        info = await self.get_symbol_info(request.symbol)
+        prepared = enforce_oto_filters(request, info) if self._enforce_filters else request
+        params = oto_request_to_params(prepared)
+        params["recvWindow"] = self._recv_window
+        return params
 
     # -- lifecycle ----------------------------------------------------------
     async def ping(self) -> None:

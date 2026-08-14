@@ -9,6 +9,7 @@ for idempotent reads versus order placement.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock
@@ -26,7 +27,7 @@ from trading_bot.core.exceptions import (
     InsufficientBalanceError,
     OrderError,
 )
-from trading_bot.core.models import OrderRequest
+from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
 from trading_bot.exchange.binance_client import BinanceClient
 
 # --------------------------------------------------------------------------
@@ -678,3 +679,225 @@ async def test_create_order_translates_insufficient_balance() -> None:
         await bc.create_order(_limit_req())
 
     assert client.create_order.await_count == 1
+
+
+# --------------------------------------------------------------------------
+# Order-list placement
+# --------------------------------------------------------------------------
+# CAPTURED VERBATIM from M5d's probe 2: `POST /api/v3/orderList/otoco` via
+# `v3_post_order_list_otoco`, Binance Spot TESTNET, 2026-08-14, order list
+# 91590, placed and cancelled within seconds. Trimmed only by dropping the two
+# pending `orderReports` entries, which this mapper does not read -- the
+# `orders` array and every list-level field are exactly as returned.
+#
+# It carries BOTH `orders` (identity triples) and `orderReports` (full orders),
+# which is what M5d-066 measured and what makes `to_order_list` -- keyed on
+# `orders` -- correct for the placement response as well as the read-back.
+# fmt: off
+ORDER_LIST_PLACED = {
+    "orderListId":       91590,
+    "contingencyType":   "OTO",
+    "listStatusType":    "EXEC_STARTED",
+    "listOrderStatus":   "EXECUTING",
+    "listClientOrderId": "tb1-BTCUSDT-1786693560000-0-L",
+    "transactionTime":   1786693572160,
+    "symbol":            "BTCUSDT",
+    "orders": [
+        {"symbol": "BTCUSDT", "orderId": 2950175,
+         "clientOrderId": "tb1-BTCUSDT-1786693560000-0-W"},
+        {"symbol": "BTCUSDT", "orderId": 2950176,
+         "clientOrderId": "tb1-BTCUSDT-1786693560000-0-SL"},
+        {"symbol": "BTCUSDT", "orderId": 2950177,
+         "clientOrderId": "tb1-BTCUSDT-1786693560000-0-TP"},
+    ],
+    "orderReports": [
+        {"symbol": "BTCUSDT", "orderId": 2950175, "orderListId": 91590,
+         "clientOrderId": "tb1-BTCUSDT-1786693560000-0-W",
+         "transactTime": 1786693572160, "price": "47268.31000000",
+         "origQty": "0.00100000", "executedQty": "0.00000000",
+         "cummulativeQuoteQty": "0.00000000", "status": "NEW",
+         "timeInForce": "GTC", "type": "LIMIT", "side": "BUY",
+         "workingTime": 1786693572160, "selfTradePreventionMode": "EXPIRE_MAKER"},
+    ],
+}
+# fmt: on
+
+LIST_BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+
+
+def _otoco_request(**overrides: object) -> OtocoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.001"),
+        "entry_limit": Decimal("47268.31"),
+        "stop_price": Decimal("44117.09"),
+        "take_profit": Decimal("50419.53"),
+        "entry_bar_time": LIST_BAR,
+    }
+    kwargs.update(overrides)
+    return OtocoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def _oto_request(**overrides: object) -> OtoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.001"),
+        "entry_limit": Decimal("47268.31"),
+        "stop_price": Decimal("44117.09"),
+        "entry_bar_time": LIST_BAR,
+    }
+    kwargs.update(overrides)
+    return OtoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def _list_client(**mock_kwargs: object) -> AsyncMock:
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL
+    client.v3_post_order_list_otoco.return_value = ORDER_LIST_PLACED
+    client.v3_post_order_list_oto.return_value = ORDER_LIST_PLACED
+    for name, value in mock_kwargs.items():
+        getattr(client, name).side_effect = value
+    return client
+
+
+async def test_creating_an_otoco_list_posts_the_mapped_params() -> None:
+    """The whole M5d chain in one call: request -> enforcement -> mapper ->
+    endpoint. The parameter set is section 3's sixteen plus ``recvWindow``."""
+    client = _list_client()
+    bc = _make(client)
+
+    await bc.create_otoco_order_list(_otoco_request())
+
+    sent = client.v3_post_order_list_otoco.await_args.kwargs
+    assert sent["workingType"] == "LIMIT"
+    assert sent["workingTimeInForce"] == "FOK"
+    assert sent["workingPrice"] == "47268.31"
+    assert sent["pendingAboveStopPrice"] == "50419.53"
+    assert sent["pendingBelowStopPrice"] == "44117.09"
+    assert sent["recvWindow"] == 5000
+    assert len(sent) == 17  # section 3's sixteen, plus recvWindow
+
+
+async def test_creating_an_oto_list_posts_the_plain_pending_prefix() -> None:
+    client = _list_client()
+    bc = _make(client)
+
+    await bc.create_oto_order_list(_oto_request())
+
+    sent = client.v3_post_order_list_oto.await_args.kwargs
+    assert sent["pendingType"] == "STOP_LOSS"
+    assert sent["pendingStopPrice"] == "44117.09"
+    assert not any(k.startswith(("pendingAbove", "pendingBelow")) for k in sent)
+    assert len(sent) == 14  # section 3's thirteen, plus recvWindow
+
+
+async def test_each_shape_posts_only_to_its_own_endpoint() -> None:
+    """ENDPOINT SELECTION, and there is no branch to get it wrong: two methods
+    mirroring the two mappers, so the caller chooses by choosing the request
+    type. A single method over a union would need an ``else`` that cannot
+    occur."""
+    client = _list_client()
+    bc = _make(client)
+
+    await bc.create_otoco_order_list(_otoco_request())
+    assert client.v3_post_order_list_otoco.await_count == 1
+    assert client.v3_post_order_list_oto.await_count == 0
+
+    await bc.create_oto_order_list(_oto_request())
+    assert client.v3_post_order_list_otoco.await_count == 1
+    assert client.v3_post_order_list_oto.await_count == 1
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "call"),
+    [
+        ("v3_post_order_list_otoco", lambda bc: bc.create_otoco_order_list(_otoco_request())),
+        ("v3_post_order_list_oto", lambda bc: bc.create_oto_order_list(_oto_request())),
+    ],
+    ids=["otoco", "oto"],
+)
+async def test_a_list_placement_is_not_retried_on_a_connection_error(
+    endpoint: str, call: object
+) -> None:
+    """``idempotent=False``, and this is the write the rule exists for. A
+    connection timeout MAY HAVE LANDED, so resending could open a second
+    position; the recovery is to QUERY the IDs we would have sent, which Q-C
+    section 6 makes derivable without persistence."""
+    client = _list_client(**{endpoint: ConnectionError("reset")})
+    bc = _make(client)
+
+    with pytest.raises(ExchangeConnectionError):
+        await call(bc)  # type: ignore[operator]
+
+    assert getattr(client, endpoint).await_count == 1
+
+
+async def test_a_list_placement_is_retried_on_a_rate_limit() -> None:
+    """A 429 is rejected BEFORE acceptance, so nothing landed and resending is
+    safe -- the one exception ``_NON_IDEMPOTENT_RETRY`` admits."""
+    client = _list_client()
+    client.v3_post_order_list_otoco.side_effect = [_rate_limit_error(), ORDER_LIST_PLACED]
+    bc = _make(client)
+
+    await bc.create_otoco_order_list(_otoco_request())
+
+    assert client.v3_post_order_list_otoco.await_count == 2
+
+
+async def test_filters_are_enforced_before_any_network_call() -> None:
+    """An off-tick price is REJECTED, not rounded, and the assertion that earns
+    its place is that the endpoint was never reached: enforcement is a
+    pre-dispatch gate, not a post-hoc complaint."""
+    client = _list_client()
+    bc = _make(client)
+
+    with pytest.raises(FilterRejectedError):
+        await bc.create_otoco_order_list(_otoco_request(entry_limit=Decimal("47268.315")))
+
+    assert client.v3_post_order_list_otoco.await_count == 0
+
+
+async def test_the_quantity_is_sized_before_sending() -> None:
+    """Enforcement rounds the quantity DOWN to the step and the SENT value is
+    the rounded one -- so the wire never carries a quantity the sizer refused."""
+    client = _list_client()
+    bc = _make(client)
+
+    await bc.create_otoco_order_list(_otoco_request(quantity=Decimal("0.0012345678")))
+
+    sent = client.v3_post_order_list_otoco.await_args.kwargs
+    # The step's exponent survives the rounding, so the wire carries
+    # "0.00123000" rather than "0.00123". Both are the same number; the literal
+    # is asserted because it is what the venue actually receives.
+    assert sent["workingQuantity"] == "0.00123000"
+    assert sent["pendingQuantity"] == "0.00123000"
+
+
+async def test_the_placement_response_maps_to_an_order_list() -> None:
+    """MEASURED at M5d probe 2: the placement response carries both ``orders``
+    and ``orderReports``, and its ``orders`` entries are the same identity
+    triples the read-back returns -- which is what makes ``to_order_list``
+    correct here without a second mapper."""
+    client = _list_client()
+    bc = _make(client)
+
+    result = await bc.create_otoco_order_list(_otoco_request())
+
+    assert result.order_list_id == "91590"
+    assert result.list_order_status == "EXECUTING"
+    assert [e.client_order_id for e in result.orders] == [
+        "tb1-BTCUSDT-1786693560000-0-W",
+        "tb1-BTCUSDT-1786693560000-0-SL",
+        "tb1-BTCUSDT-1786693560000-0-TP",
+    ]
+
+
+async def test_enforcement_can_be_disabled_and_then_nothing_is_checked() -> None:
+    """``enforce_filters=False`` is the injected-adapter escape hatch the other
+    order paths already have; an off-tick price then reaches the wire."""
+    client = _list_client()
+    bc = _make(client, enforce_filters=False)
+
+    await bc.create_otoco_order_list(_otoco_request(entry_limit=Decimal("47268.315")))
+
+    assert client.v3_post_order_list_otoco.await_args.kwargs["workingPrice"] == "47268.315"
