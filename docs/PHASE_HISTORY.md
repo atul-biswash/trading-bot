@@ -2260,3 +2260,79 @@ and current state kept in two places drifts. It did: this section carried
 listed the `Position` assignment guard as outstanding after it had been closed.
 Both were found by an audit rather than by reading, which is the argument for
 keeping one copy.
+
+---
+
+## Annotation — 2026-08-14, from M5e: the extraction procedure could not have worked
+
+**Appended, not inserted.** M5d's entry is untouched. This file is written in the
+tense a thing was decided, so editing a closed entry would erase the fact that
+the belief was held — and the belief here was reasonable, which is the part worth
+keeping.
+
+**What is annotated, by content.** M5d's entry says *"84 findings across 11
+commits, every commit carrying a block, no gaps and no duplicates — verified from
+`git log` with an explicit range rather than from the extractor, whose base is
+the previous milestone's last numbered commit and therefore also returns that
+milestone's rotation commits."* And `CLAUDE.md`'s extraction procedure says *"It
+prints nothing when no commit in the range carries a block … so an empty result
+means 'not looked' as readily as 'no findings'."*
+
+**The count claim is CORRECT and is not corrected here.** Re-measured over
+`e2ecb80..237256b`: exactly 84 distinct IDs, `M5d-001` through `M5d-084`, no gap
+and no duplicate. Scoped to the eleven numbered commits — which is how the
+sentence scopes itself — it holds exactly.
+
+Four things it did not say. Each measured at M5e, before any of M5e's own work.
+
+**1. The failure mode is a plausible SUBSET, not an empty result.** Run today
+exactly as written, the base resolves to `237256b` — M5d's *own* last numbered
+commit — and the command reaches **8 of the milestone's 19 commits and 1 of its
+85 declared blocks**. The output is well-formed: seven `Findings: none` lines and
+one complete block. The procedure's stated hazard is an empty result that might
+mean "not looked"; the actual hazard is a full-looking result that is missing
+four fifths of the milestone, and nothing in it invites distrust.
+
+**2. The base can NEVER be correct, and that is structural rather than a slip.**
+The procedure asks for *"the previous milestone's closing SHA — the last row of
+that milestone's commit table"*, and those are two different commits by
+construction: **a commit cannot write its own SHA into its own table.** This file
+already says so, in M5d's own rotation rule — the entry *"names the last one as
+'this commit' rather than by SHA, because a commit cannot know its own SHA before
+it exists."* So the table's last row necessarily *precedes* the closing commit.
+Measured: for M5c the last row was `6502acf` against a closing SHA of `e2ecb80`,
+**5 commits apart**; for M5d, `237256b` against `2378199`, **8 apart**. There is
+no moment at which the lookup returns the commit the sentence names.
+
+**3. Three IDs are unreachable at any range, for two distinct reasons.**
+`M5d-086` exists only in a *document* body — `docs/NEXT_MILESTONE.md` — and in no
+commit message, so the defect is the **source**, not the range, and no `A..B`
+reaches it. `M5d-085` and `M5d-088` are in commit *bodies* but sit **ahead of the
+`Findings:` line the awk begins printing at**, so the **print window** excludes
+them even when the range is right. Two different holes, neither closed by fixing
+the anchor.
+
+**4. `M5d-085` and `M5d-088` are cited as authority and declared nowhere on
+disk.** Both are invoked as settled findings — `f93bd85`: *"both were verified
+present by content first, because a duplicate annotation is permanent
+(M5d-085)"* and *"this milestone invalidated its own line numbers twice
+(M5d-088)"*; `3652e4a`: *"per M5d-085: a duplicate annotation is permanent."*
+**Both of those commits declare `Findings: none`.** Neither ID appears in any
+`Findings:` block in the range, and neither appears anywhere in the tree. The
+mandatory-`none` rule was satisfied and the finding was still lost, because the
+declaration went into prose above the block.
+
+**The two are NOT symmetric, and the asymmetry was checked rather than assumed.**
+`M5d-088`'s substance survives as `CLAUDE.md`'s *"CITE A DOCUMENT BY CONTENT,
+NEVER BY LINE NUMBER"*, with its measured evidence intact. `M5d-085`'s does not
+appear anywhere: searched `CLAUDE.md`, every file under `docs/` and `README.md`
+for *duplicate annotation*, *annotating twice*, *already annotated*, *verified
+present*, *verify … present*, *present by content* and *annotate … twice* — zero
+hits — then widened to bare *permanent* and bare *duplicate*, whose every hit is
+about failure counters, refusals, divergence, `__all__`, `RiskRule` or the
+order-list probe. So one citation points at a rule a reader can find, and the
+other points at nothing. It is re-landed later in this same M5e block **from the
+citation alone**; the original declaration is unrecoverable, the amend window
+being closed (`git rev-list --left-right --count @{u}...HEAD` reads `0	0`).
+
+**Ruled by the reviewer under delegation, not by the project owner.**
