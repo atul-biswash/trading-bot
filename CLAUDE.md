@@ -1849,6 +1849,70 @@ every range was in before this rule, so an empty result means "not looked" as
 readily as "no findings" — read it against `git log --oneline` over the same
 range rather than alone.
 
+> **SUPERSEDED at M5e — the anchor moves to a TAG, and a second check joins it.
+> Annotated rather than rewritten, because the reasoning above is sound and only
+> its instrument was unsatisfiable.**
+>
+> **What SURVIVED, and it is most of it.** The base must be *looked up* rather
+> than hardcoded here — *"a SHA written into this file is a count site by another
+> name"* is exactly right and is why the fix is a ref rather than a literal. The
+> awk shape is unchanged. And the warning that an empty result means "not looked"
+> as readily as "no findings" still holds for the new command.
+>
+> **What FAILED: the lookup could never return the commit the sentence names.**
+> It asks for *"the previous milestone's closing SHA — the last row of that
+> milestone's commit table"*, and those are two different commits **by
+> construction** — a commit cannot write its own SHA into its own table, which
+> this file already states one section below in the `PHASE_HISTORY` rule. So the
+> last row necessarily *precedes* the closing commit. MEASURED: `6502acf` against
+> M5c's closing `e2ecb80`, **5 commits apart**; `237256b` against M5d's `2378199`,
+> **8 apart**. Run as written after M5d's table landed, the command reached **8 of
+> that milestone's 19 commits and 1 of its 85 declared blocks**.
+>
+> **The base is now a TAG applied at milestone close**, named `milestone/<name>`:
+>
+> ```bash
+> git log "milestone/M5d..HEAD" --format='@@@%h %s%n%b' | awk '/^@@@/{h=substr($0,4);p=0;next} /^Findings:/{print "";print h;p=1} p'
+> ```
+>
+> **THE REASON TO RECORD IS THE FAILURE MODE, NOT THE CONVENIENCE.** An unknown
+> ref is fatal — MEASURED: `fatal: ambiguous argument 'milestone/M5x..HEAD':
+> unknown revision or path not in the working tree`, **exit 128, no output**.
+> The table lookup fails the other way: it returns a *well-formed subset* that
+> nothing signals distrust of, which is strictly worse than the empty result the
+> paragraph above warns about. A procedure that cannot be run wrong is worth more
+> than one that is convenient to run right.
+>
+> **A tag is a REF, not a commit.** It is carried by no commit, `git push` does
+> not carry it, and `git push origin milestone/<name>` is a separate act that
+> must not be forgotten at rotation. A clone without the tag cannot run the
+> procedure at all — which is the hard failure above, working as intended.
+>
+> **A SECOND CHECK, because no anchor could ever have provided it.** The command
+> above prints blocks; it cannot tell you a finding was cited and never declared.
+> Diff every ID mentioned anywhere in the range's commit bodies against those
+> appearing inside a `Findings:` block, and treat a non-empty difference as a
+> defect:
+>
+> ```bash
+> R="milestone/M5d..HEAD"; P='M5e-[0-9]{3}'
+> comm -23 \
+>   <(git log "$R" --format='%B' | grep -oE "$P" | sort -u) \
+>   <(git log "$R" --format='@@@%n%b' | awk '/^@@@/{p=0;next} /^Findings:/{p=1} p' | grep -oE "$P" | sort -u)
+> ```
+>
+> **MEASURED: run against M5d it returns exactly `M5d-085` and `M5d-088`** — the
+> two findings that were cited as authority and declared nowhere — and nothing
+> else. That is the defect it exists to catch, caught.
+>
+> **What it does NOT catch, stated so it is not mistaken for complete:** an ID
+> that lives only in a *document* body and never in a commit message. `M5d-086`
+> is the worked example, and both sides of this diff read commit messages, so it
+> is invisible to both. Closing that needs a third source, which is not written
+> here.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
+
 **The Claude.ai Project knowledge is a fourth drift surface, and nothing audits
 it.** It is outside the repo, so no gate, grep or review touches it —
 `MILESTONE_WORKFLOW.md` was referenced there for months while existing nowhere in
