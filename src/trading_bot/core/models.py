@@ -451,6 +451,47 @@ def _check_order_list_entry(quantity: Money, entry_limit: Money, entry_bar_time:
         raise ValueError(f"entry_bar_time must be timezone-aware, got naive {entry_bar_time!r}")
 
 
+class OrderList(_Frozen):
+    """An order list as the exchange reports it: identity, status and legs.
+
+    **What is carried is what Q-C section 7 compares**, and the omissions are
+    decisions rather than gaps.
+
+    ``contingencyType`` is **deliberately absent.** It reads ``"OTO"`` on every
+    payload of *both* shapes and never once ``"OTOCO"`` (MEASURED), so its only
+    measured property is that it is uninformative -- and a consumer that
+    switched on it would read every OTOCO list as an OTO, seeing two legs where
+    three exist. Section 7 fixes shape identification to **leg count or our own
+    IDs**, and the leg suffix in a ``tb1-`` ID is what makes the second
+    available. Carrying a field whose only use is a wrong one is an invitation;
+    leaving it out makes the misuse unrepresentable.
+
+    ``price`` and ``timeInForce`` on a stop-market leg are excluded from
+    comparison for a different reason and are still present on :class:`Order`:
+    section 3 forbids *sending* them, so the values returned are the venue's own
+    defaults and there is nothing of ours to compare them against. That is a
+    rule for whoever compares, not a reason to drop fields from the leg model.
+    """
+
+    order_list_id: str
+    symbol: str
+    #: **``None`` carries no meaning.** The placement response returns this as
+    #: ``null`` deterministically when a list terminates in the same call, while
+    #: the leg IDs in that same payload are correct (MEASURED, T1). Absence is a
+    #: property of the response shape, not of the list -- which costs nothing,
+    #: because the value is derived from seeds and we always know what we sent.
+    list_client_order_id: str | None = None
+    #: Carried as text, not an enum. Measured members exist (``EXEC_STARTED``,
+    #: ``ALL_DONE``, ``EXECUTING``) but the full set is not established, and
+    #: nothing branches on them yet -- so an enum here would ship members
+    #: without writers and a default direction nobody had chosen.
+    list_status_type: str | None = None
+    list_order_status: str | None = None
+    #: A tuple, because this model is frozen and a list would not be. Empty is a
+    #: real state: the read-back and the placement response differ in shape.
+    orders: tuple[Order, ...] = ()
+
+
 class Trade(_Frozen):
     """A completed fill (or an aggregated round-trip in backtests)."""
 

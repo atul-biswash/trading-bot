@@ -58,6 +58,7 @@ from trading_bot.core.models import (
     Candle,
     MarketLotSize,
     Order,
+    OrderList,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -431,6 +432,52 @@ _NEEDS_STOP = frozenset(
         OrderType.TAKE_PROFIT_LIMIT,
     }
 )
+
+
+#: The leg-array key. **THE ONE ASSUMED NAME IN THIS MAPPER**, and it is marked
+#: because nothing in this repository has captured an order-list payload: the
+#: record holds measured field names and values quoted in Q-C sections 7 and 8,
+#: and this key is not among them. Every other name here is measured. Reading a
+#: wrong key would yield an empty leg tuple rather than an error, which is why
+#: the absent case is pinned by its own test rather than left to look like the
+#: read-back shape.
+_LEG_REPORTS_KEY = "orderReports"
+
+
+def to_order_list(raw: dict[str, Any]) -> OrderList:
+    """Map an order-list payload into :class:`OrderList`.
+
+    **Legs go through :func:`to_order`**, which is already exhaustively tested
+    against recorded single-order JSON -- so the risk this mapper adds is
+    confined to the list-level fields and the leg-array key, not to leg mapping.
+
+    **An absent leg array is a state, not an error.** The ``v3_get_order_list``
+    read-back and the placement response differ in shape (MEASURED: the
+    read-back carries ``listClientOrderId`` where the placement response nulls
+    it), so a payload with no leg reports maps to an empty ``orders`` tuple and
+    the caller re-reads if it needs them.
+
+    **No numeric field passes through ``float``.** Everything routes through
+    :func:`to_order`'s ``_dec`` / ``_opt_dec``, which are ``Decimal(str(v))`` --
+    string to ``Decimal`` directly. That is what makes ``stopPrice`` comparable:
+    ``"40917.83"`` is returned as ``"40917.83000000"`` (MEASURED, B2), equal as
+    ``Decimal`` and unequal as text, and a string comparison would manufacture a
+    divergence on every pass -- which section 7 routes into re-place-once-then-
+    ``CRITICAL``, so the failure would drive escalation rather than merely look
+    untidy.
+
+    ``contingencyType`` is read from the payload by nothing here; see
+    :class:`OrderList` for why it is not carried.
+    """
+    reports = raw.get(_LEG_REPORTS_KEY) or ()
+    return OrderList(
+        order_list_id=str(raw["orderListId"]),
+        symbol=raw["symbol"],
+        list_client_order_id=raw.get("listClientOrderId"),
+        list_status_type=raw.get("listStatusType"),
+        list_order_status=raw.get("listOrderStatus"),
+        orders=tuple(to_order(report) for report in reports),
+    )
 
 
 def order_request_to_params(
