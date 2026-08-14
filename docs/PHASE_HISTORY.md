@@ -2107,6 +2107,146 @@ annotated by `M5c-H` rather than amended; and `M5c-AO`'s docstring correction.
 Each records a belief that was held, acted on, and then measured false. A log that
 shows only the corrected view teaches nothing about how it was reached.
 
+
+## Phase 5 M5d — the adapter surface, and one order to prove it
+
+M5d built what M5c specified. Eleven numbered commits, **84 findings, every
+commit carrying a block**, and one Testnet order placed and cancelled. The
+milestone's headline is not the code — it is that **three of the eleven commits
+exist because a measurement contradicted something already written**, twice
+against code shipped one commit earlier.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `33ae65d` | `close()` routes through `_call`; the last method bypassing error translation |
+| 2 | `4866719` | Site 3 characterised — the incoherent pair pinned as it behaves today |
+| 3 | `51f0304` | Site 3 deferred with its obstacle named; the `~14s` annotated |
+| 4 | `0c15377` | The `tb1-` ID scheme, and a guard the venue's own message cannot give |
+| 5 | `c4bad0e` | OTOCO/OTO request types; the four `-1106` fields unrepresentable |
+| 6 | `4f1b2bb` | Both parameter mappers, and a list-ID form §6 never defined |
+| 7 | `43411d6` | Per-leg filter enforcement; all three prices rejected off-tick |
+| 8 | `d646994` | The response mapper — **built on an assumed key** |
+| 9 | `227d1f1` | That key measured wrong and fixed against a captured payload |
+| 10 | `4df4565` | `create_otoco_order_list` / `create_oto_order_list` |
+| 11 | `237256b` | `get_order_list` and the prefix enumeration helper |
+
+Rotation: `3652e4a` (CLAUDE corrections), `f93bd85` (Q-C), `4ebbdd0` (`T_recon`,
+alone), `ae2ee38` (the method rules), `62f89d1` (the counts, alone), `46da8ae`
+(build state), `9f5ed54` (`NEXT_MILESTONE`), **and this commit** — seven
+rotation commits, six with SHAs and one named as itself, because a commit cannot
+know its own SHA before it exists.
+
+### What measurement cost, and what it bought
+
+**A probe falsified code shipped one commit earlier.** `d646994` read the
+order-list leg array under `orderReports`, assumed from the general Binance
+schema because *nothing in this repository had ever captured an order-list
+payload*. Against the real read-back it mapped **zero legs from a three-leg
+response, without raising** — and a test asserting the empty result **defended
+the defect**, because its composed fixture omitted the leg array entirely and so
+agreed with a wrong mapper on an input that could not tell them apart.
+
+Two blindnesses, independently insufficient, agreeing on the wrong answer. That
+is the shape worth carrying: either alone would have been caught by the other.
+
+**The fix is scoped, not unified.** `orderReports` is a measured *absence* from
+the read-back and an assumption about the placement response — and probe 2 later
+measured that the placement response carries **both** arrays. So the original
+assumption was right about one endpoint and wrong about the other, and refusing
+to merge them was right for the right reason.
+
+**One order settled the milestone's best open question.** A live OTOCO — working
+leg `LIMIT`+`GTC` 25% below market, both pendings gated by OTO phase one —
+showed `get_open_orders` returning **all three legs, pendings in `PENDING_NEW`**.
+A recovery path asking *does anything rest* therefore sees protection that has
+not activated. It also validated the whole chain: **15 of 16 parameters came
+from our own mapper** and the venue accepted every one, honouring all four
+generated IDs byte-for-byte. Balances identical before and after; one cancel
+collapsed the list, verified per-leg rather than assumed.
+
+**The claim it does NOT support is one sentence away.** What was measured is
+`PENDING_NEW` *before* a fill. Q-C §7 describes pendings after the working leg
+*fills*, and that transition is still unmeasured.
+
+### The deferral, and why it is not the third repetition
+
+Q-C §7's site-3 defect was scheduled for M5d and **deferred again** — but with
+the obstacle named and dated rather than left implicit, which is what let it be
+rescheduled twice before.
+
+Closing it needs a trusted state a *coherently protected* position can hold. The
+only trusted member is `ABSENT_BY_DESIGN`, which the fix must disqualify, and
+the replacement is `ACTIVE` — a member `CLAUDE.md` forbids creating before a
+writer exists. Attempting it anyway was measured: **0 of 16 `(protection, level)`
+pairings would reach the pricing arm**, so `MAX_OPEN_POSITIONS`,
+`ALREADY_IN_POSITION` and affordability would be shadowed portfolio-wide behind
+`COMMITTED_RISK_UNKNOWN` **in production**, and `4926705`'s anti-rot test would
+be retired.
+
+The arming condition and the enabling condition are **the same event** — the
+reconciler's milestone — which is why deferring costs nothing.
+
+### What the method learned about itself
+
+**Checking fixture expressiveness before predicting changed the tests, twice.**
+A test cannot fail on a mutation its fixture cannot express, and that is a
+property of the *input*, not the subject — so a test named for the very thing
+being mutated abstains if its input already conforms. Both times, the check
+produced a better test rather than merely a better prediction.
+
+**A mutation anchor written against pre-format source is invalid**, because the
+gate *rewrites* source. M5d's harness asserted the anchor count and aborted with
+the tree restored, so the rule surfaced as a **refusal to run** rather than as a
+confident wrong number explained afterwards. That is the one method change that
+is mechanised rather than remembered.
+
+**An agreement is evidence only when disagreement was possible.** The list-ID
+suffix `-L` was chosen at commit 6 and had already been sent by M5c's probe. The
+match is not confirmation: the second derivation could not have been
+contradicted by the first, because it did not know of it.
+
+**Two justifications went stale one commit apart**, both true when written and
+both embedded where nothing re-checks their premise. A justification resting on
+a distant invariant should name that invariant at its own site.
+
+### Three of my own claims were wrong, and are on the record
+
+The opening Phase 1 argued `get_open_orders` was *structurally blind to
+`executedQty`*, reasoning from "returns open orders only" to "cannot carry
+execution state". The returned objects carry it; §6's prefix argument was sound
+and the objection was not. A mid-milestone finding then measured correctly that
+the list read-back is the wrong endpoint and **priced the wrong replacement**,
+proposing four calls per position where the answer is one per symbol — the
+correction runs *cheaper*. And commit 11 called `get_order_list` "the only view
+of a terminated list" when probe 1 had already measured two others.
+
+All three are annotated rather than amended, per the rule that a finding later
+found wrong is corrected in a subsequent block.
+
+### The findings discipline, measured
+
+**84 findings across 11 commits, every commit carrying a block**, no gaps and no
+duplicates — verified from `git log` with an explicit range rather than from the
+extractor, whose base is the previous milestone's last *numbered* commit and
+therefore also returns that milestone's rotation commits.
+
+**Finding IDs are allocated by SUBJECT, not chronology.** Commits 2 and 3 landed
+together and their IDs interleave — `M5d-011` and `M5d-015`–`017` in one,
+`M5d-008`–`010` and `M5d-012`–`014` in the other. The union is complete, but a
+reader reconstructing chronology from IDs will get it wrong: **the log is the
+only chronology.**
+
+### Do not tidy these
+
+The two-blindness test correction; the `orderReports` assumption being right for
+one endpoint and wrong for another; the `T_recon` figure that was wrong in the
+alarming direction before measurement made it cheaper; and the three annotated
+claims of mine above. Each records a belief held, acted on, and then measured
+false — which is what the log is for.
+
+
 ---
 
 ## Known open items
