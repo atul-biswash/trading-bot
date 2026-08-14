@@ -1728,6 +1728,46 @@ impossible** rather than a property nothing verifies, which is what finding TT
 requires given that nothing checks uniqueness. An ID also becomes
 **self-locating**: `M5d-C` says which entry to open.
 
+> **FALSIFIED BY THE TREE, and annotated rather than corrected: M5d used
+> `M5d-001`, never `M5d-A`.** Every identifier M5d allocated is three digits and
+> zero-padded, running from `M5d-001` up to `M5d-090`. The paragraph above
+> describes a scheme this project has never once used.
+>
+> **The letter scheme's capacity is 26 per milestone, and M5d needed more than
+> three times it.** `M5d-090` above is an **identifier, not a count of findings**
+> — written as one deliberately, so a later count-sweep does not mistake it for a
+> figure to update. How many findings M5d produced is contested and does not
+> matter here: the *lowest* defensible reading still exceeds 26 more than
+> threefold, so the capacity conclusion holds under every reading of it.
+>
+> **The switch was forced by the same arithmetic that falsified "M5c finishes on
+> the flat sequence"**, which the blockquote further down annotates in full and
+> on exactly these grounds — *"a preference asserted as though it were a
+> constraint reads exactly like one, and nothing distinguishes them at the point
+> of writing."* Twice in two milestones an ID scheme ran out of room, and both
+> times it was met by changing the scheme in flight rather than by having counted
+> first. The rule that was supposed to prevent the second occurrence is in this
+> same section — *"checking remaining capacity is the practice, not that letters
+> keep running out"* — and it was not applied to the letter scheme itself.
+>
+> **Two further passages here are falsified by the same fact, named rather than
+> edited.** The blockquote below states *"M5d onward is unchanged at `M5d-A`"*;
+> it is not. And *"A namespace extends to two characters when its letters run
+> out"* has no application to a digit namespace — `docs/NEXT_MILESTONE.md` says so
+> in those words: *"the two-character letter extension does not apply."*
+>
+> **The digit scheme was never written into this file, and that is the sharper
+> half.** Searched `CLAUDE.md`, every file under `docs/`, `README.md` and
+> `.gitmessage` for *three digits* and *zero-padded*: **two hits, both in
+> `docs/NEXT_MILESTONE.md`, and both about M5e.** M5d's identifiers were
+> therefore allocated under a convention **no document in the tree ever stated**,
+> while the authority prescribed a different one — and the single place the
+> convention is now written is the one file rewritten at every rotation. That is
+> the `phase_5_` shape moved one step inside the repository: not outside it, but
+> in the document guaranteed not to survive the next milestone.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
+
 **M5c finishes on the flat sequence**, deliberately. Splitting one milestone's
 entry across two schemes costs more than it saves, and the scheme changing at a
 milestone boundary is legible in a way that changing mid-entry would not be. **The
