@@ -29,6 +29,7 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
 from trading_bot.exchange.binance_client import BinanceClient
+from trading_bot.exchange.ids import OrderListLeg
 
 # --------------------------------------------------------------------------
 # Recorded payloads (trimmed to fields the mappers read)
@@ -901,3 +902,161 @@ async def test_enforcement_can_be_disabled_and_then_nothing_is_checked() -> None
     await bc.create_otoco_order_list(_otoco_request(entry_limit=Decimal("47268.315")))
 
     assert client.v3_post_order_list_otoco.await_args.kwargs["workingPrice"] == "47268.315"
+
+
+# --------------------------------------------------------------------------
+# Order-list reads: the list read-back and the prefix enumeration
+# --------------------------------------------------------------------------
+# CAPTURED from M5d probe 1: `v3_get_order_list(orderListId=72321)`, TESTNET,
+# 2026-08-14. Identity triples, no compare set -- which is why enumeration uses
+# `get_open_orders` instead.
+# fmt: off
+LIST_READBACK = {
+    "orderListId":       72321,
+    "contingencyType":   "OTO",
+    "listStatusType":    "ALL_DONE",
+    "listOrderStatus":   "ALL_DONE",
+    "listClientOrderId": "tb1-BTCUSDT-1786534736813-0-L",
+    "transactionTime":   1786534737092,
+    "symbol":            "BTCUSDT",
+    "orders": [
+        {"symbol": "BTCUSDT", "orderId": 2089800,
+         "clientOrderId": "tb1-BTCUSDT-1786534736813-0-W"},
+    ],
+}
+
+# One of ours, one a human's, one PREFIXED BUT UNPARSEABLE. The third is what
+# separates a raw `startswith("tb1-")` filter from a parsing one.
+OPEN_ORDERS_MIXED = [
+    {**OPEN_ORDER, "orderId": 2950175,
+     "clientOrderId": "tb1-BTCUSDT-1786693560000-0-W"},
+    {**OPEN_ORDER, "orderId": 999001,
+     "clientOrderId": "someHumanOrder"},
+    {**OPEN_ORDER, "orderId": 999002,
+     "clientOrderId": "tb1-garbage"},
+]
+# fmt: on
+
+
+async def test_get_order_list_queries_by_the_venue_id() -> None:
+    client = AsyncMock()
+    client.v3_get_order_list.return_value = LIST_READBACK
+    bc = _make(client)
+
+    result = await bc.get_order_list(order_list_id="72321")
+
+    client.v3_get_order_list.assert_awaited_once_with(recvWindow=5000, orderListId=72321)
+    assert result.order_list_id == "72321"
+    assert result.list_order_status == "ALL_DONE"
+
+
+async def test_get_order_list_queries_by_our_derived_id() -> None:
+    """The recovery path holds OUR id, derived from seeds, and never the
+    venue's -- so querying by `origClientOrderId` is the branch it uses."""
+    client = AsyncMock()
+    client.v3_get_order_list.return_value = LIST_READBACK
+    bc = _make(client)
+
+    await bc.get_order_list(list_client_order_id="tb1-BTCUSDT-1786534736813-0-L")
+
+    client.v3_get_order_list.assert_awaited_once_with(
+        recvWindow=5000, origClientOrderId="tb1-BTCUSDT-1786534736813-0-L"
+    )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"order_list_id": "72321", "list_client_order_id": "tb1-x"}],
+    ids=["neither", "both"],
+)
+async def test_get_order_list_requires_exactly_one_identifier(kwargs: dict[str, str]) -> None:
+    """The venue accepts either and we do not guess which was meant. Both
+    directions are refused, because "both" is as ambiguous as "neither"."""
+    client = AsyncMock()
+    bc = _make(client)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        await bc.get_order_list(**kwargs)
+
+    assert client.v3_get_order_list.await_count == 0
+
+
+async def test_a_list_read_is_retried_on_a_connection_error() -> None:
+    """IDEMPOTENT -- the opposite classification from the placement methods, and
+    deliberately so: re-reading cannot create anything, so a connection error is
+    retried under `_IDEMPOTENT_RETRY`."""
+    client = AsyncMock()
+    client.v3_get_order_list.side_effect = [ConnectionError("reset"), LIST_READBACK]
+    bc = _make(client)
+
+    await bc.get_order_list(order_list_id="72321")
+
+    assert client.v3_get_order_list.await_count == 2
+
+
+async def test_the_enumeration_uses_get_open_orders_not_the_list_endpoint() -> None:
+    """ENDPOINT SELECTION, settled by measurement: only `get_open_orders`
+    returns full order objects carrying section 7's compare set. The list
+    read-back returns identity triples (M5d-052) and cannot supply it."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = OPEN_ORDERS_MIXED
+    bc = _make(client)
+
+    await bc.get_own_open_orders("BTCUSDT")
+
+    client.get_open_orders.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)
+    assert client.v3_get_order_list.await_count == 0
+
+
+async def test_the_enumeration_returns_only_our_orders() -> None:
+    """Section 6's whole purpose: `get_open_orders` returns EVERY order on the
+    symbol, ours and otherwise, and only the prefix distinguishes them."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = OPEN_ORDERS_MIXED
+    bc = _make(client)
+
+    found = await bc.get_own_open_orders("BTCUSDT")
+
+    assert [order.order_id for _parts, order in found] == ["2950175"]
+
+
+async def test_a_prefixed_but_unparseable_id_is_not_ours() -> None:
+    """THE TEST THAT SEPARATES THE TWO FILTERS. `tb1-garbage` passes a raw
+    `startswith("tb1-")` and fails the parser. Treating a human's order as ours
+    is the failure section 6 exists to prevent, and parsing is strictly narrower
+    than the prefix it replaces.
+    """
+    client = AsyncMock()
+    client.get_open_orders.return_value = [
+        {**OPEN_ORDER, "orderId": 999002, "clientOrderId": "tb1-garbage"}
+    ]
+    bc = _make(client)
+
+    assert await bc.get_own_open_orders("BTCUSDT") == []
+
+
+async def test_the_enumeration_parses_the_identity_alongside_each_order() -> None:
+    """Section 6's generation recovery takes "the highest seen", which a raw
+    prefix filter cannot supply -- only a parse yields a generation. Returning
+    the parts alongside the order is what makes that reachable without parsing
+    twice."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = OPEN_ORDERS_MIXED
+    bc = _make(client)
+
+    ((parts, order),) = await bc.get_own_open_orders("BTCUSDT")
+
+    assert parts.symbol == "BTCUSDT"
+    assert parts.generation == 0
+    assert parts.leg is OrderListLeg.WORKING
+    assert order.client_order_id == "tb1-BTCUSDT-1786693560000-0-W"
+
+
+async def test_an_empty_book_enumerates_to_nothing() -> None:
+    """Zero of ours is a state, not an error -- and it is what the recovery path
+    reads as "nothing rests"."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = []
+    bc = _make(client)
+
+    assert await bc.get_own_open_orders("BTCUSDT") == []

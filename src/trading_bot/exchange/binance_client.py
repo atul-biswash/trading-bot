@@ -33,6 +33,7 @@ from trading_bot.core.models import (
     Ticker,
 )
 from trading_bot.exchange.base import BaseExchangeClient, SleepFn
+from trading_bot.exchange.ids import ClientOrderIdParts, parse_client_order_id
 from trading_bot.exchange.models import (
     enforce_oto_filters,
     enforce_otoco_filters,
@@ -71,6 +72,7 @@ class _AsyncBinanceAPI(Protocol):
     async def cancel_order(self, **params: Any) -> dict[str, Any]: ...
     async def v3_post_order_list_otoco(self, **params: Any) -> dict[str, Any]: ...
     async def v3_post_order_list_oto(self, **params: Any) -> dict[str, Any]: ...
+    async def v3_get_order_list(self, **params: Any) -> dict[str, Any]: ...
     async def get_open_orders(self, **params: Any) -> list[dict[str, Any]]: ...
     async def close_connection(self) -> None: ...
 
@@ -258,6 +260,89 @@ class BinanceClient(BaseExchangeClient):
         params = oto_request_to_params(prepared)
         params["recvWindow"] = self._recv_window
         return params
+
+    async def get_order_list(
+        self,
+        *,
+        order_list_id: str | None = None,
+        list_client_order_id: str | None = None,
+    ) -> OrderList:
+        """Read one order list back, by the venue's ID or by ours.
+
+        **This is the only view of a TERMINATED list, and that is the whole
+        reason it exists.** Enumeration answers "what rests"; it cannot tell
+        "never placed" from "placed and already terminal", because both return
+        nothing. That distinction is what the timed-out-write recovery turns on,
+        and terminal lists were MEASURED to remain queryable for at least 1d16h
+        (M5d-054). Everything else this returns -- list status, leg identities --
+        is derivable from :meth:`get_own_open_orders`, so it is not built for
+        those.
+
+        **It does NOT carry Q-C section 7's compare set.** The read-back's legs
+        are identity triples: no ``status``, no ``executedQty``, no prices
+        (MEASURED, M5d-052). Use :meth:`get_own_open_orders` for those.
+
+        Idempotent -- a read, so ``_call``'s default policy applies and a
+        connection error is retried. That is the opposite classification from
+        the placement methods above, and deliberately so: re-reading cannot
+        create anything.
+
+        :raises ValueError: neither identifier given, or both. The venue accepts
+            either and we do not guess which the caller meant.
+        """
+        if (order_list_id is None) == (list_client_order_id is None):
+            raise ValueError(
+                "pass exactly one of order_list_id or list_client_order_id, "
+                f"got order_list_id={order_list_id!r}, "
+                f"list_client_order_id={list_client_order_id!r}"
+            )
+        params: dict[str, Any] = {"recvWindow": self._recv_window}
+        if order_list_id is not None:
+            params["orderListId"] = int(order_list_id)
+        else:
+            params["origClientOrderId"] = list_client_order_id
+        raw = await self._call(self._client.v3_get_order_list, **params)
+        return to_order_list(raw)
+
+    async def get_own_open_orders(self, symbol: str) -> list[tuple[ClientOrderIdParts, Order]]:
+        """Our RESTING orders on ``symbol``, each paired with its parsed identity.
+
+        **Scoped to what RESTS, which is what the endpoint means.** A filled leg
+        is not open and its absence here is the correct answer, not a gap.
+        Whether a filled leg remains visible to this endpoint at all is
+        UNMEASURED (M5d-072) -- and nothing here depends on it, precisely
+        because the claim is "what rests" rather than "everything of ours". A
+        caller needing fill history wants ``get_order`` by ID, not this.
+
+        **`get_open_orders`, not `v3_get_order_list`, and the choice is
+        measured.** This endpoint returns FULL order objects for all three legs
+        including pendings in ``PENDING_NEW`` -- ``status``, ``executedQty``,
+        ``origQty``, ``stopPrice`` -- which is Q-C section 7's compare set
+        (MEASURED, M5d-064/M5d-066). The list read-back returns identity triples
+        and cannot supply it.
+
+        **Filtered by PARSING, not by the raw prefix**, and the tie-break is not
+        caution. Section 6 requires generation recovery to query prefix-matching
+        orders and take "the highest seen" -- and a raw ``startswith("tb1-")``
+        yields no generation to take. Parsing supplies it, and rejects
+        ``tb1-garbage``, which a prefix test would accept as ours. The failure
+        section 6 exists to prevent is treating a human's order as ours; the
+        parse is a strictly narrower filter than the prefix it replaces.
+
+        Foreign orders are dropped silently: this endpoint returns *every* order
+        on the symbol, ours and otherwise, so meeting other people's orders is
+        the ordinary case rather than an anomaly.
+        """
+        raw = await self._call(
+            self._client.get_open_orders, symbol=symbol, recvWindow=self._recv_window
+        )
+        found: list[tuple[ClientOrderIdParts, Order]] = []
+        for payload in raw:
+            order = to_order(payload)
+            parts = parse_client_order_id(order.client_order_id or "")
+            if parts is not None:
+                found.append((parts, order))
+        return found
 
     # -- lifecycle ----------------------------------------------------------
     async def ping(self) -> None:
