@@ -59,6 +59,7 @@ from trading_bot.core.models import (
     MarketLotSize,
     Order,
     OrderList,
+    OrderListEntry,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -434,49 +435,56 @@ _NEEDS_STOP = frozenset(
 )
 
 
-#: The leg-array key. **THE ONE ASSUMED NAME IN THIS MAPPER**, and it is marked
-#: because nothing in this repository has captured an order-list payload: the
-#: record holds measured field names and values quoted in Q-C sections 7 and 8,
-#: and this key is not among them. Every other name here is measured. Reading a
-#: wrong key would yield an empty leg tuple rather than an error, which is why
-#: the absent case is pinned by its own test rather than left to look like the
-#: read-back shape.
-_LEG_REPORTS_KEY = "orderReports"
+#: The leg-array key on a ``v3_get_order_list`` read-back. **MEASURED** against
+#: a captured payload, which also enumerated the full top-level key set --
+#: ``orderReports`` is a measured ABSENCE from this endpoint.
+#:
+#: It was ``"orderReports"`` until M5d's probe, assumed from the general Binance
+#: schema because nothing in this repository had captured a payload. The wrong
+#: key mapped ZERO legs from a three-leg response WITHOUT RAISING (M5d-053), and
+#: a test asserting the empty result defended it. That is why the three-leg
+#: assertion below exists: a silent zero must be impossible to reintroduce.
+_LEG_ARRAY_KEY = "orders"
 
 
 def to_order_list(raw: dict[str, Any]) -> OrderList:
     """Map an order-list payload into :class:`OrderList`.
 
-    **Legs go through :func:`to_order`**, which is already exhaustively tested
-    against recorded single-order JSON -- so the risk this mapper adds is
-    confined to the list-level fields and the leg-array key, not to leg mapping.
+    **SCOPED TO THE READ-BACK.** The placement response is a different shape and
+    its leg array is UNMEASURED; this mapper is not it. Unifying the two on an
+    assumption is what produced M5d-053.
 
-    **An absent leg array is a state, not an error.** The ``v3_get_order_list``
-    read-back and the placement response differ in shape (MEASURED: the
-    read-back carries ``listClientOrderId`` where the placement response nulls
-    it), so a payload with no leg reports maps to an empty ``orders`` tuple and
-    the caller re-reads if it needs them.
+    **Legs are IDENTITIES, not orders.** A read-back leg carries exactly
+    ``{"symbol", "orderId", "clientOrderId"}`` (MEASURED, captured payload), so
+    :func:`to_order` cannot map one -- it raises ``KeyError: 'side'``. Section
+    7's compare set therefore needs a per-order query per leg; a list read-back
+    cannot supply it, however the legs are typed.
 
-    **No numeric field passes through ``float``.** Everything routes through
-    :func:`to_order`'s ``_dec`` / ``_opt_dec``, which are ``Decimal(str(v))`` --
-    string to ``Decimal`` directly. That is what makes ``stopPrice`` comparable:
-    ``"40917.83"`` is returned as ``"40917.83000000"`` (MEASURED, B2), equal as
-    ``Decimal`` and unequal as text, and a string comparison would manufacture a
-    divergence on every pass -- which section 7 routes into re-place-once-then-
-    ``CRITICAL``, so the failure would drive escalation rather than merely look
-    untidy.
+    **No numeric field passes through ``float`` because no numeric field is
+    read.** ``orderId`` is stringified for the domain, as ``to_order`` does.
+
+    **An absent leg array maps to an empty tuple**, which is a real state for a
+    payload that has no legs -- and is the M5d-053 defect for one that does. The
+    three-leg assertion in the tests is what separates them.
 
     ``contingencyType`` is read from the payload by nothing here; see
     :class:`OrderList` for why it is not carried.
     """
-    reports = raw.get(_LEG_REPORTS_KEY) or ()
+    entries = raw.get(_LEG_ARRAY_KEY) or ()
     return OrderList(
         order_list_id=str(raw["orderListId"]),
         symbol=raw["symbol"],
         list_client_order_id=raw.get("listClientOrderId"),
         list_status_type=raw.get("listStatusType"),
         list_order_status=raw.get("listOrderStatus"),
-        orders=tuple(to_order(report) for report in reports),
+        orders=tuple(
+            OrderListEntry(
+                symbol=entry["symbol"],
+                order_id=str(entry["orderId"]),
+                client_order_id=entry["clientOrderId"],
+            )
+            for entry in entries
+        ),
     )
 
 

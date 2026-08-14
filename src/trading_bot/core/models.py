@@ -451,8 +451,39 @@ def _check_order_list_entry(quantity: Money, entry_limit: Money, entry_bar_time:
         raise ValueError(f"entry_bar_time must be timezone-aware, got naive {entry_bar_time!r}")
 
 
+class OrderListEntry(_Frozen):
+    """One leg as a ``v3_get_order_list`` read-back reports it: an identity only.
+
+    **Three fields, because the endpoint returns three** -- MEASURED against a
+    captured payload: ``{"symbol", "orderId", "clientOrderId"}`` and nothing
+    else. No status, no quantity, no price. Q-C section 7's compare set
+    (``status``, ``executedQty``, ``origQty``, legally-sendable prices) is
+    therefore **not obtainable from a list read-back at all**; it needs a
+    per-order query per leg.
+
+    **It does not compete with :class:`~trading_bot.exchange.ids.
+    ClientOrderIdParts`, and the rule that keeps it from doing so is that it
+    carries the RAW ``client_order_id`` string and none of the parsed fields.**
+    The two answer different questions: ``ClientOrderIdParts`` decomposes an ID
+    *we generated* into ``(symbol, entry_bar_time, generation, leg)``; this
+    records what the *venue* reports. You get the first by parsing the second.
+    Duplicating ``leg`` or ``generation`` here would create a second source of
+    truth for a fact the ID already carries.
+    """
+
+    symbol: str
+    order_id: str
+    client_order_id: str
+
+
 class OrderList(_Frozen):
-    """An order list as the exchange reports it: identity, status and legs.
+    """An order list as the ``v3_get_order_list`` read-back reports it.
+
+    **Scoped to the READ-BACK, deliberately.** The placement response is a
+    different shape and its leg array is UNMEASURED -- ``orderReports`` is a
+    measured *absence* from this endpoint and an assumption about that one. The
+    two are not unified here on the strength of a guess; a placement-response
+    mapper is separate work behind a separate measurement.
 
     **What is carried is what Q-C section 7 compares**, and the omissions are
     decisions rather than gaps.
@@ -488,8 +519,10 @@ class OrderList(_Frozen):
     list_status_type: str | None = None
     list_order_status: str | None = None
     #: A tuple, because this model is frozen and a list would not be. Empty is a
-    #: real state: the read-back and the placement response differ in shape.
-    orders: tuple[Order, ...] = ()
+    #: real state -- a payload with no leg array -- but on the measured read-back
+    #: shape it is NOT the normal case: a captured three-leg list maps to three
+    #: entries, and zero from a payload that has legs is the M5d-053 defect.
+    orders: tuple[OrderListEntry, ...] = ()
 
 
 class Trade(_Frozen):

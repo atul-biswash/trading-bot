@@ -33,8 +33,8 @@ from trading_bot.core.exceptions import (
     RateLimitError,
 )
 from trading_bot.core.models import (
-    Order,
     OrderList,
+    OrderListEntry,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -1878,97 +1878,116 @@ def test_the_notional_is_checked_against_the_lowest_leg_price(call: object) -> N
 
 
 # --------------------------------------------------------------------------
-# Order-list response -> domain
+# Order-list read-back -> domain
 # --------------------------------------------------------------------------
-# COMPOSED FROM MEASURED FRAGMENTS, NOT CAPTURED. No order-list payload exists
-# anywhere in this repository; what the record holds is field NAMES and VALUES
-# quoted in Q-C sections 7 and 8. Provenance is marked per field so an assumed
-# name cannot quietly become load-bearing:
+# CAPTURED VERBATIM, not composed. Provenance: `GET /api/v3/orderList` via
+# `AsyncClient.v3_get_order_list(orderListId=72321)`, Binance Spot TESTNET
+# (effective URI https://testnet.binance.vision/api/v3/..., verified through
+# `_create_api_uri` rather than `API_URL`, which reads mainnet -- M5c-D),
+# account holding 1.00000000 BTC / 10000.00000000 USDT, read 2026-08-14. The
+# list itself was created by M5c's probe on 2026-08-12.
 #
-#   MEASURED  orderListId 72321, leg orderIds 2089800/01/02, leg clientOrderIds
-#             tb1-...-0-W / -SL / -TP, contingencyType "OTO" on BOTH shapes,
-#             listStatusType EXEC_STARTED, listOrderStatus EXECUTING, working
-#             leg NEW, both pendings PENDING_NEW, listClientOrderId null in the
-#             placement response; and for the terminated shape ALL_DONE /
-#             ALL_DONE / EXPIRED with expiryReason UNFILLED_FOK_ORDER_EXPIRED.
-#   ASSUMED   the leg-array key `orderReports`, and the per-leg field spellings,
-#             which follow the recorded single-order payloads above.
+# This replaces a COMPOSED fixture that assumed the leg array was keyed
+# `orderReports` and carried full order fields. Both assumptions were wrong, and
+# the mapper built on them silently mapped ZERO legs from this very payload
+# (M5d-053). Nothing below is inferred: the full top-level key set was
+# enumerated in the same read.
 #
-# Fenced because the layout IS the correspondence: leg order, and which status
-# sits on which leg, is what the mapper has to preserve.
+# Fenced because the layout IS the correspondence -- leg order, and the fact
+# that each leg is a three-field identity rather than an order.
 # fmt: off
-ORDER_LIST_EXECUTING = {
-    "orderListId":        72321,
-    "contingencyType":    "OTO",          # never "OTOCO", on either shape
-    "listStatusType":     "EXEC_STARTED",
-    "listOrderStatus":    "EXECUTING",
-    "listClientOrderId":  None,           # deterministically null here
-    "symbol":             "BTCUSDT",
-    "orderReports": [
+ORDER_LIST_READBACK = {
+    "orderListId":       72321,
+    "contingencyType":   "OTO",           # never "OTOCO", on either shape
+    "listStatusType":    "ALL_DONE",
+    "listOrderStatus":   "ALL_DONE",
+    "listClientOrderId": "tb1-BTCUSDT-1786534736813-0-L",
+    "transactionTime":   1786534737092,
+    "symbol":            "BTCUSDT",
+    "orders": [
         {"symbol": "BTCUSDT", "orderId": 2089800,
-         "clientOrderId": "tb1-BTCUSDT-1786708800000-0-W",
-         "price": "100.00000000", "origQty": "0.50000000",
-         "executedQty": "0.00000000", "status": "NEW",
-         "type": "LIMIT", "side": "BUY", "orderListId": 72321},
+         "clientOrderId": "tb1-BTCUSDT-1786534736813-0-W"},
         {"symbol": "BTCUSDT", "orderId": 2089801,
-         "clientOrderId": "tb1-BTCUSDT-1786708800000-0-SL",
-         "price": "0.00000000", "origQty": "0.50000000",
-         "executedQty": "0.00000000", "status": "PENDING_NEW",
-         "type": "STOP_LOSS", "side": "SELL", "orderListId": 72321,
-         "stopPrice": "40917.83000000"},
+         "clientOrderId": "tb1-BTCUSDT-1786534736813-0-SL"},
         {"symbol": "BTCUSDT", "orderId": 2089802,
-         "clientOrderId": "tb1-BTCUSDT-1786708800000-0-TP",
-         "price": "0.00000000", "origQty": "0.50000000",
-         "executedQty": "0.00000000", "status": "PENDING_NEW",
-         "type": "TAKE_PROFIT", "side": "SELL", "orderListId": 72321,
-         "stopPrice": "120.00000000"},
+         "clientOrderId": "tb1-BTCUSDT-1786534736813-0-TP"},
     ],
 }
 
-# The `v3_get_order_list` READ-BACK shape: `listClientOrderId` is present here
-# and null in the placement response above -- the asymmetry section 7 records.
-# No leg reports, which is why an empty `orders` tuple is a state and not a bug.
-ORDER_LIST_READBACK = {
-    "orderListId":        72321,
-    "contingencyType":    "OTO",
-    "listStatusType":     "ALL_DONE",
-    "listOrderStatus":    "ALL_DONE",
-    "listClientOrderId":  "tb1-BTCUSDT-1786708800000-0-L",
-    "symbol":             "BTCUSDT",
+# COMPOSED, and it demonstrates exactly ONE thing: that a null
+# `listClientOrderId` is tolerated. The placement response's leg array is
+# UNMEASURED -- no payload of that shape has been captured -- so this carries no
+# legs and no claim is made about what a real one would hold.
+ORDER_LIST_NULL_ID = {
+    "orderListId":       72321,
+    "listClientOrderId": None,            # MEASURED, T1: null in the placement response
+    "symbol":            "BTCUSDT",
 }
 # fmt: on
 
 
-def _leg(payload: dict[str, object], leg: OrderListLeg) -> Order:
-    """The leg carrying ``leg``, found by parsing its client order ID.
+def _leg(payload: dict[str, object], leg: OrderListLeg) -> OrderListEntry:
+    """The entry carrying ``leg``, found by parsing its client order ID.
 
     Selecting by leg code rather than by position is what keeps a leg assertion
     from going vacuous when the thing under test is the mapper's own ordering.
     """
-    for order in m.to_order_list(payload).orders:
-        parsed = parse_client_order_id(order.client_order_id or "")
+    for entry in m.to_order_list(payload).orders:
+        parsed = parse_client_order_id(entry.client_order_id)
         if parsed is not None and parsed.leg is leg:
-            return order
+            return entry
     raise AssertionError(f"no {leg} leg in the mapped list")
 
 
-def test_an_order_list_response_maps_its_identity() -> None:
-    result = m.to_order_list(ORDER_LIST_EXECUTING)
+def test_the_captured_read_back_maps_its_identity() -> None:
+    result = m.to_order_list(ORDER_LIST_READBACK)
 
     assert result.order_list_id == "72321"  # str in the domain, int on the wire
     assert result.symbol == "BTCUSDT"
-    assert result.list_status_type == "EXEC_STARTED"
-    assert result.list_order_status == "EXECUTING"
+    assert result.list_client_order_id == "tb1-BTCUSDT-1786534736813-0-L"
+    assert result.list_status_type == "ALL_DONE"
+    assert result.list_order_status == "ALL_DONE"
 
 
-def test_the_legs_are_mapped_in_order_through_to_order() -> None:
-    """Leg ORDER is preserved, and the assertion is on which status sits on
-    which leg -- the thing a mapper can silently transpose."""
-    result = m.to_order_list(ORDER_LIST_EXECUTING)
+def test_the_captured_read_back_maps_all_three_legs() -> None:
+    """THE ANTI-REGRESSION TEST, and the reason this commit exists.
 
-    assert [o.order_id for o in result.orders] == ["2089800", "2089801", "2089802"]
-    assert [o.status.value for o in result.orders] == ["NEW", "PENDING_NEW", "PENDING_NEW"]
-    assert [o.type.value for o in result.orders] == ["LIMIT", "STOP_LOSS", "TAKE_PROFIT"]
+    The previous mapper read the leg array under an assumed key and produced an
+    EMPTY tuple from this exact payload -- three legs in, zero out, no
+    exception. Asserting the count against a captured payload makes that silent
+    zero impossible to reintroduce: any future key change either maps three or
+    fails here.
+    """
+    result = m.to_order_list(ORDER_LIST_READBACK)
+
+    assert len(result.orders) == 3
+    assert [e.order_id for e in result.orders] == ["2089800", "2089801", "2089802"]
+    assert [e.client_order_id for e in result.orders] == [
+        "tb1-BTCUSDT-1786534736813-0-W",
+        "tb1-BTCUSDT-1786534736813-0-SL",
+        "tb1-BTCUSDT-1786534736813-0-TP",
+    ]
+
+
+def test_a_leg_carries_the_venue_identity_and_not_a_parsed_one() -> None:
+    """``OrderListEntry`` must not become a second ``ClientOrderIdParts``.
+
+    They answer different questions: ``ClientOrderIdParts`` decomposes an ID WE
+    generated into ``(symbol, entry_bar_time, generation, leg)``;
+    ``OrderListEntry`` records what the VENUE reported. You get the first by
+    parsing the second, and duplicating ``leg`` or ``generation`` onto the entry
+    would create a second source of truth for a fact the ID already carries.
+
+    Pinned as an exact field set, so a later "convenience" field fails here.
+    """
+    assert set(OrderListEntry.model_fields) == {"symbol", "order_id", "client_order_id"}
+
+    entry = _leg(ORDER_LIST_READBACK, OrderListLeg.STOP_LOSS)
+    parsed = parse_client_order_id(entry.client_order_id)
+
+    assert parsed is not None
+    assert parsed.leg is OrderListLeg.STOP_LOSS  # the parse, not a stored field
+    assert entry.order_id == "2089801"  # the venue's identity, which the ID lacks
 
 
 def test_a_null_list_client_order_id_carries_no_meaning() -> None:
@@ -1977,37 +1996,57 @@ def test_a_null_list_client_order_id_carries_no_meaning() -> None:
     (MEASURED, T1). Absence is a property of the RESPONSE SHAPE, not of the
     list -- which costs nothing, because commit 4 derives the value from seeds
     and we always know what we sent."""
-    assert m.to_order_list(ORDER_LIST_EXECUTING).list_client_order_id is None
+    assert m.to_order_list(ORDER_LIST_NULL_ID).list_client_order_id is None
     assert (
-        m.to_order_list(ORDER_LIST_READBACK).list_client_order_id == "tb1-BTCUSDT-1786708800000-0-L"
+        m.to_order_list(ORDER_LIST_READBACK).list_client_order_id == "tb1-BTCUSDT-1786534736813-0-L"
     )
 
 
-def test_a_read_back_without_leg_reports_maps_to_no_legs() -> None:
-    """A state, not an error: the read-back and the placement response differ in
-    shape, so the caller re-reads if it needs legs."""
-    assert m.to_order_list(ORDER_LIST_READBACK).orders == ()
+def test_a_payload_with_no_leg_array_maps_to_no_legs() -> None:
+    """CORRECTED, not replaced, and what changed is the reason it passes.
+
+    It was ``test_a_read_back_without_leg_reports_maps_to_no_legs``, and it
+    pinned the belief that a READ-BACK legitimately carries no legs -- which is
+    false. A read-back carries three, keyed ``orders``. The old assertion was
+    satisfied for the wrong reason twice over: its fixture omitted the leg array
+    entirely, AND the mapper was reading a key that no read-back has, so an
+    empty result agreed with a wrong mapper on a fixture that could not
+    distinguish them. It would have kept passing against the real payload while
+    the mapper dropped every leg.
+
+    What it pins NOW is narrower and true: a payload with no leg array at all
+    maps to an empty tuple rather than raising. The three-leg test above is what
+    stops that being mistaken for the read-back shape.
+
+    DECLARED ABSTAINER on the leg-array-key mutation, and unavoidably so: this
+    fixture has no leg array under EITHER key, so it yields an empty tuple
+    whichever key the mapper reads. That is the same blindness that let its
+    predecessor defend the defect -- kept deliberately, because the claim is
+    still worth pinning, and now paired with a test that can express it.
+    """
+    assert m.to_order_list(ORDER_LIST_NULL_ID).orders == ()
 
 
 def test_contingency_type_is_not_carried_at_all() -> None:
-    """It reads "OTO" on BOTH shapes and never "OTOCO" (MEASURED), so a consumer
-    switching on it would read every OTOCO list as an OTO -- two legs where
-    three exist. Section 7 fixes shape identification to leg count or our own
-    IDs. Leaving the field out makes the misuse unrepresentable rather than
-    merely discouraged.
+    """It reads "OTO" on BOTH shapes and never "OTOCO" (MEASURED, and
+    re-confirmed on the captured payload above), so a consumer switching on it
+    would read every OTOCO list as an OTO -- two legs where three exist.
+    Section 7 fixes shape identification to leg count or our own IDs. Leaving
+    the field out makes the misuse unrepresentable rather than discouraged.
     """
-    assert "contingency_type" not in OrderList.model_fields
+    assert ORDER_LIST_READBACK["contingencyType"] == "OTO"  # a 3-leg OTOCO list
     assert not any("contingency" in name for name in OrderList.model_fields)
 
 
 def test_the_shape_is_readable_from_leg_count_and_from_our_own_ids() -> None:
     """The two identifications section 7 permits, both available on the mapped
-    result -- which is what makes dropping `contingencyType` free rather than
-    lossy."""
-    result = m.to_order_list(ORDER_LIST_EXECUTING)
+    result -- which is what makes dropping ``contingencyType`` free rather than
+    lossy, on a payload whose own ``contingencyType`` says "OTO" while carrying
+    three legs."""
+    result = m.to_order_list(ORDER_LIST_READBACK)
 
     assert len(result.orders) == 3  # leg count
-    legs = [parse_client_order_id(o.client_order_id or "") for o in result.orders]
+    legs = [parse_client_order_id(e.client_order_id) for e in result.orders]
     assert [p.leg for p in legs if p is not None] == [
         OrderListLeg.WORKING,
         OrderListLeg.STOP_LOSS,
@@ -2015,42 +2054,8 @@ def test_the_shape_is_readable_from_leg_count_and_from_our_own_ids() -> None:
     ]
 
 
-def test_the_stop_price_normalises_numerically_not_as_a_string() -> None:
-    """THE HAZARD, pinned. "40917.83" is returned as "40917.83000000"
-    (MEASURED, B2). As text they differ, so a reconciler comparing strings would
-    manufacture a divergence on EVERY pass for EVERY position -- and section 7
-    routes divergence into re-place-once-then-CRITICAL, so it would drive
-    escalation rather than merely look untidy.
-
-    The fixture carries the long form and the assertion uses the short one, so
-    the test fails if the mapper ever stops normalising.
-    """
-    # Selected BY LEG CODE, not by index. Indexing would still find the stop leg
-    # under a reordering mutation -- reversing three elements leaves the middle
-    # one fixed -- so an index makes this assertion vacuous exactly when the
-    # mapper is wrong. DECLARED ABSTAINER on the leg-order mutation: it is not
-    # about order, and ordering is pinned by its own test.
-    stop_leg = _leg(ORDER_LIST_EXECUTING, OrderListLeg.STOP_LOSS)
-
-    assert stop_leg.stop_price == Decimal("40917.83")
-    assert stop_leg.stop_price == Decimal("40917.83000000")
-
-
-def test_no_numeric_field_passes_through_a_float() -> None:
-    """The one `Decimal` -> `float` boundary is `get_dataframe()`, and this
-    mapper must not open a second. `_dec` is `Decimal(str(v))`, so exactness
-    survives -- a float hop would round 0.5 harmlessly and 40917.83 visibly."""
-    result = m.to_order_list(ORDER_LIST_EXECUTING)
-    stop_leg = _leg(ORDER_LIST_EXECUTING, OrderListLeg.STOP_LOSS)  # by code, see above
-
-    for leg in result.orders:
-        assert isinstance(leg.quantity, Decimal)
-    assert stop_leg.stop_price == Decimal("40917.83000000")
-    assert str(stop_leg.stop_price) == "40917.83000000"  # exponent preserved
-
-
 def test_the_order_list_is_frozen() -> None:
-    result = m.to_order_list(ORDER_LIST_EXECUTING)
+    result = m.to_order_list(ORDER_LIST_READBACK)
 
     with pytest.raises(ValidationError):
         result.order_list_id = "other"
@@ -2058,5 +2063,23 @@ def test_the_order_list_is_frozen() -> None:
 
 def test_the_legs_are_a_tuple_so_the_frozen_model_stays_frozen() -> None:
     """A list field on a frozen model is still mutable in place -- the model
-    would refuse rebinding and permit `append`. A tuple closes that."""
-    assert isinstance(m.to_order_list(ORDER_LIST_EXECUTING).orders, tuple)
+    would refuse rebinding and permit ``append``. A tuple closes that."""
+    assert isinstance(m.to_order_list(ORDER_LIST_READBACK).orders, tuple)
+
+
+def test_a_stop_price_normalises_numerically_not_as_a_string() -> None:
+    """RE-HOMED to ``to_order``, where it applies. It was written against the
+    order-list mapper, which was wrong twice: a read-back leg carries no
+    ``stopPrice`` at all, so the assertion was never exercising the list path.
+
+    The hazard is real and belongs here. "40917.83" is returned as
+    "40917.83000000" (MEASURED, B2): unequal as text, equal as ``Decimal``. A
+    reconciler comparing strings would find divergence on EVERY pass for EVERY
+    position, and section 7 routes divergence into re-place-once-then-CRITICAL
+    -- so the failure mode is a halted bot, not a noisy log.
+    """
+    order = m.to_order({**ORDER_LIMIT_NEW, "stopPrice": "40917.83000000"})
+
+    assert order.stop_price == Decimal("40917.83")
+    assert order.stop_price == Decimal("40917.83000000")
+    assert str(order.stop_price) == "40917.83000000"  # exponent preserved, no float hop
