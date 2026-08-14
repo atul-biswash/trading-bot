@@ -24,10 +24,11 @@ per-milestone, capacity 999.**
 
 Per-milestone rather than carrying, because `CLAUDE.md`'s whole justification
 for namespacing is **self-location** — `M5d-053` tells a reader which entry to
-open, and a cumulative counter would destroy that. M5d consumed 89 of 999, so
-capacity is not a live question and **no extension rule should be invented in
-advance**; the two-character letter extension does not apply and lexical and
-numeric ordering coincide across the whole range.
+open, and a cumulative counter would destroy that. Capacity is not a live
+question at three digits -- M5d did not come close, on any reading of what it
+consumed -- and **no extension rule should be invented in advance**; the
+two-character letter extension does not apply and lexical and numeric ordering
+coincide across the whole range.
 
 This is stated here because it is the obligation that was owed before M5d's
 first commit, was not discharged, and cost two turns at the start of the
