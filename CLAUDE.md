@@ -1805,6 +1805,35 @@ nothing added. That is finding ZZ, and it was caught only because the baseline
 happened to be taken twice; re-deriving a number is not sufficient when the
 instrument itself can silently change.
 
+**VERIFY THE TARGET IS PRESENT, BY CONTENT, BEFORE ANNOTATING — a duplicate
+annotation is PERMANENT.** The pair to *"cite a document by content"* two rules
+above: that one says how to *find* the sentence, this one says what to do before
+*writing* beside it. Placed here rather than between them because that rule and
+the next reference each other by position, and breaking a pointer while landing a
+rule about broken pointers is not the joke to make.
+
+**Permanence is the whole of the argument, and it is asymmetric with the
+neighbouring failure.** A stale line number costs a re-grep: you notice, you
+re-cite, nothing is left behind. A second annotation of a section already
+annotated cannot be taken back, because **annotate-never-delete forbids removing
+it** — so the tree keeps two blocks saying the same thing, and every later reader
+must work out whether the duplication means two findings or one mistake. The
+cheap error is recoverable and the expensive one is not, which is why this rule
+asks for a check rather than care.
+
+**Restored at M5e from finding `M5d-085`, whose original declaration is
+unrecoverable.** `M5d-085` was cited as settled authority in two M5d rotation
+commit bodies — *"both were verified present by content first, because a
+duplicate annotation is permanent"* — and was declared in **no** `Findings:`
+block and nowhere in the tree; both citing commits carry `Findings: none`. The
+amend window is closed (`git rev-list --left-right --count @{u}...HEAD` reads
+`0	0`), so it cannot be added retrospectively. **The quoted clause above is all
+that survived; the paragraph beneath it is reasoning added at M5e and is not
+M5d's** — said plainly so a later reader does not credit the argument to a
+finding that never stated it.
+
+Ruled by the reviewer under delegation, not by the project owner.
+
 **An authorisation states its precondition as a CHECK TO RUN FIRST, not as an
 instruction to whoever pastes it.** Three M5c findings share one shape -- MM, NN
 and RR -- a premise asserted in prose that nothing verifies; the third was an
