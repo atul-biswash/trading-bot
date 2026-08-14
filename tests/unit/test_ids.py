@@ -14,11 +14,13 @@ import pytest
 
 from trading_bot.core.exceptions import ContractViolationError, ExchangeAPIError
 from trading_bot.exchange.ids import (
+    LIST_SUFFIX,
     MAX_CLIENT_ORDER_ID_LENGTH,
     MAX_GENERATION,
     ClientOrderIdParts,
     OrderListLeg,
     client_order_id,
+    list_client_order_id,
     parse_client_order_id,
 )
 
@@ -170,3 +172,38 @@ def test_the_shipped_symbols_fit_at_the_maximum_generation(symbol: str) -> None:
 
     assert len(generated) <= MAX_CLIENT_ORDER_ID_LENGTH
     assert len(generated) == 31
+
+
+# --------------------------------------------------------------------------
+# The LIST-level identity -- an extension of section 6, which defines legs only
+# --------------------------------------------------------------------------
+def test_the_list_id_uses_the_list_suffix_and_the_same_seeds() -> None:
+    """Section 3 requires ``listClientOrderId`` on both shapes and section 6
+    gives it no form, so one is chosen here on the same terms: same seeds, same
+    guard, same bound, differing only in the suffix."""
+    assert list_client_order_id("BTCUSDT", BAR) == f"tb1-BTCUSDT-{BAR_MS}-0-{LIST_SUFFIX}"
+    assert LIST_SUFFIX not in {member.value for member in OrderListLeg}
+
+
+def test_the_list_id_is_not_a_leg_and_does_not_parse_as_one() -> None:
+    """A list is not a leg, and the parser is about legs.
+
+    Not a gap: a list ID never appears in ``get_open_orders``, which returns
+    orders, so the foreign-ID filter that parser exists for never meets one.
+    Asserted rather than assumed, because the natural reading of "parse our IDs"
+    would include it.
+    """
+    assert parse_client_order_id(list_client_order_id("BTCUSDT", BAR)) is None
+
+
+@pytest.mark.parametrize("generation", [-1, MAX_GENERATION + 1], ids=["negative", "over"])
+def test_the_list_id_shares_the_generation_bound(generation: int) -> None:
+    """Shared through one assembly helper, so leg and list cannot drift apart in
+    their bound, their epoch arithmetic or their guard."""
+    with pytest.raises(ValueError, match="generation must be in"):
+        list_client_order_id("BTCUSDT", BAR, generation=generation)
+
+
+def test_the_list_id_shares_the_naive_time_refusal() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        list_client_order_id("BTCUSDT", datetime(2026, 8, 14, 12, 0))

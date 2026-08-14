@@ -31,7 +31,7 @@ from trading_bot.core.exceptions import (
     OrderNotFoundError,
     RateLimitError,
 )
-from trading_bot.core.models import OrderRequest
+from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
 from trading_bot.exchange import models as m
 
 # --------------------------------------------------------------------------
@@ -1409,3 +1409,258 @@ def test_a_matched_message_does_not_log(caplog: pytest.LogCaptureFixture) -> Non
         m.translate_binance_error(exc)
 
     assert [r for r in caplog.records if r.name == m.__name__] == []
+
+
+# --------------------------------------------------------------------------
+# Order-list request -> params, Q-C section 3's two sets
+# --------------------------------------------------------------------------
+#: Section 3's OTOCO set, transcribed. Kept as a literal so the assertion
+#: compares the mapper against the CONTRACT rather than against itself.
+_OTOCO_KEYS = {
+    "symbol",
+    "listClientOrderId",
+    "workingType",
+    "workingSide",
+    "workingPrice",
+    "workingQuantity",
+    "workingTimeInForce",
+    "workingClientOrderId",
+    "pendingSide",
+    "pendingQuantity",
+    "pendingAboveType",
+    "pendingAboveStopPrice",
+    "pendingAboveClientOrderId",
+    "pendingBelowType",
+    "pendingBelowStopPrice",
+    "pendingBelowClientOrderId",
+}
+
+#: Section 3's OTO set. Note the plain `pending*` prefix.
+_OTO_KEYS = {
+    "symbol",
+    "listClientOrderId",
+    "workingType",
+    "workingSide",
+    "workingPrice",
+    "workingQuantity",
+    "workingTimeInForce",
+    "workingClientOrderId",
+    "pendingType",
+    "pendingSide",
+    "pendingQuantity",
+    "pendingStopPrice",
+    "pendingClientOrderId",
+}
+
+_FORBIDDEN_1106 = [
+    "pendingAbovePrice",
+    "pendingAboveTimeInForce",
+    "pendingBelowPrice",
+    "pendingBelowTimeInForce",
+]
+
+LIST_BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+
+
+def _otoco_req(**overrides: object) -> OtocoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.5"),
+        "entry_limit": Decimal("100"),
+        "stop_price": Decimal("90"),
+        "take_profit": Decimal("120"),
+        "entry_bar_time": LIST_BAR,
+    }
+    kwargs.update(overrides)
+    return OtocoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def _oto_req(**overrides: object) -> OtoOrderListRequest:
+    kwargs: dict[str, object] = {
+        "symbol": "BTCUSDT",
+        "quantity": Decimal("0.5"),
+        "entry_limit": Decimal("100"),
+        "stop_price": Decimal("90"),
+        "entry_bar_time": LIST_BAR,
+    }
+    kwargs.update(overrides)
+    return OtoOrderListRequest(**kwargs)  # type: ignore[arg-type]
+
+
+def test_the_otoco_key_set_is_exactly_section_3s_sixteen() -> None:
+    """EXACT, not a subset. A subset assertion notices nothing when a key is
+    added, and an added key on these endpoints is how ``-1106`` happens."""
+    params = m.otoco_request_to_params(_otoco_req())
+
+    assert set(params) == _OTOCO_KEYS
+    assert len(params) == 16
+
+
+def test_the_oto_key_set_is_exactly_section_3s_thirteen() -> None:
+    params = m.oto_request_to_params(_oto_req())
+
+    assert set(params) == _OTO_KEYS
+    assert len(params) == 13
+
+
+@pytest.mark.parametrize("forbidden", _FORBIDDEN_1106)
+@pytest.mark.parametrize(
+    "build",
+    [lambda: m.otoco_request_to_params(_otoco_req()), lambda: m.oto_request_to_params(_oto_req())],
+    ids=["otoco", "oto"],
+)
+def test_the_minus_1106_fields_are_absent_from_both_shapes(build: object, forbidden: str) -> None:
+    """Absent because there is NOTHING TO READ THEM FROM, not because a check
+    removes them. The request types carry one price per protective leg and no
+    time-in-force field at all, so the mapper has no source for these. A guard
+    would imply they were reachable.
+    """
+    assert forbidden not in build()  # type: ignore[operator]
+
+
+def test_the_prefix_split_is_literal_and_the_two_shapes_do_not_share_keys() -> None:
+    """Section 3 flags it: OTO uses the plain ``pending*`` prefix where OTOCO
+    uses ``pendingAbove*``/``pendingBelow*``. The two are written out separately
+    rather than shared under a prefix parameter -- they differ in ARITY as well
+    as spelling, and a computed prefix turns a measured constant into a string a
+    typo can corrupt, failing only at the venue under ``-1100``.
+    """
+    otoco = set(m.otoco_request_to_params(_otoco_req()))
+    oto = set(m.oto_request_to_params(_oto_req()))
+
+    assert {"pendingAboveType", "pendingBelowType"} <= otoco
+    assert not any(k in otoco for k in ("pendingType", "pendingStopPrice"))
+    assert {"pendingType", "pendingStopPrice"} <= oto
+    assert not any(k.startswith(("pendingAbove", "pendingBelow")) for k in oto)
+
+
+@pytest.mark.parametrize(
+    ("build", "price_keys"),
+    [
+        (
+            lambda: m.otoco_request_to_params(
+                _otoco_req(
+                    quantity=Decimal("1e3"),
+                    entry_limit=Decimal("0.00000001"),
+                    stop_price=Decimal("0.000000001"),
+                    take_profit=Decimal("0.0000001"),
+                )
+            ),
+            (
+                "workingPrice",
+                "workingQuantity",
+                "pendingQuantity",
+                "pendingAboveStopPrice",
+                "pendingBelowStopPrice",
+            ),
+        ),
+        (
+            lambda: m.oto_request_to_params(
+                _oto_req(
+                    quantity=Decimal("1e3"),
+                    entry_limit=Decimal("0.00000001"),
+                    stop_price=Decimal("0.000000001"),
+                )
+            ),
+            ("workingPrice", "workingQuantity", "pendingQuantity", "pendingStopPrice"),
+        ),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_no_price_or_quantity_ships_scientific_notation(
+    build: object, price_keys: tuple[str, ...]
+) -> None:
+    """The one ``Decimal`` -> ``str`` boundary. MEASURED: ``str(Decimal(
+    "0.00000001"))`` is ``"1E-8"`` and ``str(Decimal("1e3"))`` is ``"1E+3"``,
+    both of which Binance rejects. ``format_decimal`` renders fixed-point.
+
+    The fixture picks values that WOULD render scientifically, which is what
+    makes this bite -- on ordinary values ``str`` and ``format_decimal`` agree
+    and the test would pass against either.
+    """
+    params = build()  # type: ignore[operator]
+
+    for key in price_keys:
+        assert "E" not in params[key], f"{key} shipped scientific notation: {params[key]}"
+
+
+@pytest.mark.parametrize(
+    ("build", "id_keys"),
+    [
+        (
+            lambda: m.otoco_request_to_params(_otoco_req(generation=3)),
+            (
+                "listClientOrderId",
+                "workingClientOrderId",
+                "pendingAboveClientOrderId",
+                "pendingBelowClientOrderId",
+            ),
+        ),
+        (
+            lambda: m.oto_request_to_params(_oto_req(generation=3)),
+            ("listClientOrderId", "workingClientOrderId", "pendingClientOrderId"),
+        ),
+    ],
+    ids=["otoco", "oto"],
+)
+def test_every_identity_is_derived_from_the_seeds_and_distinct(
+    build: object, id_keys: tuple[str, ...]
+) -> None:
+    """Derived, never carried: the request holds seeds, and the mapper computes
+    every ID from them. Distinctness is the claim that matters -- two legs
+    sharing an ID collide against the venue's live-uniqueness rule and the
+    second is refused with ``-2010``.
+    """
+    params = build()  # type: ignore[operator]
+    ids = [params[key] for key in id_keys]
+
+    assert len(set(ids)) == len(ids)
+    assert all(value.startswith("tb1-BTCUSDT-") and "-3-" in value for value in ids)
+
+
+def test_the_working_leg_is_a_marketable_limit_and_the_pendings_sell() -> None:
+    """Section 3's fixed values, which are design constants rather than caller
+    decisions -- which is exactly why they are not fields on the request."""
+    otoco = m.otoco_request_to_params(_otoco_req())
+    oto = m.oto_request_to_params(_oto_req())
+
+    for params in (otoco, oto):
+        assert params["workingType"] == "LIMIT"
+        assert params["workingSide"] == "BUY"
+        assert params["workingTimeInForce"] == "FOK"
+        assert params["pendingSide"] == "SELL"
+    assert otoco["pendingAboveType"] == "TAKE_PROFIT"
+    assert otoco["pendingBelowType"] == "STOP_LOSS"
+    assert oto["pendingType"] == "STOP_LOSS"
+
+
+def test_the_otoco_prices_land_on_the_legs_they_belong_to() -> None:
+    """WHICH PRICE FEEDS WHICH LEG is the money-critical part of this mapper,
+    and every other test here is blind to it: key sets, the prefix split, the
+    fixed types and the IDs are all identical under a mapper that swapped the
+    two protective prices. The venue would accept that list happily -- it has no
+    idea which leg we meant -- and the position would close at a loss the moment
+    it moved in our favour.
+
+    Found by planning a mutation against this file rather than by review.
+    """
+    params = m.otoco_request_to_params(_otoco_req())
+
+    assert params["workingPrice"] == "100"
+    assert params["workingQuantity"] == "0.5"
+    # One domain quantity, spelled twice on the wire -- so they must agree.
+    assert params["pendingQuantity"] == params["workingQuantity"]
+    assert params["pendingAboveStopPrice"] == "120"  # the TARGET, above entry
+    assert params["pendingBelowStopPrice"] == "90"  # the STOP, below entry
+
+
+def test_the_oto_prices_land_on_the_legs_they_belong_to() -> None:
+    """OTO has one protective leg, so the swap this pins on OTOCO is not
+    available -- what is available is feeding the pending leg from the entry
+    rather than from the stop, which this catches."""
+    params = m.oto_request_to_params(_oto_req())
+
+    assert params["workingPrice"] == "100"
+    assert params["workingQuantity"] == "0.5"
+    assert params["pendingQuantity"] == params["workingQuantity"]
+    assert params["pendingStopPrice"] == "90"

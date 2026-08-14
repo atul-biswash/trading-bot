@@ -59,10 +59,13 @@ from trading_bot.core.models import (
     MarketLotSize,
     Order,
     OrderRequest,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
     PercentPriceBySide,
     SymbolInfo,
     Ticker,
 )
+from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
 from trading_bot.utils.logger import get_logger
 
 _log = get_logger(__name__)
@@ -466,6 +469,104 @@ def order_request_to_params(
         params["newClientOrderId"] = request.client_order_id
 
     return params
+
+
+def otoco_request_to_params(request: OtocoOrderListRequest) -> dict[str, Any]:
+    """Translate an OTOCO request into keyword args for ``v3_post_order_list_otoco``.
+
+    **Sixteen keys, laid out in Q-C section 3's own grouping.** The fence is
+    load-bearing: the grouping is the correspondence to the measured parameter
+    set, and a formatter free to rewrap it would destroy the only thing that
+    makes the two checkable against each other by eye.
+
+    **No dispatch, by design.** OTO has its own function rather than a shared
+    one with a branch. A single mapper over a union would need an ``else`` that
+    cannot occur -- a branch nothing can test -- and the caller already knows
+    which shape it built.
+
+    **The four ``-1106`` fields are absent because nothing here can produce
+    them**, not because anything rejects them. Both protective legs are
+    stop-market so each carries one price, and the request type has no
+    time-in-force field, so ``pendingAbovePrice``, ``pendingAboveTimeInForce``,
+    ``pendingBelowPrice`` and ``pendingBelowTimeInForce`` have no source to be
+    read from. A guard here would imply they were reachable.
+
+    Every price and quantity goes through :func:`format_decimal`. ``str()`` on a
+    ``Decimal`` yields scientific notation at the extremes -- ``1E-8``,
+    ``1E+3`` -- which Binance rejects.
+    """
+    seeds = (request.symbol, request.entry_bar_time)
+    generation = request.generation
+    # fmt: off
+    return {
+        "symbol":                    request.symbol,
+        "listClientOrderId":         list_client_order_id(*seeds, generation=generation),
+
+        "workingType":               OrderType.LIMIT.value,
+        "workingSide":               OrderSide.BUY.value,
+        "workingPrice":              format_decimal(request.entry_limit),
+        "workingQuantity":           format_decimal(request.quantity),
+        "workingTimeInForce":        TimeInForce.FOK.value,
+        "workingClientOrderId":      client_order_id(
+            *seeds, OrderListLeg.WORKING, generation=generation
+        ),
+
+        "pendingSide":               OrderSide.SELL.value,
+        "pendingQuantity":           format_decimal(request.quantity),
+
+        "pendingAboveType":          OrderType.TAKE_PROFIT.value,
+        "pendingAboveStopPrice":     format_decimal(request.take_profit),
+        "pendingAboveClientOrderId": client_order_id(
+            *seeds, OrderListLeg.TAKE_PROFIT, generation=generation
+        ),
+
+        "pendingBelowType":          OrderType.STOP_LOSS.value,
+        "pendingBelowStopPrice":     format_decimal(request.stop_price),
+        "pendingBelowClientOrderId": client_order_id(
+            *seeds, OrderListLeg.STOP_LOSS, generation=generation
+        ),
+    }
+    # fmt: on
+
+
+def oto_request_to_params(request: OtoOrderListRequest) -> dict[str, Any]:
+    """Translate an OTO request into keyword args for ``v3_post_order_list_oto``.
+
+    **Thirteen keys, and the prefix differs by more than the missing leg.**
+    Section 3 flags it: OTO uses the plain ``pending*`` prefix where OTOCO uses
+    ``pendingAbove*``/``pendingBelow*``. The keys are written out literally here
+    rather than shared with OTOCO under a prefix parameter, on three grounds --
+    the shapes differ in *arity* as well as spelling, so a prefix parameter
+    would assert a sameness that is not there; a computed prefix turns a
+    measured constant into a string a typo can corrupt, failing only at the
+    venue and under ``-1100``'s misleading message; and literal keys are
+    checkable by eye against section 3, which is why that block is fenced.
+    """
+    seeds = (request.symbol, request.entry_bar_time)
+    generation = request.generation
+    # fmt: off
+    return {
+        "symbol":               request.symbol,
+        "listClientOrderId":    list_client_order_id(*seeds, generation=generation),
+
+        "workingType":          OrderType.LIMIT.value,
+        "workingSide":          OrderSide.BUY.value,
+        "workingPrice":         format_decimal(request.entry_limit),
+        "workingQuantity":      format_decimal(request.quantity),
+        "workingTimeInForce":   TimeInForce.FOK.value,
+        "workingClientOrderId": client_order_id(
+            *seeds, OrderListLeg.WORKING, generation=generation
+        ),
+
+        "pendingType":          OrderType.STOP_LOSS.value,
+        "pendingSide":          OrderSide.SELL.value,
+        "pendingQuantity":      format_decimal(request.quantity),
+        "pendingStopPrice":     format_decimal(request.stop_price),
+        "pendingClientOrderId": client_order_id(
+            *seeds, OrderListLeg.STOP_LOSS, generation=generation
+        ),
+    }
+    # fmt: on
 
 
 # --------------------------------------------------------------------------

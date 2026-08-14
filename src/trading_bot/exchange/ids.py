@@ -40,16 +40,30 @@ from trading_bot.core.exceptions import ContractViolationError
 
 __all__ = [
     "ID_PREFIX",
+    "LIST_SUFFIX",
     "MAX_CLIENT_ORDER_ID_LENGTH",
     "MAX_GENERATION",
     "ClientOrderIdParts",
     "OrderListLeg",
     "client_order_id",
+    "list_client_order_id",
     "parse_client_order_id",
 ]
 
 #: Section 6's prefix. See the module docstring for why it is required.
 ID_PREFIX: Final = "tb1-"
+
+#: The suffix for the LIST-level identity, and **deliberately not a member of
+#: :class:`OrderListLeg`** -- a list is not a leg. Admitting it to the enum
+#: would let it be passed to :func:`client_order_id` and to the leg parser,
+#: both of which are about orders; the type would stop meaning "which leg".
+#:
+#: **This EXTENDS Q-C section 6, which defines leg IDs only.** Section 3
+#: requires ``listClientOrderId`` on both shapes and section 6 gives it no form,
+#: so a form is chosen here: the same seeds, the same guard and the same
+#: generation bound, differing only in this suffix. The section 6 amendment
+#: recording it is due at rotation, with M5d-026's.
+LIST_SUFFIX: Final = "L"
 
 #: MEASURED at M5c: 36 accepted, 37 rejected with ``-1100``, HTTP 400.
 #: ``docs/QC_PROTECTIVE_ORDERS.md`` section 10.
@@ -154,6 +168,41 @@ def client_order_id(
         measured rule. The message says **which** rule, which the venue's own
         message does not.
     """
+    return _assemble(symbol, entry_bar_time, generation, leg.value)
+
+
+def list_client_order_id(
+    symbol: str,
+    entry_bar_time: datetime,
+    *,
+    generation: int = 0,
+) -> str:
+    """Build the LIST-level client order ID, which section 6 does not define.
+
+    Section 3 requires ``listClientOrderId`` on both shapes; section 6's scheme
+    covers leg IDs only. This closes that gap on the same terms -- same seeds,
+    same guard, same generation bound -- with :data:`LIST_SUFFIX` in the leg
+    position. It is an EXTENSION of section 6, recorded for amendment at
+    rotation rather than smuggled in as an implementation detail.
+
+    Deliberately not recoverable through :func:`parse_client_order_id`, which
+    recognises legs. A list ID never appears in ``get_open_orders`` -- that
+    endpoint returns orders -- so the filter that parser exists for never meets
+    one.
+
+    :raises ValueError: as :func:`client_order_id`.
+    :raises ContractViolationError: as :func:`client_order_id`.
+    """
+    return _assemble(symbol, entry_bar_time, generation, LIST_SUFFIX)
+
+
+def _assemble(symbol: str, entry_bar_time: datetime, generation: int, suffix: str) -> str:
+    """Validate the seeds, build the ID, and enforce the venue's rule.
+
+    Shared so the leg and list forms cannot drift apart in their bound, their
+    epoch arithmetic or their guard -- the three things a second copy would get
+    subtly wrong.
+    """
     if entry_bar_time.tzinfo is None or entry_bar_time.tzinfo.utcoffset(entry_bar_time) is None:
         raise ValueError(f"entry_bar_time must be timezone-aware, got naive {entry_bar_time!r}")
     if not 0 <= generation <= MAX_GENERATION:
@@ -166,7 +215,7 @@ def client_order_id(
     # Integer arithmetic throughout: `timestamp()` returns a float, and a
     # millisecond epoch has no business passing through one.
     ms = (entry_bar_time - _EPOCH) // timedelta(milliseconds=1)
-    candidate = f"{ID_PREFIX}{symbol}-{ms}-{generation}-{leg.value}"
+    candidate = f"{ID_PREFIX}{symbol}-{ms}-{generation}-{suffix}"
     _enforce_venue_rule(candidate)
     return candidate
 
