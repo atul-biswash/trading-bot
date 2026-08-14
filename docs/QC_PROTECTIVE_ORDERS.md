@@ -487,7 +487,36 @@ would otherwise collide with consumed IDs and return `-2010 'Duplicate order sen
 > `docs/NEXT_MILESTONE.md` for the reconciliation question that raises.
 
 Prefix `tb1-` is required because `get_open_orders` returns **every** order on the
-symbol, ours and otherwise, and only a prefix distinguishes them. Note the library
+symbol, ours and otherwise, and only a prefix distinguishes them.
+
+> **`{leg}` AND THE LIST-LEVEL ID ARE NOW BOUND, and section 6 did not bind
+> either.** Recorded here because implementation closed two things this section
+> left open, and a reader arriving cold would find no form to follow.
+>
+> **The leg vocabulary is `W` / `SL` / `TP`**, bound by `OrderListLeg` in
+> `exchange/ids.py`. §8 records those codes only as what one probe happened to
+> send; they are now the scheme's. The choice was made WHILE IMPLEMENTING
+> rather than decided in advance -- defensible, since they are the only codes
+> the venue is measured to honour byte-for-byte, and consequential, since the
+> two-character codes are what force the generation ceiling.
+>
+> **The list-level ID is `tb1-{symbol}-{ms}-{gen}-L`** -- the same seeds, guard
+> and bound, with `L` in the leg position and deliberately NOT a member of
+> `OrderListLeg`, because a list is not a leg. §3 requires `listClientOrderId`
+> on both shapes and this section defines no form for it.
+>
+> **That form was OBSERVED AT M5c, not chosen at M5d.** M5c's probe already
+> sent `tb1-BTCUSDT-<ms>-0-L`, with control arms suffixing it (`-L8`, `-Lz36`);
+> M5d re-derived it without knowing. **The agreement is not evidence**: the
+> second derivation could not have been contradicted by the first, because it
+> did not know of it. Two independent guesses agreeing shows the answer was
+> obvious, not that it was right.
+>
+> **The generation ceiling is 99**, derived: an ID is
+> `20 + len(symbol) + digits(generation) + len(leg)`, so a 12-character symbol
+> with a 2-character leg admits two digits. Enforced in `exchange/ids.py`, with
+> an output guard that re-validates length and character class **separately**,
+> because the venue reports a length violation as "Illegal characters found". Note the library
 tag is *not* the reason: `create_order` auto-injects `x-HNA2TXFJ` plus a random
 suffix when no ID is supplied (MEASURED), but the order-list endpoints are **raw
 passthrough and inject nothing** (MEASURED — unsupplied leg IDs came back
@@ -508,12 +537,51 @@ string comparison would manufacture divergence every cycle. `price` and
 `timeInForce` on a stop-market leg are server defaults and are excluded entirely —
 comparing them manufactures divergence for the same reason (MEASURED, B2/B3/B4).
 
+> **WHICH ENDPOINT SUPPLIES THIS SET IS NOW MEASURED, AND IT IS NOT THE LIST
+> READ-BACK.** This paragraph reads as though a list query is the
+> reconciliation view. It is not, and cannot be.
+>
+> `v3_get_order_list` returns each leg as an **identity triple** --
+> `{symbol, orderId, clientOrderId}` and nothing else. No `status`, no
+> `executedQty`, no `origQty`, no prices (MEASURED at M5d against a captured
+> payload whose full key set was enumerated in the same read).
+>
+> `get_open_orders` returns **full order objects for all three legs, including
+> pendings in `PENDING_NEW`**, carrying `status`, `executedQty`, `origQty` and
+> `stopPrice` (MEASURED at M5d against a live OTOCO). **That is where the
+> compare set comes from**, and §6's `tb1-` prefix is what separates our legs
+> from everyone else's in the result.
+>
+> **The consequence for cost runs in the cheap direction**, which is worth
+> stating because the first analysis got the sign wrong: the compare set costs
+> **one call per symbol, amortised across every position on that symbol** --
+> not one list query per position, and not the four-calls-per-position figure a
+> mid-milestone finding briefly proposed. See `docs/M5_NUMBERS.md`'s `T_recon`.
+>
+> The list read-back keeps one irreplaceable use, and only one: it is a view of
+> a **terminated** list, which distinguishes "never placed" from "placed and
+> already gone". `v3_get_all_order_list` and a per-leg `get_order` also show
+> terminated state, and `v3_get_all_order_list` is the one that avoids §8's
+> reused-ID ambiguity -- see `docs/NEXT_MILESTONE.md`.
+
 **Shape is identified by leg count or by our own IDs.** `contingencyType` reads
 `"OTO"` on every payload of both shapes and never once `"OTOCO"` (MEASURED).
 
 **The placement response is not a source of truth for list identity.**
 `listClientOrderId` is deterministically `null` there when a list terminates in the
 same call, while the leg IDs in that same payload are correct (MEASURED, T1).
+
+> **NARROWED at M5d: the null is a property of TERMINATING IN THE SAME CALL,
+> not of the placement response.** A list that did **not** terminate in its
+> placement call returned `listClientOrderId` **populated**, carrying the value
+> we derived and sent *(TESTNET, BTCUSDT, order list 91590, 2026-08-14)*. That
+> is the first observation of the non-terminating case, and it means an absent
+> value never carries information about the list -- only about the call.
+>
+> The sentence's conclusion is unchanged and the reasoning under it improves:
+> the placement response is still not a source of truth for list identity,
+> because **we derive that identity ourselves** and never need the response to
+> supply it.
 
 > **Five earlier measurements RE-CONFIRMED at M5c — re-confirmations, not new
 > results, and listed together because they were taken in one run against a
@@ -832,6 +900,14 @@ port move together.
 - Pending-leg partial fill — requires an irreversible fill. `FOK` removes it from
   the entry path only.
 - The `PENDING_NEW` → `NEW` transition on a real fill — DOCUMENTED, never measured.
+
+  > **STILL UNMEASURED, and one adjacent thing now IS.** `get_open_orders`
+  > returns pending protective legs **in `PENDING_NEW`** on a live list
+  > (MEASURED at M5d) -- so a recovery path asking "does anything rest" can see
+  > protection that has not activated, and need not infer it from the working
+  > leg. What was measured is `PENDING_NEW` **before** any fill; the transition
+  > this line names is the **post-fill** case and still needs one. The two are
+  > one sentence apart and must not be conflated.
 - `TAKE_PROFIT`'s algo-slot cost — inferred, not measured.
 - `LIMIT_MAKER`-at-activation blast radius — UNMEASURED; the reason it was not
   chosen.
@@ -840,6 +916,19 @@ port move together.
   generation >= 100 on a 12-character symbol
   (`tb1-` + 12 + 13 + 3 separators + 3 + 1 = 36). One deliberately over-long
   rejected request would settle it, free. Not a Q-C blocker.
+
+  > **THE ARITHMETIC ASSUMES A ONE-CHARACTER LEG AND OVERSTATES THE HEADROOM.**
+  > That trailing `1` is the leg code. Two of the three measured codes -- `SL`
+  > and `TP` -- are **two** characters, so on a twelve-character symbol those
+  > legs reach **37** and are REJECTED at generation >= 100, where this line
+  > says the scheme merely "reaches" the limit. The error is in the
+  > **overstating** direction: it claims headroom that is not there.
+  >
+  > Not a live defect. On the shipped symbols (7 characters) the worst case is
+  > 31 against 36, and `exchange/ids.py` took the **binding** case -- a
+  > generation ceiling of 99, derived from the 2-character leg -- so the
+  > overstatement cannot reach the generator. MEASURED, every component read
+  > from the tree.
 
   > **NOW MEASURED at M5c, and the assumed figure was right.** 36 characters is
   > accepted; 37 is rejected with HTTP **400**, code **`-1100`**, and the venue
