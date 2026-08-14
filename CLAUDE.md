@@ -1615,6 +1615,27 @@ renames) in **separate commits** from semantic ones. Never mix them.
    `TradeIntent.price` changing meaning after D3 had split the type, and §1 still
    carried an instruction that had already been executed. A reader arriving cold at
    either would have built something nothing adopted.
+5. **Create the milestone tag, and verify it RESOLVES.** This step runs *after*
+   the closing commit exists — which is step 1's, since the `PHASE_HISTORY` entry
+   is written last — because a tag cannot point at a commit that has not been
+   made. It is the one step that is not itself a commit.
+
+   ```bash
+   git tag -a "milestone/<name>" <closing-sha> -m "<name> close: <one line>"
+   git rev-parse "milestone/<name>^{commit}"
+   ```
+
+   **The second command is the step, not a flourish: verify the tag RESOLVES to
+   the closing commit, never merely that it exists.** `git tag -l` prints the
+   name of a tag pointing anywhere, and the next rotation's extraction is only as
+   correct as what the tag points *at*. A tag on the wrong commit reproduces the
+   precise defect the tag was adopted to remove — a well-formed subset, with no
+   error to show for it — while `git tag -l` reports success.
+
+   **A tag is a REF, not a commit.** It is carried by no commit, appears in no
+   diff, and **`git push` does not carry it**: `git push origin milestone/<name>`
+   is a separate act. Forget it and every clone but yours cannot run the next
+   rotation's extraction at all, which is the hard failure working as designed.
 
 **The `PHASE_HISTORY` entry is written LAST, and it COUNTS ITSELF.** A rotation
 cannot count itself if it writes the count before the commit that writes it
@@ -1644,6 +1665,22 @@ There is no separate workflow document; these four steps are the procedure, and
 they live here because this is the only file loaded into every session. Docs that
 must be remembered to be read are how the four drifts found in the M3 audit got
 in.
+
+> **"These four steps" now reads FIVE — annotated rather than rewritten, because
+> the sentence must change meaning and its digit is a trap.** M5e added the tag
+> step above; everything else in the sentence is unchanged and correct.
+>
+> **The trap, MEASURED rather than assumed: `four steps` occurs four times in
+> this file and only ONE of them is the rotation's.** The other three are the
+> **gate's** — *"all four steps, in this order"*, *"The four steps, and what each
+> reports when green"*, and *"THE FOUR STEPS ARE NOT A LADDER OF INCREASING
+> STRICTNESS"*. A substitution by pattern would rewrite three correct statements
+> about `scripts/check.py` into false ones, in a file where the gate's step count
+> is load-bearing. This is the inverse hazard the count-coupling section names —
+> grep the digits, then **edit by context** — firing on a phrase that counts
+> nothing the gate reports.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
 
 ### What rotation compiles FROM — a finding lands at its commit, not at rotation
 
