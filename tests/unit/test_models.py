@@ -172,15 +172,29 @@ def test_entry_bar_time_and_opened_at_are_independent() -> None:
 
 
 def test_protection_state_ships_only_the_members_that_have_writers() -> None:
-    """Members arrive with their writers. ``PENDING`` / ``ACTIVE`` / ``DIVERGED``
-    are named in the order-list contract and land in the milestones that first
-    write them -- not before. An unwritten member is a plausible value sitting in
-    the one field whose wrong value is *silent*: it does not fail, it switches
-    off the detector that would have noticed.
+    """Members arrive with their writers. An unwritten member is a plausible
+    value sitting in the one field whose wrong value is *silent*: it does not
+    fail, it switches off the detector that would have noticed.
+
+    **INVERTED at M5e, not deleted, so the change of mind stays visible.** It
+    read ``{ABSENT_BY_DESIGN, UNKNOWN}`` from M5a until
+    ``execution.reconciliation.classify_protection`` landed, and it FAILED on
+    the commit that added the other three -- which is the test working, not
+    breaking. What it pins is unchanged: that every member has a writer. Only
+    the set of writers grew.
+
+    Kept as a literal here rather than derived from the classifier: that would
+    import an outer layer's test helpers into the domain's own tests, and the
+    one place `tests/` already couples two modules is recorded as a hazard. The
+    derived form of this claim lives beside the classifier, in
+    ``test_reconciliation.py``, where it costs no coupling.
     """
     assert set(ProtectionState) == {
         ProtectionState.ABSENT_BY_DESIGN,
         ProtectionState.UNKNOWN,
+        ProtectionState.ACTIVE,
+        ProtectionState.PENDING,
+        ProtectionState.DIVERGED,
     }
 
 

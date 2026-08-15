@@ -211,16 +211,23 @@ class ProtectionState(str, Enum):
     **required and non-nullable**: a wrong value here is the off-switch for the
     divergence detector on that position, so there is no default to forget.
 
-    **Members arrive with their writers, and that discipline is the point.**
-    Only these two exist because only these two are written by rules already
-    decided. ``PENDING``, ``ACTIVE`` and ``DIVERGED`` are named in the
-    order-list contract and land in the milestones that first write them --
-    deliberately *not* now. An unwritten member sitting in this enum is a
-    plausible-looking value available to whoever is nearest a construction site
-    and needs something to type, in the one field whose wrong value is
-    **silent**: it does not fail, it switches off the detector that would have
-    noticed. Adding a member later is additive and moves no fixture; removing a
-    member that has already been assigned somewhere is not.
+    **Members arrive with their writers, and that discipline is the point.** Two
+    shipped at M5a because only those two were written by rules already decided;
+    the other three arrive here with
+    :func:`~trading_bot.execution.reconciliation.classify_protection`, which is
+    the first thing in this tree that produces them. An unwritten member sitting
+    in this enum is a plausible-looking value available to whoever is nearest a
+    construction site and needs something to type, in the one field whose wrong
+    value is **silent**: it does not fail, it switches off the detector that
+    would have noticed.
+
+    **All three additions default UNTRUSTED, and that is not an oversight.**
+    ``_TRUSTED_PROTECTION`` in ``core/portfolio.py`` is a whitelist and is
+    deliberately untouched, so a position in any of them counts as uncomputable
+    and refuses entries. For ``ACTIVE`` that is wrong and cheap -- a spurious
+    refusal until something admits it. For ``DIVERGED`` and ``PENDING`` it is
+    right. The error that refuses an entry costs a missed trade; the error that
+    trusts a stop that is not there costs the position.
     """
 
     #: No protection is expected here, because none was requested -- a
@@ -230,7 +237,26 @@ class ProtectionState(str, Enum):
     #: The protection story is not established. The placement may or may not
     #: have landed -- the state a timed-out write leaves, which is resolved by
     #: querying the IDs we would have sent rather than by retrying.
+    #:
+    #: **Also what an ABSENT leg produces, and that is a refusal to guess rather
+    #: than a gap.** Absence means never-placed, cancelled or filled, and those
+    #: are distinguishable only by a point query -- MEASURED: after a cancel,
+    #: ``get_open_orders`` returned ``[]`` while ``get_order`` by
+    #: ``origClientOrderId`` still reported ``CANCELED``. A pure classifier
+    #: cannot query, so it names what must be queried and stops.
     UNKNOWN = "unknown"
+    #: Every requested leg rests at the venue, at the requested trigger, with
+    #: nothing executed. The protection is not merely accepted but working.
+    ACTIVE = "active"
+    #: Accepted and not yet activated -- a pending leg sits ``PENDING_NEW`` from
+    #: placement and becomes live only when the working order fills. Acceptance
+    #: is not activation, so this is distinct from :attr:`ACTIVE` rather than a
+    #: weaker form of it.
+    PENDING = "pending"
+    #: Protection was requested and what rests does not match it. Keyed off the
+    #: REQUEST, never off absence: a missing leg is :attr:`UNKNOWN`, because
+    #: absence is unresolved rather than contradicted.
+    DIVERGED = "diverged"
 
 
 class PositionSizingMethod(str, Enum):
