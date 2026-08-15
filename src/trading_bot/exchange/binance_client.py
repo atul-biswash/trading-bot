@@ -74,6 +74,8 @@ class _AsyncBinanceAPI(Protocol):
     async def v3_post_order_list_otoco(self, **params: Any) -> dict[str, Any]: ...
     async def v3_post_order_list_oto(self, **params: Any) -> dict[str, Any]: ...
     async def v3_get_order_list(self, **params: Any) -> dict[str, Any]: ...
+    async def v3_get_order(self, **params: Any) -> dict[str, Any]: ...
+    async def v3_get_all_order_list(self, **params: Any) -> list[dict[str, Any]]: ...
     async def get_open_orders(self, **params: Any) -> list[dict[str, Any]]: ...
     async def close_connection(self) -> None: ...
 
@@ -429,6 +431,89 @@ class BinanceClient(BaseExchangeClient):
             **self._with_call_timeout(params, timeout_s),
         )
         return to_order_list(raw)
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        """Read one order back, by the venue's id or by ours.
+
+        **A POINT QUERY IS A DIFFERENT INSTRUMENT FROM ENUMERATION, and the
+        reconciler needs both.** MEASURED: after a cancel, `get_open_orders`
+        returns ``[]`` while this endpoint still reports the order with
+        ``status`` ``CANCELED``. So an ABSENT leg is not a resolved leg --
+        enumeration says only "it does not rest", and never-placed, cancelled
+        and (unmeasured) filled all look identical from there. A classifier that
+        resolved absence directly would be reading one instrument for an answer
+        only the other can give.
+
+        **Ours comes back in ``clientOrderId`` here**, not in
+        ``origClientOrderId``: the substitution is a property of the CANCEL
+        response, not of the order. :func:`to_order` prefers the latter where
+        present and falls through to the former, which is correct for both.
+
+        Idempotent -- a read, so ``_call``'s default policy applies. See
+        :meth:`create_order` for ``timeout_s`` and ``attempts``.
+
+        :raises ValueError: neither identifier given, or both. The venue accepts
+            either and we do not guess which the caller meant.
+        """
+        if (order_id is None) == (client_order_id is None):
+            raise ValueError(
+                "pass exactly one of order_id or client_order_id, "
+                f"got order_id={order_id!r}, client_order_id={client_order_id!r}"
+            )
+        params: dict[str, Any] = {"symbol": symbol, "recvWindow": self._recv_window}
+        if order_id is not None:
+            params["orderId"] = int(order_id)
+        else:
+            params["origClientOrderId"] = client_order_id
+        raw = await self._call(
+            self._client.v3_get_order,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
+        return to_order(raw)
+
+    async def get_all_order_lists(
+        self,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[OrderList]:
+        """Every order list on the account, live and terminal, with its status.
+
+        **This is R13's "did it place?" query, and the reason it is not a point
+        query is an ambiguity rather than a preference.** A point query by our
+        own id has an undefined answer once that id has been used twice -- the
+        live order, the most recent, or a stale terminal one, indistinguishable
+        in the payload -- and generation-0 ids repeat within a single dispatch
+        by construction, because the id derives from ``(symbol,
+        entry_bar_time)``. Enumerating and letting the caller pick avoids
+        trusting the venue's choice.
+
+        MEASURED: it returns terminal lists intact days after they closed, and a
+        live list alongside them carrying ``EXEC_STARTED``/``EXECUTING``.
+
+        **No ``limit`` or ``fromId`` parameter**, deliberately: the venue's
+        default already returns what the disambiguation needs, and a paging
+        argument with no caller is surface this milestone has not earned.
+
+        Idempotent. Each element maps through :func:`to_order_list`, whose shape
+        is measured identical to the single-list read-back's.
+        """
+        params: dict[str, Any] = {"recvWindow": self._recv_window}
+        raw = await self._call(
+            self._client.v3_get_all_order_list,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
+        return [to_order_list(entry) for entry in raw]
 
     async def get_own_open_orders(
         self,

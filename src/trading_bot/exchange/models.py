@@ -478,6 +478,13 @@ def to_order_list(raw: dict[str, Any]) -> OrderList:
     its leg array is UNMEASURED; this mapper is not it. Unifying the two on an
     assumption is what produced M5d-053.
 
+    **The list-history endpoint returns this same shape, per element** -- eight
+    list-level keys and three-key identity legs, MEASURED against a captured
+    ``v3_get_all_order_list`` payload and identical to the read-back's. So
+    ``get_all_order_lists`` maps each entry through here rather than through a
+    mapper of its own. Recorded because the scoping sentence above would
+    otherwise read as excluding a caller it does in fact cover.
+
     **Legs are IDENTITIES, not orders.** A read-back leg carries exactly
     ``{"symbol", "orderId", "clientOrderId"}`` (MEASURED, captured payload), so
     :func:`to_order` cannot map one -- it raises ``KeyError: 'side'``. Section

@@ -1333,3 +1333,267 @@ async def test_an_adapter_method_sends_no_channel_when_it_has_no_deadline() -> N
     await bc.get_own_open_orders("BTCUSDT")
 
     client.get_open_orders.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)
+
+
+# --------------------------------------------------------------------------
+# The read surface R13 and the classifier need -- point query and list history
+# --------------------------------------------------------------------------
+# CAPTURED VERBATIM from M5e's probe 2: `GET /api/v3/order` via `v3_get_order`,
+# Binance Spot TESTNET, symbol BTCUSDT, orderId 3219508, 2026-08-15, read
+# IMMEDIATELY AFTER the cancel. Untrimmed -- all twenty keys, in wire order.
+#
+# It is here to pin the asymmetry the reconciler's classifier turns on: the same
+# order is ABSENT from `get_open_orders` at this moment and PRESENT here with
+# `status` CANCELED. Note `clientOrderId` carries OUR id -- the substitution is
+# a property of the cancel RESPONSE, not of the order, so a query is where our
+# identifier survives.
+#
+# `isWorking` is `true` on a cancelled order. It is kept because the wire sent
+# it; nothing reads it, and it does not report liveness.
+# fmt: off
+ORDER_QUERY_CANCELED = {
+    "symbol":                  "BTCUSDT",
+    "orderId":                 3219508,
+    "orderListId":             -1,
+    "clientOrderId":           "tb1-BTCUSDT-1786764420000-0-W",
+    "price":                   "37863.05000000",
+    "origQty":                 "0.00020000",
+    "executedQty":             "0.00000000",
+    "cummulativeQuoteQty":     "0.00000000",
+    "status":                  "CANCELED",
+    "timeInForce":             "GTC",
+    "type":                    "LIMIT",
+    "side":                    "BUY",
+    "stopPrice":               "0.00000000",
+    "icebergQty":              "0.00000000",
+    "time":                    1786764478581,
+    "updateTime":              1786764481669,
+    "isWorking":               True,
+    "workingTime":             1786764478581,
+    "origQuoteOrderQty":       "0.00000000",
+    "selfTradePreventionMode": "EXPIRE_MAKER",
+}
+# fmt: on
+
+# CAPTURED VERBATIM from M5e's probe 1: `GET /api/v3/allOrderList` via
+# `v3_get_all_order_list`, Binance Spot TESTNET, symbol BTCUSDT, 2026-08-14.
+# UNTRIMMED -- all five lists the account held, in wire order, including two
+# from M5c's duplicate-order-list probe whose leg ids are its control arms.
+#
+# Kept whole rather than reduced to the one list under test, per the precedent
+# that a fixture trimmed to what the mapper consumes cannot show what the mapper
+# ignores. The point it exists to make needs the whole set anyway: list 94177 is
+# LIVE, `EXEC_STARTED`/`EXECUTING`, sitting among four `ALL_DONE` ones -- which
+# is what lets R13's recovery tell "placed and still working" from "placed and
+# already gone" without trusting a point query on a reusable id.
+# fmt: off
+ALL_ORDER_LISTS = [
+    {
+        "orderListId":       72324,
+        "contingencyType":   "OTO",
+        "listStatusType":    "ALL_DONE",
+        "listOrderStatus":   "ALL_DONE",
+        "listClientOrderId": "tb1-BTCUSDT-1786534736813-0-L",
+        "transactionTime":   1786534738385,
+        "symbol":            "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 2089811,
+             "clientOrderId": "tb1-BTCUSDT-1786534736813-0-W9"},
+            {"symbol": "BTCUSDT", "orderId": 2089812,
+             "clientOrderId": "tb1-BTCUSDT-1786534736813-0-SL9"},
+            {"symbol": "BTCUSDT", "orderId": 2089813,
+             "clientOrderId": "tb1-BTCUSDT-1786534736813-0-TP9"},
+        ],
+    },
+    {
+        "orderListId":       72325,
+        "contingencyType":   "OTO",
+        "listStatusType":    "ALL_DONE",
+        "listOrderStatus":   "ALL_DONE",
+        "listClientOrderId": "tb1-BTCUSDT-1786534736813-0-Lz36",
+        "transactionTime":   1786534738568,
+        "symbol":            "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 2089814,
+             "clientOrderId": "tb1-ovl-xxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
+            {"symbol": "BTCUSDT", "orderId": 2089815,
+             "clientOrderId": "tb1-BTCUSDT-1786534736813-0-SLz36"},
+            {"symbol": "BTCUSDT", "orderId": 2089816,
+             "clientOrderId": "tb1-BTCUSDT-1786534736813-0-TPz36"},
+        ],
+    },
+    {
+        "orderListId":       72432,
+        "contingencyType":   "OTO",
+        "listStatusType":    "ALL_DONE",
+        "listOrderStatus":   "ALL_DONE",
+        "listClientOrderId": "tb1-BTCUSDT-1786535515318-0-L",
+        "transactionTime":   1786535515573,
+        "symbol":            "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 2093412,
+             "clientOrderId": "tb1-BTCUSDT-1786535515318-0-W"},
+            {"symbol": "BTCUSDT", "orderId": 2093413,
+             "clientOrderId": "tb1-BTCUSDT-1786535515318-0-SL"},
+            {"symbol": "BTCUSDT", "orderId": 2093414,
+             "clientOrderId": "tb1-BTCUSDT-1786535515318-0-TP"},
+        ],
+    },
+    {
+        "orderListId":       91590,
+        "contingencyType":   "OTO",
+        "listStatusType":    "ALL_DONE",
+        "listOrderStatus":   "ALL_DONE",
+        "listClientOrderId": "tb1-BTCUSDT-1786693560000-0-L",
+        "transactionTime":   1786693572160,
+        "symbol":            "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 2950175,
+             "clientOrderId": "tb1-BTCUSDT-1786693560000-0-W"},
+            {"symbol": "BTCUSDT", "orderId": 2950176,
+             "clientOrderId": "tb1-BTCUSDT-1786693560000-0-SL"},
+            {"symbol": "BTCUSDT", "orderId": 2950177,
+             "clientOrderId": "tb1-BTCUSDT-1786693560000-0-TP"},
+        ],
+    },
+    {
+        "orderListId":       94177,
+        "contingencyType":   "OTO",
+        "listStatusType":    "EXEC_STARTED",
+        "listOrderStatus":   "EXECUTING",
+        "listClientOrderId": "tb1-BTCUSDT-1786714260000-0-L",
+        "transactionTime":   1786714265455,
+        "symbol":            "BTCUSDT",
+        "orders": [
+            {"symbol": "BTCUSDT", "orderId": 3028164,
+             "clientOrderId": "tb1-BTCUSDT-1786714260000-0-W"},
+            {"symbol": "BTCUSDT", "orderId": 3028165,
+             "clientOrderId": "tb1-BTCUSDT-1786714260000-0-SL"},
+            {"symbol": "BTCUSDT", "orderId": 3028166,
+             "clientOrderId": "tb1-BTCUSDT-1786714260000-0-TP"},
+        ],
+    },
+]
+# fmt: on
+
+
+async def test_get_order_queries_by_the_venue_id() -> None:
+    client = AsyncMock()
+    client.v3_get_order.return_value = ORDER_QUERY_CANCELED
+    bc = _make(client)
+
+    order = await bc.get_order("BTCUSDT", order_id="3219508")
+
+    client.v3_get_order.assert_awaited_once_with(symbol="BTCUSDT", orderId=3219508, recvWindow=5000)
+    assert order.order_id == "3219508"
+
+
+async def test_get_order_queries_by_our_client_order_id() -> None:
+    """Our id goes out as `origClientOrderId`, exactly as the list read-back's
+    does -- the venue's spelling for "the id the order was created with"."""
+    client = AsyncMock()
+    client.v3_get_order.return_value = ORDER_QUERY_CANCELED
+    bc = _make(client)
+
+    await bc.get_order("BTCUSDT", client_order_id="tb1-BTCUSDT-1786764420000-0-W")
+
+    client.v3_get_order.assert_awaited_once_with(
+        symbol="BTCUSDT",
+        origClientOrderId="tb1-BTCUSDT-1786764420000-0-W",
+        recvWindow=5000,
+    )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{}, {"order_id": "3219508", "client_order_id": "tb1-x"}],
+    ids=["neither", "both"],
+)
+async def test_get_order_requires_exactly_one_identifier(kwargs: dict[str, str]) -> None:
+    client = AsyncMock()
+    bc = _make(client)
+
+    with pytest.raises(ValueError, match="exactly one"):
+        await bc.get_order("BTCUSDT", **kwargs)
+
+    assert client.v3_get_order.await_count == 0
+
+
+async def test_a_point_query_resolves_an_order_enumeration_cannot_see() -> None:
+    """The asymmetry the classifier turns on, pinned. `get_open_orders` returned
+    `[]` for this very order at this very moment; the point query reports it
+    CANCELED, under OUR id."""
+    client = AsyncMock()
+    client.v3_get_order.return_value = ORDER_QUERY_CANCELED
+    bc = _make(client)
+
+    order = await bc.get_order("BTCUSDT", order_id="3219508")
+
+    assert order.status is OrderStatus.CANCELED
+    assert order.client_order_id == "tb1-BTCUSDT-1786764420000-0-W"
+    assert order.order_list_id is None  # `orderListId` -1 is a sentinel
+
+
+async def test_get_order_carries_a_per_call_timeout() -> None:
+    client = AsyncMock()
+    client.v3_get_order.return_value = ORDER_QUERY_CANCELED
+    bc = _make(client)
+
+    await bc.get_order("BTCUSDT", order_id="3219508", timeout_s=2.5)
+
+    client.v3_get_order.assert_awaited_once_with(
+        symbol="BTCUSDT",
+        orderId=3219508,
+        recvWindow=5000,
+        requests_params={"timeout": 2.5},
+    )
+
+
+async def test_get_all_order_lists_maps_every_list() -> None:
+    client = AsyncMock()
+    client.v3_get_all_order_list.return_value = ALL_ORDER_LISTS
+    bc = _make(client)
+
+    lists = await bc.get_all_order_lists()
+
+    client.v3_get_all_order_list.assert_awaited_once_with(recvWindow=5000)
+    assert [x.order_list_id for x in lists] == ["72324", "72325", "72432", "91590", "94177"]
+    assert all(len(x.orders) == 3 for x in lists)
+
+
+async def test_a_live_list_is_distinguishable_from_terminal_ones() -> None:
+    """R13's whole purpose: tell "placed and still working" from "placed and
+    already gone", without a point query on an id that may have been reused."""
+    client = AsyncMock()
+    client.v3_get_all_order_list.return_value = ALL_ORDER_LISTS
+    bc = _make(client)
+
+    lists = await bc.get_all_order_lists()
+
+    live = [x for x in lists if x.list_order_status == "EXECUTING"]
+    assert [x.order_list_id for x in live] == ["94177"]
+    assert live[0].list_client_order_id == "tb1-BTCUSDT-1786714260000-0-L"
+    assert {x.list_order_status for x in lists if x.order_list_id != "94177"} == {"ALL_DONE"}
+
+
+async def test_get_all_order_lists_honours_a_per_call_attempt_bound() -> None:
+    client = AsyncMock()
+    client.v3_get_all_order_list.side_effect = ConnectionError("down")
+    bc = _make(client)  # client default is 4 attempts
+
+    with pytest.raises(ExchangeConnectionError):
+        await bc.get_all_order_lists(attempts=2)
+
+    assert client.v3_get_all_order_list.await_count == 2
+
+
+async def test_get_all_order_lists_carries_a_per_call_timeout() -> None:
+    client = AsyncMock()
+    client.v3_get_all_order_list.return_value = []
+    bc = _make(client)
+
+    await bc.get_all_order_lists(timeout_s=2.5)
+
+    client.v3_get_all_order_list.assert_awaited_once_with(
+        recvWindow=5000, requests_params={"timeout": 2.5}
+    )
