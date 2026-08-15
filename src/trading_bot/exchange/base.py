@@ -64,12 +64,15 @@ class BaseExchangeClient(ExchangeClient):
         self._symbol_info_cache: dict[str, SymbolInfo] = {}
 
     # -- retry + error translation -----------------------------------------
-    def _make_retrying(self, *, idempotent: bool) -> AsyncRetrying:
+    def _make_retrying(self, *, idempotent: bool, attempts: int | None = None) -> AsyncRetrying:
         retry_types = _IDEMPOTENT_RETRY if idempotent else _NON_IDEMPOTENT_RETRY
+        resolved = self._retry_attempts if attempts is None else attempts
+        if resolved < 1:
+            raise ValueError("attempts must be >= 1")
         return AsyncRetrying(
             retry=retry_if_exception_type(retry_types),
             wait=wait_exponential(multiplier=self._retry_backoff, max=self._retry_max_wait),
-            stop=stop_after_attempt(self._retry_attempts),
+            stop=stop_after_attempt(resolved),
             reraise=True,
             sleep=self._sleep,
         )
@@ -79,6 +82,7 @@ class BaseExchangeClient(ExchangeClient):
         func: Callable[..., Awaitable[Any]],
         *args: Any,
         idempotent: bool = True,
+        attempts: int | None = None,
         **kwargs: Any,
     ) -> Any:
         """Invoke ``func(*args, **kwargs)`` with translation and retries.
@@ -88,6 +92,25 @@ class BaseExchangeClient(ExchangeClient):
         order placement) narrows retries to rate-limit errors only: a connection
         timeout on a write might mean the order *was* accepted, so it must not be
         blindly resent.
+
+        **``attempts`` is the per-call half of the retry budget, and ``None``
+        means "use the client's".** A retry policy is a property of what is being
+        asked, not of who is asking, so a caller on a deadline can spend fewer
+        attempts than a caller that is merely reading -- without needing a second
+        client instance configured differently. Nothing supplies it today; every
+        existing call site resolves to the constructor's value and is unchanged.
+
+        It is keyword-only and consumed here, so it never reaches ``func`` and
+        cannot be mistaken for an exchange parameter.
+
+        **It bounds ATTEMPTS, not TIME.** Wall time is attempts multiplied by
+        whatever bounds one attempt, plus the backoff between them; the
+        per-attempt bound is the transport timeout, which is a separate channel.
+        Neither this parameter nor any other in this class cancels work already
+        in flight -- deliberately, because a budget may refuse to begin work and
+        must never abandon a write mid-submission.
+
+        :raises ValueError: ``attempts`` below 1.
         """
 
         async def _attempt() -> Any:
@@ -96,7 +119,7 @@ class BaseExchangeClient(ExchangeClient):
             except BINANCE_EXCEPTIONS as exc:
                 raise translate_binance_error(exc) from exc
 
-        retrying = self._make_retrying(idempotent=idempotent)
+        retrying = self._make_retrying(idempotent=idempotent, attempts=attempts)
         return await retrying(_attempt)
 
     # -- symbol-info cache --------------------------------------------------

@@ -1122,3 +1122,214 @@ async def test_an_empty_book_enumerates_to_nothing() -> None:
     bc = _make(client)
 
     assert await bc.get_own_open_orders("BTCUSDT") == []
+
+
+# --------------------------------------------------------------------------
+# The per-call transport bound -- pinned against the REAL library
+# --------------------------------------------------------------------------
+# These four exercise `python-binance`'s own `_request` and
+# `_get_request_kwargs`, with only the aiohttp session replaced. That is
+# deliberate and is the point of them: the per-call timeout rides a PRIVATE
+# library channel -- `data["requests_params"]` merged into the transport
+# kwargs -- which no public API promises. `python-binance` is pinned `==`
+# because a pin here encodes a VERIFIED version, and these tests are what make
+# that verification real: a version that stopped honouring the channel would
+# silently unbound every deadline the executor sets, and instead turns the gate
+# red.
+#
+# No network. `AsyncClient.__init__` and `BaseClient.__init__` were read and do
+# no I/O; the real session they build is closed in a `finally`.
+
+
+class _FakeResponse:
+    """The narrow slice of `aiohttp.ClientResponse` that `_handle_response` uses."""
+
+    status = 200
+
+    async def text(self) -> str:
+        return "{}"
+
+    async def json(self) -> dict[str, Any]:
+        return {}
+
+    async def __aenter__(self) -> _FakeResponse:
+        return self
+
+    async def __aexit__(self, *exc: object) -> bool:
+        return False
+
+
+class _RecordingSession:
+    """Stands in for the aiohttp session, capturing what `_request` hands it."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def _record(self, method: str):  # type: ignore[no-untyped-def]
+        def call(url: object, **kwargs: Any) -> _FakeResponse:
+            self.calls.append({"method": method, "url": str(url), **kwargs})
+            return _FakeResponse()
+
+        return call
+
+    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
+        return self._record(name)
+
+
+async def _library_client(**client_kwargs: Any):  # type: ignore[no-untyped-def]
+    """A real `AsyncClient` with a recording session. Caller closes the real one."""
+    from binance import AsyncClient
+
+    client = AsyncClient(api_key="k", api_secret="s", testnet=True, **client_kwargs)
+    real_session = client.session
+    recorder = _RecordingSession()
+    client.session = recorder  # type: ignore[assignment]
+    return client, recorder, real_session
+
+
+async def test_a_per_call_timeout_reaches_the_transport() -> None:
+    """The channel works end to end through the library's own `_request`."""
+    client, recorder, real_session = await _library_client()
+    try:
+        await client.get_open_orders(symbol="BTCUSDT", requests_params={"timeout": 2.5})
+    finally:
+        await real_session.close()
+
+    assert len(recorder.calls) == 1
+    assert recorder.calls[0]["timeout"] == 2.5
+
+
+async def test_nothing_but_timeout_is_injected_into_the_transport_call() -> None:
+    """The merge is `kwargs.update()` over EVERY key, so the helper's restraint
+    is the only thing standing between us and arbitrary aiohttp arguments. This
+    pins the whole keyword set, not just `timeout`'s presence."""
+    client, recorder, real_session = await _library_client()
+    try:
+        await client.get_open_orders(symbol="BTCUSDT", requests_params={"timeout": 2.5})
+    finally:
+        await real_session.close()
+
+    assert set(recorder.calls[0]) == {"method", "url", "proxy", "headers", "data", "timeout"}
+
+
+async def test_a_per_call_timeout_overrides_the_client_wide_one() -> None:
+    """`exchange.requests_timeout_s` is merged first; the per-call value wins."""
+    client, recorder, real_session = await _library_client(requests_params={"timeout": 10})
+    try:
+        await client.get_open_orders(symbol="BTCUSDT", requests_params={"timeout": 1.5})
+        await client.get_open_orders(symbol="BTCUSDT")
+    finally:
+        await real_session.close()
+
+    assert recorder.calls[0]["timeout"] == 1.5
+    assert recorder.calls[1]["timeout"] == 10
+
+
+async def test_the_per_call_timeout_is_removed_before_the_signature_is_computed() -> None:
+    """If `requests_params` survived into the signed payload the signature would
+    cover it, and every request carrying a deadline would be rejected. Pinned by
+    recomputing the signature over the params WITHOUT it and matching."""
+    client, recorder, real_session = await _library_client()
+    try:
+        await client.get_open_orders(symbol="BTCUSDT", requests_params={"timeout": 2.5})
+    finally:
+        await real_session.close()
+
+    query = recorder.calls[0]["url"].split("?", 1)[1]
+    sent = dict(pair.split("=", 1) for pair in query.split("&"))
+    assert "requests_params" not in query
+    signature = sent.pop("signature")
+    assert signature == client._generate_signature(sent)
+
+
+# --------------------------------------------------------------------------
+# The helper, and the per-call attempt bound
+# --------------------------------------------------------------------------
+def test_the_timeout_helper_emits_exactly_one_key() -> None:
+    """A second key would be forwarded verbatim to aiohttp and fail there with a
+    `TypeError` rather than as a domain error."""
+    out = BinanceClient._with_call_timeout({"symbol": "BTCUSDT"}, 2.5)
+
+    assert out["requests_params"] == {"timeout": 2.5}
+    assert out == {"symbol": "BTCUSDT", "requests_params": {"timeout": 2.5}}
+
+
+def test_the_timeout_helper_never_hands_back_the_caller_s_dict() -> None:
+    """`_get_request_kwargs` deletes `requests_params` from what it is given, so
+    a shared or reused mapping would be mutated under its owner."""
+    original = {"symbol": "BTCUSDT"}
+
+    bounded = BinanceClient._with_call_timeout(original, 2.5)
+    unbounded = BinanceClient._with_call_timeout(original, None)
+
+    assert original == {"symbol": "BTCUSDT"}
+    assert bounded is not original
+    assert unbounded is not original
+    assert unbounded == original
+
+
+async def test_a_per_call_attempt_bound_changes_the_attempt_count() -> None:
+    """The per-call half of the retry budget: a caller on a deadline spends
+    fewer attempts than the client's default, without a second client."""
+    client = AsyncMock()
+    client.get_open_orders.side_effect = ConnectionError("down")
+    bc = _make(client)  # client default is 4 attempts
+
+    with pytest.raises(ExchangeConnectionError):
+        await bc.get_own_open_orders("BTCUSDT", attempts=2)
+
+    assert client.get_open_orders.await_count == 2
+
+
+async def test_omitting_the_attempt_bound_keeps_the_client_default() -> None:
+    """`None` means "the client's policy", which is what every call site uses
+    today -- so nothing changed behaviour when the parameter was added."""
+    client = AsyncMock()
+    client.get_open_orders.side_effect = ConnectionError("down")
+    bc = _make(client)
+
+    with pytest.raises(ExchangeConnectionError):
+        await bc.get_own_open_orders("BTCUSDT")
+
+    assert client.get_open_orders.await_count == 4
+
+
+# --------------------------------------------------------------------------
+# The seam between the two: that an adapter method actually USES the helper
+# --------------------------------------------------------------------------
+# These two exist because a mutation prediction was WRONG. Mutating the helper
+# to emit a second key was predicted to fail both the helper test above and the
+# transport test above it; it failed only the helper test. The transport tests
+# build `requests_params` inline against the library client, so they are not
+# downstream of the helper at all -- an expressiveness miss, caught only by the
+# prediction being checked against the observation.
+#
+# The hole that miss exposed is real and is what these close: the helper was
+# pinned in isolation, the library channel was pinned in isolation, and NOTHING
+# pinned that a call site joins them. A method that quietly stopped calling
+# `_with_call_timeout` would have failed no test.
+
+
+async def test_an_adapter_method_routes_its_timeout_through_the_helper() -> None:
+    """The per-call deadline reaches the wire as the channel, from a call site."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = []
+    bc = _make(client)
+
+    await bc.get_own_open_orders("BTCUSDT", timeout_s=2.5)
+
+    client.get_open_orders.assert_awaited_once_with(
+        symbol="BTCUSDT", recvWindow=5000, requests_params={"timeout": 2.5}
+    )
+
+
+async def test_an_adapter_method_sends_no_channel_when_it_has_no_deadline() -> None:
+    """The other direction: a caller without a deadline must not have one
+    injected, or every call would carry a bound nobody chose."""
+    client = AsyncMock()
+    client.get_open_orders.return_value = []
+    bc = _make(client)
+
+    await bc.get_own_open_orders("BTCUSDT")
+
+    client.get_open_orders.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)

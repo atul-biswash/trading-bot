@@ -17,6 +17,7 @@ adapter only enforces exchange *filter compliance* on whatever it is handed.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 from trading_bot.core.enums import TradingMode
@@ -135,6 +136,35 @@ class BinanceClient(BaseExchangeClient):
             sleep=sleep,
         )
 
+    # -- per-call transport bound -------------------------------------------
+    @staticmethod
+    def _with_call_timeout(params: Mapping[str, Any], timeout_s: float | None) -> dict[str, Any]:
+        """Return ``params`` carrying a per-call HTTP timeout, or a copy of it.
+
+        **The channel is a library internal and this is its only user.**
+        ``python-binance`` merges ``data["requests_params"]`` into the keyword
+        arguments it hands aiohttp, then deletes the key before signing, so a
+        timeout supplied this way bounds exactly one HTTP round trip and never
+        reaches the wire as a parameter. ``exchange.requests_timeout_s`` is
+        merged first and is therefore overridden by whatever this supplies.
+
+        **It emits exactly ``{"timeout": ...}``, and that restraint is the whole
+        of its safety.** The merge is ``kwargs.update()`` over *every* key, so
+        this is an arbitrary keyword-argument injection into ``aiohttp``, not a
+        timeout parameter. A second key would be forwarded verbatim and fail at
+        the transport with a ``TypeError`` rather than as a domain error.
+
+        **Always a fresh dict, never the caller's.** ``_get_request_kwargs``
+        does ``del kwargs["data"]["requests_params"]`` on what it is given, so a
+        shared or reused mapping would be mutated under its owner.
+
+        ``None`` means "no per-call bound" and yields a plain copy, so a caller
+        that has no deadline pays nothing and looks the same at the call site.
+        """
+        if timeout_s is None:
+            return dict(params)
+        return {**params, "requests_params": {"timeout": timeout_s}}
+
     # -- account / market data ---------------------------------------------
     async def get_balances(self) -> list[Balance]:
         raw = await self._call(self._client.get_account, recvWindow=self._recv_window)
@@ -156,19 +186,59 @@ class BinanceClient(BaseExchangeClient):
         return candles
 
     async def _fetch_symbol_info(self, symbol: str) -> SymbolInfo:
+        """Fetch one symbol's filters, uncached. See :meth:`get_symbol_info`.
+
+        **OUT OF SCOPE for the per-call transport bound, and it is the one
+        exclusion that sits on a timed path.** ``AsyncClient.get_symbol_info``
+        takes an explicit ``symbol`` rather than ``**params``, and it delegates
+        to ``get_exchange_info`` -- the whole-exchange payload -- so there is no
+        params dict for :meth:`_with_call_timeout` to ride and no narrower
+        endpoint to call instead.
+
+        It reaches the dispatch path through ``_enforce`` and both
+        ``_prepare_*`` methods, where a cache miss would spend an unbounded call
+        inside a bounded sequence. Safe today only because the composition root
+        primes every configured symbol at boot and nothing refreshes the cache:
+        two facts in two other files, with nothing linking them, which is why
+        the exclusion is written down here rather than inferred.
+        """
         raw = await self._call(self._client.get_symbol_info, symbol)
         if raw is None:
             raise ExchangeAPIError(f"Unknown symbol: {symbol!r}")
         return to_symbol_info(raw)
 
     # -- orders -------------------------------------------------------------
-    async def create_order(self, request: OrderRequest) -> Order:
+    async def create_order(
+        self,
+        request: OrderRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        """Place a single order.
+
+        ``timeout_s`` bounds one HTTP round trip and ``attempts`` bounds how many
+        are made; ``None`` for either means the client's own policy, which is
+        what every caller uses today.
+
+        **The filter-enforcement lookup is NOT covered by ``timeout_s``.**
+        ``_enforce`` calls :meth:`get_symbol_info`, which cannot carry the
+        per-call channel, so on a cache miss this method makes an unbounded call
+        before the bounded one. It is warm in practice because the composition
+        root primes every configured symbol at boot and nothing refreshes -- a
+        fact that lives in another file, which is why it is written here.
+        """
         prepared = await self._enforce(request) if self._enforce_filters else request
         params = order_request_to_params(prepared)
         params["recvWindow"] = self._recv_window
         # Order placement is NOT idempotent: retry only on rate-limit (rejected
         # pre-acceptance), never on a connection timeout that may have landed.
-        raw = await self._call(self._client.create_order, idempotent=False, **params)
+        raw = await self._call(
+            self._client.create_order,
+            idempotent=False,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
         return to_order(raw)
 
     async def validate_order(self, request: OrderRequest) -> None:
@@ -183,12 +253,34 @@ class BinanceClient(BaseExchangeClient):
         params["recvWindow"] = self._recv_window
         await self._call(self._client.create_test_order, idempotent=False, **params)
 
-    async def cancel_order(self, symbol: str, order_id: str) -> Order:
+    async def cancel_order(
+        self,
+        symbol: str,
+        order_id: str,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        """Cancel one order by venue id.
+
+        ``idempotent`` is left at its default of ``True`` **deliberately**: a
+        cancel is idempotent at the venue, so retrying REDUCES the frequency of
+        unknown state rather than creating it, and ``-2011`` on a retry is
+        strictly more informative than a timeout because it rules out "never
+        received". Do not narrow it without re-arguing that.
+
+        The response names the order differently from every other shape -- ours
+        arrives in ``origClientOrderId`` -- which :func:`to_order` handles.
+        """
+        params = {
+            "symbol": symbol,
+            "orderId": int(order_id),
+            "recvWindow": self._recv_window,
+        }
         raw = await self._call(
             self._client.cancel_order,
-            symbol=symbol,
-            orderId=int(order_id),
-            recvWindow=self._recv_window,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
         )
         return to_order(raw)
 
@@ -200,7 +292,13 @@ class BinanceClient(BaseExchangeClient):
         return [to_order(o) for o in raw]
 
     # -- order lists --------------------------------------------------------
-    async def create_otoco_order_list(self, request: OtocoOrderListRequest) -> OrderList:
+    async def create_otoco_order_list(
+        self,
+        request: OtocoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
         """Place a three-leg OTOCO list: working ``LIMIT``, below stop, above target.
 
         **Its own method rather than a branch shared with OTO**, mirroring the
@@ -215,13 +313,19 @@ class BinanceClient(BaseExchangeClient):
         makes derivable by pure computation. Only ``RateLimitError`` is retried,
         because a 429 is rejected before acceptance.
 
-        **The dispatch retry budget is NOT supplied here, and that is a gap
-        rather than a decision.** `CLAUDE.md` requires it per call rather than
-        per client, and ``_call`` has no per-call retry parameter -- so this
-        method inherits the client's ``retry_attempts=4``, whose worst case is
-        4 x ``requests_timeout_s`` + 3.5s of backoff = 43.5s against a
-        ``dispatch_deadline_s`` of 9.0 (M5d-008). Supplying it belongs at the
-        dispatch site, with the executor.
+        **The dispatch budget is now EXPRESSIBLE here and is still not SET.**
+        ``timeout_s`` bounds one HTTP round trip and ``attempts`` bounds how many
+        are made; both default to ``None``, meaning the client's own policy, so
+        this method behaves exactly as it did until a caller supplies them.
+        Nothing does yet. The values derive from ``risk.dispatch_deadline_s``,
+        which is a PLACEHOLDER, and belong with the executor that spends it --
+        M5d-008 recorded the gap as 4 x ``requests_timeout_s`` + 3.5s of backoff
+        against a deadline of 9.0, and closing it is a decision about numbers
+        rather than about mechanism.
+
+        **The filter lookup in :meth:`_prepare_otoco` is NOT covered by
+        ``timeout_s``** -- see :meth:`create_order` for why that is safe today
+        and where the fact it rests on lives.
 
         Returns an :class:`OrderList`. The placement response carries both
         ``orders`` and ``orderReports``; :func:`to_order_list` reads the former,
@@ -231,19 +335,35 @@ class BinanceClient(BaseExchangeClient):
         leg detail re-reads. That is a recorded loss, not an oversight.
         """
         params = await self._prepare_otoco(request)
-        raw = await self._call(self._client.v3_post_order_list_otoco, idempotent=False, **params)
+        raw = await self._call(
+            self._client.v3_post_order_list_otoco,
+            idempotent=False,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
         return to_order_list(raw)
 
-    async def create_oto_order_list(self, request: OtoOrderListRequest) -> OrderList:
+    async def create_oto_order_list(
+        self,
+        request: OtoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
         """Place a two-leg OTO list: working ``LIMIT`` and a stop, no target.
 
-        See :meth:`create_otoco_order_list` for the retry classification and the
-        response mapping; both apply unchanged. The only difference is the
-        endpoint and the parameter set -- thirteen rather than sixteen, under
-        section 3's plain ``pending*`` prefix.
+        See :meth:`create_otoco_order_list` for the retry classification, the
+        per-call bounds and the response mapping; all apply unchanged. The only
+        difference is the endpoint and the parameter set -- thirteen rather than
+        sixteen, under section 3's plain ``pending*`` prefix.
         """
         params = await self._prepare_oto(request)
-        raw = await self._call(self._client.v3_post_order_list_oto, idempotent=False, **params)
+        raw = await self._call(
+            self._client.v3_post_order_list_oto,
+            idempotent=False,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
         return to_order_list(raw)
 
     async def _prepare_otoco(self, request: OtocoOrderListRequest) -> dict[str, Any]:
@@ -266,6 +386,8 @@ class BinanceClient(BaseExchangeClient):
         *,
         order_list_id: str | None = None,
         list_client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
     ) -> OrderList:
         """Read one order list back, by the venue's ID or by ours.
 
@@ -301,10 +423,20 @@ class BinanceClient(BaseExchangeClient):
             params["orderListId"] = int(order_list_id)
         else:
             params["origClientOrderId"] = list_client_order_id
-        raw = await self._call(self._client.v3_get_order_list, **params)
+        raw = await self._call(
+            self._client.v3_get_order_list,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
         return to_order_list(raw)
 
-    async def get_own_open_orders(self, symbol: str) -> list[tuple[ClientOrderIdParts, Order]]:
+    async def get_own_open_orders(
+        self,
+        symbol: str,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[tuple[ClientOrderIdParts, Order]]:
         """Our RESTING orders on ``symbol``, each paired with its parsed identity.
 
         **Scoped to what RESTS, which is what the endpoint means.** A filled leg
@@ -333,8 +465,11 @@ class BinanceClient(BaseExchangeClient):
         on the symbol, ours and otherwise, so meeting other people's orders is
         the ordinary case rather than an anomaly.
         """
+        params = {"symbol": symbol, "recvWindow": self._recv_window}
         raw = await self._call(
-            self._client.get_open_orders, symbol=symbol, recvWindow=self._recv_window
+            self._client.get_open_orders,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
         )
         found: list[tuple[ClientOrderIdParts, Order]] = []
         for payload in raw:
@@ -346,10 +481,24 @@ class BinanceClient(BaseExchangeClient):
 
     # -- lifecycle ----------------------------------------------------------
     async def ping(self) -> None:
-        """Round-trip the exchange to verify connectivity/credentials wiring."""
+        """Round-trip the exchange to verify connectivity/credentials wiring.
+
+        **OUT OF SCOPE for the per-call transport bound**, and it is a property
+        of the library rather than a choice: ``AsyncClient.ping`` takes no
+        parameters, so there is no params dict for
+        :meth:`_with_call_timeout` to ride. Recorded rather than left silently
+        unbounded. ``attempts`` could be supplied; no caller wants it.
+        """
         await self._call(self._client.ping)
 
     async def close(self) -> None:
+        # OUT OF SCOPE for the per-call transport bound: `close_connection`
+        # takes no parameters, so there is no params dict to carry it. Teardown
+        # is also the one path where a tighter bound would be actively wrong --
+        # abandoning it leaks an aiohttp session, and the masking window this
+        # method exists to close is measured in the error it would hide, not in
+        # seconds.
+        #
         # The one method that used to reach the client without `_call`, so a
         # transport failure here escaped as a raw `aiohttp.ClientError`.
         # `live_system` closes in an unconditional `finally`, where such a raise
