@@ -41,6 +41,30 @@ milestone. It should not be owed again.
 Named rather than rediscovered. Each was a deliberate deferral, not an
 oversight.
 
+> **AN ARMING CONDITION NAMES ITS CALLER, NOT AN EVENT. Added at M5e, after two
+> of the five armed earlier than their stated conditions predicted.**
+>
+> An event-named condition dates the answer by when the *world* will supply it.
+> What actually arms a deferred item is the first **caller that cannot proceed
+> without it**, and callers are ordered by the design rather than by events. The
+> two orderings are not the same, and where they differ the caller always comes
+> first — because the design is what decides which component is written next.
+>
+> Both misses ran in the same direction, which is the one that costs. `M5d-072`
+> said *"a fill"* and is needed by the reconciler's classifier, which must decide
+> what an absent leg means long before anything fills. `M5d-074` said *"the first
+> dispatch"* and is needed by the reconciler, which this file orders **before**
+> any dispatch, because `reconcile_deadline_s` bounds a **read**. Each is
+> re-stated in caller terms in its own section below; the sections are annotated
+> rather than rewritten, and nothing is renumbered.
+>
+> The rule generalises past these two: an item whose arming condition names an
+> event has not been checked against the build order, and the check is cheap —
+> ask which component is written next and whether it can be written without the
+> answer.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
+
 ### 1. The `ExchangeClient` port declaration, with its first caller — `M5d-073`
 
 The ABC is **untouched across all 11 of M5d's commits**, verified by an empty
@@ -72,6 +96,29 @@ silently.
 *Arming condition:* the first dispatch. **It is over budget today and the
 methods say so.**
 
+> **PARTLY LANDED AT M5e's C2, and the arming condition is re-stated. Annotated
+> rather than rewritten, because what changed is which half is outstanding.**
+>
+> **Two sentences above are now false.** *"`_call` has no per-call retry
+> parameter"* — it has one, optional, defaulting to the client's value.
+> *"The method docstrings record the gap"* — they now record that the budget is
+> **expressible and unset**, which is a different statement. The arithmetic is
+> untouched and still correct: `4 x requests_timeout_s + 3.5 s` = 43.5 s against
+> a `dispatch_deadline_s` of 9.0.
+>
+> **What is outstanding is the NUMBER, not the mechanism**, and it is carried
+> below under the M5e section rather than here.
+>
+> **Arming condition, in caller terms: the RECONCILER, not the first dispatch.**
+> This file already orders the reconciler first — *"THE RECONCILER IS A HARD
+> PRECONDITION OF THE FIRST DISPATCH, and it lands as M5e's OPENING block —
+> before any order"* — and `reconcile_deadline_s` bounds a **read**. So the first
+> caller that must choose an attempt count is a reader, and it exists before
+> anything dispatches. Naming the write path dated this item to a milestone
+> later than the one that needs it.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
+
 ### 3. Whether to consume `orderReports` — `M5d-078`
 
 **The case for.** The placement response is the **only** moment at which the
@@ -102,6 +149,30 @@ question. It bites only a caller that reads absence as "never existed".
 
 *Arming condition:* a fill. Settling it needs an order that actually executes,
 which is an irreversible action and belongs to whoever authorises one.
+
+> **THE MEASUREMENT STILL NEEDS A FILL; THE ITEM NO LONGER WAITS ON ONE.
+> Annotated at M5e, and the distinction is the whole of the correction.**
+>
+> *"a fill"* dates this item by when the answer can be **obtained**. What arms it
+> is the first caller that cannot proceed without it, and the paragraph above
+> already names that caller without recognising it: *"It bites only a caller
+> that reads absence as 'never existed'."* **The reconciler's classifier is
+> exactly that caller.** It maps requested levels against resting legs to a
+> `ProtectionState`, so it must decide what an ABSENT leg means — and absence is
+> shared by never-placed, cancelled and, if the answer is no, filled.
+>
+> M5e's probe 2 sharpened the question without settling it: after a cancel,
+> `get_open_orders` returned `[]` while `v3_get_order` still reported
+> `CANCELED`, so enumeration-absence and point-query-status are genuinely
+> different instruments. That was measured on a **cancel**. The filled case is
+> untouched, and generalising one terminal state to another is the arm-set error
+> `M5c-I` records.
+>
+> **So the classifier must be written to a stated assumption about absence, and
+> the assumption named where it is made** — not deferred until a fill happens to
+> occur. The probe remains owed and remains an authorised-action question.
+>
+> Ruled by the reviewer under delegation, not by the project owner.
 
 ### 5. `get_order_list` and M5c-K — **RULED, see R13 below**
 
@@ -365,6 +436,110 @@ was level selection. Fixing either leaves the other.
 > uncomputable count was built to produce. What it is not is a wedge to be worked
 > around: the answer is that the reconciler ships first, not that the interlock
 > is loosened.
+
+---
+
+## Carried from M5e's own work — new, and each names its caller
+
+Four items opened by M5e's correction and mechanism commits. Arming conditions
+are stated in caller terms per the rule at the head of this file. None of these
+prejudges an open ruling.
+
+### 9. `get_symbol_info`'s cache assumption — `M5e-016`
+
+**The one exclusion from the per-call transport bound that sits on a timed
+path.** `AsyncClient.get_symbol_info` takes an explicit `symbol` rather than
+`**params`, so there is no dict for the channel to ride, and it delegates to the
+whole-exchange payload. It is reached from `_enforce` and from both `_prepare_*`
+methods, so a cache miss spends an **unbounded** call inside a sequence bounded
+by a derived per-call share of 3.0 s.
+
+**Why it is safe today, and why that is not reassuring.** `_prime_pairs` fetches
+every configured symbol at boot, and `refresh_symbol_info` has **zero callers in
+`src/`**. Both facts live in other files, neither is visible from the adapter,
+and either is reversible without anything reporting it.
+
+**RULED: assert the cache and REFUSE to dispatch on a miss.** The asymmetry
+decides it rather than a measurement — a spurious refusal is reversible and
+costs one missed trade, while an unbounded round trip inside a bounded sequence
+manufactures the ambiguous write the budget exists to prevent, and no later edit
+un-places an order. That is `CLAUDE.md`'s rule for exactly this shape: *"WHERE A
+CONSTRAINT IS UNMEASURED, TAKE THE READING WHOSE WRONG ANSWER IS REVERSIBLE."*
+
+Two alternatives are recorded as rejected rather than unconsidered: lowering the
+client-wide timeout bounds it but binds every call including the ones that want
+patience; and pre-resolving `SymbolInfo` at the dispatch site removes the lookup
+from the timed path but changes what `_prepare_*` takes, which is a wider change
+than this ruling needs.
+
+*Arming condition:* **the executor**, as the first caller of `create_order` and
+`_prepare_otoco`. **Recorded, deliberately not implemented** — the refusal has
+no caller to refuse yet, and adding one now is surface without a caller.
+
+### 10. R13's endpoint has no wrapper and takes no per-call bound
+
+R13 rules that M5e's timed-out-write recovery asks *did it place?* through
+`v3_get_all_order_list`, on the grounds that a point query by our own ID has an
+undefined answer once an ID has been used twice. **That endpoint is on neither
+the `_AsyncBinanceAPI` Protocol nor `BinanceClient`** — enumerated at M5e, and
+unchanged since.
+
+**Two consequences, and they are separate.** The widening that adds it must also
+give it `timeout_s` and `attempts`, or the recovery path — which runs *inside*
+the dispatch budget, at the moment the budget is already known to be under
+strain — is the one call in the sequence that nothing bounds. And **C2's stated
+justification for budgeting `get_order_list` is superseded**: C2 cited the
+timed-out-write recovery role, which R13 had already moved. **Its inclusion
+stands on a different footing** — Q-C section 7 keeps it one irreplaceable use,
+*"it is a view of a **terminated** list, which distinguishes 'never placed' from
+'placed and already gone'"* — so nothing is removed; the reason written down was
+the wrong one.
+
+*Arming condition:* **the read-surface widening** — the commit that first
+declares a read method on the port for a caller that needs it.
+
+### 11. The per-call bound shipped without its values
+
+C2 shipped the mechanism with **no number anywhere in `src/`**: no config field,
+no changed default, no attempt count and no timeout. Both values derive from
+`risk.dispatch_deadline_s` and `risk.reconcile_deadline_s`, and `M5_NUMBERS.md`
+marks each **PLACEHOLDER -- NOT MEASURED**. Neither status mark is touched here
+and no value is proposed.
+
+**What a later derivation must not do, from the only samples that exist.** M5e's
+probe 2 timed six `get_open_orders` calls against Testnet: `180.6, 451.6, 446.2,
+182.3, 181.9, 452.5` ms. They are **bimodal** — roughly 180 and roughly 450, with
+nothing between — on identical requests from one host in one session. **Their
+mean of 315.8 ms describes no call that happened**, so a value derived from a
+mean would sit in the gap and time out every slow-mode call. **A value must
+clear the SLOW mode**, and what decides it is a tail rather than a centre.
+
+**Six samples from one host bound nothing** — not the tail, not another network
+path, not a busier venue, and the cause of the bimodality was not instrumented.
+This records what the samples forbid, not what they permit.
+
+*Arming condition:* **the reconciler**, which is the first component that spends
+a budget, and by the rule above is also what arms `M5d-074`.
+
+### 12. The pipe rule's scope, and how close the suite is to it
+
+`CLAUDE.md` scopes the pipe rule to *"ANY COMMAND WHOSE OUTPUT CANNOT BE
+REGENERATED"*, and names commands with **side effects** as exactly such
+commands. The gate is merely the instance that has a guard.
+
+**The credentialed suite makes real Testnet calls**, and is regenerable **only**
+because those three tests are, in `CLAUDE.md`'s words, *"read-only against
+Binance **Testnet**, never place an order"*. That is a property of the tests, not
+of `pytest`.
+
+**So the moment any test places an order, piping the suite becomes a breach** —
+not because the command changed, but because its output stopped being
+reproducible. Recorded now because the milestone that would add such a test is
+the one being built, and the rule is easiest to apply before the test exists.
+
+*Arming condition:* **the first test that places an order.** No such test exists;
+M5e's Testnet work was done from scratchpad probes outside the tree precisely so
+that it did not.
 
 ---
 
