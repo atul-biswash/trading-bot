@@ -391,6 +391,15 @@ def to_order(raw: dict[str, Any]) -> Order:
     sentinel rather than an identity, so it maps to ``None`` -- otherwise every
     ordinary order would appear to belong to list "-1", and a reconciler keyed
     on list membership would group them together.
+
+    **A CANCEL RESPONSE NAMES THE ORDER DIFFERENTLY FROM EVERY OTHER SHAPE**, so
+    ``client_order_id`` prefers ``origClientOrderId``. On a cancel the venue puts
+    a fresh identifier of its own in ``clientOrderId`` and returns ours under
+    ``origClientOrderId``; create and query responses carry ours in
+    ``clientOrderId`` and no ``origClientOrderId``. Reading ``clientOrderId``
+    alone therefore hands the caller an identifier it never sent, on the one
+    response that confirms a cancel -- which is the response a reconciler keyed
+    on our own IDs most needs to match.
     """
     executed = _dec(raw.get("executedQty", "0"))
     cummulative = _dec(raw.get("cummulativeQuoteQty", "0"))  # Binance's spelling
@@ -407,6 +416,21 @@ def to_order(raw: dict[str, Any]) -> Order:
     raw_list_id = raw.get("orderListId")
     order_list_id = None if raw_list_id is None or int(raw_list_id) == -1 else str(raw_list_id)
 
+    # MEASURED on BOTH cancel endpoints -- `DELETE /api/v3/order` and
+    # `DELETE /api/v3/orderList` -- a cancel response reports OUR id in
+    # `origClientOrderId` and a FRESH VENUE-GENERATED value in `clientOrderId`.
+    # Create and query shapes carry ours in `clientOrderId` and no
+    # `origClientOrderId` at all, so preferring the latter key is correct for
+    # all four shapes rather than a special case bolted on for one.
+    #
+    # `is not None` rather than `or`: an empty string is not a value the venue
+    # is measured to send, and falling through on one would reintroduce the
+    # substitution silently.
+    orig_client_order_id = raw.get("origClientOrderId")
+    client_order_id = (
+        orig_client_order_id if orig_client_order_id is not None else raw.get("clientOrderId")
+    )
+
     return Order(
         order_id=str(raw["orderId"]),
         symbol=raw["symbol"],
@@ -418,7 +442,7 @@ def to_order(raw: dict[str, Any]) -> Order:
         price=price,
         average_price=average_price,
         created_at=_first_ms(raw, "transactTime", "time", "updateTime"),
-        client_order_id=raw.get("clientOrderId"),
+        client_order_id=client_order_id,
         stop_price=stop_price,
         order_list_id=order_list_id,
     )

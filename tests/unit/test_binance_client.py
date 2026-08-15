@@ -128,7 +128,42 @@ ORDER_LIMIT_NEW = {
     "type": "LIMIT",
     "side": "BUY",
 }
-ORDER_CANCELED = {**ORDER_LIMIT_NEW, "status": "CANCELED"}
+# CAPTURED VERBATIM from M5e's probe 2: `DELETE /api/v3/order` via
+# `cancel_order`, Binance Spot TESTNET, symbol BTCUSDT, orderId 3219508,
+# 2026-08-15. A plain LIMIT/GTC/BUY placed 40% under the best bid so it could
+# not cross, then cancelled from `NEW`; nothing filled. Untrimmed -- all
+# sixteen keys, in wire order.
+#
+# This replaces a COMPOSED fixture, `{**ORDER_LIMIT_NEW, "status": "CANCELED"}`,
+# which was a CREATE payload with one key overwritten. It carried no
+# `origClientOrderId` at all, so no assertion written against it could have
+# failed on the substitution below -- the fixture was unpinnable, not merely
+# unpinned.
+#
+# Fenced because the LAYOUT is the correspondence: `origClientOrderId` second
+# carrying OURS, against `clientOrderId` fifth carrying a fresh venue-generated
+# value. Regrouping the keys for readability would destroy the one thing this
+# fixture exists to show.
+# fmt: off
+ORDER_CANCELED = {
+    "symbol":                  "BTCUSDT",
+    "origClientOrderId":       "tb1-BTCUSDT-1786764420000-0-W",
+    "orderId":                 3219508,
+    "orderListId":             -1,
+    "clientOrderId":           "CfM1Bg0XtkHHVaJQAE7J14",
+    "transactTime":            1786764481669,
+    "price":                   "37863.05000000",
+    "origQty":                 "0.00020000",
+    "executedQty":             "0.00000000",
+    "origQuoteOrderQty":       "0.00000000",
+    "cummulativeQuoteQty":     "0.00000000",
+    "status":                  "CANCELED",
+    "timeInForce":             "GTC",
+    "type":                    "LIMIT",
+    "side":                    "BUY",
+    "selfTradePreventionMode": "EXPIRE_MAKER",
+}
+# fmt: on
 OPEN_ORDER = {
     "symbol": "BTCUSDT",
     "orderId": 111,
@@ -534,6 +569,33 @@ async def test_cancel_order_sends_integer_order_id() -> None:
 
     client.cancel_order.assert_awaited_once_with(symbol="BTCUSDT", orderId=123456, recvWindow=5000)
     assert order.status is OrderStatus.CANCELED
+
+
+async def test_a_cancelled_order_carries_our_id_not_the_venues() -> None:
+    """MEASURED on BOTH cancel endpoints: a cancel response reports OUR id in
+    `origClientOrderId` and a FRESH VENUE-GENERATED value in `clientOrderId`.
+
+    Reading `clientOrderId` alone hands the caller an identifier it never sent,
+    on the one response that confirms the cancel -- and reconciliation is keyed
+    off what was REQUESTED, by our own ID, so that is precisely the response it
+    cannot afford to mismatch.
+
+    **This is the assertion the previous fixture could not carry.** It was
+    `{**ORDER_LIMIT_NEW, "status": "CANCELED"}` -- a create payload with no
+    `origClientOrderId` -- so the substitution was not merely unasserted, it was
+    unrepresentable. The test above still abstains on it by asserting only
+    `status`; this one is what bites.
+    """
+    client = AsyncMock()
+    client.cancel_order.return_value = ORDER_CANCELED
+    bc = _make(client)
+
+    order = await bc.cancel_order("BTCUSDT", "3219508")
+
+    assert order.client_order_id == "tb1-BTCUSDT-1786764420000-0-W"
+    # Named explicitly rather than left to the equality above: the failure this
+    # pins is the venue's id arriving in its place, not merely a wrong string.
+    assert order.client_order_id != ORDER_CANCELED["clientOrderId"]
 
 
 async def test_get_open_orders_without_symbol_omits_symbol_param() -> None:
