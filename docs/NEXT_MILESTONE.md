@@ -565,6 +565,17 @@ in one cycle, or the position never completes.** The leftover is
 `max_calls - due`, which is the reservation's one call at saturation and more
 when positions are fewer than the cap.
 
+> **The FIRST SENTENCE STANDS; the leftover formula is SUPERSEDED.** Annotated
+> rather than edited, because the all-or-nothing finding is what made the fix
+> derivable and only its arithmetic moved.
+>
+> The leftover is no longer `max_calls - due`. Under the L-leg reservation the
+> pass stops early, at `len(results) + reserved >= max_calls`, so the leftover
+> is `max_calls - len(results)` and is **at least** what the first unresolved
+> position needs. All-or-nothing is therefore satisfied rather than worked
+> around: the leftover now covers every outstanding leg of one position, and
+> that position completes.
+
 **The priority inversion is DELIBERATE — `M5e-054`.** Unresolved positions carry
 old or absent stamps, so they sort first and are read before healthy ones.
 Verifying suspect protection ahead of re-reading protection already believed
@@ -603,6 +614,61 @@ condition arriving at the escalation that does not exist yet.
 > `P + L <= max_calls` by construction, and terminates in `k` cycles instead of
 > never. It does not close `max_open_positions = 1`, where the reserve is zero.
 > Scheduled as its own commit after the driver.
+
+> **CLOSED, and the closure is SCOPED to `max_calls >= L + 1`.** MEASURED
+> against the real functions on the scenario that produced the livelock -- two
+> unresolved two-leg positions and one healthy, `max_calls = 3`, `T_min = 60 s`:
+>
+> | cycle | read | queried | outcome |
+> |---|---|---|---|
+> | 1 | `['BTCUSDT']` | `SL`, `TP` | BTCUSDT completes, stamped |
+> | 2 | `['ETHUSDT']` | `SL`, `TP` | ETHUSDT completes, stamped |
+> | 3 | `['SOLUSDT', 'BTCUSDT']` | `SL` | the healthy position is read |
+> | 4 | `['BTCUSDT']` | `SL`, `TP` | BTCUSDT completes again |
+>
+> Against commit 2's measured baseline of `read=['BTCUSDT','ETHUSDT']` every
+> cycle, `queried=['0-SL']` forever, and the healthy position **never read**.
+> Cycle 3 also shows the late-discovery case -- BTCUSDT is visited second, so
+> its reservation lands after the budget is spent and it does not complete that
+> cycle -- and cycle 4 shows it self-correcting, because it stayed unstamped and
+> therefore sorted first.
+>
+> **The scope is arithmetic, not a weakness.** Completing an `L`-leg position
+> costs `1 + L` calls: one enumeration to discover it, `L` point queries to
+> resolve it. Below that, no scheme respecting `total <= max_calls` can finish
+> it. `max_open_positions = 1` is unchanged and stays open under `M5e-055`.
+
+### 13a. The config relation nothing validates -- `M5e-066`
+
+**`max_open_positions >= L + 1`, where `L` is the number of ENABLED protective
+levels.** Both enabled gives `L = 2` and needs `3`; a stop alone gives `L = 1`
+and needs `2`; neither gives `L = 0` and the relation is vacuous. A take-profit
+with no stop is refused at config load, so those are the only three
+combinations. **MEASURED**, by building each through `AppConfig.model_validate`.
+
+**The coherence validator cannot catch a violation, and that is the half worth
+recording.** It checks `p_sim x dispatch + n_max x reconcile <= budget`, in
+which `n_max` carries a positive coefficient -- so **lowering**
+`max_open_positions` only loosens the inequality. MEASURED on the shipped
+config with both levels enabled: `1`, `2`, `3` and `4` are all ACCEPTED and
+only `5` is refused, and it is refused for being too *large*. A config with
+`max_open_positions = 2` and both protective levels therefore **boots clean and
+fails at the first divergence**, with a position that can never finish
+resolving.
+
+That configuration is not one anyone would flag on sight: an operator choosing
+`max_open_positions = 2` with both a stop and a take-profit is choosing *more*
+caution, and gets a reconciler that cannot complete a position as the reward.
+
+**No validator rule is added here, deliberately.** The relation couples
+`risk.limits.max_open_positions` to `risk.stop_loss.enabled` and
+`risk.take_profit.enabled` -- three fields across two sections that nothing
+relates today -- and inventing that coupling in passing is how a coherence rule
+gets written without the reasoning that justifies it. Recording the relation is
+what stops it being rediscovered from a live failure.
+
+*Arming condition, in caller terms:* **whoever writes the next coherence rule**,
+as the first author with reason to relate those fields.
 
 **`max_open_positions = 1` is a total resolution hole, and its cost reaches a
 reserved ruling — `M5e-055`.** With one due position the pass spends the only

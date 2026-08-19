@@ -408,19 +408,44 @@ async def reconcile_open_positions(
     site says something, as ``RiskAssessment.stage`` does. No number is chosen
     here; budgets are the driver's.
 
-    **It reserves its LAST call once a leg has been seen unresolved.**
-    Positions are keyed by symbol on ``Portfolio``, so at the position limit
-    the pass would otherwise consume the entire budget and leave the resolver
-    zero -- every cycle, and precisely when there is most protection to verify.
-    Dedup does not help: a deduped position produces no assessment, so the call
-    it frees and the resolution that call would fund never coexist.
+    **It reserves what the FIRST unresolved position NEEDS -- its ``L``
+    outstanding legs -- once a leg has been seen unresolved.** Positions are
+    keyed by symbol on ``Portfolio``, so at the position limit the pass would
+    otherwise consume the entire budget and leave the resolver zero -- every
+    cycle, and precisely when there is most protection to verify. Dedup does
+    not help: a deduped position produces no assessment, so the call it frees
+    and the resolution that call would fund never coexist.
 
     The reservation is CONDITIONAL, and that is what makes it free. At steady
-    state nothing is unresolved, so the pass spends every call; holding one
+    state nothing is unresolved, so the pass spends every call; holding calls
     back unconditionally would tax reconciliation permanently for a resolver
-    with no work to do. It also cannot starve the pass to nothing: nothing can
-    be unresolved before the first call, so the first call is never reserved
-    away.
+    with no work to do. It also cannot starve the pass to nothing: ``reserved``
+    is assigned only *after* a call returns, so before the first call it is
+    zero and ``0 + 0 >= max_calls`` is false for any positive budget.
+
+    **Reserving exactly ONE call was this rule's first form, and it left a
+    LIVELOCK.** Recorded rather than replaced silently, because the earlier
+    reasoning was sound and only its quantity was wrong. Resolution is
+    all-or-nothing -- the ``missing`` tuple is re-derived in fixed leg order
+    every cycle and the budget is spent from the front, so one reserved call
+    re-queries the same first leg forever and a two-leg position never
+    completes. Never completing means never stamped, means sorting first
+    forever, means the healthy positions behind it are never read at all.
+
+    **Completing an ``L``-leg position costs ``1 + L`` calls**: one enumeration
+    to discover it, ``L`` point queries to resolve it. So this rule closes the
+    livelock exactly when ``max_calls >= L + 1``, and below that no scheme
+    respecting ``total <= max_calls`` can -- that is arithmetic rather than a
+    weakness in the rule. See ``docs/NEXT_MILESTONE.md`` item 13 for the config
+    relation this implies, which nothing validates.
+
+    **``L`` is DISCOVERED BY VISITING, not predicted**, and the reservation
+    takes effect from the next iteration. It protects work already identified
+    rather than work forecast, which is what lets it exist without lookahead.
+    One asymmetric case follows and self-corrects: a first unresolved position
+    discovered *last* sets ``reserved`` after every call is spent, so the
+    resolver may get nothing that cycle -- but that position is left unstamped,
+    sorts first next cycle, and is then discovered on call one.
 
     **A position whose assessment carries unresolved legs is NOT stamped.** It
     keeps ``protection`` -- the verdict is real and untrusted either way -- and
@@ -445,13 +470,19 @@ async def reconcile_open_positions(
     )
 
     results: list[tuple[Position, ProtectionAssessment]] = []
-    reserve_one = False
+    reserved = 0
     for position in due:
-        # A DISJUNCTIVE stop, entered from two sides: the plain cap, and the
-        # reservation that holds the last call back for the resolver once
-        # anything has come back unresolved. Written as one condition because
-        # they are one rule -- how many calls this pass may still spend.
-        if len(results) >= max_calls or (reserve_one and len(results) == max_calls - 1):
+        # ONE condition, not two branches. With `reserved` at zero this IS the
+        # plain cap; with `reserved` at L it IS the reservation. The earlier
+        # form was a disjunction because the reserved quantity was fixed at
+        # one; making it a quantity collapses both halves into the same
+        # arithmetic -- how many calls this pass may still spend.
+        #
+        # The guarantee falls out of it: the loop continues only while
+        # `len(results) + reserved < max_calls`, so it ends with
+        # `len(results) <= max_calls - reserved`, so the remainder the caller
+        # derives is at least `reserved`. Total stays at or under `max_calls`.
+        if len(results) + reserved >= max_calls:
             break
         orders = await client.get_own_open_orders(
             position.symbol, timeout_s=timeout_s, attempts=attempts
@@ -468,7 +499,13 @@ async def reconcile_open_positions(
         )
         if assessment.unresolved:
             position.record_partial_reconciliation(protection=assessment.state)
-            reserve_one = True
+            # FIRST-WINS, not accumulate and not last-wins. Reserving for every
+            # unresolved position would shrink the pass until it read almost
+            # nothing, and completing them one at a time is what makes progress
+            # monotone: each cycle finishes one position, stamps it, and frees
+            # its share for the next.
+            if reserved == 0:
+                reserved = len(assessment.unresolved)
         else:
             position.record_reconciliation(protection=assessment.state, at=now)
         results.append((position, assessment))

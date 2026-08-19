@@ -44,6 +44,9 @@ BAR = datetime(2026, 8, 15, 11, 0, tzinfo=timezone.utc)
 DEDUP = timedelta(minutes=1)
 QTY = Decimal("0.00100000")
 STOP = Decimal("44117.09")
+#: A take-profit, so a position can request TWO protective legs. The
+#: reservation is a leg COUNT, and a one-leg fixture cannot express that.
+TAKE = Decimal("52000.00")
 LIST_ID = "91590"
 
 
@@ -134,7 +137,13 @@ def _order(
     )
 
 
-def _position(symbol: str, *, stamp: datetime | None, stop_loss: Decimal | None = STOP) -> Position:
+def _position(
+    symbol: str,
+    *,
+    stamp: datetime | None,
+    stop_loss: Decimal | None = STOP,
+    take_profit: Decimal | None = None,
+) -> Position:
     return Position(
         symbol=symbol,
         side=PositionSide.LONG,
@@ -145,6 +154,7 @@ def _position(symbol: str, *, stamp: datetime | None, stop_loss: Decimal | None 
         order_list_id=LIST_ID,
         last_reconciled_at=stamp,
         stop_loss=stop_loss,
+        take_profit=take_profit,
     )
 
 
@@ -425,7 +435,173 @@ async def test_the_pass_reserves_its_last_call_once_a_leg_is_unresolved() -> Non
         attempts=None,
     )
 
-    assert len(results) == 2  # one call held back for the resolver
+    assert len(results) == 2  # one call held back: the absent position needs L=1
+
+
+async def test_the_reservation_is_the_first_positions_leg_count_not_one() -> None:
+    """L, not 1. Completing an L-leg position costs 1 enumeration + L queries,
+    so reserving a single call leaves a two-leg position permanently
+    unfinishable -- it re-queries the same first leg every cycle, never
+    completes, never gets stamped, and therefore sorts first forever while the
+    positions behind it are never read.
+
+    The contrast with the test above is the point: identical shape, one absent
+    leg there and two here, and the pass stops one call earlier.
+    """
+    positions = [
+        _position("BTCUSDT", stamp=None, take_profit=TAKE),
+        _position("ETHUSDT", stamp=None),
+        _position("SOLUSDT", stamp=None),
+    ]
+    books = _resting("ETHUSDT", "SOLUSDT")
+    books["BTCUSDT"] = []
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(books),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert len(results) == 1  # two calls held back, because L is two
+
+
+async def test_only_the_first_unresolved_positions_legs_are_reserved() -> None:
+    """FIRST-WINS, and the two positions must need DIFFERENT numbers of legs.
+
+    Reserving for every unresolved position would shrink the pass until it read
+    almost nothing; completing them one at a time is what makes progress
+    monotone. But with two one-leg positions, first-wins, last-wins and
+    accumulate-all are indistinguishable at a budget this size -- the fixture
+    would read as covering the rule while being blind to both inversions. So
+    the first unresolved position needs ONE leg and the second needs TWO:
+    first-wins reserves 1 and reads all three, last-wins reserves 2 and stops
+    at two, accumulate reserves 3 and also stops at two.
+    """
+    positions = [
+        _position("BTCUSDT", stamp=None),
+        _position("ETHUSDT", stamp=None, take_profit=TAKE),
+        _position("SOLUSDT", stamp=None),
+    ]
+    books = _resting("SOLUSDT")
+    books["BTCUSDT"] = []
+    books["ETHUSDT"] = []
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(books),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=4,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert len(results) == 3
+
+
+async def test_the_pass_never_leaves_less_than_it_reserved() -> None:
+    """THE GUARANTEE, asserted directly rather than inferred from a count.
+    The loop continues only while `len(results) + reserved < max_calls`, so the
+    remainder the caller derives is at least what the first unresolved position
+    needs -- and the total the phase can spend never exceeds the reservation
+    the coherence validator computed.
+    """
+    positions = [
+        _position("BTCUSDT", stamp=None, take_profit=TAKE),
+        _position("ETHUSDT", stamp=None),
+        _position("SOLUSDT", stamp=None),
+    ]
+    books = _resting("ETHUSDT", "SOLUSDT")
+    books["BTCUSDT"] = []
+    max_calls = 3
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(books),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=max_calls,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    outstanding = sum(len(assessment.unresolved) for _p, assessment in results)
+    assert max_calls - len(results) >= outstanding
+
+
+async def test_a_budget_below_one_plus_l_cannot_complete_the_position() -> None:
+    """THE BOUNDARY, pinned so the rule is not read as universal. Completing an
+    L-leg position costs 1 + L calls, so at `max_calls = 2` a two-leg position
+    cannot be finished by any scheme respecting `total <= max_calls`. That is
+    arithmetic, not a weakness in the reservation -- and it makes
+    `max_open_positions >= L + 1` a config relation nothing validates. See
+    `docs/NEXT_MILESTONE.md` item 13.
+    """
+    positions = [
+        _position("BTCUSDT", stamp=None, take_profit=TAKE),
+        _position("ETHUSDT", stamp=None),
+    ]
+    books = _resting("ETHUSDT")
+    books["BTCUSDT"] = []
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(books),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=2,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    ((_position_out, assessment),) = results
+    assert len(assessment.unresolved) == 2
+    assert 2 - len(results) < len(assessment.unresolved)  # the remainder cannot cover it
+
+
+async def test_a_late_discovered_unresolved_position_self_corrects_next_cycle() -> None:
+    """The one asymmetric case, and why it needs no lookahead. A first
+    unresolved position discovered LAST sets the reservation after every call
+    is spent, so the resolver may get nothing that cycle -- but the position is
+    left unstamped, sorts first next cycle, and is then discovered on call one
+    with its full share still unspent.
+    """
+    healthy = _position("ETHUSDT", stamp=NOW - timedelta(minutes=30))
+    broken = _position("BTCUSDT", stamp=NOW - timedelta(minutes=5), take_profit=TAKE)
+    books = _resting("ETHUSDT")
+    books["BTCUSDT"] = []
+    client = _StubClient(books)
+    portfolio = _portfolio(healthy, broken)
+
+    first = await reconcile_open_positions(
+        portfolio=portfolio,
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+    assert client.asked == ["ETHUSDT", "BTCUSDT"]
+    assert 3 - len(first) == 1  # discovered last: only one call left, and it needs two
+
+    client.asked.clear()
+    second = await reconcile_open_positions(
+        portfolio=portfolio,
+        client=client,
+        now=NOW + timedelta(minutes=2),
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == ["BTCUSDT"]  # oldest stamp, so first -- and the pass stops
+    assert 3 - len(second) == 2  # its full share is left over
 
 
 async def test_the_pass_spends_every_call_when_nothing_is_unresolved() -> None:
