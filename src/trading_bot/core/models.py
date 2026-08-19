@@ -642,6 +642,38 @@ class Position(BaseModel):
         self.protection = protection
         self.last_reconciled_at = at
 
+    def record_partial_reconciliation(self, *, protection: ProtectionState) -> None:
+        """Record what was learned, and DELIBERATELY not the stamp.
+
+        **This is the first deliberate use of the ordering ruled unprovable
+        above.** That ruling prefers "never reconciled" to "reconciled but
+        stale" for a write interrupted between the two fields; this method
+        produces exactly that state on purpose and durably, for a position
+        whose protective legs could not all be resolved. The state the ordering
+        was chosen to favour therefore becomes observable -- and testable --
+        for the first time.
+
+        Note precisely what that does and does not buy, because the tempting
+        over-statement is one notch stronger than the truth: the *ordering*
+        remains unprovable, since swapping the two assignments inside
+        :meth:`record_reconciliation` is still unobservable. What is now
+        observable is the *state*, not the sequence that reaches it.
+
+        **A sibling method rather than a flag on the other one.** A boolean
+        parameter that silently changes which fields a method writes is a
+        second meaning hidden inside one name; a caller reading
+        ``record_reconciliation(..., stamp=False)`` learns nothing about why.
+        This name says what happened, and greps as the deliberate case.
+
+        **The consequence is the point, not a side effect.** An unstamped
+        position is maximally stale by every reader of
+        ``last_reconciled_at``, is always due, and sorts first -- so the next
+        pass visits it before anything else and the reservation fires early
+        enough to leave a query for it. The stamp is the state; nothing else
+        has to remember.
+        """
+        self.protection = protection
+
 
 class SizingDecision(_Frozen):
     """How much to trade -- or, when the answer is nothing, why.

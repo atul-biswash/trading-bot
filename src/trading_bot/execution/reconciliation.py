@@ -357,6 +357,9 @@ async def reconcile_open_positions(
     client: ExchangeClient,
     now: datetime,
     dedup_interval: timedelta,
+    max_calls: int,
+    timeout_s: float | None,
+    attempts: int | None,
 ) -> tuple[tuple[Position, ProtectionAssessment], ...]:
     """Read what rests, classify every due position, and record the verdict.
 
@@ -381,6 +384,51 @@ async def reconcile_open_positions(
     arrived contributes no timestamp, so a candle clock freezes exactly during
     the outage that makes the ledger least trustworthy.
 
+    **``max_calls`` bounds the WHOLE reconciliation phase, not this pass.**
+    The coherence validator reserves ``max_open_positions x
+    reconcile_deadline_s`` for reconciliation, and every call is bounded by
+    ``reconcile_deadline_s``, so the reservation admits exactly
+    ``max_open_positions`` calls. That reservation is met with equality and
+    never exceeded: what this pass does not spend is what
+    :func:`resolve_unresolved_legs` may.
+
+    **The pass makes EXACTLY ONE call per returned assessment**, which is why
+    the caller can derive the remainder as ``max_calls - len(results)`` with no
+    counter to keep in step. The loop is written against ``len(results)``
+    rather than a parallel tally so the invariant is structural rather than
+    remembered.
+
+    **``timeout_s`` and ``attempts`` are REQUIRED and nullable**, not defaulted.
+    ``None`` means the implementation's own policy and is a legitimate answer;
+    what is not legitimate is a caller that never considered the question,
+    because omitting them silently inherits the client-wide policy -- four
+    attempts at ``exchange.requests_timeout_s``, tens of seconds -- inside a
+    slot reserved at ``reconcile_deadline_s``. That failure is silent and
+    blows the only guarantee the coherence validator computes, so every call
+    site says something, as ``RiskAssessment.stage`` does. No number is chosen
+    here; budgets are the driver's.
+
+    **It reserves its LAST call once a leg has been seen unresolved.**
+    Positions are keyed by symbol on ``Portfolio``, so at the position limit
+    the pass would otherwise consume the entire budget and leave the resolver
+    zero -- every cycle, and precisely when there is most protection to verify.
+    Dedup does not help: a deduped position produces no assessment, so the call
+    it frees and the resolution that call would fund never coexist.
+
+    The reservation is CONDITIONAL, and that is what makes it free. At steady
+    state nothing is unresolved, so the pass spends every call; holding one
+    back unconditionally would tax reconciliation permanently for a resolver
+    with no work to do. It also cannot starve the pass to nothing: nothing can
+    be unresolved before the first call, so the first call is never reserved
+    away.
+
+    **A position whose assessment carries unresolved legs is NOT stamped.** It
+    keeps ``protection`` -- the verdict is real and untrusted either way -- and
+    is left maximally stale, so it sorts first next cycle and the reservation
+    fires early enough to fund it. The stamp is the state; nothing here
+    remembers anything between passes. See
+    :meth:`~trading_bot.core.models.Position.record_partial_reconciliation`.
+
     :raises ContractViolationError: an order came back with an identifier that
         does not parse. See :func:`_compare_set` for why aborting is safe.
     """
@@ -397,8 +445,17 @@ async def reconcile_open_positions(
     )
 
     results: list[tuple[Position, ProtectionAssessment]] = []
+    reserve_one = False
     for position in due:
-        orders = await client.get_own_open_orders(position.symbol)
+        # A DISJUNCTIVE stop, entered from two sides: the plain cap, and the
+        # reservation that holds the last call back for the resolver once
+        # anything has come back unresolved. Written as one condition because
+        # they are one rule -- how many calls this pass may still spend.
+        if len(results) >= max_calls or (reserve_one and len(results) == max_calls - 1):
+            break
+        orders = await client.get_own_open_orders(
+            position.symbol, timeout_s=timeout_s, attempts=attempts
+        )
         assessment = classify_protection(
             symbol=position.symbol,
             entry_bar_time=position.entry_bar_time,
@@ -409,7 +466,11 @@ async def reconcile_open_positions(
             take_profit=position.take_profit,
             resting=_compare_set(orders, symbol=position.symbol),
         )
-        position.record_reconciliation(protection=assessment.state, at=now)
+        if assessment.unresolved:
+            position.record_partial_reconciliation(protection=assessment.state)
+            reserve_one = True
+        else:
+            position.record_reconciliation(protection=assessment.state, at=now)
         results.append((position, assessment))
     return tuple(results)
 
@@ -458,6 +519,9 @@ async def resolve_unresolved_legs(
     assessments: Sequence[tuple[Position, ProtectionAssessment]],
     client: ExchangeClient,
     max_queries: int,
+    now: datetime,
+    timeout_s: float | None,
+    attempts: int | None,
 ) -> tuple[tuple[Position, ProtectionAssessment], ...]:
     """Resolve absent legs by point query, within a cap.
 
@@ -468,13 +532,43 @@ async def resolve_unresolved_legs(
     happened to be missing.
 
     **``max_queries`` is a parameter and no number is chosen here.** It is a
-    budget, and budgets in this project are the driver's to set.
+    budget, and budgets in this project are the driver's to set. The same is
+    true of ``timeout_s`` and ``attempts``, which are required and nullable for
+    the reason given on :func:`reconcile_open_positions`. ``now`` is the same
+    instant the pass used: one clock reading per cycle, so a two-phase
+    reconciliation records the cycle it belongs to rather than the moment its
+    second half happened to finish.
 
     **This function does NOT write to the positions**, deliberately. Every state
     it can return is untrusted exactly as the ``UNKNOWN`` the pass already wrote
     is untrusted, so the ledger's answer to "may this stop be priced" does not
     change -- only the REPORT sharpens. Writing would also re-stamp
     ``last_reconciled_at`` and reset a dedup clock the pass has just set.
+
+    .. note::
+
+       **SUPERSEDED in its second half, and annotated rather than rewritten,
+       because its first half is still the reason this is safe.**
+
+       What SURVIVES: every state returned here is untrusted, so writing one
+       changes no risk answer. That is what makes the write below harmless
+       rather than merely convenient.
+
+       What FAILED: *"would also re-stamp ``last_reconciled_at`` and reset a
+       dedup clock the pass has just set"*. The pass no longer sets a stamp on
+       a position carrying unresolved legs -- it writes protection alone -- so
+       for exactly the positions reaching the write below there is no clock to
+       reset. **This is a justification that went stale when a fact
+       established elsewhere moved**, which is why it is annotated at its own
+       site instead of being quietly deleted.
+
+       **So this function writes in ONE case: a position whose every
+       outstanding leg it actually queried.** That is the second half of a
+       two-phase reconciliation, and the stamp records the phase that
+       completed it. A position with legs left over is still not stamped, and
+       the legs are carried back in ``unresolved`` so the caller can tell "all
+       queried" from "the budget ran out" -- a distinction that previously
+       existed only in the reason prose, where nothing could act on it.
 
     **Only ``OrderNotFoundError`` is caught, and the principle generalises past
     this function.** It is an ANSWER: the venue saying the order does not exist.
@@ -503,6 +597,7 @@ async def resolve_unresolved_legs(
 
         states: list[_ResolvedState] = []
         reasons: list[str] = []
+        carried: list[UnresolvedLeg] = []
         for item in assessment.unresolved:
             if budget <= 0:
                 states.append(ProtectionState.UNKNOWN)
@@ -511,11 +606,20 @@ async def resolve_unresolved_legs(
                     "budget was exhausted before reaching it, so nothing is known about it beyond "
                     "its absence from the enumeration"
                 )
+                # Carried back rather than left to the prose. "Every leg was
+                # queried" and "the budget ran out" are different facts with
+                # different consequences -- only the first may stamp -- and a
+                # caller cannot act on a distinction that exists only in a
+                # sentence.
+                carried.append(item)
                 continue
             budget -= 1
             try:
                 order = await client.get_order(
-                    position.symbol, client_order_id=item.client_order_id
+                    position.symbol,
+                    client_order_id=item.client_order_id,
+                    timeout_s=timeout_s,
+                    attempts=attempts,
                 )
             except OrderNotFoundError as exc:
                 states.append(ProtectionState.DIVERGED)
@@ -551,6 +655,16 @@ async def resolve_unresolved_legs(
                 continue
             else:
                 assert_never(candidate)
-        refined.append((position, ProtectionAssessment(state=verdict, reason="; ".join(reasons))))
+        outcome = ProtectionAssessment(
+            state=verdict, reason="; ".join(reasons), unresolved=tuple(carried)
+        )
+        # The completing half of a two-phase reconciliation, and it stamps
+        # only when there is nothing left outstanding. A position with legs
+        # carried forward stays unstamped, stays maximally stale, and is
+        # visited first next cycle -- which is what funds the query it did not
+        # get this time.
+        if not carried:
+            position.record_reconciliation(protection=verdict, at=now)
+        refined.append((position, outcome))
 
     return tuple(refined)

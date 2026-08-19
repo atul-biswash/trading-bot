@@ -541,6 +541,69 @@ the one being built, and the rule is easiest to apply before the test exists.
 M5e's Testnet work was done from scratchpad probes outside the tree precisely so
 that it did not.
 
+### 13. What the last-call reservation costs — `M5e-053`, `M5e-054`, `M5e-055`
+
+The pass reserves its last call for the resolver once a leg comes back
+unresolved, and does not stamp a position whose legs it could not all query.
+Three costs follow. **None is a defect to fix here**; each is a consequence of
+a scheme that was chosen over a strictly worse one, and each is recorded so it
+is not rediscovered as a surprise.
+
+**Resolution progress is ALL-OR-NOTHING, not incremental — `M5e-053`,
+MEASURED, and it falsifies the 2k-cycle bound this item was drafted around.**
+The bound assumed one leg resolved per cycle, so `2k` cycles for `k` positions
+holding two legs each. It does not happen. `classify_protection` derives its
+`missing` tuple in fixed sorted leg order from the book, every cycle, and
+`resolve_unresolved_legs` spends its budget from the front — so with a budget
+of one and two absent legs, **the same leg is queried on every cycle and the
+second is never reached.** Measured over four cycles: `queried=['0-SL']` each
+time, `TP` never. Progress would need per-leg memory, and the stamp — the only
+state this scheme keeps — cannot carry it.
+
+So the correct statement is: **either the leftover covers every outstanding leg
+in one cycle, or the position never completes.** The leftover is
+`max_calls - due`, which is the reservation's one call at saturation and more
+when positions are fewer than the cap.
+
+**The priority inversion is DELIBERATE — `M5e-054`.** Unresolved positions carry
+old or absent stamps, so they sort first and are read before healthy ones.
+Verifying suspect protection ahead of re-reading protection already believed
+sound is the right order: the suspect one is why the portfolio is refusing.
+MEASURED on the shipped shape (`max_calls = 3`, `T_min = 60 s`,
+`max_position_staleness_s = 180`) with `k = 2`: the two unresolved positions
+consume both spendable calls every cycle, the reservation takes the third, and
+**the healthy position is never read at all** — its stamp ages 60, 120, 180,
+240 s and exceeds the threshold at the fourth cycle, permanently.
+
+That is contained rather than harmless: an unresolved position is `UNKNOWN`,
+which is untrusted, which already refuses every entry portfolio-wide, so the
+stale healthy position adds no new refusal. What it does add is a second
+condition arriving at the escalation that does not exist yet.
+
+*Arming condition:* **QB site 4's escalation**, which is the first thing that
+would report an unbounded stamp, and the §7 re-placement milestone, which is
+the only thing that ends the underlying condition.
+
+**`max_open_positions = 1` is a total resolution hole, and its cost reaches a
+reserved ruling — `M5e-055`.** With one due position the pass spends the only
+call the reservation admits and the remainder is zero, every cycle: the legs
+are never queried, so the position is never stamped and `last_reconciled_at`
+stays `None` permanently. No reservation scheme closes this — one call cannot
+fund two instruments — and alternation would need a discriminator that is a
+second reading of position state.
+
+The cost is **not only report quality.** `DIVERGED` is never reached, so §7's
+re-placement can never arm; that much is report. But a permanently `None` stamp
+lands directly on the reserved ruling about what `None` means for the staleness
+refusal, and the three live options do not agree: under **maximally stale** the
+position refuses entries portfolio-wide forever and the bot never trades again;
+under **exempt until first stamped** and under **stamped at construction** it
+does not. **The ruling is not made here**, and this is recorded so that it is
+made knowing a legal configuration turns one of its options into a permanent
+halt.
+
+*Arming condition:* **the ruling itself**, which the driver's milestone forces.
+
 ---
 
 ## Observations carried into the open items — states, not decisions

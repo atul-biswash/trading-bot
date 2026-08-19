@@ -75,6 +75,52 @@ def test_position_unrealized_pnl_short() -> None:
     assert pos.unrealized_pnl(Decimal("90")) == Decimal("20")
 
 
+def test_record_partial_reconciliation_writes_the_verdict_and_not_the_stamp() -> None:
+    """The state `record_reconciliation`'s ordering exists to prefer, produced
+    deliberately rather than only by an interrupted write.
+
+    Note what this pins and what it does not: the ORDERING remains unprovable,
+    since swapping the two assignments inside `record_reconciliation` is still
+    unobservable. What is observable -- and is what this asserts -- is the
+    state that ordering was chosen to favour.
+    """
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
+    )
+
+    pos.record_partial_reconciliation(protection=ProtectionState.DIVERGED)
+
+    assert pos.protection is ProtectionState.DIVERGED
+    assert pos.last_reconciled_at is None
+
+
+def test_record_partial_reconciliation_does_not_clear_an_existing_stamp() -> None:
+    """It withholds a stamp; it does not retract one. A position reconciled at
+    a known instant and later found partially unresolvable keeps the instant it
+    was last understood at -- which is what makes it sort ahead of positions
+    read since, rather than resetting it to a state it never had."""
+    at = datetime(2026, 7, 25, 12, 5, tzinfo=timezone.utc)
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.ACTIVE,
+    )
+    pos.record_reconciliation(protection=ProtectionState.ACTIVE, at=at)
+
+    pos.record_partial_reconciliation(protection=ProtectionState.UNKNOWN)
+
+    assert pos.protection is ProtectionState.UNKNOWN
+    assert pos.last_reconciled_at == at
+
+
 # --------------------------------------------------------------------------
 # Money fields refuse to be built from binary floats
 # --------------------------------------------------------------------------

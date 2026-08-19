@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Any
 
 import pytest
 
@@ -71,9 +70,20 @@ class _StubClient:
         self.orders = orders or {}
         self.asked: list[str] = []
         self.queried: list[str] = []
+        #: The per-call transport bound each call was given. RECORDED rather
+        #: than swallowed into ``**kwargs``: a fixture that accepts an argument
+        #: and discards it cannot express a mutation that stops forwarding it,
+        #: so every bound test written against such a fixture abstains while
+        #: appearing to cover the thing. Naming the parameters also turns an
+        #: unexpected keyword into a ``TypeError`` here rather than silence.
+        self.bounds: list[tuple[float | None, int | None]] = []
+        self.query_bounds: list[tuple[float | None, int | None]] = []
 
-    async def get_own_open_orders(self, symbol: str, **_kwargs: Any) -> list[Order]:
+    async def get_own_open_orders(
+        self, symbol: str, *, timeout_s: float | None = None, attempts: int | None = None
+    ) -> list[Order]:
         self.asked.append(symbol)
+        self.bounds.append((timeout_s, attempts))
         if symbol not in self.books:
             raise AssertionError(
                 f"no book configured for {symbol!r}. Configure one explicitly -- an implicit "
@@ -82,10 +92,16 @@ class _StubClient:
         return self.books[symbol]
 
     async def get_order(
-        self, symbol: str, *, client_order_id: str | None = None, **_kwargs: Any
+        self,
+        symbol: str,
+        *,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
     ) -> Order:
         key = client_order_id or ""
         self.queried.append(key)
+        self.query_bounds.append((timeout_s, attempts))
         if key not in self.orders:
             raise AssertionError(
                 f"no point-query answer configured for {key!r}. A point query has no empty "
@@ -144,7 +160,13 @@ async def test_one_call_per_symbol_for_a_due_position() -> None:
     client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
 
     await reconcile_open_positions(
-        portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.asked == ["BTCUSDT"]
@@ -152,17 +174,31 @@ async def test_one_call_per_symbol_for_a_due_position() -> None:
 
 async def test_positions_are_visited_oldest_stamp_first() -> None:
     """A pass cut short by the budget must advance the STALEST, not a fixed
-    tail. Unstamped sorts first, having waited longest by definition."""
+    tail. Unstamped sorts first, having waited longest by definition.
+
+    **Every book RESTS deliberately.** Empty books would classify unresolved,
+    which arms the last-call reservation and cuts the pass to two symbols --
+    confounding the ordering claim with a budget one. The reservation has its
+    own tests; this one must be able to see all three.
+    """
     fresh = _position("ETHUSDT", stamp=NOW - timedelta(minutes=5))
     stale = _position("BTCUSDT", stamp=NOW - timedelta(minutes=30))
     never = _position("SOLUSDT", stamp=None)
-    client = _StubClient({"SOLUSDT": [], "BTCUSDT": [], "ETHUSDT": []})
+    client = _StubClient(
+        {
+            symbol: [_order(symbol, OrderListLeg.STOP_LOSS)]
+            for symbol in ("SOLUSDT", "BTCUSDT", "ETHUSDT")
+        }
+    )
 
     await reconcile_open_positions(
         portfolio=_portfolio(fresh, stale, never),
         client=client,
         now=NOW,
         dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.asked == ["SOLUSDT", "BTCUSDT", "ETHUSDT"]
@@ -177,7 +213,13 @@ async def test_the_returned_order_matches_the_visit_order() -> None:
     client = _StubClient({"BTCUSDT": [], "ETHUSDT": []})
 
     results = await reconcile_open_positions(
-        portfolio=_portfolio(fresh, stale), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(fresh, stale),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert [position.symbol for position, _assessment in results] == client.asked
@@ -189,7 +231,13 @@ async def test_a_fresh_stamp_is_not_re_read() -> None:
     client = _StubClient({"BTCUSDT": []})
 
     results = await reconcile_open_positions(
-        portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.asked == []
@@ -205,7 +253,13 @@ async def test_a_never_reconciled_position_is_read() -> None:
     client = _StubClient({"BTCUSDT": []})
 
     await reconcile_open_positions(
-        portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.asked == ["BTCUSDT"]
@@ -216,7 +270,13 @@ async def test_the_pass_writes_the_state_and_the_stamp() -> None:
     client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
 
     await reconcile_open_positions(
-        portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert position.protection is ProtectionState.ACTIVE
@@ -233,7 +293,13 @@ async def test_the_pass_returns_the_reason_and_the_unresolved_legs() -> None:
     client = _StubClient({"BTCUSDT": []})  # nothing rests, ON PURPOSE
 
     ((_position_out, assessment),) = await reconcile_open_positions(
-        portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.UNKNOWN
@@ -257,7 +323,13 @@ async def test_an_unparseable_id_is_a_contract_violation() -> None:
 
     with pytest.raises(ContractViolationError, match="does not parse"):
         await reconcile_open_positions(
-            portfolio=_portfolio(position), client=client, now=NOW, dedup_interval=DEDUP
+            portfolio=_portfolio(position),
+            client=client,
+            now=NOW,
+            dedup_interval=DEDUP,
+            max_calls=3,
+            timeout_s=None,
+            attempts=None,
         )
 
 
@@ -273,11 +345,220 @@ async def test_a_closed_position_is_not_visited() -> None:
     client = _StubClient({"BTCUSDT": []})
 
     results = await reconcile_open_positions(
-        portfolio=_portfolio(flat), client=client, now=NOW, dedup_interval=DEDUP
+        portfolio=_portfolio(flat),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.asked == []
     assert results == ()
+
+
+# --------------------------------------------------------------------------
+# The phase budget, and the last call it holds back
+# --------------------------------------------------------------------------
+def _resting(*symbols: str) -> dict[str, list[Order]]:
+    """Books in which every requested leg rests, so nothing is unresolved."""
+    return {symbol: [_order(symbol, OrderListLeg.STOP_LOSS)] for symbol in symbols}
+
+
+async def test_the_pass_forwards_its_per_call_bound_to_the_client() -> None:
+    """A caller on a deadline must be able to bound this THROUGH the pass.
+    Omitting the bound inherits the client-wide policy -- four attempts at the
+    general timeout -- inside a slot reserved at `reconcile_deadline_s`, which
+    silently blows the only guarantee the coherence validator computes."""
+    position = _position("BTCUSDT", stamp=None)
+    client = _StubClient(_resting("BTCUSDT"))
+
+    await reconcile_open_positions(
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=3.0,
+        attempts=1,
+    )
+
+    assert client.bounds == [(3.0, 1)]
+
+
+async def test_the_pass_stops_at_max_calls() -> None:
+    """The plain cap: total calls never exceed the reservation the coherence
+    validator computed, which is met with equality and never exceeded."""
+    positions = [_position(symbol, stamp=None) for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
+    client = _StubClient(_resting("BTCUSDT", "ETHUSDT", "SOLUSDT"))
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=2,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == ["BTCUSDT", "ETHUSDT"]
+    assert len(results) == 2
+
+
+async def test_the_pass_reserves_its_last_call_once_a_leg_is_unresolved() -> None:
+    """Positions are keyed by SYMBOL, so at the position limit the pass would
+    otherwise consume the whole budget and leave resolution zero -- every
+    cycle, and precisely when there is most protection to verify."""
+    positions = [_position(symbol, stamp=None) for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
+    books = _resting("ETHUSDT", "SOLUSDT")
+    books["BTCUSDT"] = []  # first visited, and nothing of ours rests
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(books),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert len(results) == 2  # one call held back for the resolver
+
+
+async def test_the_pass_spends_every_call_when_nothing_is_unresolved() -> None:
+    """The other direction, and what makes the reservation FREE: at steady
+    state there is nothing to resolve, so holding a call back would tax
+    reconciliation permanently for a resolver with no work.
+
+    DECLARED ABSTENTION: this fixture cannot express a mutation that removes
+    the reservation, because nothing here is ever unresolved. The test above is
+    what bites for that direction.
+    """
+    positions = [_position(symbol, stamp=None) for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=_StubClient(_resting("BTCUSDT", "ETHUSDT", "SOLUSDT")),
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert len(results) == 3
+
+
+async def test_the_first_call_is_never_reserved_away() -> None:
+    """Nothing can be unresolved before the first call, so the reservation
+    cannot starve the pass to nothing -- not even at `max_calls=1`, where the
+    reserved slot and the only slot are the same one."""
+    position = _position("BTCUSDT", stamp=None)
+    client = _StubClient({"BTCUSDT": []})
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=1,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == ["BTCUSDT"]
+    assert len(results) == 1
+
+
+async def test_one_call_per_result_is_what_lets_the_caller_derive_the_remainder() -> None:
+    """The caller derives the resolver's budget as `max_calls - len(results)`
+    and keeps no counter. That derivation is only sound because the pass makes
+    exactly one call per returned assessment, so the correspondence is pinned
+    rather than assumed.
+
+    DECLARED ABSTENTION: this test failed under NONE of commit 1's eleven
+    mutations, and that is a property of what it pins rather than a gap. The
+    correspondence is COVERAGE BY CONSTRUCTION -- the loop issues one call and
+    appends one result on the same pass, with no branch between them -- so
+    breaking it needs the loop restructured, not a line changed. It is here
+    because a later restructuring is exactly what would break it silently, and
+    because an arithmetic in another module depends on it.
+    """
+    positions = [_position(symbol, stamp=None) for symbol in ("BTCUSDT", "ETHUSDT")]
+    client = _StubClient(_resting("BTCUSDT", "ETHUSDT"))
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(*positions),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert len(results) == len(client.asked)
+
+
+async def test_a_position_with_unresolved_legs_keeps_its_verdict_and_loses_its_stamp() -> None:
+    """Both halves, together. The verdict is real and is written; the stamp is
+    withheld because the position was not fully reconciled. This is the state
+    `record_reconciliation`'s ordering exists to prefer, now produced on
+    purpose rather than only by an interrupted write."""
+    position = _position("BTCUSDT", stamp=None)
+    client = _StubClient({"BTCUSDT": []})
+
+    await reconcile_open_positions(
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert position.protection is ProtectionState.UNKNOWN
+    assert position.last_reconciled_at is None
+
+
+async def test_an_unstamped_position_sorts_first_on_the_next_pass() -> None:
+    """THE MECHANISM IS THE STAMP, not memory. Withholding it is what makes the
+    next pass visit the unresolved position first, which is what arms the
+    reservation early enough to fund the query it missed. Nothing carries state
+    between passes."""
+    healthy = _position("ETHUSDT", stamp=NOW - timedelta(minutes=30))
+    broken = _position("BTCUSDT", stamp=NOW - timedelta(minutes=5))
+    books = _resting("ETHUSDT")
+    books["BTCUSDT"] = []
+    client = _StubClient(books)
+
+    await reconcile_open_positions(
+        portfolio=_portfolio(healthy, broken),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+    assert client.asked == ["ETHUSDT", "BTCUSDT"]
+
+    client.asked.clear()
+    await reconcile_open_positions(
+        portfolio=_portfolio(healthy, broken),
+        client=client,
+        now=NOW + timedelta(minutes=2),
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked[0] == "BTCUSDT"
 
 
 def test_record_reconciliation_rejects_a_naive_stamp() -> None:
@@ -340,7 +621,12 @@ async def test_a_cancelled_leg_is_divergence() -> None:
     client = _StubClient(orders={SL_ID: _queried(OrderStatus.CANCELED)})
 
     ((_p, assessment),) = await resolve_unresolved_legs(
-        assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.DIVERGED
@@ -354,7 +640,12 @@ async def test_an_unknown_order_is_divergence_with_its_cause_recorded() -> None:
     client = _StubClient(orders={SL_ID: OrderNotFoundError("Unknown order sent.")})
 
     ((_p, assessment),) = await resolve_unresolved_legs(
-        assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.DIVERGED
@@ -368,7 +659,12 @@ async def test_a_filled_leg_is_refused_rather_than_interpreted() -> None:
     client = _StubClient(orders={SL_ID: _queried(OrderStatus.FILLED, filled=QTY)})
 
     ((_p, assessment),) = await resolve_unresolved_legs(
-        assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.UNKNOWN
@@ -381,7 +677,12 @@ async def test_a_partially_filled_leg_is_refused_on_the_same_grounds() -> None:
     )
 
     ((_p, assessment),) = await resolve_unresolved_legs(
-        assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.UNKNOWN
@@ -395,7 +696,12 @@ async def test_a_live_leg_is_an_instrument_disagreement(status: OrderStatus) -> 
     client = _StubClient(orders={SL_ID: _queried(status)})
 
     ((_p, assessment),) = await resolve_unresolved_legs(
-        assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.UNKNOWN
@@ -411,6 +717,9 @@ async def test_the_cap_bounds_the_number_of_queries() -> None:
         assessments=[_unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)],
         client=client,
         max_queries=1,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert client.queried == [SL_ID]
@@ -426,6 +735,9 @@ async def test_an_unqueried_leg_reads_differently_from_a_resolved_one() -> None:
         assessments=[_unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)],
         client=client,
         max_queries=1,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert "NOT YET QUERIED" in assessment.reason
@@ -444,6 +756,9 @@ async def test_the_weaker_answer_wins_when_legs_disagree() -> None:
         assessments=[_unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)],
         client=client,
         max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
     assert assessment.state is ProtectionState.UNKNOWN
@@ -464,7 +779,14 @@ async def test_an_assessment_with_nothing_unresolved_is_passed_through() -> None
         ),
     ]
 
-    refined = await resolve_unresolved_legs(assessments=passthrough, client=client, max_queries=4)
+    refined = await resolve_unresolved_legs(
+        assessments=passthrough,
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
+    )
 
     assert refined == tuple(passthrough)
     assert client.queried == []
@@ -480,7 +802,12 @@ async def test_a_failure_to_get_an_answer_propagates() -> None:
 
     with pytest.raises(ExchangeConnectionError):
         await resolve_unresolved_legs(
-            assessments=[_unresolved(OrderListLeg.STOP_LOSS)], client=client, max_queries=4
+            assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+            client=client,
+            max_queries=4,
+            now=NOW,
+            timeout_s=None,
+            attempts=None,
         )
 
 
@@ -511,6 +838,9 @@ async def test_no_state_resolution_can_return_is_trusted() -> None:
             ],
             client=_StubClient(orders={key: answer}),
             max_queries=4,
+            now=NOW,
+            timeout_s=None,
+            attempts=None,
         )
         producible.add(assessment.state)
     # The cap path, which returns without querying anything.
@@ -518,6 +848,9 @@ async def test_no_state_resolution_can_return_is_trusted() -> None:
         assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
         client=_StubClient(),
         max_queries=0,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
     producible.add(capped.state)
 
@@ -525,18 +858,110 @@ async def test_no_state_resolution_can_return_is_trusted() -> None:
     assert producible & _TRUSTED_PROTECTION == set()
 
 
-async def test_resolution_does_not_write_to_the_position() -> None:
-    """Every state this can return is untrusted exactly as the `UNKNOWN` the
-    pass wrote is untrusted, so the ledger's answer does not change -- only the
-    report sharpens. Writing would also re-stamp a dedup clock the pass just
-    set."""
+async def test_resolution_stamps_a_position_whose_every_leg_it_queried() -> None:
+    """THE COMPLETING HALF of a two-phase reconciliation.
+
+    The pass deliberately withheld the stamp because legs were outstanding.
+    Once none are, the position has in fact been reconciled -- in two calls
+    rather than one -- and the stamp records that. This is not a re-stamp: the
+    superseded objection assumed the pass had already set a dedup clock, and
+    for exactly the positions reaching here it has not.
+
+    The verdict is written too, because `DIVERGED` is strictly more informative
+    than the `UNKNOWN` absence produced, and both are untrusted -- so no risk
+    answer changes, only the report.
+    """
     position, assessment = _unresolved(OrderListLeg.STOP_LOSS)
-    position.record_reconciliation(protection=ProtectionState.UNKNOWN, at=NOW)
+    position.record_partial_reconciliation(protection=ProtectionState.UNKNOWN)
     client = _StubClient(orders={SL_ID: _queried(OrderStatus.CANCELED)})
 
     await resolve_unresolved_legs(
-        assessments=[(position, assessment)], client=client, max_queries=4
+        assessments=[(position, assessment)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
     )
 
-    assert position.protection is ProtectionState.UNKNOWN
+    assert position.protection is ProtectionState.DIVERGED
     assert position.last_reconciled_at == NOW
+
+
+async def test_resolution_leaves_a_position_with_legs_left_over_unstamped() -> None:
+    """The opposite direction, and the one that keeps the scheme live.
+
+    A position still carrying an unqueried leg has NOT been reconciled, so it
+    keeps a `None` stamp, sorts first next cycle, and is what the reservation
+    funds. Stamping it here would deduplicate it out of the very pass that
+    would finish the job.
+    """
+    position, assessment = _unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)
+    client = _StubClient(orders={SL_ID: _queried(OrderStatus.CANCELED)})
+
+    await resolve_unresolved_legs(
+        assessments=[(position, assessment)],
+        client=client,
+        max_queries=1,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert position.last_reconciled_at is None
+
+
+async def test_unqueried_legs_are_carried_back_rather_than_left_in_the_prose() -> None:
+    """ "Every leg was queried" and "the budget ran out" are different facts with
+    different consequences -- only the first may stamp. Before this they were
+    distinguishable only by reading a sentence, which no caller can act on."""
+    client = _StubClient(orders={SL_ID: _queried(OrderStatus.CANCELED)})
+
+    ((_p, assessment),) = await resolve_unresolved_legs(
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)],
+        client=client,
+        max_queries=1,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert [item.leg for item in assessment.unresolved] == [OrderListLeg.TAKE_PROFIT]
+
+
+async def test_a_fully_queried_position_carries_nothing_back() -> None:
+    """The negative of the test above: with budget to spare, nothing is
+    outstanding and the tuple is empty -- which is what licenses the stamp."""
+    client = _StubClient(
+        orders={SL_ID: _queried(OrderStatus.CANCELED), TP_ID: _queried(OrderStatus.CANCELED)}
+    )
+
+    ((_p, assessment),) = await resolve_unresolved_legs(
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert assessment.unresolved == ()
+
+
+async def test_the_resolver_forwards_its_per_call_bound_to_the_client() -> None:
+    """A point query runs inside the same reserved slot as the enumeration, so
+    it takes the same bound. Omitting it inherits the client-wide policy --
+    four attempts at the general timeout -- which is tens of seconds inside a
+    slot reserved at `reconcile_deadline_s`, and nothing reports that."""
+    client = _StubClient(orders={SL_ID: _queried(OrderStatus.CANCELED)})
+
+    await resolve_unresolved_legs(
+        assessments=[_unresolved(OrderListLeg.STOP_LOSS)],
+        client=client,
+        max_queries=4,
+        now=NOW,
+        timeout_s=3.0,
+        attempts=1,
+    )
+
+    assert client.query_bounds == [(3.0, 1)]
