@@ -180,6 +180,17 @@ class FakeRootClient(ExchangeClient):
     ) -> list[Order]:
         raise NotImplementedError
 
+    async def get_order(  # pragma: no cover
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        raise NotImplementedError
+
 
 class FakeStream(MarketDataStream):
     """Records lifecycle calls so teardown ordering is observable."""

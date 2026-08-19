@@ -96,6 +96,34 @@ class ExchangeClient(ABC):
         ...
 
     @abstractmethod
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        """One order by the venue's id or by ours. Exactly one identifier.
+
+        **A POINT QUERY IS A DIFFERENT INSTRUMENT FROM ENUMERATION**, and a
+        reconciler needs both. MEASURED: immediately after a cancel,
+        ``get_own_open_orders`` returned nothing while this endpoint still
+        reported the order as ``CANCELED``. Absence from an enumeration says
+        only "it does not rest"; never-placed, cancelled and filled are
+        indistinguishable from there, and only this separates them.
+
+        ``timeout_s`` and ``attempts`` bound one call, as on
+        :meth:`get_own_open_orders`.
+
+        :raises ValueError: neither identifier given, or both.
+        :raises OrderNotFoundError: the venue has no such order -- which is an
+            ANSWER, not a failure, and callers are expected to act on it.
+        """
+        ...
+
+    @abstractmethod
     async def close(self) -> None: ...
 
 

@@ -33,7 +33,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from trading_bot.core.enums import OrderStatus, ProtectionState
-from trading_bot.core.exceptions import ContractViolationError
+from trading_bot.core.exceptions import ContractViolationError, OrderNotFoundError
 from trading_bot.core.interfaces import ExchangeClient
 from trading_bot.core.models import Order, Position
 from trading_bot.core.portfolio import Portfolio
@@ -49,6 +49,7 @@ __all__ = [
     "UnresolvedLeg",
     "classify_protection",
     "reconcile_open_positions",
+    "resolve_unresolved_legs",
 ]
 
 #: The generation every position is reconciled at, because there is nowhere to
@@ -410,3 +411,118 @@ async def reconcile_open_positions(
         position.record_reconciliation(protection=assessment.state, at=now)
         results.append((position, assessment))
     return tuple(results)
+
+
+def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[ProtectionState, str]:
+    """What one point-query answer means for the leg it was asked about.
+
+    **One discriminator rather than a list of statuses**, so a status nobody has
+    classified still lands somewhere defensible: ``OrderStatus.is_open`` is a
+    blacklist of terminal states, and its unclassified members default to OPEN
+    -- which here means UNKNOWN, which refuses. The reversible direction.
+    """
+    if order.status is OrderStatus.FILLED or order.filled_quantity > 0:
+        return (
+            ProtectionState.UNKNOWN,
+            f"{symbol} leg {leg.value} reports {order.status.value} with "
+            f"{order.filled_quantity} executed; the fill path is unmeasured, so this state is "
+            "refused rather than interpreted",
+        )
+    if order.status.is_open:
+        return (
+            ProtectionState.UNKNOWN,
+            f"{symbol} leg {leg.value} is INSTRUMENT DISAGREEMENT: absent from the enumeration "
+            f"and {order.status.value} on a point query. Two views of one leg disagree, and "
+            "nothing measured says which to believe, so neither is acted on",
+        )
+    return (
+        ProtectionState.DIVERGED,
+        f"{symbol} leg {leg.value} was requested and does not rest: the point query reports "
+        f"{order.status.value}",
+    )
+
+
+async def resolve_unresolved_legs(
+    *,
+    assessments: Sequence[tuple[Position, ProtectionAssessment]],
+    client: ExchangeClient,
+    max_queries: int,
+) -> tuple[tuple[Position, ProtectionAssessment], ...]:
+    """Resolve absent legs by point query, within a cap.
+
+    **Beside the pass, not inside it.** Section 7 budgets the compare set at one
+    call per symbol and the pass stays literally that; these queries are a
+    separate, visible budget line the driver decides to spend. Folding them in
+    would make one call per symbol quietly mean one plus however many legs
+    happened to be missing.
+
+    **``max_queries`` is a parameter and no number is chosen here.** It is a
+    budget, and budgets in this project are the driver's to set.
+
+    **This function does NOT write to the positions**, deliberately. Every state
+    it can return is untrusted exactly as the ``UNKNOWN`` the pass already wrote
+    is untrusted, so the ledger's answer to "may this stop be priced" does not
+    change -- only the REPORT sharpens. Writing would also re-stamp
+    ``last_reconciled_at`` and reset a dedup clock the pass has just set.
+
+    **Only ``OrderNotFoundError`` is caught, and the principle generalises past
+    this function.** It is an ANSWER: the venue saying the order does not exist.
+    Everything else -- a transport failure, a rate limit, a contract violation --
+    is a FAILURE TO GET AN ANSWER, and turning one of those into a verdict would
+    be exactly what the classifier already refuses to do with absence. A verdict
+    must rest on something the venue said. This is the precedent the executor's
+    recovery behaviours inherit: catch answers, propagate failures.
+
+    Per leg, so one leg's outcome cannot discard another's. The function may
+    raise; the driver above it is what must not.
+
+    **Where legs disagree, the WEAKER answer wins.** A position with one leg
+    provably gone and another unresolved is not a position we understand, so it
+    reports ``UNKNOWN`` rather than ``DIVERGED`` -- and ``DIVERGED`` is what
+    section 7 answers with re-placement, which should not run on partial
+    knowledge.
+    """
+    budget = max_queries
+    refined: list[tuple[Position, ProtectionAssessment]] = []
+
+    for position, assessment in assessments:
+        if not assessment.unresolved:
+            refined.append((position, assessment))
+            continue
+
+        states: list[ProtectionState] = []
+        reasons: list[str] = []
+        for item in assessment.unresolved:
+            if budget <= 0:
+                states.append(ProtectionState.UNKNOWN)
+                reasons.append(
+                    f"{position.symbol} leg {item.leg.value} was NOT YET QUERIED -- the point-query "
+                    "budget was exhausted before reaching it, so nothing is known about it beyond "
+                    "its absence from the enumeration"
+                )
+                continue
+            budget -= 1
+            try:
+                order = await client.get_order(
+                    position.symbol, client_order_id=item.client_order_id
+                )
+            except OrderNotFoundError as exc:
+                states.append(ProtectionState.DIVERGED)
+                reasons.append(
+                    f"{position.symbol} leg {item.leg.value} was requested and the venue has no "
+                    f"such order ({exc}). Note this cannot distinguish never-placed from "
+                    "placed-and-since-purged; order retention is unmeasured"
+                )
+                continue
+            state, reason = _refine(item.leg, order, symbol=position.symbol)
+            states.append(state)
+            reasons.append(reason)
+
+        state = (
+            ProtectionState.UNKNOWN
+            if ProtectionState.UNKNOWN in states
+            else ProtectionState.DIVERGED
+        )
+        refined.append((position, ProtectionAssessment(state=state, reason="; ".join(reasons))))
+
+    return tuple(refined)
