@@ -653,6 +653,36 @@ async def test_failing_hook_does_not_break_the_feed() -> None:
     assert provider.candle_count("BTCUSDT", "1m") == 2
 
 
+async def test_handlers_run_in_registration_order() -> None:
+    """DOCUMENTED ON `on_candle` AND ASSERTED NOWHERE UNTIL NOW, and something
+    now depends on it: the composition root registers the reconciliation driver
+    before `TradingEngine.start` registers its own hook, so that the same bar's
+    evaluation reads a ledger the pass has just refreshed. That guarantee is
+    this ordering plus that registration order, and neither was pinned.
+
+    Note what this does NOT pin -- that a handler has finished its work before
+    the next begins. `_notify` awaits each in turn, so it holds, but a handler
+    that merely SCHEDULED its work would satisfy this test and break the
+    guarantee. `test_modes.py` carries the behavioural test for that.
+    """
+    provider, _, stream = build_provider({("BTCUSDT", "1m"): [rest_candle(0)]})
+    order: list[str] = []
+
+    async def first(candle: Candle) -> None:
+        order.append("first")
+
+    async def second(candle: Candle) -> None:
+        order.append("second")
+
+    provider.on_candle(first)
+    provider.on_candle(second)
+    await provider.start()
+
+    await stream.emit("BTCUSDT", "1m", ws_candle(1))
+
+    assert order == ["first", "second"]
+
+
 # --------------------------------------------------------------------------
 # Shutdown
 # --------------------------------------------------------------------------

@@ -580,9 +580,29 @@ which is untrusted, which already refuses every entry portfolio-wide, so the
 stale healthy position adds no new refusal. What it does add is a second
 condition arriving at the escalation that does not exist yet.
 
-*Arming condition:* **QB site 4's escalation**, which is the first thing that
-would report an unbounded stamp, and the §7 re-placement milestone, which is
-the only thing that ends the underlying condition.
+> **RESTATED at M5e's driver commit: this is a LIVELOCK, not a staleness
+> bound.** The two readings differ in what they imply. A staleness bound says
+> healthy positions are read late; a livelock says reconciliation **permanently
+> stops reading them**, because the unresolved positions sort first, consume
+> every spendable call, never complete, and therefore never stop sorting first.
+> Nothing in the cycle advances. It is reachable from ordinary divergence
+> whenever `k >= max_calls - 1` positions are unresolved -- all but one.
+>
+> **Inert today**: `Position` is constructed nowhere in `src/`, so
+> `open_positions` is empty and no pass has anything to livelock over.
+>
+> *Arming condition, in caller terms:* **the executor**, as the first thing that
+> opens a position.
+>
+> **The cause is the reservation's SHAPE, not the driver's numbers**, and no
+> in-constraint derivation dissolves it: the admissible range is
+> `max_calls <= max_open_positions`, the driver already takes the maximum, and
+> the measured livelock ran at that maximum. The remedy is to reserve what the
+> FIRST unresolved position needs -- `L` legs, capping the pass at
+> `max_calls - L` -- which completes positions one at a time, keeps
+> `P + L <= max_calls` by construction, and terminates in `k` cycles instead of
+> never. It does not close `max_open_positions = 1`, where the reserve is zero.
+> Scheduled as its own commit after the driver.
 
 **`max_open_positions = 1` is a total resolution hole, and its cost reaches a
 reserved ruling — `M5e-055`.** With one due position the pass spends the only

@@ -42,7 +42,17 @@ Boot order: all I/O before any socket exists
 4. Unmanaged base holdings -- a second ``get_balances``, then one
    ``get_ticker`` per candidate asset. Warns; never refuses.
 5. Market-data provider (this is the first step that can open a WebSocket).
-6. Engine, 7. risk manager, 8. intent logger, 9. the one signal handler.
+6. Engine, 7. risk manager, 8. intent logger, 9. the one signal handler,
+   10. the reconciliation driver, subscribed to candles.
+
+Step 10 registers on ``provider.on_candle`` **before this function yields**, and
+``TradingEngine.start`` registers its own candle hook only when ``run()`` is
+called afterwards. Since ``_notify`` fans out in registration order, the
+reconciler is always subscriber zero -- **reconcile, then decide** -- so the
+same bar's ``evaluate`` reads a ledger this pass has just refreshed, and the
+reserved reconciliation floor is spent before anything else on the bar. That
+ordering is a consequence of *where* the two registrations happen, so it is
+pinned by tests rather than by a comment alone.
 
 Steps 0 to 3 are the fail-fast: every boot refusal is raised there, before the
 first socket at step 5, so a refusal has exactly one REST client to unwind and
@@ -114,6 +124,10 @@ from trading_bot.core.interfaces import (
 )
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.engine.live_engine import TradingEngine
+from trading_bot.execution.reconciliation_driver import (
+    ReconciliationBudget,
+    ReconciliationDriver,
+)
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
@@ -164,6 +178,7 @@ class LiveSystem:
     portfolio: Portfolio
     pairs: Mapping[str, PairContext]
     intent_logger: IntentLogger
+    reconciler: ReconciliationDriver
 
 
 # --------------------------------------------------------------------------
@@ -606,6 +621,20 @@ async def live_system(
                         pairs=pairs,
                     )
                 )
+                # RECONCILE, THEN DECIDE -- and the ordering is structural
+                # rather than remembered. `_notify` runs candle subscribers in
+                # registration order, and the engine registers its own hook
+                # inside `start()`, which runs only after this context manager
+                # has yielded. So the reconciler is always subscriber zero:
+                # the same bar's `evaluate` reads a ledger this pass has just
+                # refreshed, and the reserved reconciliation floor is spent
+                # before any dispatch could compete for it.
+                reconciler = ReconciliationDriver(
+                    portfolio=portfolio,
+                    client=resolved_client,
+                    budget=ReconciliationBudget.from_config(settings.config, timeframes=timeframes),
+                )
+                provider.on_candle(reconciler)
                 _log.info(
                     "Composition root ready: %d pair(s), %s %s free",
                     len(pairs),
@@ -621,6 +650,7 @@ async def live_system(
                     portfolio=portfolio,
                     pairs=pairs,
                     intent_logger=intent_logger,
+                    reconciler=reconciler,
                 )
             finally:
                 await engine.stop()

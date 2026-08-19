@@ -46,6 +46,7 @@ from trading_bot.config.models import StopLossConfig, TakeProfitConfig
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import (
     OrderSide,
+    PositionSide,
     PositionSizingMethod,
     ProtectionState,
     RefusalStage,
@@ -69,6 +70,7 @@ from trading_bot.core.models import (
     Candle,
     Order,
     OrderRequest,
+    Position,
     Signal,
     SymbolInfo,
     Ticker,
@@ -88,6 +90,7 @@ from trading_bot.utils.logger import surplus_fields
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Mapping
+    from datetime import datetime
     from pathlib import Path
 
 D = Decimal
@@ -1294,6 +1297,103 @@ class TestBootAssembly:
             before = system.portfolio.free_quote
             await system.engine._emit(buy("100.00"))
             assert system.portfolio.free_quote == before == D("777")
+
+
+class _ReadableRootClient(FakeRootClient):
+    """A root client that also answers the reconciler's enumeration.
+
+    ``FakeRootClient`` raises ``NotImplementedError`` for it, which is right for
+    every test that must not reach the venue. The reconciler does reach it, so
+    this narrows the fake exactly as far as the driver needs and no further.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.enumerations: list[str] = []
+
+    async def get_own_open_orders(
+        self, symbol: str, *, timeout_s: float | None = None, attempts: int | None = None
+    ) -> list[Order]:
+        self.enumerations.append(symbol)
+        return []
+
+
+def _unprotected_position(symbol: str) -> Position:
+    """An open position with nothing requested: classifies ABSENT_BY_DESIGN.
+
+    Chosen because that is the one verdict the pass STAMPS on a first read, so
+    ``last_reconciled_at`` moves from ``None`` to a datetime and gives the
+    behavioural test below an observable marker that no other collaborator
+    writes.
+    """
+    return Position(
+        symbol=symbol,
+        side=PositionSide.LONG,
+        quantity=D("0.001"),
+        entry_price=D("47000"),
+        entry_bar_time=NOW,
+        protection=ProtectionState.UNKNOWN,
+    )
+
+
+class TestReconcileThenDecide:
+    """The reconciler subscribes to candles, and it subscribes FIRST."""
+
+    async def test_the_reconciler_is_registered_before_the_engines_own_hook(
+        self, tmp_path: Path
+    ) -> None:
+        """Registration order, which is a consequence of WHERE each registration
+        happens: this root subscribes before it yields, and `TradingEngine.start`
+        subscribes only when `run()` is called afterwards. Nothing asserted that,
+        and an inversion's symptom -- evaluation reading a bar-old ledger -- is
+        silent.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(
+            settings, client=_ReadableRootClient(), stream=FakeStream()
+        ) as system:
+            await system.engine.start()
+
+            handlers = system.provider._handlers  # type: ignore[attr-defined]
+            assert handlers[0] is system.reconciler
+            assert handlers[1].__self__ is system.engine  # type: ignore[attr-defined]
+
+    async def test_a_later_subscriber_already_sees_the_reconciliation_from_the_same_candle(
+        self, tmp_path: Path
+    ) -> None:
+        """THE PROPERTY THE OTHER TWO TESTS EXIST TO PROTECT, and neither pins it.
+
+        Registration order and `_notify`'s iteration order can both hold while
+        evaluation on bar N still reads bar N-1's ledger -- a driver that
+        SCHEDULED its work instead of performing it inline would satisfy both
+        and break this. So this observes the effect rather than the order: a spy
+        registered immediately after the reconciler, with no intervening await
+        for a scheduled task to sneak through, reads the marker the pass writes.
+
+        The spy sits at index 1 and the engine's hook at index 2, so a write
+        visible to the spy was necessarily complete before the engine ran --
+        `_notify` awaits its subscribers in turn.
+        """
+        settings = write_settings(tmp_path)
+        stream = FakeStream()
+        seen_by_spy: list[datetime | None] = []
+
+        async with live_system(settings, client=_ReadableRootClient(), stream=stream) as system:
+            position = _unprotected_position(SYMBOL)
+            system.portfolio.positions[SYMBOL] = position
+
+            async def spy(candle: Candle) -> None:
+                seen_by_spy.append(position.last_reconciled_at)
+
+            system.provider.on_candle(spy)
+            await system.engine.start()
+
+            assert position.last_reconciled_at is None
+            await stream.handlers[(SYMBOL, TIMEFRAME)](engine_candle())
+
+        assert len(seen_by_spy) == 1, "the spy did not run: the candle never reached _notify"
+        assert seen_by_spy[0] is not None
 
 
 # --------------------------------------------------------------------------
