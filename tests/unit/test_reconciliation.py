@@ -168,6 +168,53 @@ def test_a_partial_fill_is_refused_on_the_same_grounds() -> None:
     assert "0.00050000" in result.reason
 
 
+def test_a_filled_working_leg_is_not_a_reason_to_refuse() -> None:
+    """`-W` IS THE ENTRY, so by the time a position exists it has filled by
+    definition. Judged by the fill rule it would make every correctly protected
+    position read `UNKNOWN` -- untrusted, therefore uncomputable, therefore a
+    portfolio-wide refusal. The interlock firing on the healthy path.
+
+    Correct under both answers to the open question of whether a filled leg
+    stays visible to `get_open_orders`: if it does, this prevents the refusal;
+    if it does not, the leg is never in the compare set and the skip is inert.
+    """
+    resting = [
+        _leg(OrderListLeg.WORKING, stop_price=None, status=OrderStatus.FILLED, filled=QTY),
+        *_both_legs_resting(),
+    ]
+
+    result = _classify(resting=resting)
+
+    assert result.state is ProtectionState.ACTIVE
+
+
+def test_no_state_this_can_return_is_trusted_except_absent_by_design() -> None:
+    """What makes `DIVERGED` a REFUSAL rather than a label -- and the mechanism
+    is two modules away, which is why it is pinned here.
+
+    Nothing in the classifier says "refuse". `committed_risk` counts any state
+    outside `_TRUSTED_PROTECTION` as uncomputable, and that whitelist lives in
+    `core/portfolio.py`. A reader of either file alone cannot see the decision,
+    so this test is the tripwire across the gap.
+
+    Admitting `ACTIVE` to the whitelist later is a real decision with a real
+    cost -- a position would be priced off a stop on the strength of a
+    classification -- and it must fail HERE first rather than land quietly.
+    """
+    from trading_bot.core.portfolio import _TRUSTED_PROTECTION
+
+    producible = {
+        _classify(resting=_both_legs_resting()).state,
+        _classify(resting=_both_legs_resting(status=OrderStatus.PENDING_NEW)).state,
+        _classify(resting=_both_legs_resting(list_id="99999")).state,
+        _classify(resting=[]).state,
+        _classify(stop_loss=None, take_profit=None).state,
+    }
+
+    trusted = producible & _TRUSTED_PROTECTION
+    assert trusted == {ProtectionState.ABSENT_BY_DESIGN}
+
+
 def test_nothing_requested_and_nothing_resting_is_absent_by_design() -> None:
     result = _classify(stop_loss=None, take_profit=None)
 

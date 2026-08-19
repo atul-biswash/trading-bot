@@ -158,7 +158,29 @@ def classify_protection(
     # that the story is not established. `UNKNOWN` is untrusted, which refuses
     # entries: reversible, and it makes the missing measurement visible in
     # behaviour instead of hiding it inside an assumption.
-    for leg, order in sorted(mine.items(), key=lambda item: item[0].value):
+    #
+    # SCOPED TO PROTECTIVE LEGS, AND THE WORKING LEG IS THE REASON. `-W` is the
+    # entry: by the time a `Position` exists it has filled BY DEFINITION. Judged
+    # by the rule above it would make every correctly protected position read
+    # `UNKNOWN`, which is untrusted, which counts uncomputable, which refuses
+    # every entry portfolio-wide -- the interlock firing on the healthy path.
+    #
+    # The scoping is correct under BOTH answers to the open question of whether
+    # a filled leg stays visible to `get_open_orders`, which is why it needs no
+    # measurement: if filled legs remain visible it prevents that refusal, and
+    # if they vanish the working leg is never in the compare set and the skip is
+    # inert. It changes behaviour only in the case that would be broken.
+    #
+    # Scoped by LEG rather than by what was asked for, so an unrequested `-SL`
+    # or `-TP` reporting a fill still refuses. That is the conservative side.
+    # Annotated rather than inferred: without it the `is not WORKING` test
+    # narrows the key type to the two remaining members, and a `for` target is
+    # FUNCTION-scoped, so the narrowed binding collides with the plain
+    # `OrderListLeg` the later loops assign to the same name.
+    protective_legs: dict[OrderListLeg, Order] = {
+        leg: order for leg, order in mine.items() if leg is not OrderListLeg.WORKING
+    }
+    for leg, order in sorted(protective_legs.items(), key=lambda item: item[0].value):
         if order.status is OrderStatus.FILLED or order.filled_quantity > 0:
             return ProtectionAssessment(
                 state=ProtectionState.UNKNOWN,
