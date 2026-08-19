@@ -29,7 +29,7 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
 from trading_bot.exchange.binance_client import BinanceClient
-from trading_bot.exchange.ids import OrderListLeg
+from trading_bot.exchange.ids import OrderListLeg, parse_client_order_id
 
 # --------------------------------------------------------------------------
 # Recorded payloads (trimmed to fields the mappers read)
@@ -1079,7 +1079,7 @@ async def test_the_enumeration_returns_only_our_orders() -> None:
 
     found = await bc.get_own_open_orders("BTCUSDT")
 
-    assert [order.order_id for _parts, order in found] == ["2950175"]
+    assert [order.order_id for order in found] == ["2950175"]
 
 
 async def test_a_prefixed_but_unparseable_id_is_not_ours() -> None:
@@ -1097,21 +1097,30 @@ async def test_a_prefixed_but_unparseable_id_is_not_ours() -> None:
     assert await bc.get_own_open_orders("BTCUSDT") == []
 
 
-async def test_the_enumeration_parses_the_identity_alongside_each_order() -> None:
-    """Section 6's generation recovery takes "the highest seen", which a raw
-    prefix filter cannot supply -- only a parse yields a generation. Returning
-    the parts alongside the order is what makes that reachable without parsing
-    twice."""
+async def test_the_raw_id_survives_so_a_caller_can_re_parse() -> None:
+    """WHAT THE NARROWED RETURN TYPE COSTS, AND WHAT IT DOES NOT.
+
+    This method used to hand back each order paired with its parsed identity,
+    and section 6's generation recovery -- "take the highest seen" -- was part
+    of why it parsed at all. It now returns orders alone, so nobody receives the
+    parsed generation.
+
+    The ABILITY survives, which is what this pins: the raw `client_order_id`
+    rides on every `Order`, so a caller re-parses and gets the same answer.
+    Parsing twice is the price of a port type `core/` can express.
+    """
     client = AsyncMock()
     client.get_open_orders.return_value = OPEN_ORDERS_MIXED
     bc = _make(client)
 
-    ((parts, order),) = await bc.get_own_open_orders("BTCUSDT")
+    found = await bc.get_own_open_orders("BTCUSDT")
 
+    assert found[0].client_order_id == "tb1-BTCUSDT-1786693560000-0-W"
+    parts = parse_client_order_id(found[0].client_order_id or "")
+    assert parts is not None
     assert parts.symbol == "BTCUSDT"
     assert parts.generation == 0
     assert parts.leg is OrderListLeg.WORKING
-    assert order.client_order_id == "tb1-BTCUSDT-1786693560000-0-W"
 
 
 async def test_an_empty_book_enumerates_to_nothing() -> None:

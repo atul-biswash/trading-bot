@@ -34,7 +34,7 @@ from trading_bot.core.models import (
     Ticker,
 )
 from trading_bot.exchange.base import BaseExchangeClient, SleepFn
-from trading_bot.exchange.ids import ClientOrderIdParts, parse_client_order_id
+from trading_bot.exchange.ids import parse_client_order_id
 from trading_bot.exchange.models import (
     enforce_oto_filters,
     enforce_otoco_filters,
@@ -521,8 +521,8 @@ class BinanceClient(BaseExchangeClient):
         *,
         timeout_s: float | None = None,
         attempts: int | None = None,
-    ) -> list[tuple[ClientOrderIdParts, Order]]:
-        """Our RESTING orders on ``symbol``, each paired with its parsed identity.
+    ) -> list[Order]:
+        """Our RESTING orders on ``symbol``, foreign ones filtered out.
 
         **Scoped to what RESTS, which is what the endpoint means.** A filled leg
         is not open and its absence here is the correct answer, not a gap.
@@ -538,13 +538,22 @@ class BinanceClient(BaseExchangeClient):
         (MEASURED, M5d-064/M5d-066). The list read-back returns identity triples
         and cannot supply it.
 
-        **Filtered by PARSING, not by the raw prefix**, and the tie-break is not
-        caution. Section 6 requires generation recovery to query prefix-matching
-        orders and take "the highest seen" -- and a raw ``startswith("tb1-")``
-        yields no generation to take. Parsing supplies it, and rejects
-        ``tb1-garbage``, which a prefix test would accept as ours. The failure
-        section 6 exists to prevent is treating a human's order as ours; the
-        parse is a strictly narrower filter than the prefix it replaces.
+        **Filtered by PARSING, not by the raw prefix**, and the surviving reason
+        is rejection rather than extraction. ``tb1-garbage`` passes a raw
+        ``startswith("tb1-")`` and fails the parser, and the failure section 6
+        exists to prevent is treating a human's order as ours -- so the parse is
+        a strictly narrower filter than the prefix it replaces. That argument is
+        untouched by what this returns.
+
+        **What this method no longer EXPORTS, said plainly because the previous
+        wording claimed it.** It used to return each order paired with its
+        parsed identity, and justified the parse partly by section 6's
+        generation recovery -- "take the highest seen", which a prefix test
+        cannot supply. It now returns orders alone, so the parsed generation
+        goes to nobody. The ABILITY is preserved rather than lost: the raw
+        ``client_order_id`` rides on every :class:`Order`, so a caller that
+        needs the generation re-parses it. Parsing twice is the cost of a port
+        that ``core/`` can express, which is the ruling this shape implements.
 
         Foreign orders are dropped silently: this endpoint returns *every* order
         on the symbol, ours and otherwise, so meeting other people's orders is
@@ -556,12 +565,11 @@ class BinanceClient(BaseExchangeClient):
             attempts=attempts,
             **self._with_call_timeout(params, timeout_s),
         )
-        found: list[tuple[ClientOrderIdParts, Order]] = []
+        found: list[Order] = []
         for payload in raw:
             order = to_order(payload)
-            parts = parse_client_order_id(order.client_order_id or "")
-            if parts is not None:
-                found.append((parts, order))
+            if parse_client_order_id(order.client_order_id or "") is not None:
+                found.append(order)
         return found
 
     # -- lifecycle ----------------------------------------------------------
