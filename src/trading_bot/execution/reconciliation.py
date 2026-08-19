@@ -29,6 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
+from typing import Literal, assert_never
 
 from pydantic import BaseModel, ConfigDict
 
@@ -413,7 +414,17 @@ async def reconcile_open_positions(
     return tuple(results)
 
 
-def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[ProtectionState, str]:
+#: The states a point-query answer can produce -- NARROWER than
+#: :class:`ProtectionState` on purpose.
+#:
+#: The narrowing is what makes the exhaustiveness guard in the precedence walk
+#: possible at all: over the full enum mypy can prove nothing about which
+#: members a fold must handle. Adding a member here without extending that walk
+#: fails the type check, which is the whole point.
+_ResolvedState = Literal[ProtectionState.UNKNOWN, ProtectionState.DIVERGED]
+
+
+def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[_ResolvedState, str]:
     """What one point-query answer means for the leg it was asked about.
 
     **One discriminator rather than a list of statuses**, so a status nobody has
@@ -490,7 +501,7 @@ async def resolve_unresolved_legs(
             refined.append((position, assessment))
             continue
 
-        states: list[ProtectionState] = []
+        states: list[_ResolvedState] = []
         reasons: list[str] = []
         for item in assessment.unresolved:
             if budget <= 0:
@@ -518,11 +529,28 @@ async def resolve_unresolved_legs(
             states.append(state)
             reasons.append(reason)
 
-        state = (
-            ProtectionState.UNKNOWN
-            if ProtectionState.UNKNOWN in states
-            else ProtectionState.DIVERGED
-        )
-        refined.append((position, ProtectionAssessment(state=state, reason="; ".join(reasons))))
+        # THE WEAKER ANSWER WINS, and the walk is explicit so a third state
+        # cannot slip through it. The previous form -- UNKNOWN if UNKNOWN is
+        # present else DIVERGED -- hardcoded the two states `_refine` produces
+        # and would have silently converted any third to DIVERGED. Safe in
+        # direction, since DIVERGED is untrusted, and silent, which is the part
+        # that matters: nothing would have reported the collapse.
+        #
+        # `assert_never` is a TYPE assertion, not defensive branching. Its
+        # branch is provably unreachable under mypy, so widening
+        # `_ResolvedState` fails the GATE rather than producing a wrong verdict
+        # at runtime. That is the opposite of the harm the no-`UNCLASSIFIED`
+        # rule names -- it forbids an unreachable enum member because one
+        # "would invite defensive branching on a state the domain forbids", and
+        # this makes such branching impossible to add without mypy objecting.
+        verdict: _ResolvedState = ProtectionState.DIVERGED
+        for candidate in states:
+            if candidate is ProtectionState.UNKNOWN:
+                verdict = ProtectionState.UNKNOWN
+            elif candidate is ProtectionState.DIVERGED:
+                continue
+            else:
+                assert_never(candidate)
+        refined.append((position, ProtectionAssessment(state=verdict, reason="; ".join(reasons))))
 
     return tuple(refined)
