@@ -611,6 +611,37 @@ class Position(BaseModel):
             return (self.entry_price - price) * self.quantity
         return Decimal(0)
 
+    def record_reconciliation(self, *, protection: ProtectionState, at: datetime) -> None:
+        """Record what a reconciliation pass found, and when.
+
+        **One method rather than two assignments**, which is what this class's
+        note above prescribes for every multi-field write: with
+        ``validate_assignment`` on, two statements are observable between each
+        other, and collapsing them is the prerequisite for any cross-field
+        invariant this model might later carry.
+
+        **``protection`` first, the stamp LAST, and the order is the point.** A
+        write interrupted between them leaves the position reading *never
+        reconciled* rather than *reconciled but stale* -- and the stamp is what
+        the staleness refusal trusts, so a stamp landing ahead of the state it
+        summarises would claim currency for a fact not yet written. Erring
+        toward "never" costs a re-read; erring toward "current" costs the
+        refusal that would have caught it.
+
+        **This ordering is UNPROVABLE by mutation, and is done for the reason
+        above rather than because a test demands it.** Both assignments succeed,
+        the final state is identical either way, and no fixture can observe the
+        instant between two plain assignments without patching the model itself.
+        A proof that cannot fail is not a proof, so none is claimed.
+
+        :raises ValueError: ``at`` is naive. A naive value would be read as
+            local time and move every staleness comparison by the host's offset.
+        """
+        if at.tzinfo is None or at.tzinfo.utcoffset(at) is None:
+            raise ValueError(f"record_reconciliation requires an aware datetime, got {at!r}")
+        self.protection = protection
+        self.last_reconciled_at = at
+
 
 class SizingDecision(_Frozen):
     """How much to trade -- or, when the answer is nothing, why.

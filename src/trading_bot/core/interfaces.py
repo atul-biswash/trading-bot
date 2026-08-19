@@ -60,6 +60,42 @@ class ExchangeClient(ABC):
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]: ...
 
     @abstractmethod
+    async def get_own_open_orders(
+        self,
+        symbol: str,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Order]:
+        """Our RESTING orders on ``symbol``, foreign ones filtered out.
+
+        The reconciliation compare set. ``get_open_orders`` returns *every*
+        order on the symbol, ours and everyone else's; an implementation must
+        return only those it can recognise as its own, and must recognise them
+        by a test at least as narrow as parsing a generated identifier -- a raw
+        prefix test admits a human's order that merely starts the same way.
+
+        **Returns orders, not parsed identities.** The parsed form belongs to
+        the adapter layer that generates the identifiers, and this port lives in
+        ``core``, which does not import outward. A caller needing the decomposed
+        identity re-parses the ``client_order_id`` carried on each order.
+
+        **``timeout_s`` and ``attempts`` bound one call, and ``None`` means the
+        implementation's own policy.** They sit on the port rather than on the
+        adapter alone because a caller on a deadline must be able to bound this
+        THROUGH the abstraction; a port narrower than its implementation would
+        force that caller to reach past it, which defeats the port. Nothing
+        supplies them yet -- the values derive from ``reconcile_deadline_s``,
+        which is a PLACEHOLDER, and land with the driver that spends it.
+
+        Declaring a transport bound on a domain port is a transport concern
+        crossing inward, and is coherent here only because this project already
+        treats budgets as domain policy: ``dispatch_deadline_s`` and
+        ``reconcile_deadline_s`` live in the risk config, not the exchange one.
+        """
+        ...
+
+    @abstractmethod
     async def close(self) -> None: ...
 
 

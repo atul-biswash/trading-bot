@@ -1,9 +1,16 @@
-"""Classify a position's protection from what rests at the venue.
+"""Classify a position's protection from what rests at the venue, and record it.
 
-Pure. No I/O, no config, no clock, no ``Position`` -- the caller supplies the
-requested levels and the legs it has already read, and receives a frozen
-verdict carrying its reason. Driving this from the candle subscription, and
-performing the queries it asks for, belong to whoever owns the reconciler.
+**Two layers, and the split is deliberate.**
+:func:`classify_protection` is PURE -- no I/O, no config, no clock, no
+``Position``: it takes requested levels and a compare set and returns a frozen
+verdict carrying its reason. :func:`reconcile_open_positions` is the pass
+around it: it reads, classifies, and writes. Driving the pass from the candle
+subscription, and performing the point queries a verdict asks for, belong to
+whoever owns the reconciler and are not here.
+
+The pure half is what makes the impure half testable without a venue, and
+keeping the classification decidable from data alone is why it is worth the
+extra function.
 
 **Keyed off what was REQUESTED, never off what is absent.** Divergence is
 "protection was requested and does not rest", not "no legs are resting" -- so a
@@ -20,16 +27,41 @@ do about a verdict, only what the verdict is.
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
 from trading_bot.core.enums import OrderStatus, ProtectionState
-from trading_bot.core.models import Order
-from trading_bot.exchange.ids import ClientOrderIdParts, OrderListLeg, client_order_id
+from trading_bot.core.exceptions import ContractViolationError
+from trading_bot.core.interfaces import ExchangeClient
+from trading_bot.core.models import Order, Position
+from trading_bot.core.portfolio import Portfolio
+from trading_bot.exchange.ids import (
+    ClientOrderIdParts,
+    OrderListLeg,
+    client_order_id,
+    parse_client_order_id,
+)
 
-__all__ = ["ProtectionAssessment", "UnresolvedLeg", "classify_protection"]
+__all__ = [
+    "ProtectionAssessment",
+    "UnresolvedLeg",
+    "classify_protection",
+    "reconcile_open_positions",
+]
+
+#: The generation every position is reconciled at, because there is nowhere to
+#: read one from: ``Position`` carries no generation field and nothing in
+#: ``src/`` has ever produced a generation above zero.
+#:
+#: Named rather than inlined so the assumption is greppable. It is WRONG the
+#: moment a re-placement happens -- section 7's "re-place once at the next
+#: generation" -- and the consequence is recorded as ``M5e-031``: a leg resting
+#: under an earlier generation is filtered out, reads as absent, and yields an
+#: unresolved entry naming an identifier that was never sent. The first
+#: re-placement arms it.
+_NO_GENERATION_SOURCE = 0
 
 
 class _Frozen(BaseModel):
@@ -257,3 +289,124 @@ def classify_protection(
         state=ProtectionState.ACTIVE,
         reason=f"{symbol}: every requested protective leg rests at its requested trigger",
     )
+
+
+def _is_due(position: Position, *, now: datetime, dedup_interval: timedelta) -> bool:
+    """Whether this position's stamp is old enough to re-read.
+
+    **Passes are deduplicated by ``last_reconciled_at``**: a position is
+    re-read only once its stamp is older than the interval the driver supplies,
+    so two pairs whose bars close on the same minute pay for one pass and not
+    two.
+
+    **``None`` re-reads, and that is a DEDUP decision only.** An unstamped
+    position has never been read; re-reading it costs one call and cannot be
+    wrong. What ``None`` should mean for the STALENESS REFUSAL -- maximally
+    stale, exempt until first stamped, or stamped at construction -- is a
+    separate ruling, reserved, and untouched here. Nothing in this function is
+    precedent for it.
+
+    The interval is a parameter rather than a constant because it derives from
+    the shortest enabled timeframe, which is config the driver holds.
+    """
+    if position.last_reconciled_at is None:
+        return True
+    return now - position.last_reconciled_at > dedup_interval
+
+
+def _compare_set(orders: Sequence[Order], *, symbol: str) -> list[tuple[ClientOrderIdParts, Order]]:
+    """Re-parse each order's identifier and pair it back up.
+
+    The port returns orders alone, because the parsed form lives in a module
+    ``core`` may not import. Parsing here is the cost of that, and it is pure
+    string work over a list already bounded by the venue's open-order count.
+
+    **An unparseable identifier is a CONTRACT VIOLATION, not a market state.**
+    The implementation filters by parsing, so every order reaching here parses
+    by construction; one that does not means our adapter is broken or an
+    implementation does not honour the port. That is our bug, and this project
+    keeps our bugs in a family a caller can catch as a class rather than
+    disguising them as refusals.
+
+    **Raising mid-pass is survivable, which is what makes it the right answer
+    rather than merely the correctly classified one.** An abort leaves the
+    positions already visited written and the rest untouched, so those keep old
+    stamps, go stale, and refuse entries -- which is IDENTICAL to a pass cut
+    short by its budget, a designed normal state rather than a novel one. And
+    because positions are visited oldest stamp first, the loss falls on the
+    FRESHEST, which is the one that could best afford to wait.
+    """
+    found: list[tuple[ClientOrderIdParts, Order]] = []
+    for order in orders:
+        parts = parse_client_order_id(order.client_order_id or "")
+        if parts is None:
+            raise ContractViolationError(
+                f"{symbol}: get_own_open_orders returned an order whose client order id "
+                f"does not parse: {order.client_order_id!r}. The implementation filters by "
+                "parsing, so this is our bug rather than a venue state."
+            )
+        found.append((parts, order))
+    return found
+
+
+async def reconcile_open_positions(
+    *,
+    portfolio: Portfolio,
+    client: ExchangeClient,
+    now: datetime,
+    dedup_interval: timedelta,
+) -> tuple[tuple[Position, ProtectionAssessment], ...]:
+    """Read what rests, classify every due position, and record the verdict.
+
+    **One call per symbol.** Section 7 prices the compare set at "one call per
+    symbol, amortised across every position on that symbol", and this pass is
+    literally that -- the point query that resolves an absent leg is a separate,
+    visible budget line rather than a phase hidden inside this one.
+
+    **Positions are visited OLDEST STAMP FIRST**, so a pass cut short by the
+    budget always advances the stalest one instead of starving a fixed tail.
+    Unstamped positions sort first, having waited longest by definition.
+
+    **Returns the assessments, not just the states.** The reason and the
+    unresolved legs cannot be recovered from a written ``Position``: resolving
+    an absent leg would have to re-derive the whole classification, escalation
+    needs a cause for its detail, and an operator facing a portfolio-wide
+    refusal is owed one. Nothing is logged here -- the driver decides what is
+    worth saying.
+
+    ``now`` is WALL CLOCK. Candle time cannot be used: staleness must count
+    every bar that never arrived because the feed dropped, and a bar that never
+    arrived contributes no timestamp, so a candle clock freezes exactly during
+    the outage that makes the ledger least trustworthy.
+
+    :raises ContractViolationError: an order came back with an identifier that
+        does not parse. See :func:`_compare_set` for why aborting is safe.
+    """
+    due = sorted(
+        (
+            position
+            for position in portfolio.open_positions
+            if _is_due(position, now=now, dedup_interval=dedup_interval)
+        ),
+        key=lambda position: (
+            position.last_reconciled_at is not None,
+            position.last_reconciled_at or now,
+        ),
+    )
+
+    results: list[tuple[Position, ProtectionAssessment]] = []
+    for position in due:
+        orders = await client.get_own_open_orders(position.symbol)
+        assessment = classify_protection(
+            symbol=position.symbol,
+            entry_bar_time=position.entry_bar_time,
+            generation=_NO_GENERATION_SOURCE,
+            quantity=position.quantity,
+            order_list_id=position.order_list_id,
+            stop_loss=position.stop_loss,
+            take_profit=position.take_profit,
+            resting=_compare_set(orders, symbol=position.symbol),
+        )
+        position.record_reconciliation(protection=assessment.state, at=now)
+        results.append((position, assessment))
+    return tuple(results)
