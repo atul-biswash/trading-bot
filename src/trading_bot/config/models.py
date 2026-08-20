@@ -282,6 +282,51 @@ class RiskConfig(_Model):
     #:
     #: **PLACEHOLDER -- NOT MEASURED.** Too tight is the expensive direction: a
     #: placement that times out may in fact have placed.
+    #:
+    #: **That direction is about the TRANSPORT TIMEOUT -- the derived per-call
+    #: share -- and not about the reservation.** A share that is too tight
+    #: abandons a write whose outcome is then unknown, which is the expensive
+    #: error and is what the sentence above names. A *reservation* that is too
+    #: loose fails the other way: the sequence is permitted to spend past the
+    #: deadline, and no later edit un-places what it placed. The two quantities
+    #: are one division apart and a reader meets them together, so which is
+    #: which is stated rather than inferred. This is a clarification; the
+    #: sentence above is correct about what it is about.
+    #:
+    #: > **ANNOTATED at M5f -- "three-call ``CLOSE``" COUNTS Q-C SECTION 4b's
+    #: > THREE *STEPS* AS THREE *CALLS*, AND THAT EQUATION IS FALSE.** Nothing
+    #: > above is rewritten and the value is untouched: the field is still the
+    #: > whole sequence, the share is still derived from it, and the status
+    #: > mark still reads PLACEHOLDER -- NOT MEASURED. Only the divisor is
+    #: > wrong.
+    #: >
+    #: > **Why, from three measured facts, each quoted from where it lives.**
+    #: > Q-C section 4b, on the middle step: *"The confirming query decides
+    #: > what happens next, and it reads ``executedQty`` on each leg, not
+    #: > merely ``status``"*. :class:`~trading_bot.core.models.OrderListEntry`,
+    #: > MEASURED against a captured payload: *"Q-C section 7's compare set
+    #: > (``status``, ``executedQty``, ``origQty``, legally-sendable prices) is
+    #: > therefore not obtainable from a list read-back at all; it needs a
+    #: > per-order query per leg."* And
+    #: > :meth:`~trading_bot.core.interfaces.ExchangeClient.get_order`,
+    #: > MEASURED: *"immediately after a cancel, ``get_own_open_orders``
+    #: > returned nothing while this endpoint still reported the order as
+    #: > ``CANCELED``... never-placed, cancelled and filled are
+    #: > indistinguishable from there, and only this separates them."* So the
+    #: > confirm step is per-leg point queries; neither enumeration nor a list
+    #: > read-back can serve it.
+    #: >
+    #: > **Measured worst cases, in calls.** OTOCO **5** -- one cancel
+    #: > (MEASURED: one cancel collapses the whole list), three point queries,
+    #: > one sell. OTO **4**. Unprotected **1**, there being no protection to
+    #: > cancel. The recovery-bearing entry path **3** -- place, did-it-place?,
+    #: > re-place.
+    #: >
+    #: > **NO REPLACEMENT SHARE IS STATED HERE.** Whether the confirm step
+    #: > queries all three legs or only the two protective ones is **UNRULED**
+    #: > and reserved to the project owner; it decides 5 against 4, and a
+    #: > divisor written here before that ruling would be the same kind of
+    #: > guess this annotation exists to record.
     dispatch_deadline_s: float = Field(9.0, gt=0)
     #: Deadline for **one** position's reconciliation query, in seconds. Bounds
     #: a single slow read so it cannot consume the reserved floor and starve the
@@ -468,6 +513,38 @@ _PIPELINE_HEADROOM = 0.5
 #: cancel, then confirm by query, then sell. Used only to report the derived
 #: per-call share in the refusal message; the configured number is the whole
 #: sequence.
+#:
+#: > **ANNOTATED at M5f, twice over. This is the only place the three is a
+#: > VALUE rather than prose, and both halves of the comment above are
+#: > wrong.** Neither is rewritten and the value is not touched.
+#: >
+#: > **First: "cancel, then confirm by query, then sell" is three STEPS, not
+#: > three CALLS**, and the middle step is not one call. Q-C section 4b:
+#: > *"The confirming query decides what happens next, and it reads
+#: > ``executedQty`` on each leg, not merely ``status``"*.
+#: > :class:`~trading_bot.core.models.OrderListEntry`, MEASURED against a
+#: > captured payload: *"Q-C section 7's compare set (``status``,
+#: > ``executedQty``, ``origQty``, legally-sendable prices) is therefore not
+#: > obtainable from a list read-back at all; it needs a per-order query per
+#: > leg."* And :meth:`~trading_bot.core.interfaces.ExchangeClient.get_order`,
+#: > MEASURED: *"immediately after a cancel, ``get_own_open_orders`` returned
+#: > nothing while this endpoint still reported the order as ``CANCELED``...
+#: > never-placed, cancelled and filled are indistinguishable from there, and
+#: > only this separates them."* So the confirm step is per-leg point queries.
+#: > **Measured worst cases, in calls:** OTOCO **5**, OTO **4**, unprotected
+#: > **1**, and the recovery-bearing entry path **3**.
+#: >
+#: > **Second: "Used only to report the derived per-call share in the refusal
+#: > message" is false -- nothing uses this name at all.** MEASURED by grep
+#: > over ``src/`` and ``tests/``: one hit, this definition. The refusal
+#: > message below reports the whole-sequence figures and never divides. So a
+#: > reader is told this constant has a consumer, and it has none.
+#: >
+#: > **Neither is corrected here.** Changing the value needs the ruling below;
+#: > removing the name is a code change, and this commit is documentation
+#: > only. Whether the confirm step queries all three legs or only the two
+#: > protective ones is **UNRULED** and reserved to the project owner -- it
+#: > decides 5 against 4 -- so no replacement is written.
 _CLOSE_SEQUENCE_CALLS = 3
 
 

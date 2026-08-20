@@ -842,6 +842,45 @@ data.
   plausible venue round-trip, which manufactures the ambiguous write the budget
   exists to prevent. The arithmetic that fixes it is enforced at config load: see
   `docs/M5_NUMBERS.md`.
+
+  > **ANNOTATED at M5f — "THREE-CALL `CLOSE`" COUNTS Q-C §4b's THREE *STEPS* AS
+  > THREE *CALLS*, AND THAT EQUATION IS FALSE.** Nothing above is rewritten and
+  > no number is changed. The rule stands: the field bounds the whole sequence,
+  > it is the only configured number, and the per-call share is derived from it
+  > by dividing by the call count of the longest sequence. **Only the call count
+  > is wrong**, and with it the `30s` and `60s` arithmetic in the first sentence.
+  >
+  > **It covers the bullet three lines above this one too** — *"`CLOSE` is
+  > ungateable by design, costs three round trips"* — which is the same claim in
+  > different words, in a different locked decision. Named here rather than
+  > annotated separately, because a duplicate annotation is permanent.
+  >
+  > **Why, from three measured facts, each quoted from where it lives.** Q-C
+  > §4b on the middle step: *"The confirming query decides what happens next,
+  > and it reads `executedQty` on each leg, not merely `status`"*.
+  > `OrderListEntry` in `core/models.py`, MEASURED against a captured payload:
+  > *"Q-C section 7's compare set (`status`, `executedQty`, `origQty`,
+  > legally-sendable prices) is therefore not obtainable from a list read-back
+  > at all; it needs a per-order query per leg."* And `ExchangeClient.get_order`
+  > in `core/interfaces.py`, MEASURED: *"immediately after a cancel,
+  > `get_own_open_orders` returned nothing while this endpoint still reported
+  > the order as `CANCELED`… never-placed, cancelled and filled are
+  > indistinguishable from there, and only this separates them."*
+  >
+  > So the confirm step is **per-leg point queries** — neither an enumeration
+  > nor a list read-back can serve it, and after a cancel the enumeration is
+  > empty. The cancel is one call (MEASURED at M5c: one cancel collapses the
+  > whole list) and the sell is one.
+  >
+  > **Measured worst cases, in calls.** OTOCO **5**, OTO **4**, unprotected
+  > **1**, and the recovery-bearing entry path **3** — place, did-it-place?,
+  > re-place. So the two limbs disagree, which is what makes the divisor a
+  > ruling rather than an arithmetic step.
+  >
+  > **NO REPLACEMENT SHARE IS STATED HERE.** Whether the confirm step queries
+  > all three legs or only the two protective ones is **UNRULED** and reserved
+  > to the project owner; it decides 5 against 4. Ruled by the reviewer under
+  > delegation, not by the project owner.
 - **A timed-out write is resolved by query, never by retry.**
   `BaseExchangeClient._call` already narrows placement to `idempotent=False`,
   retrying only `RateLimitError` — a 429 is rejected pre-acceptance, and an

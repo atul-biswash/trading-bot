@@ -420,6 +420,55 @@ empirical input.
 > removes — between ~11% and ~100%, on a sample of two. The cause remains unknown
 > and this note does not resolve it.
 
+> **ANNOTATED at M5f — "THREE-CALL `CLOSE`" COUNTS Q-C §4b's THREE *STEPS* AS
+> THREE *CALLS*, AND THAT EQUATION IS FALSE.** Nothing above is rewritten, no
+> number is changed, and the status mark stands. `D` is still the whole
+> sequence and the per-call figure is still derived from it by dividing by the
+> call count of the longest sequence. Only the call count is wrong.
+>
+> **This one annotation covers every site in this document**, rather than
+> repeating itself beside each — a duplicate annotation is permanent, and these
+> are all one claim. The sites are: §3's *"inside a three-call `CLOSE`"*; §5's
+> *"a three-call `CLOSE` sequence at that value is 30 s"*, *"worst case the
+> three-call `CLOSE`"* and *"per call inside a three-call `CLOSE`"*; the
+> correction block above, which quotes the table's *"per call in a 3-call
+> CLOSE"* column; the constraint table's `D` row (*"worst case the 3-call
+> `CLOSE`"*) and that column header; and the refusal-message section's *"its
+> derived per-call share is `3.0 s`"*.
+>
+> **Why, from three measured facts, each quoted from where it lives.** Q-C §4b
+> on the middle step: *"The confirming query decides what happens next, and it
+> reads `executedQty` on each leg, not merely `status`"*. `OrderListEntry` in
+> `core/models.py`, MEASURED against a captured payload: *"Q-C section 7's
+> compare set (`status`, `executedQty`, `origQty`, legally-sendable prices) is
+> therefore not obtainable from a list read-back at all; it needs a per-order
+> query per leg."* And `ExchangeClient.get_order` in `core/interfaces.py`,
+> MEASURED: *"immediately after a cancel, `get_own_open_orders` returned
+> nothing while this endpoint still reported the order as `CANCELED`…
+> never-placed, cancelled and filled are indistinguishable from there, and only
+> this separates them."*
+>
+> So the confirm step is **per-leg point queries**: neither a list read-back
+> nor an enumeration can serve it, and after a cancel the enumeration is empty.
+> The cancel itself is one call — MEASURED at M5c, one cancel collapses the
+> whole list — and the sell is one.
+>
+> **Measured worst cases, in calls.** OTOCO **5** (cancel + three point queries
+> + sell). OTO **4**. Unprotected **1**, there being no protection to cancel.
+> The recovery-bearing entry path **3** — place, did-it-place?, re-place.
+>
+> **NO REPLACEMENT PER-CALL SHARE IS STATED HERE.** Whether the confirm step
+> queries all three legs or only the two protective ones is **UNRULED** and
+> reserved to the project owner; it decides 5 against 4. Writing a divisor
+> before that ruling would reproduce the defect this annotation records — a
+> number derived from a step count nobody re-checked.
+>
+> **How it survived.** Every site above rests on a fact established elsewhere,
+> and nothing at any of their sites re-checks it. The step-to-call equation was
+> written before M5d measured what a list read-back carries and before M5e
+> measured that enumeration and point query are different instruments. Ruled by
+> the reviewer under delegation, not by the project owner.
+
 ---
 
 ## 6. `risk.reconcile_deadline_s`

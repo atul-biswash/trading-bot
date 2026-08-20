@@ -101,6 +101,32 @@ risk:
                                     # CLOSE. The per-call share is DERIVED (~3.0s),
                                     # never set here. Not exchange.requests_timeout_s:
                                     # a three-call CLOSE at that 10s would be 30s.
+                                    #
+                                    # ANNOTATED at M5f: "three-call CLOSE" counts
+                                    # Q-C section 4b's three STEPS as three CALLS,
+                                    # and that equation is FALSE. The lines above
+                                    # are unchanged and the value is untouched --
+                                    # only the divisor is wrong.
+                                    #
+                                    # Why: section 4b's middle step "reads
+                                    # executedQty on each leg"; OrderListEntry is
+                                    # MEASURED to show a list read-back carries
+                                    # identity only, so the compare set "needs a
+                                    # per-order query per leg"; and get_order is
+                                    # MEASURED to show a post-cancel enumeration
+                                    # returns nothing, leaving never-placed,
+                                    # cancelled and filled indistinguishable. So
+                                    # the confirm step is per-leg point queries.
+                                    #
+                                    # Measured worst cases, in calls: OTOCO 5,
+                                    # OTO 4, unprotected 1, and the recovery-
+                                    # bearing entry path 3.
+                                    #
+                                    # NO REPLACEMENT SHARE IS STATED. Whether the
+                                    # confirm step queries all three legs or only
+                                    # the two protective ones is UNRULED and
+                                    # reserved to the project owner; it decides 5
+                                    # against 4.
   reconcile_deadline_s: 3.0         # PLACEHOLDER -- NOT MEASURED. One order-list
                                     # query, so a slow read cannot starve the pass.
 
