@@ -65,6 +65,33 @@ terminal only if it fails to clear within N reconciliation cycles. Escalating a
 self-clearing condition at the same level as a terminal one is how a `CRITICAL`
 line stops being read.
 
+> **SITE 4 SPLIT AT M5e: THE REFUSAL HALF LANDED, THE ESCALATION HALF IS
+> BLOCKED — and it is blocked by two decisions that are each correct.**
+> Annotated rather than rewritten; nothing above is wrong, and what follows is
+> the half this section did not anticipate needing.
+>
+> The refusal half exists. `RefusalStage.POSITION_STALE` sits ahead of the
+> committed-risk guard in `RiskManager.evaluate`, reads
+> `risk.max_position_staleness_s`, and treats an unstamped position as
+> maximally stale.
+>
+> **The escalation half cannot be built as specified.** Section 1 of this
+> document defines `CRITICAL` as three things, of which the second is **a halt
+> flag on `Portfolio`** — and no halt flag exists anywhere in `src/`. The
+> N-cycle promotion above needs state carried *between* reconciliation passes,
+> and M5e's driver commit **deliberately refused** to hold any: a driver that
+> remembers position state becomes a second source of truth for a fact the
+> position already owns, and the stamp is that fact.
+>
+> **So the two decisions conflict, and naming that is all this annotation
+> does.** "Promote after N cycles" requires a counter; "the driver holds no
+> cross-pass state" forbids one. Neither is wrong. Resolving it needs a third
+> place for the count — the position, a halt object, or somewhere not yet
+> designed — and choosing is not attempted here.
+>
+> *Arming condition, in caller terms:* **the halt flag's first writer**, which
+> is the first thing that needs any of §1's three parts to exist.
+
 **Resolvable by observation (1).** The halt persists until a query succeeds. Retry
 the query on the reconciliation cadence; it costs one round trip against the
 reserved floor.

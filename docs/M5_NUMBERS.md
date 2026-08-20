@@ -275,6 +275,31 @@ a warning when it means something.
 
 **Status: PLACEHOLDER — NOT MEASURED.**
 
+> **IT NOW HAS A READER, AND THE INSTRUCTION ABOVE WAS NOT CARRIED OUT.**
+> Annotated at M5e's rotation; the value, the working figure and the status mark
+> are all untouched.
+>
+> *"Set it before M5e from the measurable half"* — this did not happen. M5e
+> landed the reader without setting the number, deliberately and in C2's shape:
+> mechanism without a value. So the field is now **enforced arithmetic on an
+> unmeasured threshold**, which is strictly better than an unenforced one and
+> strictly worse than a measured one, and that is the honest description of what
+> shipped.
+>
+> **The measurable half got harder to take, not easier.** The floor is
+> `p99(T_recon) + T_min`, and `T_recon` is itself PLACEHOLDER — so the floor is
+> expressed in terms of a second unmeasured number. The only latency samples in
+> existence are M5e probe 2's six `get_open_orders` timings, which are
+> **bimodal** at roughly 180 ms and 450 ms with nothing between; their mean falls
+> in the empty gap and describes no call that happened. Six samples from one host
+> bound no tail at all, so they cannot produce a `p99`.
+>
+> **Who reads it:** `RiskManager._stale_positions`, reached from `evaluate`
+> ahead of the committed-risk guard, refusing new entries under
+> `RefusalStage.POSITION_STALE`. **Unexercised** — nothing constructs a
+> `Position` in `src/`, so no position has ever aged against this value outside
+> a test.
+
 ---
 
 ## 5. `risk.dispatch_deadline_s`
@@ -451,6 +476,35 @@ no order.
 > per-symbol or per-position -- which is the milestone that builds it. What
 > this annotation fixes is the DEFINITION the number is attached to, so the
 > next derivation does not start from a call that cannot answer.
+
+> **THE RECONCILER'S REAL SHAPE IS NOW KNOWN, and the annotation above asked
+> for exactly it.** Added at M5e's rotation. The value and its status mark are
+> untouched; what follows answers the question left open, and does not re-derive
+> the constraint.
+>
+> **A pass is per-SYMBOL**, one `get_own_open_orders` per due symbol, and
+> positions are keyed by symbol on `Portfolio` — so at the position limit the
+> symbol count and the position count coincide, and the headroom the annotation
+> above identified is **zero exactly when it would be needed**. It exists only
+> where `max_open_positions` exceeds the number of configured pairs.
+>
+> **The number now bounds two things, not one.** M5e's driver derives from it
+> the per-call `timeout_s` **and**, through `max_open_positions`, a total call
+> count for the whole reconciliation phase — the pass plus the point queries
+> that resolve absent legs, which the annotation above did not know would exist.
+> `attempts` is forced to 1 by `attempts x timeout_s <= T_recon`; splitting the
+> deadline into a per-attempt share would be a tail claim the six bimodal
+> samples cannot support.
+>
+> **One consequence is recorded in `NEXT_MILESTONE.md` rather than here**, since
+> it is a config relation and not a number: completing an `L`-leg position costs
+> `1 + L` calls, so `max_open_positions >= L + 1` where `L` is the count of
+> enabled protective levels. The coherence constraint below cannot catch a
+> violation — `n_max` carries a positive coefficient, so **lowering** the limit
+> only loosens the inequality.
+>
+> **Still NOT re-derived.** The constraint's arithmetic is unchanged and no
+> figure here moves. Both statuses stay PLACEHOLDER.
 
 ---
 

@@ -741,6 +741,33 @@ the natural fix and is deliberately **not** prescribed here.
 > prescribe, *uncomputable (refuse)* versus *mispriced (understate)*, is still
 > deliberately unprescribed here.
 
+> **SITE 3 IS CLOSED, at M5e, and NOT by the change three deferrals predicted.**
+> Annotated rather than struck, because the prediction being wrong is the part
+> worth keeping.
+>
+> Every deferral above expected site 3 to be closed by a dedicated fix needing
+> `ACTIVE`. What actually closed it was the **`DIVERGED` write plus this
+> whitelist's existing untrusted default**: a position whose requested stop is
+> found not to rest now carries `DIVERGED`, which is outside
+> `_TRUSTED_PROTECTION`, so `committed_risk`'s third disjunct fires and it counts
+> uncomputable. It is never priced off the stop. That happened one commit before
+> `ACTIVE` was admitted, and it required no code written for site 3 at all.
+>
+> `ACTIVE`'s admission, when it came, did the **opposite** thing: it widened the
+> pricing arm so that a *correctly* protected position stops counting
+> uncomputable. Without it the first live position would have refused every
+> subsequent entry portfolio-wide — the interlock firing on the healthy path. So
+> the two changes point in opposite directions and only the first is site 3's.
+>
+> **The choice this note declined to prescribe was made by the whitelist, not by
+> a decision here:** *uncomputable (refuse)*. The alternative — pricing off a
+> stop nobody has confirmed rests — is the understate direction that
+> `_TRUSTED_PROTECTION`'s own comment names as the expensive one.
+>
+> **UNEXERCISED.** Nothing constructs a `Position` in `src/` — one grep, one
+> hit, the class definition — so no position has ever carried `DIVERGED` outside
+> a test. Site 3 is closed by construction and unobserved in operation.
+
 ## 8. Errors
 
 `translate_binance_error` must match **message text, not code**. `-2010 'Duplicate
