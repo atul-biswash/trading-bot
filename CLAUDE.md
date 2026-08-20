@@ -1022,6 +1022,24 @@ data.
 - New exception classes end in `Error`. `zip()` always takes `strict=`. Never
   use `l` as a variable name.
 - **All files are LF**, pinned by `.gitattributes`. Write LF.
+- **CONTENT GOES THROUGH A FILE-WRITING TOOL, NEVER THROUGH THE SHELL.** Prose,
+  code, commit messages, probe scripts — anything whose exact bytes matter is
+  written with the editor tooling, not embedded in a heredoc, a `-c` string or
+  a backticked argument.
+
+  **Three failures in one milestone, and none of them damaged anything** — a
+  heredoc broke on quoting, a backtick corrupted content, and a multi-edit
+  heredoc script aborted on an anchor mismatch. Each failed *before* writing,
+  which is the reason this reads as a style rule rather than an incident
+  report. What makes it worth a line here is the fourth fact: **the instruction
+  against it had lived only in prompts.** Three occurrences of one failure,
+  under a rule repeated every session and recorded nowhere in the tree, is the
+  `phase_5_` shape — a rule that exists outside the repository cannot survive
+  the session that heard it.
+
+  The shell is still the right tool for *commands*. The boundary is whether the
+  bytes are the point: `git commit -F <file>` is shell, and the file it names
+  was written by the editor.
 - **Text that LEAVES a document to be committed or executed is ASCII. Text that
   stays in the document is house style, em dashes included.** This is a
   **propagation boundary, not a file rule**, which is why the right answer can
@@ -1449,6 +1467,39 @@ are precisely the four whose rows never reach a check placed inside the loop.
 **The prediction was correct for the mutation described and wrong for the
 mutation applied**, and nothing in the output distinguished the two.
 
+**A MUTATION MUST BE VERIFIED TO MEAN WHAT ITS NAME SAYS, NOT ONLY TO HAVE
+APPLIED (`M5e-079`).** The rule above catches an anchor that moved. This
+catches an anchor that did not: the text matched exactly once, the checksum
+changed, the mutated content printed — every check passed — and the semantics
+were still not the ones predicted.
+
+The worked example is M5e's staleness guard. A mutation named *"the guard
+placed after `committed_risk`"* was applied by replacing the guard's input with
+an empty list. **A guard whose input is emptied never fires; a guard moved
+later fires later**, and only the second is an ordering claim. It predicted one
+failure and produced four — correctly, for the mutation it had become. Re-run
+as specified, by moving the refusal below the committed-risk guard, it matched
+at one.
+
+So the check is a sentence, not a tool: **state what the mutated code now does,
+and confirm it is what the mutation's name asserts.** Emptying an input,
+short-circuiting a condition and deleting a branch all read as "disable this"
+in a diff and are three different experiments. Every mechanical safeguard this
+project has — anchor counts, checksums, printed content — is blind to the
+difference by construction, because each of them is satisfied.
+
+**AND A PREDICTION MADE BEFORE THE TESTS EXIST IS INVALIDATED BY WRITING THEM
+(`M5e-051`).** The same expiry, applied to predictions instead of to source
+text. A prediction is made at report time, when the test set is still planned;
+the act of implementing changes that set — a fixture gains a default, two tests
+collapse into one, a helper turns out to be shared. Two consecutive commits
+missed for exactly this cause before it was named.
+
+So: **predict at report time, RE-DERIVE at the green baseline once the tests
+exist, and treat the re-derivation as binding.** The first prediction is not
+discarded — the gap between the two is itself evidence, and it has twice
+pointed at a test that should not have existed in the form it was planned.
+
 **Predicting which tests a mutation breaks means enumerating EVERY test
 downstream of the mutated point, not only those testing the behaviour you have
 in mind (M5c-U).** Moving the classifier's reject-set check ahead of its rule
@@ -1459,6 +1510,23 @@ classification. **A guard cannot report on a path that never reaches it** — an
 that coupling was invisible until a prediction was wrong about it. Predicted
 cardinalities of 1, 2, 3, 5, 8, 9, 11 and 18 have since held; the discipline is
 to state the number *and* the list before running.
+
+**MECHANISING THAT ENUMERATION MAKES IT AUDITABLE, NOT CORRECT (`M5e-080`),
+and the difference is the hazard.** M5e's staleness commit parsed both test
+modules with `ast` to find every test that drives `evaluate` while holding an
+open position, rather than reading for them. The list it produced was wrong in
+both directions: it **missed four** — two whose portfolios are built through
+paths the heuristic did not model, and two parametrised entries whose fixtures
+come from a table rather than a call — and **included one** that was put there
+by reading a fixture rather than tracing it, whose case holds no open position
+at all. Predicted 12, observed 15.
+
+The tool was still worth writing, and the reason is precisely why it is worth a
+warning: **a tool that is wrong legibly can be corrected, while eyeballing is
+wrong invisibly.** What it must not buy is confidence. The output of an
+enumerator is a *candidate set* to be traced, and the heuristic it encodes —
+"this call, that construction" — is a model of the test suite that the test
+suite is under no obligation to obey.
 
 **A test absent from EVERY mutation's failure set is abstaining, not passing
 (M5c-AB).** It is the cheapest audit available once several mutations have run:
@@ -1486,6 +1554,41 @@ assignment assertion was written. That is why it is a step rather than a
 caution. **Partly mechanisable**: nothing can decide expressiveness, but "the
 abstention is declared in the docstring" is greppable, and declaring it is the
 half that stops the same discovery being made twice.
+
+**AN EXPRESSIVE FIXTURE STILL ABSTAINS IF THE ASSERTION DOES NOT LOOK.**
+Expressiveness is a property of the *input*; the assertion is what converts it
+into a failure. M5e's worked example:
+`test_cancel_order_sends_integer_order_id` was given a fixture that could
+express the mutation and abstained anyway, because it asserts only `status` —
+the mutated field travels through the test untouched and unexamined. So the
+fixture check has two halves, and passing the first proves nothing about the
+second: *can this input express the mutation*, and *does anything in this test
+read the thing the mutation moves*.
+
+**SURVEY IN BOTH DIRECTIONS, AND THE SECOND DIRECTION IS DISTINCT FROM
+EXPRESSIVENESS (`M5e-022`).** Expressiveness asks whether a test's input can
+express the mutation. The second direction asks whether the test is
+**downstream of the mutated code at all**. A prediction can pass the first and
+fail the second: M5e's per-call-timeout commit predicted two failures and got
+one, because the transport tests build their parameters inline against the
+library client and never reach the helper being mutated. Their fixtures could
+have expressed it; they were simply not on the path.
+
+So the survey is two enumerations, not one: **which tests reach the mutated
+code, and which of those the mutation could move.**
+
+**AND A WRONG PREDICTION IS WORTH DIAGNOSING RATHER THAN CORRECTING
+(`M5e-014`), because the diagnosis is where the coverage hole is.** That same
+miss was not merely a bad guess. Following it showed the helper was pinned in
+isolation and the library channel was pinned in isolation, while **nothing
+pinned that a call site joins them** — a method that quietly stopped calling
+`_with_call_timeout` would have failed zero tests. Two tests closed it.
+
+That is a different failure from either survey direction, and it is the one
+worth the most: **two things each covered, and the seam between them covered by
+nothing.** A prediction that is wrong is the cheapest way this project has
+found to locate such a seam, so the response to one is to ask what the surprise
+implies about coverage — not to adjust the number and move on.
 
 **AN AGREEMENT IS EVIDENCE ONLY WHEN DISAGREEMENT WAS POSSIBLE AND WOULD HAVE
 BEEN NOTICED.** Two independent derivations reaching the same answer tells you
@@ -1516,6 +1619,30 @@ script that could not be re-run without placing a second. Recovery was possible
 only because the teardown happened to be independently observable. **Partly
 mechanisable** — `scripts/check.py`'s FIFO refusal is the working precedent, and
 a probe harness can refuse a piped stdout the same way.
+
+> **ANNOTATED at M5e with a SECOND, INDEPENDENT reason. Regenerability stays
+> the scope stated above; this adds a case that reaches commands whose output
+> is perfectly regenerable.**
+>
+> **A pipeline's exit status is the LAST command's.** So any check whose verdict
+> travels by exit code is destroyed by piping, whatever its output does. The
+> gate's own section says this of `check.py`; what is added here is that the
+> property belongs to **pipelines**, not to that script — a verdict-by-exit-code
+> command is unsafe to pipe even when re-running it is free.
+>
+> **One occurrence, run in M5e**, and stated at that strength rather than
+> inflated: `python scripts/check.py 2>&1 | tail -14` printed the guard's
+> refusal, and the `echo GATE_EXIT=$?` beside it reported **0** — `tail`'s
+> status, on a run where the gate never executed. `CLAUDE.md` already records a
+> separate instance from M5b's rotation, where the same guard fired on
+> `... | tail -12`.
+>
+> **The `-qq` case is a DIFFERENT failure mode and is not folded in.** `pytest
+> -q` on top of `addopts`' own `-q` suppresses the summary line entirely — that
+> is **output loss**, and the exit code survives it intact. The two are worth
+> keeping apart because their remedies differ: output loss is recovered by
+> re-running without the flag, while a destroyed exit status is not recoverable
+> from the same output at all, since nothing in it records what the verdict was.
 
 **A MUTATION ANCHOR WRITTEN AGAINST PRE-FORMAT SOURCE IS INVALID, AND THIS IS A
 TOOLCHAIN PROPERTY RATHER THAN A DISCIPLINE.** The gate *rewrites source*:

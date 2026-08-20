@@ -1,12 +1,19 @@
 """Classify a position's protection from what rests at the venue, and record it.
 
-**Two layers, and the split is deliberate.**
+**Three layers, and the split is deliberate.**
 :func:`classify_protection` is PURE -- no I/O, no config, no clock, no
 ``Position``: it takes requested levels and a compare set and returns a frozen
 verdict carrying its reason. :func:`reconcile_open_positions` is the pass
-around it: it reads, classifies, and writes. Driving the pass from the candle
-subscription, and performing the point queries a verdict asks for, belong to
-whoever owns the reconciler and are not here.
+around it: it reads, classifies, and writes.
+:func:`resolve_unresolved_legs` performs the point queries a verdict asks for.
+**Driving all of it from the candle subscription is what does not live here** --
+that belongs to :mod:`trading_bot.execution.reconciliation_driver`.
+
+*(This paragraph read "Two layers" and placed the point queries outside the
+module until M5e. It was falsified by the commit that added
+:func:`resolve_unresolved_legs` to this file, and stayed wrong through four
+milestones' worth of correct deferrals -- correct because the defect armed
+nothing, which is exactly why it would have deferred indefinitely.)*
 
 The pure half is what makes the impure half testable without a venue, and
 keeping the classification decidable from data alone is why it is worth the
