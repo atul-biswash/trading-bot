@@ -2336,3 +2336,175 @@ citation alone**; the original declaration is unrecoverable, the amend window
 being closed (`git rev-list --left-right --count @{u}...HEAD` reads `0	0`).
 
 **Ruled by the reviewer under delegation, not by the project owner.**
+---
+
+## Phase 5 M5e — the reconciler, and the trust it earned
+
+M5e built the reconciler and then made the risk layer depend on it. **26
+commits including this one — 22 numbered and four of rotation — and 95
+findings, every commit carrying a block.** The milestone's headline is not any
+component: it is that **the whole subsystem is inert**, and the first live
+position will exercise seven of its parts against reality simultaneously.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `18b41be` | A finding count that matched no measurement, dropped |
+| 2 | `8123ff6` | What M5d's entry could not have known, appended |
+| 3 | `15ff98e` | The extraction anchor becomes a tag, and gains a second check |
+| 4 | `4ddd16b` | The rule M5d cited and never wrote down, re-landed |
+| 5 | `0d0266b` | The ID scheme this file prescribes has never been used |
+| 6 | `497cc38` | The rotation checklist gains the tag it was told to rely on |
+| 7 | `75bd7ae` | A cancel response names the order in `origClientOrderId` |
+| 8 | `5b54f9e` | A per-call bound on transport time and attempt count |
+| 9 | `53b3039` | Arming conditions name their caller, and four new items |
+| 10 | `17ff858` | The two reads the reconciler and R13 need |
+| 11 | `0ffde89` | Protection classified from what rests, purely |
+| 12 | `e93300d` | The working leg is the entry, not protection |
+| 13 | `22d3248` | The enumeration returns orders, not parsed pairs |
+| 14 | `db3db37` | The reconciliation pass, and the port that lets it exist |
+| 15 | `bfe92be` | An absent leg resolved by point query |
+| 16 | `e382629` | The precedence fold made exhaustive, checked by mypy |
+| 17 | `d4885c1` | The pass and the resolver take their budgets |
+| 18 | `ab62861` | The driver, and the numbers it spends |
+| 19 | `f51f5d4` | Reserve what the first unresolved position needs |
+| 20 | `b11d208` | `ACTIVE` admitted to the trust whitelist |
+| 21 | `8db6dd1` | An entry refused while the ledger is not current |
+| 22 | `d0aecc3` | The method rules M5e earned, landed before rotation |
+
+Four rotation commits follow: `4a5d34c` annotated the decided contracts,
+`4d28a5d` wrote the current state and the counts, `470b47b` rewrote
+`NEXT_MILESTONE.md` for M5f, and **this commit** is the entry. The count above
+includes it, because a rotation that writes its count before its final commit
+exists is off by one — the defect finding MM recorded, whose only real fix is to
+count itself and name the last one in words.
+
+### The whole subsystem is inert, and that is the milestone's finding
+
+`grep -rn "Position(" src/` returns **one hit**: the class definition in
+`core/models.py`. Nothing in `src/` constructs a `Position`. So **seven
+components have never run against a real position** — `classify_protection`,
+`resolve_unresolved_legs`, `reconcile_open_positions`, `ReconciliationDriver`,
+the L-leg reservation, `ACTIVE`'s membership in `_TRUSTED_PROTECTION`, and
+`RefusalStage.POSITION_STALE`.
+
+Every one is pinned by tests over fabricated positions, and the tests are not
+the weak part: they include mutation surveys with predicted failure sets, and
+one measured trace of a livelock closing. **What nothing covers is the
+composition.** The first position the executor opens is read by the driver on
+the next candle, classified, possibly resolved, stamped or deliberately not
+stamped, trusted or not, and priced or refused — seven decisions in sequence,
+each individually pinned, none ever having run in series against a venue.
+
+This is stated as a **risk carried into M5f**, not as a defect. Building the
+reconciler before the first order was correct and remains correct: with only
+untrusted protection states, the first position opened would have refused every
+entry after it, portfolio-wide. The cost of that ordering is precisely this —
+that the safety machinery is unexercised at the moment it first matters.
+
+### What was decided
+
+**The reservation reserves what the first unresolved position needs, not one
+call.** Reserving a single call left a livelock: resolution is all-or-nothing,
+so one reserved call re-queries the same first leg forever, a two-leg position
+never completes, never gets stamped, sorts first forever, and the healthy
+positions behind it are never read. Measured, then closed, then measured again
+— the fix was traced cycle by cycle against the real functions before it was
+written, and the trace is in `NEXT_MILESTONE.md` item 13. **The closure is
+scoped to `max_calls >= L + 1`**, which is arithmetic rather than a weakness:
+completing an `L`-leg position costs one enumeration plus `L` queries.
+
+**`ACTIVE` was admitted to `_TRUSTED_PROTECTION`, and it is the one member that
+may be.** Every other state is trusted or not on the strength of what nobody
+checked; `ACTIVE` is returned only when every requested leg was found resting at
+the venue, at its trigger, for the quantity, under the list id, with nothing
+executed. It is the only member whose truth is measured. What it unblocks is
+trading, not a defect — left untrusted, a correctly protected position refuses
+every entry portfolio-wide.
+
+**The executor must construct every `Position` with `ProtectionState.UNKNOWN`.**
+A constraint on a caller that does not exist, ruled so that the reserved
+question about `last_reconciled_at is None` collapses: unstamped implies
+`UNKNOWN` implies untrusted implies uncomputable, so all three readings coincide
+and the choice becomes a label. It also keeps stamping-at-construction adoptable
+later, where the opposite ruling would have required a measurement that requires
+a dispatch.
+
+**`RefusalStage.POSITION_STALE` refuses while the ledger is not current**, ahead
+of the committed-risk guard because it names the cause where that names the
+consequence. It is **ungated by `stop_loss.enabled`** where its neighbour is
+gated, and that is the milestone's only behaviour change: the opt-out is about
+committed risk, while staleness is about whether `has_position` describes
+reality.
+
+### What was rejected
+
+**Reserving one call unconditionally** — free-looking, and it produced the
+livelock. **Reserving for every unresolved position** — it shrinks the pass
+until it reads almost nothing; completing them one at a time is what makes
+progress monotone. **Stamping at construction** — honest only if the executor
+observes venue state, which needs `orderReports`, whose shape is UNMEASURED and
+whose measurement needs a dispatch. **Gating staleness on `stop_loss.enabled`**
+— consistent with its neighbour, and wrong, because a `CLOSE`-owning operator
+still needs `has_position` correct. **A driver that remembers position state** —
+it becomes a second source of truth for a fact the position already owns, and
+refusing it is what blocks Q-B site 4's N-cycle counter.
+
+### Three things the method itself learned
+
+**A mutation must be verified to MEAN what its name says.** A mutation named
+"the guard placed after `committed_risk`" was applied by emptying the guard's
+input. A guard whose input is emptied never fires; a guard moved later fires
+later. Every mechanical safeguard passed — the anchor matched once, the checksum
+changed, the content printed — and the experiment was still not the one
+predicted.
+
+**Mechanising an enumeration makes it auditable, not correct.** An AST pass over
+the test modules missed four tests and invented one. It was still worth writing:
+a tool that is wrong legibly can be corrected, while eyeballing is wrong
+invisibly.
+
+**A prediction made before the tests exist is invalidated by writing them.**
+Two consecutive commits missed for that cause before it was named. Predict at
+report time, re-derive at the green baseline, and let the re-derivation bind.
+
+### The extraction procedure's first live use, and how it was checked
+
+This rotation is the first to run the tag-anchored extractor K3 rebuilt. It
+reached **22 of 22** commits, all carrying blocks, and the cited-but-not-declared
+cross-check returned empty.
+
+**Neither of those alone would establish anything, and the composition is the
+point.** `M5e-001` measured that the predecessor could return a *well-formed
+subset* with nothing signalling distrust — so a plausible output needs a check
+that could have distinguished it.
+
+- **ID density** — the declared identifiers ran `001` to the maximum with **no
+  gaps** — rules out a missed *middle* commit, since a skipped block takes its
+  identifiers with it.
+- **Header parity** — commits emitting a header equalled commits in range,
+  cross-checked against `git rev-list --count` — rules out a truncated *tail*,
+  which would read as perfectly dense with a lower maximum.
+
+Density alone is blind to truncation; parity alone is blind to a hole. Together
+they close both, and that is why both are recorded.
+
+The cross-check's empty result is a **pass rather than a vacuum**: thirteen
+identifiers are cited in commit prose outside any block in this range, so the
+diff had real input and found every one of them declared. A second run against
+`docs/`, `CLAUDE.md` and `README.md` found no identifier living only in a
+document body — `M5d-086`'s class did not recur.
+
+**What none of it catches** is a rule stated with no identifier at all. One
+reached this milestone that way, carried by memory rather than by the queue.
+
+### The historical figures in this entry
+
+**26 commits, 95 findings, and the gate at `470b47b` — `ruff check` clean, 92
+files formatted, mypy clean over 62 source files, 1046 passed credentialed.**
+These are HISTORICAL and must never move, exactly like the `4926705`-pinned trio
+in `CLAUDE.md`. A later rotation grepping the digits will meet them; they are
+facts about this milestone's close, not counts to update.
+
+**Ruled by the reviewer under delegation, not by the project owner.**
