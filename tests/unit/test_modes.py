@@ -90,7 +90,7 @@ from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.logger import surplus_fields
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
     from datetime import datetime
     from pathlib import Path
 
@@ -1067,21 +1067,25 @@ class TestBootRefusals:
 
 
 class TestQuoteAssetMatching:
-    async def test_matching_is_case_insensitive_on_both_sides(self) -> None:
+    """`_seed_portfolio` takes a snapshot rather than reading one, so these need
+    no client at all -- the boot reads balances once and hands the sequence to
+    both consumers."""
+
+    def test_matching_is_case_insensitive_on_both_sides(self) -> None:
         """`trading.base_currency` carries no validator of its own, so this code
         has to be correct standing alone. The Commit-2 validator is defence in
         depth, not a substitute."""
-        client = FakeRootClient(balances=[Balance(asset="usdt", free=D("12"), locked=D("0"))])
+        balances = [Balance(asset="usdt", free=D("12"), locked=D("0"))]
 
-        portfolio = await _seed_portfolio(client, quote_asset="uSdT")
+        portfolio = _seed_portfolio(balances, quote_asset="uSdT")
 
         assert portfolio.free_quote == D("12")
 
-    async def test_the_normalised_form_is_what_lands_on_the_portfolio(self) -> None:
+    def test_the_normalised_form_is_what_lands_on_the_portfolio(self) -> None:
         """It is interpolated into refusal messages and future code will compare it."""
-        client = FakeRootClient(balances=[Balance(asset="usdt", free=D("1"), locked=D("0"))])
+        balances = [Balance(asset="usdt", free=D("1"), locked=D("0"))]
 
-        portfolio = await _seed_portfolio(client, quote_asset="usdt")
+        portfolio = _seed_portfolio(balances, quote_asset="usdt")
 
         assert portfolio.quote_asset == "USDT"
 
@@ -1092,6 +1096,86 @@ class TestQuoteAssetMatching:
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             assert system.portfolio.quote_asset == "USDT"
             assert system.portfolio.free_quote == D("5000")
+
+
+class TestTheBootReadsBalancesOnce:
+    """One account read, shared by the seeded portfolio and the holdings
+    snapshot. The saved round trip is the smaller half: two reads could disagree
+    if a balance moved between them, and the two consumers would then describe
+    different accounts."""
+
+    async def test_the_boot_reads_balances_exactly_once(self, tmp_path: Path) -> None:
+        """Arity. `FakeRootClient` journals every call, so a second read is
+        visible as a second entry rather than inferred from a counter."""
+        settings = write_settings(tmp_path)
+        journal: list[str] = []
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ],
+            journal=journal,
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            # Both consumers ran: the portfolio is seeded AND the holding was
+            # snapshotted, so the single read fed both rather than one of them.
+            assert system.portfolio.free_quote == D("5000")
+            assert system.portfolio.unmanaged_holdings == {SYMBOL: D("0.5")}
+
+        assert journal.count("balances") == 1
+
+    async def test_both_consumers_receive_the_same_snapshot_object(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """IDENTITY, not arity, and the two are different claims.
+
+        One `get_balances` call can still hand the consumers different objects
+        -- a defensive copy at either call site would do it -- and two objects
+        are free to diverge later even though they agree now. Counting calls
+        cannot see that; `is` can.
+
+        The fixture can express it: `FakeRootClient.get_balances` returns
+        `list(self._balances)`, a NEW list per call, so under a second read the
+        two consumers would genuinely hold different objects and this assertion
+        would fail rather than coincidentally hold.
+        """
+        from trading_bot.engine import modes
+
+        seen: list[Sequence[Balance]] = []
+        real_seed = modes._seed_portfolio
+        real_snapshot = modes._snapshot_unmanaged_holdings
+
+        def recording_seed(balances: Sequence[Balance], *, quote_asset: str) -> Portfolio:
+            seen.append(balances)
+            return real_seed(balances, quote_asset=quote_asset)
+
+        async def recording_snapshot(
+            client: ExchangeClient,
+            *,
+            balances: Sequence[Balance],
+            pairs: Mapping[str, PairContext],
+            portfolio: Portfolio,
+        ) -> None:
+            seen.append(balances)
+            await real_snapshot(client, balances=balances, pairs=pairs, portfolio=portfolio)
+
+        monkeypatch.setattr(modes, "_seed_portfolio", recording_seed)
+        monkeypatch.setattr(modes, "_snapshot_unmanaged_holdings", recording_snapshot)
+
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()):
+            pass
+
+        assert len(seen) == 2
+        assert seen[0] is seen[1]
 
 
 class TestUnmanagedHoldings:

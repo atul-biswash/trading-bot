@@ -38,9 +38,11 @@ Boot order: all I/O before any socket exists
 2. Pair contexts -- the *pure* duplicate-symbol check first, so a config
    mistake costs no network round trip, then one ``get_symbol_info`` per
    distinct symbol.
-3. Portfolio, seeded from ``get_balances``.
-4. Unmanaged base holdings -- a second ``get_balances``, then one
-   ``get_ticker`` per candidate asset. Warns; never refuses.
+3. One ``get_balances``, shared by steps 3a and 4 -- two reads could disagree
+   if a balance moved between them.
+3a. Portfolio, seeded from that snapshot.
+4. Unmanaged base holdings, from the same snapshot, then one ``get_ticker``
+   per candidate asset. Warns; never refuses.
 5. Market-data provider (this is the first step that can open a WebSocket).
 6. Engine, 7. risk manager, 8. intent logger, 9. the one signal handler,
    10. the reconciliation driver, subscribed to candles.
@@ -133,10 +135,10 @@ from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import AsyncIterator, Mapping
+    from collections.abc import AsyncIterator, Mapping, Sequence
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Signal
+    from trading_bot.core.models import Balance, Signal
 
 _log = get_logger(__name__)
 
@@ -441,8 +443,19 @@ async def _prime_pairs(
     return pairs
 
 
-async def _seed_portfolio(client: ExchangeClient, *, quote_asset: str) -> Portfolio:
+def _seed_portfolio(balances: Sequence[Balance], *, quote_asset: str) -> Portfolio:
     """Build the boot-snapshot portfolio from the account's quote balance.
+
+    **Takes a snapshot rather than reading one, and shares it with
+    :func:`_snapshot_unmanaged_holdings`.** The boot reads ``get_balances`` once
+    and hands the same sequence to both. Two reads is not merely a wasted round
+    trip: a balance moving between them would leave the seeded portfolio and the
+    unmanaged-holdings snapshot describing **different accounts**, and every
+    equity figure derived afterwards would be a blend of two instants. One read
+    makes that unrepresentable rather than unlikely.
+
+    That also makes this function pure -- no client, no I/O, no await -- so the
+    quote-matching rules below can be exercised against a list of balances.
 
     From the exchange, never from config: both ``initial_balance`` fields are
     ``float`` *and* belong to backtest/paper, so that route is dead twice over.
@@ -461,7 +474,6 @@ async def _seed_portfolio(client: ExchangeClient, *, quote_asset: str) -> Portfo
     hold -- and refuses the boot. A zero balance is a valid, non-refusing state.
     """
     normalised = quote_asset.upper()
-    balances = await client.get_balances()
     for balance in balances:
         if balance.asset.upper() == normalised:
             return Portfolio(quote_asset=normalised, free_quote=balance.free)
@@ -475,9 +487,19 @@ async def _seed_portfolio(client: ExchangeClient, *, quote_asset: str) -> Portfo
 
 
 async def _snapshot_unmanaged_holdings(
-    client: ExchangeClient, *, pairs: Mapping[str, PairContext], portfolio: Portfolio
+    client: ExchangeClient,
+    *,
+    balances: Sequence[Balance],
+    pairs: Mapping[str, PairContext],
+    portfolio: Portfolio,
 ) -> None:
     """Record material base holdings the account had before this bot started.
+
+    **``balances`` is the boot's single account read, shared with
+    :func:`_seed_portfolio`.** This function used to take its own, and the two
+    reads could disagree if a balance moved between them -- leaving the seeded
+    portfolio and this snapshot describing different accounts. The ``client`` is
+    still needed, for the per-asset ticker below.
 
     **Counted toward equity, never adopted as positions.** Adopting would give
     a holding no entry price, no stop and no requested protection -- the
@@ -521,7 +543,7 @@ async def _snapshot_unmanaged_holdings(
         if context.symbol_info.quote_asset == quote
     }
 
-    for balance in await client.get_balances():
+    for balance in balances:
         asset = balance.asset.upper()
         # The quote asset is already `free_quote`; counting it here would
         # double it into equity outright.
@@ -594,11 +616,19 @@ async def live_system(
     try:
         timeframes = _pair_timeframes(settings)
         pairs = await _prime_pairs(resolved_client, timeframes)
-        portfolio = await _seed_portfolio(
-            resolved_client, quote_asset=settings.config.trading.base_currency
-        )
+        # ONE account read, shared by both consumers below. The saved round trip
+        # is the smaller half: two reads could disagree if a balance moved
+        # between them, and the seeded portfolio and the unmanaged-holdings
+        # snapshot would then describe different accounts. The single read is
+        # taken at the EARLIER of the two original moments, so `_seed_portfolio`
+        # observes exactly what it did before and the holdings snapshot now
+        # observes an account state one round trip older.
+        balances = await resolved_client.get_balances()
+        portfolio = _seed_portfolio(balances, quote_asset=settings.config.trading.base_currency)
         # Still before any socket, with the other four boot refusals.
-        await _snapshot_unmanaged_holdings(resolved_client, pairs=pairs, portfolio=portfolio)
+        await _snapshot_unmanaged_holdings(
+            resolved_client, balances=balances, pairs=pairs, portfolio=portfolio
+        )
 
         provider = await BufferedMarketDataProvider.create(
             settings, client=resolved_client, stream=stream
