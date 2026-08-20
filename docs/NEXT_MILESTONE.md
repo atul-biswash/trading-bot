@@ -1,42 +1,72 @@
-# Current milestone — M5e: the first dispatch
+# Current milestone — M5f: the executor, and the first order
 
-**THE RECONCILER SHIPS BEFORE THE FIRST ORDER, and that is a hard precondition
-rather than a preference.** It is stated first because every other item here
-assumes it.
+**THE EXECUTOR IS THE MILESTONE EVERY DEFERRAL IN THIS FILE HAS BEEN WAITING
+FOR.** Nine carried items name it or something it causes; five name it
+literally. It is stated first because the size of that queue is the milestone's
+real shape, not the code that dispatches an order.
 
-M5d built the adapter surface: request types, per-leg enforcement, both
-parameter mappers, both placement methods, the response mapper and the Q-C §6 ID
-scheme. **Nothing calls any of it.** M5e wires it to the decision path — which
-means it is the milestone that first sends an order the bot decided to send.
+M5e built the reconciler — a pure classifier, a per-symbol pass, a point-query
+resolver, a candle-subscribed driver, the trust admission and the staleness
+refusal. **Every piece of it is inert.** Nothing constructs a `Position` in
+`src/`, so the first position this milestone opens exercises seven components
+against reality simultaneously and for the first time. That is the risk M5f
+carries, and no test can retire it in advance.
 
 Read first: `docs/QC_PROTECTIVE_ORDERS.md` §4 (entry mechanics), §4b (the
-discretionary close), §7 (reconciliation) and §8 (errors and the re-place branch
-table); `docs/M5_NUMBERS.md`, whose `T_recon` definition was corrected at M5d's
-rotation; `docs/QB_ESCALATION.md`. The decisions are locked in `CLAUDE.md`; this
-file is the task list and the single home for live open items.
+discretionary close), §6 (the ID scheme), §7 (reconciliation, whose site 3 is
+now closed) and §8 (errors and the re-place branch table); `docs/M5_NUMBERS.md`,
+whose §4 and §6 were annotated at M5e's rotation; `docs/QB_ESCALATION.md`, whose
+site 4 is now split. The decisions are locked in `CLAUDE.md`; this file is the
+task list and the single home for live open items.
 
 ---
 
-## Before M5e starts — the namespace, settled in advance this time
+## Before M5f starts — the namespace
 
-**M5e's finding namespace is `M5e-001` onward: three digits, zero-padded,
+**M5f's finding namespace is `M5f-001` onward: three digits, zero-padded,
 per-milestone, capacity 999.**
 
 Per-milestone rather than carrying, because `CLAUDE.md`'s whole justification
-for namespacing is **self-location** — `M5d-053` tells a reader which entry to
-open, and a cumulative counter would destroy that. Capacity is not a live
-question at three digits -- M5d did not come close, on any reading of what it
-consumed -- and **no extension rule should be invented in advance**; the
-two-character letter extension does not apply and lexical and numeric ordering
-coincide across the whole range.
+for namespacing is **self-location** — `M5e-053` tells a reader which entry to
+open, and a cumulative counter would destroy that. **M5e consumed 89 of 999**,
+which is the first real datum on capacity: the three-digit scheme is not close
+to binding, and no extension rule should be invented in advance.
 
-This is stated here because it is the obligation that was owed before M5d's
-first commit, was not discharged, and cost two turns at the start of the
-milestone. It should not be owed again.
+Stated here before the first commit, which is where it belongs — M5d owed this
+and did not discharge it, and M5e discharged it and then spent 89 identifiers
+without incident.
 
 ---
 
-## The five decisions M5e inherits, with arming conditions
+## The executor's inherited queue — nine items, five naming it literally
+
+**This queue has accumulated across four milestones and had never been counted
+until M5e's rotation counted it.** Each entry below links to its full section;
+this table is the size of the obligation, not a replacement for the reasoning.
+
+| Item | ID | What the executor owes |
+|---|---|---|
+| 1 | `M5d-073` | Declare the placement methods on `ExchangeClient` **in the same commit** as their production caller — the commit finding GG has been saved for |
+| 9 | `M5e-016` | Assert the `get_symbol_info` cache and **refuse to dispatch on a miss** — ruled, recorded, deliberately unimplemented |
+| 13 | `M5e-054` | Nothing to build: opening the first position is what makes the reconciler's livelock reachable at all |
+| 14b | `M5e-075` | Construct every `Position` with `ProtectionState.UNKNOWN` |
+| 14 | `M5e-069` | **Superseded — see the annotation on item 14.** Its condition named the executor for a refusal that landed at M5e |
+
+Four more are armed by what the executor *causes* rather than by the executor
+itself: **item 2** (`M5d-074`, the per-call retry budget — "the first
+dispatch"), **item 4** (`M5d-072`, whether a filled leg stays visible — needs a
+fill), **item 12** (the pipe rule's scope — "the first test that places an
+order"), and **item 3** (`M5d-078`, `orderReports` — names a confirmation step
+that does not exist).
+
+**A tenth is not on this list and should be**: `QB_ESCALATION.md`'s site 4
+escalation half, blocked on a halt flag. Its arming condition names the halt
+flag's first writer rather than the executor, and whether that is the same
+commit is undecided.
+
+---
+
+## The five decisions M5f inherits, with arming conditions
 
 Named rather than rediscovered. Each was a deliberate deferral, not an
 oversight.
@@ -275,6 +305,33 @@ must decide whether that means "no findings" or "not looked". **M5c's rotation
 ran the extractor before appending its table precisely to avoid case three**,
 which is a workaround, not a fix.
 
+> **PARTLY DISSOLVED, and the part that survives is smaller than it was —
+> `M5e-091`.** M5e's rotation was the tag-anchored extractor's **first live
+> use** since it replaced the table lookup, and it did not return empty: 22 of
+> 22 commits reached, 22 carrying blocks, 84 entries, 83 distinct IDs.
+>
+> **Two of the four cases are gone by construction.** "The lookup matched no
+> row" and "it matched the wrong row" were properties of the `sed`-into-the-table
+> anchor; a tag either resolves or is fatal — `fatal: ambiguous argument`,
+> exit 128, no output — so neither can produce a quiet empty any more.
+>
+> **Case three is unchanged and still needs the workaround.** Appending the
+> milestone's table row does not move a *tag*, so the tag-anchored form is
+> immune to that — but the rotation still runs the extractor before writing the
+> entry, now for a different reason: the entry must report the finding count,
+> and its own commit changes it.
+>
+> **Case four is unchanged and undecidable from the output alone.** An empty
+> result still cannot distinguish "no findings" from "not looked", and the
+> procedure's own text still says to read it against `git log --oneline` over
+> the same range.
+>
+> **What M5e added is a check that could have distinguished a plausible empty
+> from a real one**, which is the thing `M5e-001` said was missing. See the
+> composition recorded under the rotation's own findings: header parity rules
+> out a truncated tail, ID density rules out a missed middle, and neither alone
+> suffices.
+
 ### 4. Finding I and Finding X, together
 
 They edit the same code — `live_system`'s priming loop — and splitting them means
@@ -440,6 +497,28 @@ was level selection. Fixing either leaves the other.
 > constructed nowhere in `src/`, nothing assigns `Position.protection`, and no
 > M5d work item creates either.
 
+> **CLOSED AT M5e — and by a change no deferral predicted. `M5e-084`.** All
+> three deferrals named `ACTIVE` as the prerequisite. What actually closed site
+> 3 was the **`DIVERGED` write plus the whitelist's existing untrusted
+> default**: a position whose requested stop is found not to rest carries
+> `DIVERGED`, which is outside `_TRUSTED_PROTECTION`, so `committed_risk` counts
+> it uncomputable and never prices off that stop. No code was written for site 3.
+>
+> `ACTIVE`'s admission, one commit later, did the **opposite** thing — it
+> widened the pricing arm so a *correctly* protected position stops counting
+> uncomputable, which is what stops the first live position refusing every entry
+> after it. The two changes point in opposite directions and only the first is
+> site 3's.
+>
+> **The transferable part:** a defect deferred behind a named prerequisite can
+> be closed by something else entirely, and nothing re-checks the prerequisite
+> once it is written down. Three deferrals restated the same blocking object
+> without re-deriving whether it was still the blocker.
+>
+> **UNEXERCISED.** Nothing constructs a `Position`, so no position has carried
+> `DIVERGED` outside a test. Closed by construction, unobserved in operation.
+> Full annotation in `docs/QC_PROTECTIVE_ORDERS.md` §7.
+
 > **THE RECONCILER IS A HARD PRECONDITION OF THE FIRST DISPATCH, and it lands as
 > M5e's OPENING block — before any order.** Recorded here because it is a
 > scheduling constraint that three documents now depend on and none stated.
@@ -541,6 +620,22 @@ This records what the samples forbid, not what they permit.
 
 *Arming condition:* **the reconciler**, which is the first component that spends
 a budget, and by the rule above is also what arms `M5d-074`.
+
+> **ARMED AND PARTLY DISCHARGED AT M5e.** The reconciler shipped and its driver
+> derives three values from config: `timeout_s = reconcile_deadline_s`,
+> `attempts = 1` (forced by `attempts x timeout_s <= T_recon`, since splitting
+> the deadline into a per-attempt share is a tail claim six bimodal samples
+> cannot support), and a phase-wide call count of `max_open_positions`.
+>
+> **No number was written into `src/`, and both status marks are untouched.**
+> `reconcile_deadline_s` and `max_position_staleness_s` remain PLACEHOLDER — NOT
+> MEASURED. What the driver derives, it derives from those placeholders, so the
+> arithmetic is enforced on an unmeasured base.
+>
+> **`M5d-074`'s DISPATCH half is still owed**, and is on the executor's queue:
+> `dispatch_deadline_s` has no reader, and the placement methods still inherit
+> the client-wide retry policy whose worst case is 43.5 s against a 9.0 s
+> deadline.
 
 ### 12. The pipe rule's scope, and how close the suite is to it
 
@@ -766,6 +861,23 @@ inside a whitelist edit is how a guard lands without the reasoning that
 justifies it. `test_membership_says_nothing_about_when_the_protection_was_verified`
 in `tests/unit/test_risk_manager.py` characterises the gap, so closing it
 inverts a test rather than passing silently.
+
+> **THIS ARMING CONDITION FIRED AND NOTHING NOTICED — `M5e-090`.** The refusal
+> it names landed at M5e's S1, three commits after this condition was written,
+> **in the same milestone**. The item went on reading as though it were waiting
+> for a component that had not been built, while the thing it was waiting for
+> had already shipped.
+>
+> Nothing detected it. The arming-condition discipline has no mechanism that
+> watches a condition for its own satisfaction; what found this one was a
+> rotation reading every condition in the file in one pass, which happens once a
+> milestone. That is the third and newest failure mode of arming conditions, and
+> unlike the other two it is not a badly written condition — the condition was
+> correct, and correct is not the same as observed. It is recorded as a rule in
+> `CLAUDE.md` beside the caller-not-event rule.
+>
+> **What remains of item 14 is the escalation half only**, whose arming
+> condition is the halt flag's first writer, stated below.
 
 > **THE REFUSAL HALF HAS LANDED (S1). The driver's escalation half has not, and
 > the reason is a conflict between two correct decisions.**
