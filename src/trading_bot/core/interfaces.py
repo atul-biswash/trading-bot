@@ -84,9 +84,14 @@ class ExchangeClient(ABC):
         implementation's own policy.** They sit on the port rather than on the
         adapter alone because a caller on a deadline must be able to bound this
         THROUGH the abstraction; a port narrower than its implementation would
-        force that caller to reach past it, which defeats the port. Nothing
-        supplies them yet -- the values derive from ``reconcile_deadline_s``,
-        which is a PLACEHOLDER, and land with the driver that spends it.
+        force that caller to reach past it, which defeats the port.
+
+        **Both are supplied today, by the reconciliation driver.**
+        ``ReconciliationBudget.from_config`` derives ``timeout_s`` from
+        ``risk.reconcile_deadline_s`` and forces ``attempts`` to 1;
+        ``ReconciliationDriver`` hands the pair to ``reconcile_open_positions``,
+        which passes them straight to this method. So a caller reading this
+        signature is reading a channel that is in use rather than reserved.
 
         Declaring a transport bound on a domain port is a transport concern
         crossing inward, and is coherent here only because this project already
