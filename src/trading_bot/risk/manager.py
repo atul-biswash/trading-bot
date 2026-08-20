@@ -163,8 +163,16 @@ class RiskManager(RiskManagerPort):
         portfolio: Portfolio,
         equity: Decimal,
         committed: Decimal,
+        now: datetime,
     ) -> RiskDecision:
         """Evaluate the limits against an already-computed ``equity``.
+
+        ``now`` is SUPPLIED rather than read here. It used to be this method's
+        own ``self._clock()`` call; :meth:`evaluate` hoisted it so that the
+        staleness guard and the daily-loss and cooldown comparisons all measure
+        against **one instant**. Two readings would let a signal be fresh
+        against one and in cooldown against another, which is a boundary nobody
+        would find twice.
 
         First failure wins, in a fixed order: the portfolio-wide halt that makes
         every entry unacceptable, then the facts about this one symbol, then the
@@ -172,7 +180,6 @@ class RiskManager(RiskManagerPort):
         genuinely be new, so it is checked after "we already hold this".
         """
         limits = self._config.limits
-        now = self._clock()
 
         def refuse(rule: RiskRule, detail: str) -> RiskDecision:
             return RiskDecision(symbol=signal.symbol, approved=False, rule=rule, reason=detail)
@@ -334,6 +341,12 @@ class RiskManager(RiskManagerPort):
                 stage=RefusalStage.UNSUPPORTED_ACTION,
             )
 
+        # ONE reading, hoisted here from `_approve`, and after the CLOSE
+        # dispatch above so the exit path stays clock-free. Everything below
+        # that compares against a clock -- staleness, the daily-loss roll,
+        # cooldown expiry -- measures against this instant.
+        now = self._clock()
+
         marks, unpriced = self._mark_prices(portfolio)
         if unpriced:
             decision = RiskDecision(
@@ -346,6 +359,41 @@ class RiskManager(RiskManagerPort):
                 ),
             )
             return refuse(decision.reason, stage=RefusalStage.NO_MARK_PRICE, decision=decision)
+
+        # THE LEDGER'S CURRENCY, checked before anything is computed from it.
+        #
+        # Ahead of COMMITTED_RISK_UNKNOWN deliberately: this names the CAUSE
+        # where that one names the CONSEQUENCE. An operator reading "the ledger
+        # is not current" can act -- the feed, the budget, the reconciler --
+        # while one reading "committed risk is unknown" has to work backwards to
+        # the same place. The two overlap on inputs the pass really produces, so
+        # the order is pinned by a test rather than left to this sequence.
+        #
+        # UNGATED BY `stop_loss.enabled`, unlike the guard below, and that is
+        # THE ONE BEHAVIOUR CHANGE this introduces. The opt-out that gate
+        # honours is about COMMITTED RISK -- the operator has declared they own
+        # their exits -- while this is about whether `positions`,
+        # `position_count` and `has_position` describe reality. A CLOSE-owning
+        # operator still needs `has_position` correct, or a BUY pyramids onto a
+        # position that closed at the venue. The change is narrow: a
+        # stop-disabled position classifies ABSENT_BY_DESIGN and is stamped on
+        # the first pass, so this fires only once the pass STOPS RUNNING -- and
+        # an operator who opted out of protective orders is the least equipped
+        # to notice that on their own.
+        #
+        # `None` is MAXIMALLY STALE. Under the executor constraint (a position
+        # is constructed UNKNOWN and nothing trusts it until the reconciler has
+        # seen its protection resting) every reading of `None` coincides in
+        # behaviour, so this is a label decision everywhere except the
+        # stop-disabled case above.
+        stale = self._stale_positions(portfolio, now=now)
+        if stale:
+            return refuse(
+                f"{len(stale)} open position(s) have not been fully reconciled within "
+                f"{self._config.max_position_staleness_s}s ({', '.join(stale)}); the ledger "
+                "is not current enough for any limit to mean anything",
+                stage=RefusalStage.POSITION_STALE,
+            )
 
         # Forward risk that cannot be priced refuses BEFORE the limits, in the
         # shape NO_MARK_PRICE already has: an inability to compute, not a
@@ -366,7 +414,9 @@ class RiskManager(RiskManagerPort):
             )
 
         equity = portfolio.equity(marks)
-        decision = self._approve(signal, portfolio=portfolio, equity=equity, committed=committed)
+        decision = self._approve(
+            signal, portfolio=portfolio, equity=equity, committed=committed, now=now
+        )
         if not decision.approved:
             return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 
@@ -581,6 +631,43 @@ class RiskManager(RiskManagerPort):
         """
         context = self._pairs.get(symbol)
         return context.symbol_info.price_tick if context is not None else Decimal(0)
+
+    def _stale_positions(self, portfolio: Portfolio, *, now: datetime) -> list[str]:
+        """Symbols whose last COMPLETE reconciliation is older than the bound.
+
+        **``last_reconciled_at is None`` is maximally stale**, and the ``None``
+        branch is separate arithmetic rather than a sentinel folded into the
+        comparison -- ``None`` has no subtraction. Keeping it a branch is also
+        what lets a mutation of either half be attributed to one of them.
+
+        **THE STAMP MEANS LAST COMPLETELY RECONCILED**, not last read. A
+        position under active reconciliation that never finishes -- legs the
+        budget could not query -- carries ``None`` while being visited every
+        bar, and is stale here on purpose: it is being *looked at* and is not
+        *understood*, and only the second is what a limit can be computed from.
+
+        **The conversion boundary sits here and creates nothing new.**
+        ``now - stamp`` is a ``timedelta``, ``.total_seconds()`` is a ``float``,
+        and ``max_position_staleness_s`` is already ``float`` by M5a's type
+        split -- the fields that multiply money are ``Decimal``, the durations
+        compared against clocks are not. No money is involved, so the
+        ``Decimal`` rule has nothing to say about it.
+
+        **MECHANISM WITHOUT A MEASURED NUMBER.** The bound is
+        ``risk.max_position_staleness_s``, whose status is **PLACEHOLDER -- NOT
+        MEASURED** and is untouched here. Its floor is ``p99(T_recon) +
+        T_min``, ``T_recon`` is itself a placeholder, and the only latency
+        samples in existence are six bimodal readings that bound nothing. So
+        this is enforced arithmetic on an unmeasured threshold -- strictly
+        better than an unenforced one, strictly worse than a measured one.
+        """
+        bound = self._config.max_position_staleness_s
+        stale: list[str] = []
+        for position in portfolio.open_positions:
+            stamp = position.last_reconciled_at
+            if stamp is None or (now - stamp).total_seconds() > bound:
+                stale.append(position.symbol)
+        return stale
 
     def _mark_prices(self, portfolio: Portfolio) -> tuple[dict[str, Decimal], list[str]]:
         """Latest close per symbol equity must value, plus the ones that have none.

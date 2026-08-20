@@ -273,7 +273,23 @@ def long_position(
     take_profit: Decimal | None = None,
     trailing_stop: Decimal | None = None,
     protection: ProtectionState = ProtectionState.UNKNOWN,
+    last_reconciled_at: datetime | None = NOW,
 ) -> Position:
+    """A long position, FRESHLY RECONCILED unless a test says otherwise.
+
+    **The stamp defaults to ``NOW``, and that default is a decision.** Before
+    the staleness guard existed every fixture here carried ``None`` and it did
+    not matter; now ``None`` is maximally stale, so an unstamped default would
+    make every test in this file refuse at `POSITION_STALE` before reaching
+    what it was written to exercise. Defaulting to fresh keeps each test
+    asserting its own subject.
+
+    The consequence is worth naming rather than absorbing: **every existing
+    `evaluate` test thereby begins asserting the FRESH path.** That is correct
+    -- they were written before staleness existed and were implicitly fresh --
+    but it is a property nobody chose until this commit, across every use of
+    this helper.
+    """
     return Position(
         symbol=symbol,
         side=PositionSide.LONG,
@@ -285,6 +301,7 @@ def long_position(
         stop_loss=stop_loss,
         take_profit=take_profit,
         trailing_stop=trailing_stop,
+        last_reconciled_at=last_reconciled_at,
     )
 
 
@@ -1449,6 +1466,150 @@ class TestNoPlaceableStop:
 # --------------------------------------------------------------------------
 # evaluate: preconditions, sizing refusals, affordability, exits
 # --------------------------------------------------------------------------
+class TestStaleness:
+    """The ledger's currency, checked before anything is computed from it."""
+
+    @staticmethod
+    def _manager_and_signal() -> tuple[RiskManager, Signal]:
+        pairs = multi_pairs(SYMBOL, "ETHUSDT")
+        manager, _ = build_manager(
+            provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+            pairs=pairs,
+        )
+        return manager, buy()
+
+    def test_an_unstamped_position_is_maximally_stale(self) -> None:
+        """`None` means never COMPLETELY reconciled, and it refuses.
+
+        A separate branch rather than a sentinel folded into the comparison --
+        `None` has no subtraction -- which is also what keeps a mutation of this
+        half attributable to it rather than to the arithmetic.
+
+        The position is `ABSENT_BY_DESIGN` with a stop so it is trusted and
+        priced, and therefore cannot reach `COMMITTED_RISK_UNKNOWN`: this test
+        must fail for staleness or not at all.
+        """
+        manager, signal = self._manager_and_signal()
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                    last_reconciled_at=None,
+                )
+            },
+        )
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert not assessment.approved
+        assert assessment.stage is RefusalStage.POSITION_STALE
+
+    def test_a_freshly_reconciled_position_is_not_refused(self) -> None:
+        """The other direction. Without this, a guard that refused everything
+        would satisfy every test above.
+
+        DECLARED ABSTENTION: this fixture cannot express a mutation of the
+        `None` branch, because its stamp is set. That is structural rather than
+        an oversight -- the two halves are separate code and are separately
+        pinned.
+        """
+        manager, signal = self._manager_and_signal()
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                    last_reconciled_at=NOW - timedelta(seconds=1),
+                )
+            },
+        )
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert assessment.stage is not RefusalStage.POSITION_STALE
+
+    def test_staleness_refuses_ahead_of_committed_risk_unknown(self) -> None:
+        """THE ADJACENCY, on an input the pass really produces.
+
+        A position stamped at some point, later found to have an absent leg --
+        `record_partial_reconciliation` writes `UNKNOWN` and LEAVES THE EXISTING
+        STAMP, which `test_models.py` pins -- and then aged past the bound. It
+        trips both guards: stale by the stamp, uncomputable by `UNKNOWN` being
+        outside the trusted set.
+
+        Staleness wins, and the ordering is the ruling: this names the CAUSE
+        where committed-risk-unknown names the CONSEQUENCE, and an operator
+        reading "the ledger is not current" can act where one reading
+        "committed risk is unknown" must work backwards to the same place.
+        """
+        manager, signal = self._manager_and_signal()
+        position = long_position(
+            symbol="ETHUSDT",
+            stop_loss=D("90"),
+            protection=ProtectionState.ACTIVE,
+            last_reconciled_at=NOW - timedelta(hours=1),
+        )
+        position.record_partial_reconciliation(protection=ProtectionState.UNKNOWN)
+        portfolio = Portfolio(free_quote=D("10000"), positions={"ETHUSDT": position})
+
+        # Both conditions hold, which is what makes this an ordering test.
+        assert position.last_reconciled_at == NOW - timedelta(hours=1)
+        assert portfolio.committed_risk({"ETHUSDT": D("100")})[1] == 1
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert assessment.stage is RefusalStage.POSITION_STALE
+
+    def test_the_guard_is_not_gated_on_stop_loss_enabled(self) -> None:
+        """THE ONE BEHAVIOUR CHANGE IN THIS COMMIT, pinned rather than left to
+        the docstring.
+
+        `COMMITTED_RISK_UNKNOWN` is gated on `stop_loss.enabled` because that
+        opt-out is about COMMITTED RISK -- the operator has declared they own
+        their exits. Staleness is about whether `positions`, `position_count`
+        and `has_position` describe reality, and a `CLOSE`-owning operator
+        still needs `has_position` correct or a `BUY` pyramids onto a position
+        that closed at the venue.
+
+        The change is narrow: a stop-disabled position classifies
+        `ABSENT_BY_DESIGN` and is stamped on the first pass, so this fires only
+        once the pass STOPS RUNNING -- and an operator who opted out of
+        protective orders is the least equipped to notice that unaided.
+        """
+        # Both disabled, because the config layer permits nothing else: stops
+        # off implies everything off, since a take-profit or a trailing stop
+        # without a stop is refused at load. So this is the ONLY stop-disabled
+        # configuration that exists, and it is the whole surface of the change.
+        pairs = multi_pairs(SYMBOL, "ETHUSDT")
+        manager, _ = build_manager(
+            config=risk_config(
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(enabled=False),
+            ),
+            provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+            pairs=pairs,
+        )
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                    last_reconciled_at=None,
+                )
+            },
+        )
+
+        assessment = manager.evaluate(buy(), portfolio=portfolio)
+
+        assert assessment.stage is RefusalStage.POSITION_STALE
+
+
 class TestEvaluate:
     def test_unknown_pair_is_refused(self) -> None:
         manager, _ = build_manager()

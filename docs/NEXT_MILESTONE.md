@@ -137,6 +137,27 @@ read path cannot supply.
 whether it is call-bound.** The decision is M5e's; the argument is written so it
 does not have to be re-derived.
 
+> **NO LONGER BLOCKING ANYTHING. Annotated at M5e's S1, and both sides of the
+> argument above survive untouched.**
+>
+> It became load-bearing for one turn: "stamped at construction" was one of the
+> three live readings of `last_reconciled_at is None`, and that reading is
+> honest **only** if the executor has observed venue state, which is what
+> consuming `orderReports` would supply. So the staleness ruling appeared to
+> depend on this one -- whose own arming condition names a confirmation step
+> that does not exist, because there is no executor.
+>
+> **S1 cut that dependency by ruling the other way**: the executor writes
+> `ProtectionState.UNKNOWN` at construction, so nothing is trusted until the
+> reconciler has seen its protection resting, and no observation is needed at
+> construction time at all.
+>
+> **So this returns to being an OPTIMISATION with a recorded loss** -- one
+> saved round trip on the first confirmation -- rather than a prerequisite. The
+> asymmetry that decided it: ruling as S1 did leaves this open and adoptable
+> later if `orderReports` is ever measured, while ruling the other way would
+> have required the measurement first, and the measurement requires a dispatch.
+
 ### 4. Whether a filled leg stays visible to `get_open_orders` — `M5d-072`
 
 UNMEASURED, and **a probe question rather than an implementation choice**.
@@ -690,6 +711,28 @@ halt.
 
 *Arming condition:* **the ruling itself**, which the driver's milestone forces.
 
+> **THE RULING IS MADE (S1: `None` is maximally stale), and the paragraph above
+> OVERSTATES what it costs.** Annotated rather than rewritten, because the
+> mechanism it describes is right and only its consequence was inflated.
+>
+> *"the position refuses entries portfolio-wide forever and the bot never
+> trades again"* attributes to maximally-stale a halt that
+> `COMMITTED_RISK_UNKNOWN` **already imposes on the identical set**. The chain
+> is structural: unstamped implies `UNKNOWN` — `record_partial_reconciliation`
+> is the only writer that leaves the stamp unset, and it is called only on the
+> absence branch, which returns `UNKNOWN` — which implies untrusted, which
+> implies uncomputable. So under `stop_loss.enabled` those positions were
+> already refusing before this guard existed.
+>
+> What maximally-stale adds at `max_open_positions = 1` is a **better label**,
+> not a new halt: the operator reads "the ledger is not current" instead of
+> "committed risk is unknown", and the first names something they can act on.
+> The one place it adds behaviour is a stop-DISABLED config, where the
+> committed-risk gate is off — see item 14c.
+>
+> The reviewer wrote the overstated framing; it is corrected here rather than
+> at its author.
+
 ### 14. The staleness refusal is now a HARD PRECONDITION of the first dispatch — `M5e-069`, `M5e-070`
 
 **`ACTIVE` was admitted to `_TRUSTED_PROTECTION`, and that made an
@@ -723,6 +766,77 @@ inside a whitelist edit is how a guard lands without the reasoning that
 justifies it. `test_membership_says_nothing_about_when_the_protection_was_verified`
 in `tests/unit/test_risk_manager.py` characterises the gap, so closing it
 inverts a test rather than passing silently.
+
+> **THE REFUSAL HALF HAS LANDED (S1). The driver's escalation half has not, and
+> the reason is a conflict between two correct decisions.**
+>
+> `RefusalStage.POSITION_STALE` sits between `_mark_prices` and the
+> committed-risk guard, reads `risk.max_position_staleness_s`, and treats
+> `last_reconciled_at is None` as maximally stale. The clock is read **once**
+> per evaluation, hoisted out of `_approve` and placed after the `CLOSE`
+> dispatch so the exit path stays clock-free -- which also means staleness, the
+> daily-loss roll and cooldown expiry now all measure against one instant
+> rather than two readings that could straddle a boundary.
+>
+> **The escalation half stays deferred.** Q-B section 1 defines `CRITICAL` as a
+> log line **and a halt flag on `Portfolio`**, and site 4 additionally requires
+> a distinct marker with promotion to terminal after N reconciliation cycles.
+> The halt flag does not exist. The N-cycle counter needs cross-pass state,
+> which the driver commit **deliberately refused** to hold, on the grounds that
+> a driver holding position state becomes a second source of truth for a fact
+> the position already owns. **Those two decisions are each correct and they
+> conflict**; naming that is the whole of what is recorded here, and resolving
+> it is not attempted.
+>
+> *Arming condition, in caller terms:* **the halt flag's first writer.**
+
+### 14b. CONSTRAINT ON THE EXECUTOR: construct positions `UNKNOWN` — `M5e-075`
+
+**Ruled at S1: the executor writes `ProtectionState.UNKNOWN` when it constructs
+a `Position`.** No position is trusted until the reconciler has seen its
+protection resting at the venue.
+
+**Grounds.** The error direction is a refusal rather than a mispriced stop: a
+position wrongly marked `UNKNOWN` costs entries until the next pass corrects
+it, while one wrongly marked `ACTIVE` is priced off a stop nobody confirmed.
+And ruling this way **does not foreclose** stamping at construction later, if
+`orderReports` is ever measured and shown to carry the compare set; ruling the
+other way requires that measurement **first**, and obtaining it requires a
+dispatch — see item 3.
+
+It also collapses the reserved `None` question: under this constraint all three
+readings of `last_reconciled_at is None` coincide in behaviour, because
+unstamped implies `UNKNOWN` implies untrusted implies uncomputable. `None` is
+treated as maximally stale, and that is now a **label** decision rather than a
+behavioural one — everywhere except the stop-disabled case in item 14c.
+
+*Arming condition, in caller terms:* **the executor**, as the only thing that
+will ever construct a `Position`. Nothing enforces this today because nothing
+constructs one; it is a constraint on a caller that does not exist yet, which
+is exactly why it is written down rather than left to be inferred.
+
+### 14c. The one behaviour change: staleness is UNGATED by `stop_loss.enabled` — `M5e-076`
+
+`COMMITTED_RISK_UNKNOWN` is gated on `stop_loss.enabled`; the staleness guard
+ahead of it is not, and **that is the only behaviour change in the commit.**
+
+The opt-out that gate honours is about **committed risk** — the operator has
+declared they own their exits via `SignalAction.CLOSE`. Staleness is about
+whether `positions`, `position_count` and `has_position` describe reality, and
+a `CLOSE`-owning operator still needs `has_position` correct or a `BUY`
+pyramids onto a position that closed at the venue.
+
+**The change is narrow, and its narrowness is the reason it is acceptable
+rather than merely defensible.** Stops off implies *everything* off — a
+take-profit or a trailing stop without a stop is refused at config load — so
+such a position requests no protective levels, classifies `ABSENT_BY_DESIGN`,
+and is **stamped on the first pass**. The guard therefore fires only once the
+pass **stops running**: a dropped feed, a pass that raised, a budget-crowded
+cycle. And an operator who has opted out of protective orders is the least
+equipped to notice that unaided.
+
+Pinned by `test_the_guard_is_not_gated_on_stop_loss_enabled`, which builds the
+only stop-disabled configuration the config layer permits.
 
 ### 14a. The arming caveat on the admission itself — `M5e-071`
 
@@ -981,6 +1095,21 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   sequence** (`COMMITTED_RISK_UNKNOWN` before the limits, `UNMANAGED_HOLDING`
   after them) and pinned them through `_STAGE_CASES`; the two pairs above are
   unchanged.
+
+  **M5e's S1 added a third guard and one of each kind — `M5e-077`.**
+  `POSITION_STALE` sits between `_mark_prices` and the committed-risk guard.
+  Its pair with `COMMITTED_RISK_UNKNOWN` **is pinned**, by
+  `test_staleness_refuses_ahead_of_committed_risk_unknown`, on an input the
+  pass really produces: a position stamped at some point, later found to have
+  an absent leg — `record_partial_reconciliation` writes `UNKNOWN` and leaves
+  the existing stamp — and then aged past the bound. That was worth pinning
+  precisely because the ordering is the ruling: staleness names the cause where
+  committed-risk-unknown names the consequence.
+
+  Its pair with `NO_MARK_PRICE` **is not pinned**, and joins the two above.
+  `NO_MARK_PRICE` is deliberately first: "we cannot value your positions at
+  all" is more fundamental than "the ledger is not current", and a stale
+  position may also be unpriceable. Nothing asserts that order.
 
 - **`size_not_tradeable` against `unaffordable` is order-INDEPENDENT, a different
   claim from the entry above and not to be collapsed into it.** Those two are

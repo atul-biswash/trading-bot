@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import FrozenInstanceError
+from datetime import timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -359,6 +360,40 @@ def _case_committed_risk_unknown() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
+def _case_position_stale() -> Case:
+    """A priceable, TRUSTED position whose last complete reconciliation is old.
+
+    Built on an OLD STAMP rather than `None`, deliberately. `None` is maximally
+    stale too, but folding both into one case would make a mutation of the
+    `None` branch and a mutation of the comparison indistinguishable here; each
+    gets its own test in `test_risk_manager.py` so each stays attributable.
+
+    `ABSENT_BY_DESIGN` with a stop level is the pairing that reaches the pricing
+    arm, so this position is computable and cannot be what
+    `COMMITTED_RISK_UNKNOWN` fires on -- this case must isolate staleness, and
+    the adjacency between the two guards is pinned separately by an input that
+    trips both.
+    """
+    pairs = multi_pairs(SYMBOL, "ETHUSDT")
+    manager, _ = build_manager(
+        provider=FakeProvider(candles={SYMBOL: candle(), "ETHUSDT": candle(symbol="ETHUSDT")}),
+        pairs=pairs,
+    )
+    portfolio = Portfolio(
+        free_quote=D("10000"),
+        positions={
+            "ETHUSDT": long_position(
+                symbol="ETHUSDT",
+                stop_loss=D("90"),
+                protection=ProtectionState.ABSENT_BY_DESIGN,
+                last_reconciled_at=NOW - timedelta(hours=1),
+            )
+        },
+    )
+    signal = buy()
+    return signal, manager.evaluate(signal, portfolio=portfolio), pairs
+
+
 def _case_unmanaged_holding() -> Case:
     """A material base holding the bot did not open, on the signal's symbol.
 
@@ -454,6 +489,7 @@ _STAGE_CASES = [
     (RefusalStage.NOTHING_TO_CLOSE, _case_nothing_to_close),
     (RefusalStage.UNSUPPORTED_ACTION, _case_unsupported_action),
     (RefusalStage.NO_MARK_PRICE, _case_no_mark_price),
+    (RefusalStage.POSITION_STALE, _case_position_stale),
     (RefusalStage.COMMITTED_RISK_UNKNOWN, _case_committed_risk_unknown),
     (RefusalStage.LIMIT_REFUSED, _case_limit_refused),
     (RefusalStage.UNMANAGED_HOLDING, _case_unmanaged_holding),

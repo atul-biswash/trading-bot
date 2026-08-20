@@ -177,6 +177,14 @@ class RefusalStage(str, Enum):
     not a limit firing -- and it deliberately has **no** ``RiskRule`` twin, so
     the coincidence above stays the single one it claims to be.
 
+    :attr:`POSITION_STALE` is the third of that family and sits **ahead of**
+    ``COMMITTED_RISK_UNKNOWN`` on purpose: it names the **cause** where that
+    one names the **consequence**. An operator reading "the ledger is not
+    current" can act -- the feed, the budget, the reconciler; one reading
+    "committed risk is unknown" has to work backwards to the same place. The
+    two overlap on real inputs rather than in theory, so their order is pinned
+    by a test rather than left to the sequence.
+
     :attr:`UNMANAGED_HOLDING` is deliberately **not** in that family, and its
     position says so: it is checked *after* the limits pass, because under an
     unmanaged holding the ledger is **intact**. Nothing is uncomputable; one
@@ -195,6 +203,7 @@ class RefusalStage(str, Enum):
     NOTHING_TO_CLOSE = "nothing_to_close"
     UNSUPPORTED_ACTION = "unsupported_action"
     NO_MARK_PRICE = "no_mark_price"
+    POSITION_STALE = "position_stale"
     COMMITTED_RISK_UNKNOWN = "committed_risk_unknown"
     LIMIT_REFUSED = "limit_refused"
     UNMANAGED_HOLDING = "unmanaged_holding"
