@@ -50,6 +50,7 @@ Reading this list first will save you time if it is not the tool you want.
 | Indicators (SMA, EMA, RSI, MACD, Bollinger, ATR) and strategies | ✅ built |
 | Risk: sizing, protective levels, limits, `RiskManager` | ✅ built |
 | Composition root wiring the whole decision path | ✅ built |
+| Reconciler — reads what rests at the venue and records it | ✅ built, **never run against a real position** |
 | **Order execution** | ⛔ **stub — M5 in progress** |
 | Backtesting, paper simulator, persistence, notifications | ⛔ stubs |
 
@@ -58,6 +59,14 @@ data → strategy → risk end to end. It seeds a portfolio from your balance, p
 each pair's exchange filters, and logs every signal's outcome as a structured
 `risk_refused` or `intent_dispatched` line. The terminal collaborator is
 `IntentLogger`, and it *logs* — it dispatches nothing.
+
+**A reconciler now runs on every candle, and it has nothing to reconcile.** It
+reads the venue's open orders per symbol, compares them against what each
+position requested, records a verdict, and refuses new entries while the ledger
+is not current. But **nothing constructs a position** — that is the executor's
+job and the executor is a stub — so the pass visits an empty list on every bar.
+It ships before the first order deliberately: with no trusted protection state,
+the first position opened would have refused every entry after it.
 
 Twelve files are docstring-only placeholders: `execution/` (executor, order
 manager), `paper/simulator`, `persistence/`, `notifications/`, `backtesting/`,
@@ -165,10 +174,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  87 files already formatted
-mypy                                   Success: no issues found in 60 source files
-pytest                                 941 passed, 3 skipped
-                                       (944 = 941 + 3 with Testnet credentials)
+ruff format --check src tests scripts  92 files already formatted
+mypy                                   Success: no issues found in 62 source files
+pytest                                 1043 passed, 3 skipped
+                                       (1046 = 1043 + 3 with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -177,9 +186,9 @@ pytest                                 941 passed, 3 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `941 passed, 3 skipped` on a machine without
-  them and `944 passed` on a machine with them. **Both are green.** A fresh clone
-  seeing 941 is not looking at a regression — quote the count with its condition,
+  keys. The *same commit* reports `1043 passed, 3 skipped` on a machine without
+  them and `1046 passed` on a machine with them. **Both are green.** A fresh clone
+  seeing 1043 is not looking at a regression — quote the count with its condition,
   never bare.
 - **Network.** Those three tests make live read-only calls to Testnet and two wait
   on a real 1-minute bar, so a full run takes ~90s longer and can fail for reasons

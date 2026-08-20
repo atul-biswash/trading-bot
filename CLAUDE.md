@@ -382,6 +382,25 @@ data.
   **understate** and let an entry through on the strength of protection that does
   not exist. The two failure directions are not comparable, which is why this is a
   decision per field rather than a house preference.
+
+  > **`ACTIVE` WAS ADMITTED TO `_TRUSTED_PROTECTION` AT M5e, and it is the one
+  > member that may be.** The whitelist direction above is unchanged and still
+  > governs every other member. `ACTIVE` inverts against it because it is
+  > **earned rather than assumed**: the classifier returns it only when every
+  > requested leg was found resting at the venue, at its requested trigger, for
+  > the requested quantity, under the requested list id, with nothing executed.
+  > It is the only member whose truth is measured, so it is the only one allowed
+  > to carry the expensive error direction.
+  >
+  > **What it unblocks is TRADING, not a defect.** Left untrusted, a correctly
+  > protected position counts uncomputable and refuses every entry
+  > portfolio-wide — the interlock firing on the healthy path, which the
+  > executor's first position would have hit.
+  >
+  > **Membership says nothing about WHEN protection was verified**, and that is
+  > what admitting it made load-bearing: the discriminator reads the set and not
+  > `last_reconciled_at`. `RefusalStage.POSITION_STALE` is what closes that, and
+  > it landed in the same milestone.
 - **`EXPIRED_IN_MATCH`'s classification is UNMEASURED and sits on the open side.**
   Nothing in this tree defines it and neither does `python-binance`. It looks
   terminal, and "it looks terminal" is the whole of the case for it. **Moving it
@@ -729,6 +748,27 @@ data.
   assignment and would observe the intermediate state between
   `advance_trailing_stop`'s two writes. The prescribed fix — collapse those writes
   into one method on `Position` — has to land first, and it is not M5's.
+
+  **THE EXECUTOR CONSTRUCTS EVERY `Position` WITH `ProtectionState.UNKNOWN`.**
+  Ruled at M5e. No position is trusted until the reconciler has seen its
+  protection resting at the venue — acceptance is not activation, and a
+  placement response is not an observation of what rests.
+
+  The error direction decides it: a position wrongly marked `UNKNOWN` costs
+  entries until the next pass corrects it, while one wrongly marked `ACTIVE` is
+  priced off a stop nobody confirmed. And ruling this way **does not foreclose**
+  stamping at construction later, if `orderReports` is ever measured and shown
+  to carry the compare set; ruling the other way requires that measurement
+  **first**, and obtaining it requires a dispatch.
+
+  It also settles what `last_reconciled_at is None` means, by collapsing the
+  question: unstamped implies `UNKNOWN` implies untrusted implies uncomputable,
+  so every reading of `None` coincides in behaviour and the choice is a label
+  rather than a decision. `None` is treated as maximally stale.
+
+  **This is a constraint on a caller that does not exist**, which is exactly why
+  it is written here. Nothing enforces it, because nothing constructs a
+  `Position` yet.
 - **Requested protective levels are immutable ONCE SET, not immutable after
   entry.** The distinction is load-bearing. Reconciliation is keyed off what was
   *requested*; a position with nothing requested gives it nothing to compare, so
@@ -952,6 +992,31 @@ data.
   bars where nothing evaluates. There the response is escalation, not refusal: a bot
   that is not trading is not harmed by staleness, but "an unmonitored open position
   and no alarm" is the state an operator most needs told.
+
+  > **THE REFUSAL HALF LANDED AT M5e AS `RefusalStage.POSITION_STALE`; THE
+  > ESCALATION HALF DID NOT, AND IS BLOCKED BY TWO CORRECT DECISIONS.** The
+  > guard sits between `_mark_prices` and the committed-risk check — **ahead of
+  > it deliberately, because staleness names the CAUSE where
+  > committed-risk-unknown names the CONSEQUENCE**, and an operator reading "the
+  > ledger is not current" can act where one reading "committed risk is unknown"
+  > must work backwards to the same place. That ordering is pinned by a test on
+  > an input the pass really produces.
+  >
+  > **It is UNGATED by `stop_loss.enabled`, where the guard beside it is gated,
+  > and that is a real behaviour change.** The opt-out that gate honours is
+  > about *committed risk* — the operator has declared they own their exits.
+  > Staleness is about whether `positions`, `position_count` and `has_position`
+  > describe reality, and a `CLOSE`-owning operator still needs `has_position`
+  > correct or a `BUY` pyramids onto a position that closed at the venue. The
+  > change is narrow: stops off implies *everything* off, such a position
+  > classifies `ABSENT_BY_DESIGN` and is stamped on the first pass, so the guard
+  > fires only once the pass **stops running** — and an operator who opted out of
+  > protective orders is the least equipped to notice that unaided.
+  >
+  > **The escalation half is blocked**, and by two decisions that are each
+  > correct: Q-B §1 defines `CRITICAL` as including a halt flag on `Portfolio`,
+  > which does not exist, and its N-cycle promotion needs cross-pass state, which
+  > the driver deliberately refuses to hold. See `docs/QB_ESCALATION.md`, site 4.
 - **An exit must always be permitted — that rule governs *limits*, not
   venue-state uncertainty.** A limit that could trap an open position would be a
   risk rule that creates risk, which is why no limit gates a `CLOSE`. It does
@@ -1188,10 +1253,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  87 files already formatted
-mypy                                   Success: no issues found in 60 source files
-pytest                                 941 passed, 3 skipped
-                                       (944 passed with Testnet credentials present)
+ruff format --check src tests scripts  92 files already formatted
+mypy                                   Success: no issues found in 62 source files
+pytest                                 1043 passed, 3 skipped
+                                       (1046 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1200,14 +1265,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `944 passed` on a machine with Binance Testnet credentials in `.env`
-- `941 passed, 3 skipped` on a machine without them
+- `1046 passed` on a machine with Binance Testnet credentials in `.env`
+- `1043 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 941 and must not read it as a regression against a documented
-944. Quote the count with its condition, never bare.
+runner will see 1043 and must not read it as a regression against a documented
+1046. Quote the count with its condition, never bare.
 
-Only the `944` is measured here; `941` is `944` minus the three `skipif`-gated
+Only the `1046` is measured here; `1043` is `1046` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -1222,7 +1287,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 941, so **treat a lone
+output was read. The unit suite is deterministic at 1043, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -1267,8 +1332,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 87 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 60 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 92 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 62 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -1731,6 +1796,46 @@ renames) in **separate commits** from semantic ones. Never mix them.
    "grep for the NUMBER" warning below exists to prevent.
 3. Rewrite `docs/NEXT_MILESTONE.md` for the next milestone, carrying forward any
    open items that are still open. This is the single home for live open items.
+
+   **AN ARMING CONDITION NAMES ITS CALLER, NOT AN EVENT.** Every carried item
+   states what would make it live, and an event-named condition dates the item by
+   when the *world* will supply an answer. What actually arms it is the first
+   **caller that cannot proceed without one**, and callers are ordered by the
+   design rather than by events. Where the two orderings differ the caller comes
+   first, because the design decides which component is written next. The check is
+   cheap: ask which component is written next and whether it can be written
+   without the answer.
+
+   **The rule lived only in `NEXT_MILESTONE.md` from M5e until this rotation** —
+   which is the file rewritten at every rotation, so it was one rewrite from
+   being lost. That is the `phase_5_` shape one step inside the repository, and
+   it is the second time this project has found a rule there; the ID scheme was
+   the first.
+
+   **THREE FAILURE MODES, and only the first two are badly written conditions.**
+
+   1. **The condition names an event.** Measured twice at M5e: `M5d-072` said
+      *"a fill"* and was needed by the classifier long before anything fills;
+      `M5d-074` said *"the first dispatch"* and was needed by the reconciler,
+      which is ordered **before** any dispatch. Both ran in the costly
+      direction.
+   2. **The condition names a component that does not exist.** `M5d-078`'s reads
+      *"M5e's confirmation step"*, and there is no confirmation step because
+      there is no executor. Distinct from mode 1: mode 1 names something real
+      that happens too late, this names something that will never happen on its
+      own — so the item is not deferred, it is stranded.
+   3. **The condition FIRES and nothing notices.** Not a badly written condition
+      at all. Item 14's read *"the executor, as the first caller that can produce
+      a position capable of aging"*, and the refusal it named **landed at M5e's
+      S1** — the condition was satisfied by the milestone that wrote it, and the
+      item still read as waiting. Found by a rotation reading every condition in
+      one pass, which is the only thing that has ever found one.
+
+   Modes 1 and 2 are fixed as instances. **Mode 3 is the absence of a mechanism**,
+   and there is none proposed here: nothing watches a condition for its own
+   satisfaction, and the rotation pass that catches it happens once a milestone.
+   What is required is only that the rotation *look* — read every arming
+   condition and ask whether it has already fired.
 4. **Re-read the contracts under `docs/` for prose this milestone superseded.**
    `QC_PROTECTIVE_ORDERS.md`, `QB_ESCALATION.md` and `M5_NUMBERS.md` are *decided
    documents*, not logs: a later decision can invalidate a paragraph in one of them
@@ -2397,6 +2502,38 @@ defended it. Both were corrected against a captured artefact. Separately, Q-C
 §7's site-3 defect was **deferred** rather than fixed: closing it needs a
 `ProtectionState` member no writer exists for, and attempting it would have
 shadowed the entire limit layer behind `COMMITTED_RISK_UNKNOWN`.
+
+**M5e is complete, and it built the reconciler — every piece of which is
+INERT.** The chain exists end to end in `execution/`: `classify_protection`
+(pure — requested levels against a compare set, returning a frozen verdict
+carrying its reason), `reconcile_open_positions` (one `get_own_open_orders` per
+due symbol, oldest stamp first, writing `Position.protection` and
+`last_reconciled_at`), `resolve_unresolved_legs` (point-querying legs the
+classifier could not resolve), and `ReconciliationDriver`, which subscribes to
+candles from the composition root and spends a budget derived from config.
+`core/interfaces.py` declares `get_own_open_orders` and `get_order`; **placement
+methods are still not declared**, because finding GG binds a port declaration to
+its production caller and the only honest caller is an executor.
+
+**Nothing constructs a `Position` in `src/`** — one `grep`, one hit, the class
+definition itself. So the classifier, the resolver, the pass, the driver, the
+L-leg reservation, `ACTIVE`'s trust and the staleness refusal have **never run
+against a real position**, and the first live one exercises all seven at once.
+Each is pinned by tests over fabricated positions; what nothing covers is their
+composition.
+
+**Four decisions in it are load-bearing and are locked above:** the reservation
+reserves what the first unresolved position *needs* rather than one call;
+`ACTIVE` joined `_TRUSTED_PROTECTION`, which is what stops a correctly protected
+position refusing every entry portfolio-wide; `RefusalStage.POSITION_STALE`
+refuses while the ledger is not current; and **the executor must construct every
+`Position` with `ProtectionState.UNKNOWN`** — a constraint on a caller that does
+not exist yet, which is why it is written down rather than inferred.
+
+**Still nothing places an order.** `IntentLogger` remains the terminal
+collaborator and `execution/executor.py` is still a stub. The reconciler ships
+before the first order by design: with only untrusted protection states, the
+first position the executor opened would have refused every entry after it.
 
 **Q-A** stays unscheduled: its thresholds need soak data and nothing has
 dispatched an order yet, so the `collaborator_failed` lines it would be
