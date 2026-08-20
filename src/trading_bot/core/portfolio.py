@@ -62,13 +62,31 @@ _PERCENT = Decimal(100)
 #: not exist. Each field takes the direction whose wrong answer is the cheap
 #: one, and for this field that means an unclassified state is not trusted.
 #:
-#: **The ``protection`` half of this test is FIXTURE-ONLY today.** Nothing in
-#: ``src/`` populates ``Position.protection`` until the reconciler exists, so
-#: today the discriminating condition in practice is the absent stop level.
-#: This does **not** close the defect it anticipates -- a position whose
-#: requested stop was found not to be resting still prices off that stop until
-#: a writer sets a state outside this set.
-_TRUSTED_PROTECTION = frozenset({ProtectionState.ABSENT_BY_DESIGN})
+#: **``ACTIVE`` is the one member admitted against that default, and it is
+#: admitted because it is EARNED rather than assumed.** Every other state is
+#: trusted or not on the strength of what nobody checked; ``ACTIVE`` is
+#: returned only when every requested leg was found resting at the venue, at
+#: its requested trigger, for the requested quantity, under the requested list
+#: id, with nothing executed. It is the only member whose truth is measured, so
+#: it is the only one that may carry the expensive error direction.
+#:
+#: **What it unblocks is TRADING, not a defect.** Left out, a correctly
+#: protected position counts uncomputable, which refuses every entry
+#: portfolio-wide -- the interlock firing on the healthy path. Q-C section 7's
+#: site 3 was already closed by the ``DIVERGED`` write plus this whitelist's
+#: default, one commit earlier.
+#:
+#: **MEMBERSHIP HERE SAYS NOTHING ABOUT WHEN THE PROTECTION WAS LAST
+#: VERIFIED**, and admitting ``ACTIVE`` is what makes that matter. The check in
+#: :meth:`Portfolio.committed_risk` reads this set and does not read
+#: ``last_reconciled_at``: before this member existed every reconciler-written
+#: state was untrusted, so stale and fresh both counted uncomputable and the
+#: omission was invisible. Now a position classified ``ACTIVE`` and never
+#: re-read -- a dropped feed, a budget-skipped pass -- stays trusted
+#: indefinitely and is priced off a stop that may no longer rest.
+#: ``risk.max_position_staleness_s`` is the guarantee that would close it and
+#: **it has no reader**; see ``docs/NEXT_MILESTONE.md`` item 14.
+_TRUSTED_PROTECTION = frozenset({ProtectionState.ABSENT_BY_DESIGN, ProtectionState.ACTIVE})
 
 
 def _require_aware(name: str, moment: datetime) -> datetime:

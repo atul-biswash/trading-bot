@@ -200,6 +200,18 @@ def test_no_state_this_can_return_is_trusted_except_absent_by_design() -> None:
     Admitting `ACTIVE` to the whitelist later is a real decision with a real
     cost -- a position would be priced off a stop on the strength of a
     classification -- and it must fail HERE first rather than land quietly.
+
+    **IT DID, and the admission has since been made deliberately.** The test is
+    NARROWED rather than retired: `ACTIVE` joins the trusted side because it is
+    the one state measured against the venue rather than assumed, and the three
+    that remain must still be forbidden. A tripwire deleted once the thing it
+    guarded happened would leave the next admission unguarded, which is the
+    whole reason it existed.
+
+    So the claim is now stated in BOTH directions. The intersection says what
+    may be trusted; the difference says what may not, by name, so a fourth
+    member arriving on the trusted side fails against a list rather than
+    against an inference.
     """
     from trading_bot.core.portfolio import _TRUSTED_PROTECTION
 
@@ -212,7 +224,12 @@ def test_no_state_this_can_return_is_trusted_except_absent_by_design() -> None:
     }
 
     trusted = producible & _TRUSTED_PROTECTION
-    assert trusted == {ProtectionState.ABSENT_BY_DESIGN}
+    assert trusted == {ProtectionState.ABSENT_BY_DESIGN, ProtectionState.ACTIVE}
+    assert producible - _TRUSTED_PROTECTION == {
+        ProtectionState.DIVERGED,
+        ProtectionState.PENDING,
+        ProtectionState.UNKNOWN,
+    }
 
 
 def test_nothing_requested_and_nothing_resting_is_absent_by_design() -> None:

@@ -704,6 +704,25 @@ class TestPortfolio:
         ``total == 0, uncomputable == 1``. Inverting it then is correct;
         deleting it is not, because the change of behaviour is the thing worth
         recording.
+
+        > **ANNOTATED, and BOTH paragraphs above are now wrong in their
+        > particulars while the test itself is untouched and still passes.**
+        >
+        > *"the ONLY route into the pricing arm"* rested on `UNKNOWN` being
+        > *"the only other member"*, which was true of a two-member enum. There
+        > are five members now and `ACTIVE` is trusted, so a coherently
+        > protected position reaches the pricing arm by the intended route.
+        >
+        > *"Closing site 3 INVERTS this test"* mis-predicted which change would
+        > do it. Site 3 was closed by the `DIVERGED` write plus the whitelist's
+        > untrusted default, and that left this incoherent pairing exactly as it
+        > was -- `ABSENT_BY_DESIGN` is still trusted, still paired with a
+        > non-`None` stop, still priced. **The characterisation stands and the
+        > defect it characterises is still open.**
+        >
+        > The transferable part: a justification resting on a fact established
+        > elsewhere -- here, an enum's membership -- goes stale silently when
+        > that fact moves, and nothing at the justification's site re-checks it.
         """
         portfolio = Portfolio(
             free_quote=D("1000"),
@@ -779,6 +798,68 @@ class TestPortfolio:
         total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
         assert total == D("0")
         assert uncomputable == 1
+
+    def test_an_active_position_is_priced_rather_than_counted_uncomputable(self) -> None:
+        """THE ADMISSION, and what it buys. `ACTIVE` is the one state measured
+        against the venue rather than assumed -- every requested leg found
+        resting, at its trigger, for the quantity, under the list id, nothing
+        executed -- so it is the one member allowed to carry the expensive error
+        direction that this whitelist otherwise refuses.
+
+        **What it unblocks is TRADING, not a defect.** Left untrusted, a
+        correctly protected position counts uncomputable, which refuses every
+        entry portfolio-wide: the interlock firing on the healthy path. The
+        first position the executor opens would have frozen the portfolio at one
+        position, at the highest-risk moment in the project.
+
+        The count is asserted first, as in the tests above: being TRUSTED is the
+        claim and the priced total is its consequence, so a change that stopped
+        trusting `ACTIVE` fails on the count that says why.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            positions={
+                SYMBOL: long_position(
+                    quantity="10",
+                    entry="100",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ACTIVE,
+                )
+            },
+        )
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+        assert uncomputable == 0
+        assert total == D("-100")  # (90 - 100) * 10, off a stop the venue confirmed
+
+    def test_membership_says_nothing_about_when_the_protection_was_verified(self) -> None:
+        """A CHARACTERISATION OF WHAT THIS COMMIT MAKES LOAD-BEARING, not an
+        approval of it.
+
+        The discriminator reads `_TRUSTED_PROTECTION` and does not read
+        `last_reconciled_at`. Before `ACTIVE` was admitted that was invisible:
+        every reconciler-written state was untrusted, so a stale one and a fresh
+        one both counted uncomputable. Now a position classified `ACTIVE` and
+        never re-read -- a dropped feed, a budget-skipped pass -- stays trusted
+        indefinitely and is priced off a stop that may no longer rest.
+
+        A stamp older than any plausible `max_position_staleness_s` is priced
+        here exactly as a fresh one is, and that field HAS NO READER in `src/`.
+        The refusal that closes it is a hard precondition of the first dispatch;
+        see `docs/NEXT_MILESTONE.md` item 14. This test exists so that closing
+        it inverts something rather than passing silently.
+        """
+        ancient = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        position = long_position(
+            quantity="10", entry="100", stop_loss=D("90"), protection=ProtectionState.ACTIVE
+        )
+        position.record_reconciliation(protection=ProtectionState.ACTIVE, at=ancient)
+        portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: position})
+
+        total, uncomputable = portfolio.committed_risk({SYMBOL: D("100")})
+
+        assert position.last_reconciled_at == ancient
+        assert uncomputable == 0  # priced, on protection verified years ago
+        assert total == D("-100")
 
     def test_a_stop_already_above_the_mark_commits_nothing_rather_than_a_credit(self) -> None:
         """The `min(0, ...)` clamp. A long whose stop sits *above* the mark has

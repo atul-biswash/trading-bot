@@ -690,6 +690,63 @@ halt.
 
 *Arming condition:* **the ruling itself**, which the driver's milestone forces.
 
+### 14. The staleness refusal is now a HARD PRECONDITION of the first dispatch — `M5e-069`, `M5e-070`
+
+**`ACTIVE` was admitted to `_TRUSTED_PROTECTION`, and that made an
+unimplemented guarantee load-bearing.** MEASURED before writing this: the
+discriminator in `Portfolio.committed_risk` reads membership in
+`_TRUSTED_PROTECTION` and contains **no reference to `last_reconciled_at` or
+to staleness**; and `max_position_staleness_s` appears exactly **once** in
+`src/`, at its own field declaration in `config/models.py`. **It has no
+reader.**
+
+Before the admission that omission was invisible, because every
+reconciler-written state was untrusted and a stale one and a fresh one both
+counted uncomputable. After it, a position classified `ACTIVE` and never
+re-read — a dropped feed, a budget-skipped pass, a pass that raised — **stays
+trusted indefinitely** and is priced off a stop that may no longer rest. That
+is the understate direction the whitelist's own comment names as the expensive
+one, reached not by trusting the wrong state but by trusting the right state
+for too long.
+
+**So the staleness refusal joins the reconciler as a hard precondition of the
+first dispatch.** The window between this commit and that one is safe for
+exactly one reason — nothing constructs a `Position` in `src/`, so no position
+can go stale — and **that reason expires at the executor**, which is the same
+commit that would first supply a stale one.
+
+*Arming condition, in caller terms:* **the executor**, as the first caller that
+can produce a position capable of aging. Not implemented here, deliberately:
+the refusal is a risk-layer decision with its own stage, its own reason string
+and its own interaction with the reserved `None` ruling, and improvising it
+inside a whitelist edit is how a guard lands without the reasoning that
+justifies it. `test_membership_says_nothing_about_when_the_protection_was_verified`
+in `tests/unit/test_risk_manager.py` characterises the gap, so closing it
+inverts a test rather than passing silently.
+
+### 14a. The arming caveat on the admission itself — `M5e-071`
+
+**"A production path assigns `ACTIVE`" is true; "a production run has assigned
+`ACTIVE`" is not.** Six links were enumerated from `main.py`'s
+`async with live_system(settings)` through `provider.on_candle(reconciler)`,
+`_notify`, the driver, `classify_protection` and
+`position.record_reconciliation(protection=assessment.state, at=now)` — every
+one in `src/`, none reachable only from tests. But `Position` is constructed
+nowhere in `src/`, so the chain runs over an empty list and no run has yet
+produced the datum.
+
+**Deferring on that is worse than proceeding, and the asymmetry is the reason
+this is recorded rather than left as a doubt.** The run that would supply the
+observation is *the executor's first position* — which would be classified
+`ACTIVE`, count uncomputable while untrusted, and refuse every subsequent entry
+portfolio-wide. So waiting buys one observation at the price of freezing the
+portfolio at a single position, at the highest-risk moment in the project,
+while the classifier's correctness is already pinned by tests that drive the
+real function over the real compare set.
+
+*Arming condition:* **none — this is a closed decision**, recorded so the gap
+between "wired" and "exercised" is not rediscovered as a defect.
+
 ---
 
 ## Observations carried into the open items — states, not decisions
