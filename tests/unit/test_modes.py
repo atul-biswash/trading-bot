@@ -72,6 +72,8 @@ from trading_bot.core.models import (
     Order,
     OrderList,
     OrderRequest,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
     Position,
     Signal,
     SymbolInfo,
@@ -202,6 +204,24 @@ class FakeRootClient(ExchangeClient):
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[OrderList]:
+        raise NotImplementedError
+
+    async def create_otoco_order_list(  # pragma: no cover
+        self,
+        request: OtocoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        raise NotImplementedError
+
+    async def create_oto_order_list(  # pragma: no cover
+        self,
+        request: OtoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
         raise NotImplementedError
 
 
@@ -863,6 +883,7 @@ def build_handler(
     intent_logger: IntentLogger | None = None,
     portfolio: Portfolio | None = None,
     pairs: Mapping[str, PairContext] | None = None,
+    executor: Any = None,
 ) -> Any:
     resolved_pairs = pairs if pairs is not None else default_pairs()
     manager, _ = build_manager(pairs=resolved_pairs)
@@ -873,6 +894,7 @@ def build_handler(
         else IntentLogger(pairs=resolved_pairs),
         portfolio=portfolio if portfolio is not None else Portfolio(free_quote=D("10000")),
         pairs=resolved_pairs,
+        executor=executor,
     )
 
 
@@ -882,7 +904,7 @@ class TestChainedHandler:
     ) -> None:
         handler = build_handler()
         with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
-            await handler(buy("100.00"))
+            await handler(buy("100.00"), candle())
 
         assert len(_records(caplog, "intent_dispatched")) == 1
 
@@ -902,7 +924,7 @@ class TestChainedHandler:
         assert boom is not None
 
         with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
-            await handler(buy())  # must not raise
+            await handler(buy(), candle())  # must not raise
 
         failures = _records(caplog, "collaborator_failed")
         assert len(failures) == 1
@@ -918,7 +940,7 @@ class TestChainedHandler:
         handler = build_handler(intent_logger=BoomIntentLogger(pairs=pairs), pairs=pairs)
 
         with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
-            await handler(buy("100.00"))  # must not raise
+            await handler(buy("100.00"), candle())  # must not raise
 
         failures = _records(caplog, "collaborator_failed")
         assert len(failures) == 1
@@ -1413,7 +1435,7 @@ class TestBootAssembly:
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
             with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
-                await system.engine._emit(buy("100.00"))
+                await system.engine._emit(buy("100.00"), candle())
 
         assert len(_records(caplog, "intent_dispatched")) == 1
 
@@ -1424,7 +1446,7 @@ class TestBootAssembly:
 
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             before = system.portfolio.free_quote
-            await system.engine._emit(buy("100.00"))
+            await system.engine._emit(buy("100.00"), candle())
             assert system.portfolio.free_quote == before == D("777")
 
 
@@ -1468,7 +1490,7 @@ def _unprotected_position(symbol: str) -> Position:
 class TestReconcileThenDecide:
     """The reconciler subscribes to candles, and it subscribes FIRST."""
 
-    async def test_the_reconciler_is_registered_before_the_engines_own_hook(
+    async def test_candle_subscribers_run_reconcile_then_resolve_then_decide(
         self, tmp_path: Path
     ) -> None:
         """Registration order, which is a consequence of WHERE each registration
@@ -1476,6 +1498,13 @@ class TestReconcileThenDecide:
         subscribes only when `run()` is called afterwards. Nothing asserted that,
         and an inversion's symptom -- evaluation reading a bar-old ledger -- is
         silent.
+
+        THREE subscribers now, and the middle one is what makes Option 4
+        correct: the executor resolves an ambiguous write from the previous bar
+        out of THIS bar's fresh budget, before the engine can dispatch anything
+        new. Moving it after the engine's hook would resolve the ambiguity only
+        after a second placement had already been decided on a portfolio that
+        does not know about the first.
         """
         settings = write_settings(tmp_path)
 
@@ -1486,7 +1515,8 @@ class TestReconcileThenDecide:
 
             handlers = system.provider._handlers  # type: ignore[attr-defined]
             assert handlers[0] is system.reconciler
-            assert handlers[1].__self__ is system.engine  # type: ignore[attr-defined]
+            assert handlers[1] is system.executor
+            assert handlers[2].__self__ is system.engine  # type: ignore[attr-defined]
 
     async def test_a_later_subscriber_already_sees_the_reconciliation_from_the_same_candle(
         self, tmp_path: Path
@@ -1500,7 +1530,8 @@ class TestReconcileThenDecide:
         registered immediately after the reconciler, with no intervening await
         for a scheduled task to sneak through, reads the marker the pass writes.
 
-        The spy sits at index 1 and the engine's hook at index 2, so a write
+        The spy sits at index 2, after the reconciler and the executor,
+        and the engine's hook at index 3, so a write
         visible to the spy was necessarily complete before the engine ran --
         `_notify` awaits its subscribers in turn.
         """

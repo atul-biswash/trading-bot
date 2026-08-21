@@ -126,6 +126,8 @@ from trading_bot.core.interfaces import (
 )
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.engine.live_engine import TradingEngine
+from trading_bot.execution.dispatch_budget import DispatchBudget
+from trading_bot.execution.executor import OrderExecutor
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
@@ -138,7 +140,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import AsyncIterator, Mapping, Sequence
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Balance, Signal
+    from trading_bot.core.models import Balance, Candle, Signal
 
 _log = get_logger(__name__)
 
@@ -153,6 +155,7 @@ _EVENT_COLLABORATOR_FAILED = "collaborator_failed"
 #: Names used in ``collaborator`` on a ``collaborator_failed`` line.
 _COLLABORATOR_RISK = "risk_manager"
 _COLLABORATOR_INTENT_LOGGER = "intent_logger"
+_COLLABORATOR_EXECUTOR = "order_executor"
 
 
 @dataclass(frozen=True, slots=True, eq=False)
@@ -181,6 +184,7 @@ class LiveSystem:
     pairs: Mapping[str, PairContext]
     intent_logger: IntentLogger
     reconciler: ReconciliationDriver
+    executor: OrderExecutor
 
 
 # --------------------------------------------------------------------------
@@ -310,8 +314,19 @@ def _build_signal_handler(
     intent_logger: IntentLogger,
     portfolio: Portfolio,
     pairs: Mapping[str, PairContext],
+    executor: OrderExecutor | None = None,
 ) -> SignalHandler:
     """The one handler registered on the engine: the adapter, and the chain.
+
+    **The executor CHAINS AFTER the intent logger; it does not replace it.**
+    The logger owns the whole ``risk_refused`` / ``intent_dispatched`` schema
+    and records every assessment, approved or not -- including the ones the
+    executor then refuses to dispatch. Replacing it would delete the only
+    record of a refused signal, and the two answer different questions: what
+    the risk layer decided, and what execution did about it. ``executor`` is
+    optional so a caller that wants the decision path without dispatch -- every
+    test of this chain that predates the executor -- gets exactly the old
+    behaviour.
 
     ``SignalHandler`` is a coroutine taking only a signal, while
     ``RiskManager.evaluate`` is synchronous and needs a portfolio. This closure
@@ -334,7 +349,7 @@ def _build_signal_handler(
     places orders adds it under a deadline it sets itself.
     """
 
-    async def handle(signal: Signal) -> None:
+    async def handle(signal: Signal, candle: Candle) -> None:
         try:
             assessment = risk.evaluate(signal, portfolio=portfolio)
         except Exception as exc:  # the handler must never raise; see the docstring
@@ -345,6 +360,13 @@ def _build_signal_handler(
             await intent_logger.record(signal, assessment)
         except Exception as exc:  # the handler must never raise; see the docstring
             _log_collaborator_failure(_COLLABORATOR_INTENT_LOGGER, signal, exc, pairs)
+
+        if executor is None:
+            return
+        try:
+            await executor.dispatch(signal, assessment, candle)
+        except Exception as exc:  # the handler must never raise; see the docstring
+            _log_collaborator_failure(_COLLABORATOR_EXECUTOR, signal, exc, pairs)
 
     return handle
 
@@ -657,12 +679,18 @@ async def live_system(
                     clock=utc_now,
                 )
                 intent_logger = IntentLogger(pairs=pairs)
+                executor = OrderExecutor(
+                    client=resolved_client,
+                    portfolio=portfolio,
+                    budget=DispatchBudget.from_config(settings.config),
+                )
                 engine.on_signal(
                     _build_signal_handler(
                         risk=risk,
                         intent_logger=intent_logger,
                         portfolio=portfolio,
                         pairs=pairs,
+                        executor=executor,
                     )
                 )
                 # RECONCILE, THEN DECIDE -- and the ordering is structural
@@ -679,6 +707,12 @@ async def live_system(
                     budget=ReconciliationBudget.from_config(settings.config, timeframes=timeframes),
                 )
                 provider.on_candle(reconciler)
+                # Subscriber ONE: Option 4 resolution, after the reconciler and
+                # still before the engine's own hook. So every bar runs
+                # reconcile -> resolve -> decide, and an ambiguous write from
+                # the previous bar is settled out of THIS bar's fresh budget
+                # before anything new can be dispatched.
+                provider.on_candle(executor)
                 _log.info(
                     "Composition root ready: %d pair(s), %s %s free",
                     len(pairs),
@@ -695,6 +729,7 @@ async def live_system(
                     pairs=pairs,
                     intent_logger=intent_logger,
                     reconciler=reconciler,
+                    executor=executor,
                 )
             finally:
                 await engine.stop()

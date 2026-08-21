@@ -518,7 +518,7 @@ async def test_real_signal_reaches_a_signal_handler_through_the_engine() -> None
 
     received: list[Signal] = []
 
-    async def collect(signal: Signal) -> None:
+    async def collect(signal: Signal, candle: Candle) -> None:
         received.append(signal)
 
     engine.on_signal(collect)

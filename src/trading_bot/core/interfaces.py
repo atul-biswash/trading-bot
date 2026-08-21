@@ -23,6 +23,8 @@ from trading_bot.core.models import (
     Order,
     OrderList,
     OrderRequest,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
     Signal,
     SizingDecision,
     SymbolInfo,
@@ -159,6 +161,49 @@ class ExchangeClient(ABC):
         ...
 
     @abstractmethod
+    async def create_otoco_order_list(
+        self,
+        request: OtocoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Place a three-leg OTOCO list: working ``LIMIT``, below stop, above target.
+
+        **THIS IS A WRITE, AND IT IS THE FIRST ONE ON THIS PORT THAT CAN OPEN A
+        POSITION.** A connection timeout here MAY HAVE LANDED, so the result of
+        a failure is genuinely unknown and must not be resolved by resending.
+        The recovery is to QUERY the ids we would have sent, which Q-C section 6
+        makes derivable by pure computation.
+
+        **Its own method rather than a branch shared with the OTO shape.** Q-C
+        section 2 calls the arity branch irreducible and the two dispatch to
+        different endpoints, so the caller selects by selecting the request type
+        it built and there is no ``else`` here that cannot occur.
+
+        ``timeout_s`` bounds one HTTP round trip and ``attempts`` bounds how
+        many are made; ``None`` for either means the implementation's own
+        policy. A dispatch on a deadline supplies both.
+        """
+        ...
+
+    @abstractmethod
+    async def create_oto_order_list(
+        self,
+        request: OtoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Place a two-leg OTO list: working ``LIMIT`` and a below stop.
+
+        The stop-only shape, for a configuration with no take-profit. Same
+        write semantics, same recovery and the same per-call bounds as
+        :meth:`create_otoco_order_list`.
+        """
+        ...
+
+    @abstractmethod
     async def close(self) -> None: ...
 
 
@@ -166,8 +211,25 @@ class ExchangeClient(ABC):
 CandleHandler = Callable[[Candle], Awaitable[None]]
 
 # A callback invoked whenever a strategy produces a signal. This is the seam
-# where risk management and execution attach to the engine in later phases.
-SignalHandler = Callable[[Signal], Awaitable[None]]
+# where risk management and execution attach to the engine.
+#
+# **The candle is FORWARDED, not re-read, and that is a ruling rather than a
+# convenience.** `Candle.close_time` seeds every client order id under Q-C
+# section 6, so whatever reaches a handler here decides what the reconciler
+# later compares against what rests at the venue. `live_engine._evaluate`
+# already forwards this same candle to strategies for the same reason, in its
+# own words: the two are identical "but only the former stays correct if this
+# call ever moves off the current stack, at which point `last_candle()` could
+# already have advanced a bar". A handler sits one seam further down than a
+# strategy, so the argument is stronger here, not weaker.
+#
+# The alternative -- taking the seed from `Signal.timestamp` -- is what this
+# parameter exists to make unnecessary. That field carries
+# `Field(default_factory=_utcnow)`, so a strategy that simply omits it seeds
+# every id from wall-clock, and every position then classifies DIVERGED with no
+# error anywhere (M5f-003). Forwarding removes the dependency on an unenforced
+# strategy convention entirely.
+SignalHandler = Callable[[Signal, Candle], Awaitable[None]]
 
 
 class MarketDataStream(ABC):

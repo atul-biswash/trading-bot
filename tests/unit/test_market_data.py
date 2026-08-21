@@ -30,6 +30,8 @@ from trading_bot.core.models import (
     Order,
     OrderList,
     OrderRequest,
+    OtocoOrderListRequest,
+    OtoOrderListRequest,
     SymbolInfo,
     Ticker,
 )
@@ -172,6 +174,24 @@ class FakeExchangeClient(ExchangeClient):
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[OrderList]:
+        raise NotImplementedError
+
+    async def create_otoco_order_list(  # pragma: no cover
+        self,
+        request: OtocoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        raise NotImplementedError
+
+    async def create_oto_order_list(  # pragma: no cover
+        self,
+        request: OtoOrderListRequest,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
         raise NotImplementedError
 
 

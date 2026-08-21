@@ -299,10 +299,10 @@ async def test_signal_is_emitted_to_handlers_in_order() -> None:
     engine, provider, _ = build_engine(ScriptedStrategy(result=buy()))
     order: list[str] = []
 
-    async def first(signal: Signal) -> None:
+    async def first(signal: Signal, candle: Candle) -> None:
         order.append("first")
 
-    async def second(signal: Signal) -> None:
+    async def second(signal: Signal, candle: Candle) -> None:
         order.append("second")
 
     engine.on_signal(first)
@@ -318,7 +318,7 @@ async def test_no_signal_means_no_handler_call() -> None:
     engine, provider, _ = build_engine(ScriptedStrategy(result=None))
     seen: list[Signal] = []
 
-    async def record(signal: Signal) -> None:
+    async def record(signal: Signal, candle: Candle) -> None:
         seen.append(signal)
 
     engine.on_signal(record)
@@ -333,10 +333,10 @@ async def test_failing_signal_handler_does_not_stop_the_others() -> None:
     engine, provider, _ = build_engine(ScriptedStrategy(result=buy()))
     survivors: list[Signal] = []
 
-    async def boom(signal: Signal) -> None:
+    async def boom(signal: Signal, candle: Candle) -> None:
         raise RuntimeError("risk manager exploded")
 
-    async def record(signal: Signal) -> None:
+    async def record(signal: Signal, candle: Candle) -> None:
         survivors.append(signal)
 
     engine.on_signal(boom)
@@ -362,12 +362,12 @@ async def test_failing_signal_handler_does_not_stop_the_feed() -> None:
     survivors: list[Signal] = []
     failures = 0
 
-    async def boom(signal: Signal) -> None:
+    async def boom(signal: Signal, candle: Candle) -> None:
         nonlocal failures
         failures += 1
         raise RuntimeError("executor exploded")
 
-    async def record(signal: Signal) -> None:
+    async def record(signal: Signal, candle: Candle) -> None:
         survivors.append(signal)
 
     engine.on_signal(boom)
@@ -427,7 +427,7 @@ async def test_strategy_exception_does_not_kill_the_engine() -> None:
     engine, provider, _ = build_engine(strategy)
     seen: list[Signal] = []
 
-    async def record(signal: Signal) -> None:
+    async def record(signal: Signal, candle: Candle) -> None:
         seen.append(signal)
 
     engine.on_signal(record)

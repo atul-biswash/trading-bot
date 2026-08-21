@@ -250,7 +250,7 @@ class TradingEngine:
 
         signal = self._evaluate(key, strategy, candle)
         if signal is not None:
-            await self._emit(signal)
+            await self._emit(signal, candle)
 
     def _evaluate(self, key: _Key, strategy: Strategy, candle: Candle) -> Signal | None:
         """Run one strategy against the current window, containing failures.
@@ -322,10 +322,17 @@ class TradingEngine:
                 count,
             )
 
-    async def _emit(self, signal: Signal) -> None:
-        """Fan a signal out to registered handlers, isolating failures."""
+    async def _emit(self, signal: Signal, candle: Candle) -> None:
+        """Fan a signal out to registered handlers, isolating failures.
+
+        ``candle`` is the bar the signal was decided on, forwarded rather than
+        re-read for the reason :meth:`_evaluate` forwards it to strategies --
+        see the note on ``SignalHandler``. A handler needing a restart-stable
+        identity seed takes ``candle.close_time``; nothing downstream should
+        reach back to ``provider.last_candle()``.
+        """
         for handler in self._signal_handlers:
             try:
-                await handler(signal)
+                await handler(signal, candle)
             except Exception:
                 _log.exception("Signal handler failed for %s; continuing", signal.symbol)
