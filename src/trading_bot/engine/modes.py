@@ -462,12 +462,26 @@ def _seed_portfolio(balances: Sequence[Balance], *, quote_asset: str) -> Portfol
     ``Balance.free`` is already ``Money``, parsed from the wire string with
     ``Decimal(str(...))``, so this opens no new float boundary.
 
-    Both sides are upper-cased before matching. ``trading.base_currency`` carries
-    no validator while ``PairConfig.symbol`` twelve lines above it does, and
-    nothing read ``base_currency`` at all until this function; normalising here
-    means this code is correct standing alone. The **normalised** form is what
-    lands on the portfolio, because it is interpolated into refusal messages and
-    future code will compare against it.
+    Both sides are upper-cased before matching, here rather than upstream.
+    ``base_currency`` does carry a validator -- ``TradingConfig._upper`` in
+    ``config/models.py``, a ``field_validator`` that upper-cases it at parse --
+    so the value arriving here is normalised already. That is defence in depth
+    and not the reason this is correct.
+
+    **This paragraph used to assert that no such validator existed. That was
+    FALSE, and it carried no weight**, which is worth separating: the conclusion
+    was never "no validator exists" but "this code is correct STANDING ALONE",
+    and not depending on a validator two layers away is exactly what that means.
+    ``TradingConfig._upper``'s own docstring says the same thing from the other
+    side -- *"The composition root normalises both sides itself and does not
+    depend on this -- correctness there must not rest on a validator two layers
+    away."* So the two files agreed on the substance while disagreeing on the
+    fact.
+
+    This function remains ``base_currency``'s only consumer: ``live_system``
+    reads it once to pass it here, and nothing else in ``src/`` touches it. The
+    **normalised** form is what lands on the portfolio, because it is
+    interpolated into refusal messages and future code will compare against it.
 
     ``get_balances`` returns every asset including zero balances, so an absent
     entry means genuinely absent -- a configured quote asset the account does not

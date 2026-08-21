@@ -266,9 +266,32 @@ class BinanceMarketDataStream(MarketDataStream):
         self._task = asyncio.create_task(self._run(), name="binance-market-data-stream")
 
     async def stop(self) -> None:
-        """Cancel the receive task and release the underlying connection.
+        """Cancel the receive task and release BOTH of the stream's connections.
 
         Safe to call more than once and even if :meth:`start` was never called.
+
+        **Two connections come down, by two different mechanisms.** Cancelling
+        the receive task exits the ``async with socket`` in :meth:`_run`, and
+        that is what closes the **websocket**. ``_source.aclose()`` closes the
+        **REST session** owned by the second ``AsyncClient`` that
+        ``_BinanceSocketSource`` built -- a different object, and not the feed.
+
+        **This used to read "release the underlying connection", singular. That
+        was not false so much as MISLEADING**, and the distinction is worth
+        keeping: the sentence was defensible -- a REST session is an underlying
+        connection -- and it pointed at the one thing here that is *not* what a
+        reader chasing a feed would be looking for.
+
+        **MEASURED at M5f: closing the REST session does not stop the feed.**
+        With ``aclose()`` forced to run before the socket was ever opened, a
+        credentialed integration test still built a working stream and received
+        a closed candle from Testnet. ``BinanceSocketManager`` takes only
+        configuration from the client -- ``testnet``, ``demo``, ``https_proxy``,
+        ``TIME_UNIT`` -- and the sockets it hands out connect independently.
+
+        So: a feed that will not close is the task and the socket's context
+        manager, pinned by ``test_stop_cancels_the_task_and_closes_the_source``.
+        A leaked ``aiohttp`` session is ``aclose()``, and this is where to look.
         """
         self._running = False
         task, self._task = self._task, None
