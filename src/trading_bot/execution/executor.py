@@ -25,6 +25,7 @@ from typing import TYPE_CHECKING
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import PositionSide, ProtectionState
 from trading_bot.core.models import (
+    Money,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -32,7 +33,14 @@ from trading_bot.core.models import (
 )
 from trading_bot.execution.dispatch_budget import DispatchBudget
 from trading_bot.execution.placement import build_placement
-from trading_bot.execution.resolution import PlacementOutcome, resolve_placement
+from trading_bot.execution.resolution import (
+    _LIVE_STATUSES as _LIVE_LIST_STATUSES,
+)
+from trading_bot.execution.resolution import (
+    PlacementOutcome,
+    PlacementVerdict,
+    resolve_placement,
+)
 from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
 
@@ -45,6 +53,23 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.core.portfolio import Portfolio
 
 __all__ = ["OrderExecutor", "PendingPlacement"]
+
+
+def _matched_list_id(verdict: PlacementVerdict) -> str | None:
+    """The list id of the single live match, or ``None``.
+
+    ``matched`` can hold more than one -- MEASURED, a Testnet census found one
+    ``listClientOrderId`` mapping to three lists -- but ``PLACED_LIVE`` is only
+    returned when exactly one of them is live, so the id is unambiguous here.
+    ``None`` rather than a guess if the shape is ever otherwise: an absent
+    ``order_list_id`` on the position is honest, where a wrong one would send
+    the reconciler to compare against somebody else's legs.
+    """
+    live = [ol for ol in verdict.matched if ol.list_order_status in _LIVE_LIST_STATUSES]
+    if len(live) != 1:
+        return None
+    return live[0].list_client_order_id
+
 
 _log = get_logger(__name__)
 
@@ -71,11 +96,34 @@ _REASON_PENDING = "placement_pending"
 class PendingPlacement:
     """A placement whose outcome we did not observe, awaiting resolution.
 
-    **Three fields, and every one of them is a SEED rather than a fact about a
-    position.** Q-C section 6 makes a generation-0 client order id derivable
-    from ``(symbol, entry_bar_time, generation)`` by pure computation, so this
-    record is *reconstructible input*, not persisted state -- it carries what
-    the query needs to re-derive the ids we would have sent, and nothing else.
+    **Every field is something WE REQUESTED, never something the venue
+    reported.** That is the line this type is drawn along, and it is the whole
+    of why the record is safe to hold.
+
+    The first three are ID SEEDS: Q-C section 6 makes a generation-0 client
+    order id derivable from ``(symbol, entry_bar_time, generation)`` by pure
+    computation, so they are *reconstructible input* -- what the query needs to
+    re-derive the ids we would have sent.
+
+    **The last four are the requested ECONOMICS** -- ``quantity``,
+    ``entry_limit`` and the two protective levels -- and they sit on the same
+    side of that line for the same reason. Every one is computed by our own
+    risk layer BEFORE any venue contact, so carrying them forward is carrying
+    our own arithmetic, not an observation. Q-C keys reconciliation off what
+    was **requested** rather than off what the venue holds, which is precisely
+    the category these belong to. R23, ruled by the reviewer under delegation.
+
+    **THE LINE, STATED SO IT CAN BE ENFORCED: a record of OUR INTENT, never a
+    shadow of venue state.** ``executedQty``, a fill price, a leg status or an
+    ``orderId`` fall on the OTHER side and **must never be added here**. Those
+    are facts a ``Position`` or the venue owns, and duplicating one into this
+    record is exactly the second-source-of-truth the reconciliation driver
+    refused to become.
+
+    This widens the type's own justification rather than contradicting it: an
+    earlier version of this docstring said "three fields, and every one of them
+    is a SEED", which was true of what it then held and stated the boundary
+    more narrowly than the boundary actually is.
 
     **Why this is NOT the cross-pass state the reconciliation driver refused.**
     That refusal is quoted in ``docs/NEXT_MILESTONE.md`` in these words: the
@@ -92,6 +140,10 @@ class PendingPlacement:
     symbol: str
     entry_bar_time: datetime
     generation: int
+    quantity: Money
+    entry_limit: Money
+    stop_loss: Money | None
+    take_profit: Money | None
 
 
 class OrderExecutor:
@@ -185,6 +237,57 @@ class OrderExecutor:
                 )
                 continue
 
+            # R24. A LIVE list means the working leg FILLED, so a position
+            # exists and this is where it gets recorded.
+            #
+            # WHAT THIS CLOSES. Until R24 every branch here merely deleted the
+            # record. A placement that landed but whose response we never saw
+            # therefore left a live list at the venue with NO `Position` and NO
+            # debit: `has_position` false, so a later `BUY` pyramids onto it;
+            # `free_quote` overstated by the committed cost, so every subsequent
+            # size is computed against money already spent; and nothing for
+            # `reconcile_open_positions` to iterate, because it iterates
+            # `portfolio.open_positions`. UNBOUNDED, because the record was
+            # deleted and nothing retried.
+            #
+            # THAT IS THE OUTCOME FAIL-CLOSED EXISTS TO PREVENT, reached through
+            # the branch that SUCCEEDS rather than the one that fails. The
+            # `UNRESOLVED` branch above is careful never to strand a list; this
+            # one stranded every list it successfully found.
+            #
+            # WHY LIVE AND TERMINAL ARE NOT ONE BRANCH. Q-C section 3 fixes the
+            # working leg as `LIMIT`+`FOK`, which cannot rest -- it fills or
+            # expires at once. So a list still EXECUTING has passed its working
+            # leg and its pendings are live: capital is committed. A TERMINAL
+            # list is the opposite and it is MEASURED: six probe lists with a
+            # FOK working leg read ALL_DONE/ALL_DONE, every leg EXPIRED,
+            # `executedQty` 0. Constructing a position there would INVENT one
+            # and debit `free_quote` for money never spent. The S5 reading of
+            # terminal -- filled, then protection triggered (M5f-037) -- agrees
+            # on the treatment for a different reason: that position has already
+            # closed, so opening one now would also be wrong.
+            #
+            # THE LIVE HALF IS INFERRED, NOT MEASURED, and C3 said so when it
+            # shipped the classifier: "a falsification of the live half lands on
+            # the RISK PATH." This is that path.
+            if verdict.outcome is PlacementOutcome.PLACED_LIVE:
+                self._open_position(
+                    symbol=symbol,
+                    quantity=record.quantity,
+                    entry_limit=record.entry_limit,
+                    stop_loss=record.stop_loss,
+                    take_profit=record.take_profit,
+                    entry_bar_time=record.entry_bar_time,
+                    order_list_id=_matched_list_id(verdict),
+                )
+
+            # NOT_PLACED IS DELIBERATELY UNTOUCHED -- R25, and it is a KNOWN
+            # DIVERGENCE rather than an oversight. Today: the record is deleted
+            # and nothing is re-placed, so the trade is silently missed.
+            # `CLAUDE.md`'s locked timed-out-write rule prescribes the opposite
+            # -- "Not found => nothing rests; re-place at the same generation."
+            # Which is right is a RULING reserved to the project owner and is
+            # UNRULED, so this commit changes nothing here and declares it.
             del self._pending[symbol]
             _log.info(
                 "Placement resolved",
@@ -193,6 +296,9 @@ class OrderExecutor:
                     "symbol": symbol,
                     "outcome": verdict.outcome.value,
                     "reason": verdict.reason,
+                    "quantity": record.quantity,
+                    "entry": record.entry_limit,
+                    "stop_loss": record.stop_loss,
                     "candle_time": candle.close_time.isoformat(),
                 },
             )
@@ -266,7 +372,13 @@ class OrderExecutor:
         # Mark BEFORE the write. A record created after a call that never
         # returned would not exist, which is the exact state it is for.
         self._pending[signal.symbol] = PendingPlacement(
-            symbol=signal.symbol, entry_bar_time=entry_bar_time, generation=0
+            symbol=signal.symbol,
+            entry_bar_time=entry_bar_time,
+            generation=0,
+            quantity=intent.quantity,
+            entry_limit=intent.entry_limit,
+            stop_loss=intent.levels.stop_loss,
+            take_profit=intent.levels.take_profit,
         )
         try:
             order_list = await self._place(request, bounds.timeout_s, bounds.attempts)
@@ -284,7 +396,15 @@ class OrderExecutor:
             return
 
         self._pending.pop(signal.symbol, None)
-        self._record(intent, order_list, entry_bar_time=entry_bar_time)
+        self._open_position(
+            symbol=intent.symbol,
+            quantity=intent.quantity,
+            entry_limit=intent.entry_limit,
+            stop_loss=intent.levels.stop_loss,
+            take_profit=intent.levels.take_profit,
+            entry_bar_time=entry_bar_time,
+            order_list_id=order_list.list_client_order_id,
+        )
         _log.info(
             "Order list placed",
             extra={
@@ -314,8 +434,16 @@ class OrderExecutor:
             request, timeout_s=timeout_s, attempts=attempts
         )
 
-    def _record(
-        self, intent: EntryIntent, order_list: OrderList, *, entry_bar_time: datetime
+    def _open_position(
+        self,
+        *,
+        symbol: str,
+        quantity: Money,
+        entry_limit: Money,
+        stop_loss: Money | None,
+        take_profit: Money | None,
+        entry_bar_time: datetime,
+        order_list_id: str | None,
     ) -> None:
         """Construct the position this placement opened, UNKNOWN until reconciled.
 
@@ -324,6 +452,13 @@ class OrderExecutor:
         loosely because the direction is the whole argument: a position wrongly
         marked ``UNKNOWN`` costs entries until the next pass corrects it, while
         one wrongly marked ``ACTIVE`` is priced off a stop nobody confirmed.
+
+        **ONE CONSTRUCTION SITE, TWO CALLERS.** The dispatch success path and
+        the ``PLACED_LIVE`` resolution branch both arrive here, taking values
+        rather than an ``EntryIntent`` because the second has no intent -- it
+        has the requested economics carried on its ``PendingPlacement``. A
+        second construction site would be a second place for M5e-075's ruling
+        to be forgotten.
 
         **A placement response is NOT an observation of what rests.**
         Acceptance is not activation. The venue has accepted a list; whether
@@ -340,17 +475,17 @@ class OrderExecutor:
         it, and why ``ACTIVE`` was admitted to ``_TRUSTED_PROTECTION``.
         """
         position = Position(
-            symbol=intent.symbol,
+            symbol=symbol,
             side=PositionSide.LONG,
-            quantity=intent.quantity,
-            entry_price=intent.entry_limit,
+            quantity=quantity,
+            entry_price=entry_limit,
             entry_bar_time=entry_bar_time,
             protection=ProtectionState.UNKNOWN,
-            order_list_id=order_list.list_client_order_id,
-            stop_loss=intent.levels.stop_loss,
-            take_profit=intent.levels.take_profit,
+            order_list_id=order_list_id,
+            stop_loss=stop_loss,
+            take_profit=take_profit,
         )
-        self._portfolio.open_position(position, cost=intent.quantity * intent.entry_limit)
+        self._portfolio.open_position(position, cost=quantity * entry_limit)
 
     def _refuse(self, signal: Signal, reason: str, candle: Candle) -> None:
         _log.warning(

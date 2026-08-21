@@ -129,6 +129,37 @@ def placed_list(list_id: str = "tb1-BTCUSDT-1714564800000-0-L") -> OrderList:
     )
 
 
+def live_verdict(list_id: str = "tb1-BTCUSDT-1714564800000-0-L") -> PlacementVerdict:
+    """A PLACED_LIVE verdict carrying the list it matched.
+
+    A fake whose resolver always returns NOT_PLACED cannot express any of the
+    R24 behaviour, which is why this exists: until it did, all three resolution
+    tests returned NOT_PLACED and the live branch was driven by nothing.
+    """
+    return PlacementVerdict(
+        outcome=PlacementOutcome.PLACED_LIVE,
+        reason="one live match",
+        matched=(placed_list(list_id),),
+    )
+
+
+def terminal_verdict() -> PlacementVerdict:
+    return PlacementVerdict(
+        outcome=PlacementOutcome.PLACED_TERMINAL,
+        reason="one terminal match",
+        matched=(
+            OrderList(
+                order_list_id="2",
+                list_client_order_id="tb1-BTCUSDT-1714564800000-0-L",
+                list_order_status="ALL_DONE",
+                list_status_type="ALL_DONE",
+                symbol=SYMBOL,
+                orders=(),
+            ),
+        ),
+    )
+
+
 class FakeClient:
     """Records placements; can be made to fail, which is what expresses S-ambiguous."""
 
@@ -336,7 +367,13 @@ class TestOptionFourResolution:
         await executor.dispatch(buy(), entry_assessment(), candle())
 
         assert executor._pending[SYMBOL] == PendingPlacement(
-            symbol=SYMBOL, entry_bar_time=BAR, generation=0
+            symbol=SYMBOL,
+            entry_bar_time=BAR,
+            generation=0,
+            quantity=D("0.5"),
+            entry_limit=D("100"),
+            stop_loss=D("95"),
+            take_profit=D("110"),
         )
 
     async def test_a_successful_placement_leaves_no_pending_record(self) -> None:
@@ -448,6 +485,85 @@ class TestOptionFourResolution:
 
         assert len(_records(caplog, "placement_resolved")) == 1
         assert _records(caplog, "placement_unresolved") == []
+
+    async def test_a_live_resolution_records_the_position_it_learned_exists(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R24. Until this, a placement that LANDED but whose response we never
+        saw left a live list with no Position -- unbounded, because the record
+        was deleted and nothing retried.
+        """
+        executor, _, portfolio = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+        assert SYMBOL not in portfolio.positions
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        position = portfolio.positions[SYMBOL]
+        assert position.protection is ProtectionState.UNKNOWN
+        assert position.quantity == D("0.5")
+        assert position.entry_price == D("100")
+        assert position.stop_loss == D("95")
+        assert position.take_profit == D("110")
+        assert position.entry_bar_time == BAR
+        assert position.order_list_id == "tb1-BTCUSDT-1714564800000-0-L"
+        assert executor._pending == {}
+
+    async def test_a_live_resolution_debits_the_portfolio(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """THE DEBIT, asserted separately from the Position.
+
+        A membership assertion cannot express it: `open_position` both inserts
+        and debits, so a mutation deleting only the debit would leave every
+        Position assertion passing. `free_quote` overstated by the committed
+        cost is what makes every SUBSEQUENT size wrong, not just this one.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor, _, _ = build(
+            client=FakeClient(place_error=TimeoutError("reset")), portfolio=portfolio
+        )
+        await executor.dispatch(buy(), entry_assessment(), candle())
+        assert portfolio.free_quote == D("10000")  # nothing charged yet
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert portfolio.free_quote == D("10000") - D("0.5") * D("100")
+
+    async def test_a_terminal_resolution_records_no_position(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Live and terminal are NOT one branch.
+
+        A terminal list is MEASURED to mean the FOK expired with `executedQty`
+        0 -- nothing rests and no capital moved. Constructing a position here
+        would invent one and debit for money never spent. The S5 reading
+        (filled, then protection triggered) agrees on the treatment: that
+        position has already closed.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor, _, _ = build(
+            client=FakeClient(place_error=TimeoutError("reset")), portfolio=portfolio
+        )
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _terminal(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return terminal_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _terminal)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.free_quote == D("10000")
+        assert executor._pending == {}
 
     async def test_a_bar_with_nothing_pending_queries_nothing(
         self, monkeypatch: pytest.MonkeyPatch
