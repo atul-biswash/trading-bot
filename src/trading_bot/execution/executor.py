@@ -52,6 +52,14 @@ _EVENT_PLACED = "order_placed"
 _EVENT_REFUSED = "dispatch_refused"
 _EVENT_AMBIGUOUS = "placement_ambiguous"
 _EVENT_RESOLVED = "placement_resolved"
+#: A resolution ATTEMPT that did not resolve. Its own event name rather than
+#: `_EVENT_RESOLVED` carrying an `outcome` field, because that is the schema
+#: convention everywhere else in `src/`: `IntentLogger` emits `risk_refused`
+#: or `intent_dispatched` from ONE call site depending on the outcome, and
+#: `ReconciliationDriver` splits `reconciliation_pass` from
+#: `reconciliation_untrusted`. Nowhere does one name carry an outcome field
+#: to distinguish outcomes a reader acts on differently.
+_EVENT_UNRESOLVED = "placement_unresolved"
 
 _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
@@ -157,10 +165,18 @@ class OrderExecutor:
 
             if verdict.outcome is PlacementOutcome.UNRESOLVED:
                 # Fail-closed: keep the record, do NOT re-place.
+                #
+                # ITS OWN EVENT NAME. Under fail-closed this is the branch that
+                # LEAVES AN ORPHANED LIST -- the record survives, nothing is
+                # re-placed, and a list may be resting at the venue that the
+                # portfolio does not know about. A reader filtering on
+                # `placement_resolved` and counting this as one of them is wrong
+                # in the expensive direction: they would see a resolution rate
+                # of 100% while every attempt was failing.
                 _log.warning(
                     "Placement still unresolved",
                     extra={
-                        "event": _EVENT_RESOLVED,
+                        "event": _EVENT_UNRESOLVED,
                         "symbol": symbol,
                         "outcome": verdict.outcome.value,
                         "reason": verdict.reason,

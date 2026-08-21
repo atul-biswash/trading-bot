@@ -307,13 +307,22 @@ class TestRefusals:
     async def test_an_exhausted_budget_refuses_rather_than_dispatching(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A budget may refuse to BEGIN work; it must never abandon one in flight."""
+        """A budget may refuse to BEGIN work; it must never abandon one in flight.
+
+        THE REASON IS ASSERTED, not only the refusal. A swap mutation --
+        exchanging this reason with the pending-placement one -- returned 1
+        rather than 2, and the 1 was the finding: an assertion on the COUNT
+        survives being handed the wrong reason, so the two refusals were pinned
+        as distinguishable in one direction only. This is the other direction.
+        """
         executor, client, _ = build(deadline_s=0.0)
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(buy(), entry_assessment(), candle())
 
-        assert len(_records(caplog, "dispatch_refused")) == 1
+        refusals = _records(caplog, "dispatch_refused")
+        assert len(refusals) == 1
+        assert refusals[0].reason == "budget_exhausted"  # type: ignore[attr-defined]
         assert client.otoco == []
 
 
@@ -405,6 +414,40 @@ class TestOptionFourResolution:
 
         assert SYMBOL in executor._pending
         assert len(_records(caplog, "collaborator_failed")) == 1
+
+    async def test_the_two_resolution_outcomes_carry_distinct_event_names(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A non-resolution is the branch that leaves an orphaned list.
+
+        Both outcomes shared one event name until now, so a reader filtering on
+        `placement_resolved` counted failures as successes -- and would have
+        seen a 100% resolution rate while every attempt failed. Nothing pinned
+        either name: neither literal appeared anywhere outside `executor.py`.
+        """
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _unresolved(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.UNRESOLVED, reason="query failed")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _unresolved)
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        assert len(_records(caplog, "placement_unresolved")) == 1
+        assert _records(caplog, "placement_resolved") == []
+
+        async def _resolved(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _resolved)
+        caplog.clear()
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        assert len(_records(caplog, "placement_resolved")) == 1
+        assert _records(caplog, "placement_unresolved") == []
 
     async def test_a_bar_with_nothing_pending_queries_nothing(
         self, monkeypatch: pytest.MonkeyPatch
