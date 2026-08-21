@@ -85,6 +85,16 @@ _EVENT_RESOLVED = "placement_resolved"
 #: `reconciliation_untrusted`. Nowhere does one name carry an outcome field
 #: to distinguish outcomes a reader acts on differently.
 _EVENT_UNRESOLVED = "placement_unresolved"
+#: A resolution that found nothing and will not be retried -- the trade is gone.
+#: Its own name for the same reason `_EVENT_UNRESOLVED` has one, and at ERROR
+#: rather than the INFO it shared with a successful resolution: `placement_
+#: unresolved` is SELF-CLEARING (retried next bar) while this is TERMINAL, and
+#: Q-B's rule is that escalating a self-clearing condition at the same level as
+#: a terminal one "is how a `CRITICAL` line stops being read". Read the other
+#: way it says a terminal condition must not hide at a self-clearing one's
+#: level. Not CRITICAL: Q-B reserves that for a log line AND A HALT, and this
+#: halts nothing.
+_EVENT_MISSED = "dispatch_missed"
 
 _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
@@ -281,14 +291,54 @@ class OrderExecutor:
                     order_list_id=_matched_list_id(verdict),
                 )
 
-            # NOT_PLACED IS DELIBERATELY UNTOUCHED -- R25, and it is a KNOWN
-            # DIVERGENCE rather than an oversight. Today: the record is deleted
-            # and nothing is re-placed, so the trade is silently missed.
-            # `CLAUDE.md`'s locked timed-out-write rule prescribes the opposite
-            # -- "Not found => nothing rests; re-place at the same generation."
-            # Which is right is a RULING reserved to the project owner and is
-            # UNRULED, so this commit changes nothing here and declares it.
             del self._pending[symbol]
+
+            if verdict.outcome is PlacementOutcome.NOT_PLACED:
+                # THE TRADE IS GONE, NOT DEFERRED, and it now says so.
+                #
+                # `NOT_PLACED` IS AN INFERENCE, NOT AN OBSERVATION. It means
+                # "no list on the account carried our id", which covers at
+                # least THREE venue states that want different things:
+                #   1. the request never reached the venue -- nothing created;
+                #   2. it reached the venue and was REJECTED at submission --
+                #      band, filter, -1106, insufficient balance -- so no list
+                #      was ever created;
+                #   3. a list WAS created but is absent from the enumeration.
+                #      `get_all_order_lists` passes no `limit` and no `fromId`,
+                #      and the window's size is UNMEASURED in this tree.
+                # Do not read the event name as "confirmed not placed". State
+                # 3 is the one in which something may be resting right now.
+                #
+                # WHY IT IS FINAL. `CLAUDE.md`: strategies are "**Edge-
+                # triggered, not level-triggered.** A cross fires on the
+                # transition bar and is silent while the condition persists".
+                # So the signal will NOT be re-emitted on the next bar: this is
+                # not a deferral, it is a trade the bot decided to take and did
+                # not. Counting these against `order_placed` is the only way an
+                # operator sees that rate at all.
+                #
+                # WHETHER TO RE-PLACE IS UNRULED. `CLAUDE.md`'s locked
+                # timed-out-write rule prescribes the opposite of this branch
+                # -- "Not found => nothing rests; re-place at the same
+                # generation." Which is right is reserved to the project owner.
+                # THIS COMMIT DELIBERATELY DOES NOT SETTLE IT: the branch still
+                # deletes the record and re-places nothing. Only what it SAYS
+                # has changed.
+                _log.error(
+                    "Dispatch missed; the trade will not be retried",
+                    extra={
+                        "event": _EVENT_MISSED,
+                        "symbol": symbol,
+                        "quantity": record.quantity,
+                        "entry": record.entry_limit,
+                        "stop_loss": record.stop_loss,
+                        "entry_bar_time": record.entry_bar_time.isoformat(),
+                        "reason": verdict.reason,
+                        "candle_time": candle.close_time.isoformat(),
+                    },
+                )
+                continue
+
             _log.info(
                 "Placement resolved",
                 extra={

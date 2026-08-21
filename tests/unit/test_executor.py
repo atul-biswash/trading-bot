@@ -476,7 +476,10 @@ class TestOptionFourResolution:
         assert _records(caplog, "placement_resolved") == []
 
         async def _resolved(*_a: Any, **_k: Any) -> PlacementVerdict:
-            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+            # PLACED_TERMINAL, not NOT_PLACED: the latter is a MISSED DISPATCH
+            # and has its own event now, so it can no longer stand for "a
+            # resolution that succeeded".
+            return terminal_verdict()
 
         monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _resolved)
         caplog.clear()
@@ -564,6 +567,72 @@ class TestOptionFourResolution:
         assert SYMBOL not in portfolio.positions
         assert portfolio.free_quote == D("10000")
         assert executor._pending == {}
+
+    async def test_a_missed_dispatch_has_its_own_event_and_is_not_a_resolution(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A trade the bot decided to take and did not.
+
+        It shared `placement_resolved` at INFO with the outcomes that SUCCEEDED,
+        so an operator counting resolutions counted losses among them.
+        """
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _missed(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _missed)
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert len(_records(caplog, "dispatch_missed")) == 1
+        assert _records(caplog, "placement_resolved") == []
+        assert executor._pending == {}  # the branch still deletes and re-places nothing
+
+    async def test_a_missed_dispatch_carries_the_economics_it_attempted(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Countable against `order_placed`, or the miss rate cannot be computed."""
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _missed(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _missed)
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        record = _records(caplog, "dispatch_missed")[0]
+        assert record.quantity == D("0.5")  # type: ignore[attr-defined]
+        assert record.entry == D("100")  # type: ignore[attr-defined]
+        assert record.stop_loss == D("95")  # type: ignore[attr-defined]
+        assert record.entry_bar_time == BAR.isoformat()  # type: ignore[attr-defined]
+
+    async def test_a_missed_dispatch_outranks_a_self_clearing_one(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """THE LEVEL IS ASSERTED, and M5f-058 is why.
+
+        That finding measured that no test in this file asserted a log level at
+        all -- a mutation demoting the orphan-leaving branch to INFO passed the
+        whole suite. Level is the other property an operator filters on, so a
+        terminal outcome hiding at a self-clearing one's level is invisible in
+        exactly the view that matters.
+        """
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _missed(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _missed)
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert _records(caplog, "dispatch_missed")[0].levelno == logging.ERROR
+        assert logging.ERROR > logging.WARNING  # the self-clearing branch's level
 
     async def test_a_bar_with_nothing_pending_queries_nothing(
         self, monkeypatch: pytest.MonkeyPatch
