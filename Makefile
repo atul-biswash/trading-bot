@@ -26,7 +26,7 @@ backtest: ## Run the backtesting engine
 	$(PYTHON) -m trading_bot backtest
 
 cov: ## Run tests with coverage
-	pytest --cov --cov-report=term-missing
+	$(PYTHON) -m pytest --cov --cov-report=term-missing
 
 # The gate is defined once, in scripts/check.py, and these targets delegate to
 # it. `make` is not installed on every development machine, so a Makefile-native
@@ -35,7 +35,7 @@ lint: ## Lint + formatter check with ruff
 	$(PYTHON) scripts/check.py lint
 
 format: ## Auto-format with ruff
-	ruff format src tests scripts && ruff check --fix src tests scripts
+	$(PYTHON) -m ruff format src tests scripts && $(PYTHON) -m ruff check --fix src tests scripts
 
 type: ## Type-check with mypy
 	$(PYTHON) scripts/check.py type
