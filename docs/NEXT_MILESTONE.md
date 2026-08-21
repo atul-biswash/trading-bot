@@ -66,6 +66,177 @@ commit is undecided.
 
 ---
 
+## HANDOVER — M5f as of `3438180`, written so a successor needs no chat history
+
+**Nine commits and forty findings into M5f, and the executor is still a stub.**
+Several decisions the next session needs were made in conversation and existed
+in the tree only as findings scattered across nine commit messages. This section
+is their home. It is **not a rotation**: nothing below is renumbered, no item is
+closed, and every existing claim in this file stays exactly where it is —
+annotations sit beside them. Ruled by the reviewer under delegation, not by the
+project owner.
+
+Extraction over `milestone/M5e..HEAD` at `3438180`, with the declaration-shape
+instrument: **40 findings, `M5f-001` through `M5f-040`, no gap, no duplicate, 9
+commits in range and 9 blocks parsed.**
+
+### The project owner's three rulings, verbatim
+
+1. **"Resolver lands in its own isolated commit."** — LANDED at `3438180`. The
+   reviewer read it as necessarily authorising **one read method** on
+   `ExchangeClient`, because C3 was measured as one commit or none: every
+   `execution/` consumer types its client as the port, and under `mypy strict` a
+   call to an undeclared method fails the gate. `get_all_order_lists` is now
+   declared. **No placement method is.**
+2. **"Execute Question 4 (non-filling limit test) to establish venue write
+   validity."** — EXECUTED 2026-08-21. Results below.
+3. **"Fail-closed on UNRESOLVED states for Ruling 2."** — IMPLEMENTED at
+   `3438180`. The caller does **not** re-place on `UNRESOLVED`.
+
+### Ruling 3 CONTRADICTS A LOCKED RULE, and the tree now holds both
+
+`CLAUDE.md`'s timed-out-write decision says the opposite, verbatim: *"Query
+failed ⇒ re-place anyway, because a duplicate lands as `-2010 'Duplicate order
+sent.'`, which Q-C §8 classifies as a **success signal**. The re-place is
+idempotent *by the venue*, not by us."* — and that sentence carries a later
+annotation stating the rule *"is NOT falsified. It stands exactly as written."*
+
+C3 implements the owner's ruling and **does not edit `CLAUDE.md`**: annotating a
+locked-decisions document is the project owner's act, not the reviewer's. Until
+he annotates it, **two contradictory rules govern the same branch**, and a
+successor reading only `CLAUDE.md` will implement the wrong one. Declared as
+`M5f-036`.
+
+**FAIL-CLOSED ALSO MAKES THE FUNDING QUESTION NON-RECOVERABLE, and that is new.**
+Under re-place-anyway, a *starved* query — one the budget refused to begin — was
+recoverable, because the caller re-placed regardless. Under fail-closed a
+starved query and a failed query end identically: no re-place, and an order list
+possibly resting at the venue that **`reconcile_open_positions` can never see**,
+because it iterates `portfolio.open_positions` and there is no position. That is
+the orphan, and it is now reachable through the budget rather than only through
+the venue.
+
+### The four funding options for the resolver — UNRULED, reserved to the owner
+
+Stated so a successor need not re-derive them. The resolver takes `timeout_s`
+and `attempts` as parameters and chooses none of these:
+
+1. **Reserve a slice before the placement.** Needs a number nobody has.
+2. **Run outside the dispatch budget.** Contradicts item 10's *"runs inside the
+   dispatch budget"*.
+3. **Accept no recovery that bar.** Under fail-closed this is the orphan above.
+4. **Resolve at the START of the next candle-handler invocation, out of its
+   fresh `D`.** **Needs no new number and no reserve** — it simply spends a
+   different invocation's budget. Its cost is a **one-bar orphan window**: up to
+   60 s on the shipped pair list, during which `has_position` is false and a
+   second `BUY` could be evaluated on that symbol.
+
+### What the 2026-08-21 Testnet probe measured
+
+Six OTOCO placements, working leg `LIMIT`+`FOK` at 30% below the ask, nothing
+fillable, account total identical across all six captures.
+
+- **Placement latency is the SAME bimodal distribution as a read.** Wire round
+  trips, in order: `POST /api/v3/orderList/otoco` gave **452.4, 471.2, 182.6,
+  181.7, 451.8, 454.1 ms**; `GET /api/v3/allOrderList` gave **189.9, 459.9,
+  450.1, 184.1, 182.3, 196.3 ms**. Both cluster at ~182 and ~452 with nothing
+  between. **A resolver call costs what a placement costs.** Any funding rule
+  assuming a read is cheaper is assuming something the samples do not support.
+  Six samples from one host bound no tail, and the bimodality is uninstrumented.
+- **The `listClientOrderId` census: 14 lists, 12 distinct ids, one id mapping to
+  THREE lists** (`72321`, `72322`, `72324`, all `ALL_DONE`). This is why
+  `resolve_placement` collects the SET rather than keying a dict — `M5f-035`.
+- **A FOK-expired list reads `ALL_DONE` / `ALL_DONE`, is findable by our derived
+  id, and carries leg ids byte-for-byte — six of six.** The LIVE branch
+  (`EXECUTING`/`EXEC_STARTED`) remains M5c's measurement, not this session's.
+- **`orderReports` is present in the placement response and carries Q-C §7's
+  complete compare set at no extra call** — `status`, `executedQty`, `origQty`,
+  `price`, `origQuoteOrderQty`, `timeInForce`, `type`, `side`, `expiryReason`,
+  `workingTime`. **This settles item 3's PREMISE. The DECISION is still open** —
+  `M5f-038`.
+- **`MAX_NUM_ORDER_LISTS` headroom is now 6 of 20.** All 14 lists on the account
+  are ours and all are `ALL_DONE`. Whether terminated lists count toward the
+  ceiling is still unmeasured — nothing approached 20.
+
+### The tree cost of a port declaration is the DOUBLES, not the declaration
+
+`M5f-040`, and it is stated here because **C4's placement declaration is the same
+shape and larger**. Adding **one** abstract method to `ExchangeClient` at
+`3438180` broke **69 tests**, every one the same cause — `TypeError: Can't
+instantiate abstract class … without an implementation for abstract method
+'get_all_order_lists'` — across three doubles that subclass the port
+(`FakeExchangeClient`, `FakeRootClient`, `_ReadableRootClient`). Each needed the
+method added, raising `NotImplementedError` under `# pragma: no cover`.
+
+The BRIEF that weighed this decision's reversal cost counted the declaration and
+not the doubles. C4 declares **two** placement methods and widens `create_order`
+and `cancel_order` for the per-call bounds; budget for it.
+
+### Items this file lists as open that M5f has DISCHARGED
+
+Annotated in place below as well; collected here so a successor sees them at
+once.
+
+| Item | Discharged by |
+|---|---|
+| Finding X — the boot's two `get_balances` calls | `276e1ee` |
+| The `BinanceMarketDataStream.create` leak window | `03eccac` |
+| `make cov` / `make format` bypassing `$(PYTHON)` | `dce6165` |
+| Item 10's remaining half — the ABC declaration | `3438180` |
+| Item 1's READ half — `get_all_order_lists` on the port | `3438180` |
+
+### Open items that existed ONLY in commit messages until now
+
+Each is a finding with no home in this task list. None is closed.
+
+- **`M5f-002` — `model_copy(update=…)` skips the model validator of every frozen
+  domain type.** Measured at C3 Phase 1: all four `src/` call sites are
+  unexploitable, because each re-checks more strictly than the validator would.
+  The mechanism is open and this tree's idiom walks into it.
+- **`M5f-003` — Q-C §6's derivability rests on an UNENFORCED strategy
+  convention, and the executor is its first consumer.** `entry_bar_time`'s only
+  source is `Signal.timestamp`, which carries `default_factory=_utcnow`. Both
+  shipped strategies set it to `last_candle.close_time`; nothing requires it. A
+  strategy that omits it seeds every client order id from wall-clock, so the
+  reconciler's requested-leg ids never match what rests and every position
+  classifies `DIVERGED` — with no error anywhere. **This is C4's to confront.**
+- **`M5f-009` — the "three-call `CLOSE`" is false; the replacement per-call share
+  is UNRULED and reserved to the owner.** Measured worst cases: OTOCO **5**,
+  OTO **4**, unprotected **1**, recovery-bearing entry **3**. Twelve sites were
+  annotated at `7aa8f59`; **this file's item 9 was deliberately excluded** as
+  task-list text and still reads *"a derived per-call share of 3.0 s"*.
+- **`M5f-010` and `M5f-018` — `_CLOSE_SEQUENCE_CALLS` is dead, and deleting it is
+  a precedent decision.** Nothing reads it; its comment claims a consumer that
+  does not exist. It now also carries the `7aa8f59` annotation whose only anchor
+  is that definition line, so removing the constant orphans or deletes an
+  annotation — which annotate-never-delete forbids.
+- **`M5f-020` — `CLAUDE.md` says the mapping targets an order-list request for
+  "three of the four branches"; Q-C §2's own table and `build_placement` both say
+  TWO.** Documents were out of scope at `7aa8f59`, so the sentence stands.
+- **`M5f-030` — the same stale claim propagated into a TEST docstring**, where
+  the pattern has never been counted, and it contradicts itself in consecutive
+  sentences. Not corrected: `0500e52` was scoped to `src/`.
+- **`M5f-033` — `install` and `install-dev` bypass `$(PYTHON)` too**, calling bare
+  `pip` twice each. Arguably worse than `cov`'s, because they *create* the
+  environment mismatch rather than reporting from one.
+- **`M5f-011` and `M5f-029` — two drift patterns with NO INSTRUMENT.** A
+  justification going stale because nothing at its site re-checks the fact it
+  rests on (three instances); and a `src/` docstring outliving its fact (five
+  instances across two milestones). Of the five, **one** was found by someone
+  looking; two by reading adjacent code for another reason; and **two by a wrong
+  mutation prediction** — a mechanism that exists for a different purpose and is
+  the closest thing to an instrument either pattern has.
+- **`M5f-037` — S5 is named and not handled.** A list whose working leg filled
+  and whose protection has since triggered is terminal, reads `ALL_DONE`, and is
+  indistinguishable from the FOK-expired case by this endpoint — so it maps to
+  `PLACED_TERMINAL`, which asserts no position was opened. Separating it needs a
+  per-leg `executedQty`, which this endpoint does not carry, so it costs a
+  per-leg point query and reintroduces the M5c-K ambiguity R13 routes around.
+- **`M5f-039` — "no placement has ever been timed" is now FALSE.** `cd7348a`'s
+  body and the SHAPE report both state it; both were true when written.
+
+---
+
 ## The five decisions M5f inherits, with arming conditions
 
 Named rather than rediscovered. Each was a deliberate deferral, not an
@@ -187,6 +358,29 @@ does not have to be re-derived.
 > asymmetry that decided it: ruling as S1 did leaves this open and adoptable
 > later if `orderReports` is ever measured, while ruling the other way would
 > have required the measurement first, and the measurement requires a dispatch.
+
+> **THE MEASUREMENT HAS BEEN TAKEN. THE PREMISE IS SETTLED; THE DECISION IS NOT
+> — `M5f-038`.** The dispatch the paragraph above says it requires happened on
+> 2026-08-21, under the project owner's ruling, and the annotation's own
+> condition — *"adoptable later if `orderReports` is ever measured"* — is met.
+>
+> **MEASURED: the placement response carries `orderReports`, and it holds Q-C
+> §7's complete compare set at no extra call** — `status`, `executedQty`,
+> `origQty`, `price`, `origQuoteOrderQty`, `timeInForce`, `type`, `side`,
+> `expiryReason`, `workingTime`. On the six probe placements every leg read
+> `status='EXPIRED'`, `executedQty='0.00000000'`, `origQty='0.00100000'`. The
+> response carries **both** `orders` (identity triples, which `to_order_list`
+> reads) and `orderReports`.
+>
+> **Nothing is built on it.** C3 does not consume it. The case *against* in this
+> section is untouched and still stands on its own terms: consuming it means
+> `OrderList` holds two leg representations, or two types exist for one concept,
+> with the richer one available from exactly one endpoint. **That trade-off is
+> the project owner's to rule and is open.**
+>
+> The arming condition remains badly formed — it names *"M5e's confirmation
+> step"*, a component that does not exist. In caller terms it is **C4's
+> placement site**, the first thing that will hold a placement response.
 
 ### 4. Whether a filled leg stays visible to `get_open_orders` — `M5d-072`
 
@@ -363,6 +557,26 @@ disagree if a balance changes between them.
 
 *Arming condition:* already live — it is two calls today. The disagreement window
 matters more once positions exist.
+
+> **FINDING X IS DISCHARGED at `276e1ee`. Finding I is NOT and stays open.**
+> Annotated rather than rewritten, since the two share this section.
+>
+> The boot now reads `get_balances` **once** and hands the same sequence to both
+> consumers; `_seed_portfolio` became pure — no client, no await. The single read
+> is taken at the **earlier** of the two original moments, so the seeded
+> portfolio observes exactly what it did before and the unmanaged-holdings
+> snapshot now observes a state one round trip older. That direction is the
+> point: the snapshot is now consistent with the portfolio it is recorded
+> against, where before it could be newer than it.
+>
+> **The cited line numbers had drifted before the fix** — the calls were at
+> `modes.py:464` and `:524`, not the `:449`/`:509` this section names. Cite by
+> content.
+>
+> **Finding I remains open**, and its arming condition still names a state of the
+> world rather than a caller: restated in caller terms it is `_prime_pairs`,
+> which exists today, so the check is armed now and merely unreachable on the
+> configured pair list.
 
 ### 5. The trailing milestone
 
@@ -597,6 +811,26 @@ the wrong one.
 
 *Arming condition:* **the read-surface widening** — the commit that first
 declares a read method on the port for a caller that needs it.
+
+> **THIS ITEM IS DISCHARGED, AND ITS CENTRAL CLAIM WAS ALREADY FALSE WHEN
+> WRITTEN.** Annotated rather than rewritten.
+>
+> *"That endpoint is on neither the `_AsyncBinanceAPI` Protocol nor
+> `BinanceClient` — enumerated at M5e, and unchanged since"* is **FALSE**.
+> `v3_get_all_order_list` has been on the Protocol and `get_all_order_lists` on
+> `BinanceClient`, **with `timeout_s` and `attempts`**, since M5e's `17ff858` —
+> **fifteen commits before the rotation that wrote this paragraph.** Both stated
+> consequences were therefore already closed.
+>
+> What actually remained was the **ABC declaration**, and that landed at
+> `3438180` with `resolve_placement` as its production caller. The arming
+> condition fired at `17ff858` and nothing noticed until M5f's Phase 1 — the
+> third instance of `M5e-090`'s mode: a condition that fires and no mechanism
+> watches.
+>
+> **Consequence two is unchanged and still live**: the recovery path runs inside
+> the dispatch budget, and how it is funded is UNRULED. See the handover
+> section's four options.
 
 ### 11. The per-call bound shipped without its values
 
@@ -1116,6 +1350,25 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   twice — and M5c's probe has already created exactly that condition on Testnet,
   so the measurement costs a single call and no order.
 
+  > **THE ARMING CONDITION FIRED AT M5e AND THIS ITEM STILL READS AS WAITING.**
+  > Annotated, not rewritten. *"Nothing queries by client order ID today"* is
+  > **FALSE**: `resolve_unresolved_legs` calls
+  > `client.get_order(position.symbol, client_order_id=item.client_order_id, …)`
+  > in `execution/reconciliation.py`, and has since M5e's `bfe92be`. The
+  > reconciler — the very caller this condition names — queries by client order
+  > id on every unresolved leg, while the question of what such a query returns
+  > for a twice-used id remains UNMEASURED.
+  >
+  > **The condition it names is now CONFIRMED to exist, and larger than assumed.**
+  > The 2026-08-21 census found the probe account holds `72321`, `72322` and
+  > `72324` all carrying `tb1-BTCUSDT-1786534736813-0-L` — **multiplicity three**,
+  > not two. The read-only measurement remains one call and no order.
+  >
+  > **C3 routes around it rather than settling it.** `resolve_placement`
+  > enumerates and reasons about the SET precisely because a point query on such
+  > an id is undefined — see `M5f-035`. That removes the resolver's dependence on
+  > the answer; it does not remove the reconciler's.
+
 - **`-1128` is DELIBERATELY UNCLASSIFIED, and that is a ruling rather than an
   omission.** M5c's classifier arc classified `-1106`, `-1159` and `-1158` as
   `ContractViolationError`; `-1128` is named beside them in Q-C §8 and is **not**
@@ -1306,6 +1559,24 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   correctly: `stream.stop()` calls `source.aclose()` unconditionally, outside the
   task guard, so it releases whether or not `start()` was ever called.
 
+  > **DISCHARGED at `03eccac`**, with the prescribed shape. Two things this item
+  > got wrong are annotated rather than corrected.
+  >
+  > **`stop()` does NOT cover the window, and the reason is structural.** This
+  > item cites it as evidence the client is "otherwise closed correctly", which
+  > is true — but nothing can call `stop()` on an object whose `__init__` raised,
+  > because no reference is returned. The window is between the source existing
+  > and the stream owning it, and only `create` is inside it (`M5f-026`).
+  >
+  > **The leaked object is a REST session, NOT the feed** (`M5f-027`). MEASURED:
+  > with `aclose()` forced to run before the socket was opened, a credentialed
+  > integration test still built a working stream and received a closed candle
+  > from Testnet — `BinanceSocketManager` takes only configuration from the
+  > client and its sockets connect independently. The leak is real and is an
+  > unclosed `aiohttp` session; it is not a feed outage, which is what "release
+  > the underlying connection" would lead a reader to expect. `stop()`'s
+  > docstring was corrected at `0500e52`.
+
 - **`main.py`'s two error paths disagree about which stream they write to.** One
   uses `log.error`, which reaches the console handler — **stdout** via
   `RichHandler`. The other uses `print(..., file=sys.stderr)`. So a configuration
@@ -1334,6 +1605,30 @@ it:** the same gap exists at all *three* isolation layers, not just the engine's
   `pytest` / `ruff`, so `make PYTHON=... cov` silently uses a different
   interpreter than `make PYTHON=... check` would. Outside the gate, so left alone;
   inconsistent, so recorded.
+
+  > **DISCHARGED at `dce6165`** — both now run `$(PYTHON) -m …`, matching the
+  > gate's own invocation form. Two annotations, neither a correction of the
+  > sentence above.
+  >
+  > **The item named two recipes and there are FOUR** (`M5f-033`, `M5f-034`).
+  > Enumerated, and the three groups sum to seventeen: eight already used
+  > `$(PYTHON)`; five call non-Python shell tools; and four called bare
+  > Python-ecosystem executables — `cov`, `format`, and **`install` /
+  > `install-dev`**, which call bare `pip` twice each. The last two are **still
+  > open**, and are arguably worse: they *create* the environment mismatch that
+  > `cov` merely reported from.
+  >
+  > **"Silently uses a different interpreter" is measured, not hypothetical**
+  > (`M5f-032`). On this machine bare `python` is the Windows Store stub, bare
+  > `pytest` is **Anaconda's**, and bare `ruff` is **not on PATH at all** — so
+  > `make cov` would have run a foreign pytest against this tree with no
+  > interpreter guard anywhere in the path, and `make format` would have failed
+  > outright. `PYTHON ?= python` means an override exists, and for `cov` it was
+  > **inert**, because the recipe never mentioned `$(PYTHON)`.
+  >
+  > **This closes the INCONSISTENCY, not the "never executed through make" item
+  > below it.** `make` is still not installed here; the change is REASONED and
+  > the unverified claim is that the edited recipes work.
 
 - **The `logging.file.json` flag controls console *and* file together.** There is
   no way to have a pretty console and a JSON file. Roughly three lines in
