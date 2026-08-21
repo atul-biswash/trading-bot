@@ -223,12 +223,18 @@ class BinanceClient(BaseExchangeClient):
         are made; ``None`` for either means the client's own policy, which is
         what every caller uses today.
 
-        **The filter-enforcement lookup is NOT covered by ``timeout_s``.**
-        ``_enforce`` calls :meth:`get_symbol_info`, which cannot carry the
-        per-call channel, so on a cache miss this method makes an unbounded call
-        before the bounded one. It is warm in practice because the composition
-        root primes every configured symbol at boot and nothing refreshes -- a
-        fact that lives in another file, which is why it is written here.
+        **The filter-enforcement lookup makes no call at all.** ``_enforce``
+        reads the symbol-info **cache** and raises
+        :class:`SymbolInfoNotPrimedError` on a miss, so there is no unbounded
+        round trip ahead of the bounded one and nothing for ``timeout_s`` to
+        fail to cover.
+
+        This paragraph used to say the opposite -- that a miss makes an
+        unbounded call, warm in practice because the composition root primes
+        every configured symbol at boot. That was true until M5e's item 9
+        ruling was implemented. The priming fact is unchanged and still lives
+        in another file; what changed is that a miss is now refused instead of
+        silently paid for.
         """
         prepared = await self._enforce(request) if self._enforce_filters else request
         params = order_request_to_params(prepared)
@@ -325,9 +331,10 @@ class BinanceClient(BaseExchangeClient):
         against a deadline of 9.0, and closing it is a decision about numbers
         rather than about mechanism.
 
-        **The filter lookup in :meth:`_prepare_otoco` is NOT covered by
-        ``timeout_s``** -- see :meth:`create_order` for why that is safe today
-        and where the fact it rests on lives.
+        **The filter lookup in :meth:`_prepare_otoco` makes no call at all** --
+        it reads the cache and raises :class:`SymbolInfoNotPrimedError` on a
+        miss. See :meth:`create_order`, which carries the same change and the
+        record of what this paragraph used to claim.
 
         Returns an :class:`OrderList`. The placement response carries both
         ``orders`` and ``orderReports``; :func:`to_order_list` reads the former,
@@ -369,16 +376,33 @@ class BinanceClient(BaseExchangeClient):
         return to_order_list(raw)
 
     async def _prepare_otoco(self, request: OtocoOrderListRequest) -> dict[str, Any]:
-        """Filter-check and map, so nothing reaches the wire unchecked."""
-        info = await self.get_symbol_info(request.symbol)
-        prepared = enforce_otoco_filters(request, info) if self._enforce_filters else request
+        """Filter-check and map, so nothing reaches the wire unchecked.
+
+        The filter lookup reads the **cache** and refuses on a miss rather than
+        fetching -- see :meth:`_cached_symbol_info`.
+
+        **The lookup sits inside the enforcement branch, not ahead of it**, so
+        ``enforce_filters=False`` performs no lookup at all. It used to sit
+        ahead, which meant the escape hatch still paid for a ``SymbolInfo`` it
+        then discarded -- harmless while the lookup was a silent cache read,
+        and a spurious refusal once it could refuse. This now matches
+        :meth:`create_order`, which has always gated at the call site.
+        """
+        prepared = (
+            enforce_otoco_filters(request, self._cached_symbol_info(request.symbol))
+            if self._enforce_filters
+            else request
+        )
         params = otoco_request_to_params(prepared)
         params["recvWindow"] = self._recv_window
         return params
 
     async def _prepare_oto(self, request: OtoOrderListRequest) -> dict[str, Any]:
-        info = await self.get_symbol_info(request.symbol)
-        prepared = enforce_oto_filters(request, info) if self._enforce_filters else request
+        prepared = (
+            enforce_oto_filters(request, self._cached_symbol_info(request.symbol))
+            if self._enforce_filters
+            else request
+        )
         params = oto_request_to_params(prepared)
         params["recvWindow"] = self._recv_window
         return params
@@ -657,8 +681,11 @@ class BinanceClient(BaseExchangeClient):
         only thing that does. What it buys is that the dependency on that
         upstream is **explicit and loud** rather than silent and coincidental.
         The trigger is protected once and checked once, not twice.
+
+        **The filter lookup reads the cache and refuses on a miss** rather than
+        fetching -- see :meth:`_cached_symbol_info`.
         """
-        info = await self.get_symbol_info(request.symbol)
+        info = self._cached_symbol_info(request.symbol)
 
         if request.stop_price is not None and (
             round_price(request.stop_price, info.price_tick) != request.stop_price

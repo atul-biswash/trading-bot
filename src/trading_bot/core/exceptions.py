@@ -25,6 +25,42 @@ class ExchangeConnectionError(ExchangeError):
     """Network/transport failure talking to the exchange."""
 
 
+class SymbolInfoNotPrimedError(ExchangeError):
+    """A dispatch path needed a symbol's filters and the cache does not hold them.
+
+    **Our bug or our configuration, never a market condition or a transient.**
+    The composition root primes every configured symbol at boot -- one
+    ``get_symbol_info`` per distinct symbol in ``_prime_pairs`` -- and nothing
+    in ``src/`` refreshes or evicts, so on the intended path this cannot happen:
+    a signal for an unprimed symbol is already refused upstream with
+    ``RefusalStage.UNKNOWN_PAIR``. Reaching here means the primed set and the
+    dispatched set have diverged. The three ways they can, in decreasing
+    likelihood: the dispatching code was handed a **different client instance**
+    than the one the boot primed (the cache is per instance); a
+    ``RiskManager`` was built with pairs the client never saw; or a caller
+    reached the adapter without passing the risk layer at all.
+
+    **Why refusing beats fetching**, which is the whole of M5e's ruling
+    (``docs/NEXT_MILESTONE.md`` item 9, ``M5e-016``). ``get_symbol_info``
+    cannot carry the per-call timeout channel -- the underlying library method
+    takes an explicit ``symbol`` rather than ``**params`` -- so a fetch here is
+    an **unbounded** round trip inside a sequence the dispatch budget has
+    bounded. ``CLAUDE.md``: *"A budget may refuse to BEGIN work. It must never
+    abandon a write in flight."* A refusal is the first of those; spending an
+    ungranted round trip and then being cut off mid-placement is the second.
+
+    The error direction decides it rather than a measurement, per
+    ``CLAUDE.md``'s *"WHERE A CONSTRAINT IS UNMEASURED, TAKE THE READING WHOSE
+    WRONG ANSWER IS REVERSIBLE"*: a spurious refusal costs one missed trade and
+    is reversible, while an ambiguous write is not un-placed by any later edit.
+
+    Not an :class:`ExchangeAPIError`: nothing came from the exchange, so there
+    is no code to carry. It is also raised **before** ``_call``, so it never
+    reaches the retry machinery -- which is correct, since retrying a cold
+    cache would fetch exactly the unbounded payload this refuses.
+    """
+
+
 class ExchangeAPIError(ExchangeError):
     """The exchange returned an error response, and it carries the exchange's
     own identifier for it.

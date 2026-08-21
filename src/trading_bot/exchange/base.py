@@ -30,7 +30,11 @@ from tenacity import (
     wait_exponential,
 )
 
-from trading_bot.core.exceptions import ExchangeConnectionError, RateLimitError
+from trading_bot.core.exceptions import (
+    ExchangeConnectionError,
+    RateLimitError,
+    SymbolInfoNotPrimedError,
+)
 from trading_bot.core.interfaces import ExchangeClient
 from trading_bot.core.models import SymbolInfo
 from trading_bot.exchange.models import BINANCE_EXCEPTIONS, translate_binance_error
@@ -131,6 +135,38 @@ class BaseExchangeClient(ExchangeClient):
         info = await self._fetch_symbol_info(symbol)
         self._symbol_info_cache[symbol] = info
         return info
+
+    def _cached_symbol_info(self, symbol: str) -> SymbolInfo:
+        """Return ``symbol``'s cached filters, refusing rather than fetching on a miss.
+
+        **The timed-path counterpart to :meth:`get_symbol_info`**, which stays
+        fetch-on-miss for every other caller. This one is for the three sites
+        that run inside a sequence the dispatch budget has bounded --
+        ``_enforce`` and both ``_prepare_*`` methods -- where a fetch would
+        spend an unbounded round trip the budget never granted.
+
+        Synchronous on purpose, and that is the point rather than a
+        convenience: there is no ``await`` here, so it is not merely *bounded*
+        but incapable of I/O, and a future edit reintroducing a fetch would
+        have to change the signature to do it.
+
+        This is M5e's ruling (``docs/NEXT_MILESTONE.md`` item 9, ``M5e-016``)
+        landing at the caller its arming condition named; the decision is
+        M5e's, not this method's. See :class:`SymbolInfoNotPrimedError` for
+        what a miss means and why refusing is the reversible direction.
+
+        :raises SymbolInfoNotPrimedError: the cache does not hold ``symbol``.
+        """
+        cached = self._symbol_info_cache.get(symbol)
+        if cached is None:
+            raise SymbolInfoNotPrimedError(
+                f"{symbol} is not in the symbol-info cache, so its filters cannot be "
+                "read without an unbounded fetch inside a bounded dispatch sequence. "
+                "The boot primes every configured symbol, so this means the primed set "
+                "and the dispatched set have diverged -- most often a different client "
+                "instance than the one the boot primed, since the cache is per instance"
+            )
+        return cached
 
     async def refresh_symbol_info(self, symbol: str) -> SymbolInfo:
         """Force a re-fetch of ``symbol``'s filters and update the cache."""

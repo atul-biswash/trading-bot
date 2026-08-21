@@ -26,6 +26,7 @@ from trading_bot.core.exceptions import (
     FilterRejectedError,
     InsufficientBalanceError,
     OrderError,
+    SymbolInfoNotPrimedError,
 )
 from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
 from trading_bot.exchange.binance_client import BinanceClient
@@ -205,6 +206,28 @@ def _make(client: AsyncMock, **kwargs: Any) -> BinanceClient:
     return BinanceClient(client, **kwargs)
 
 
+async def _make_primed(client: AsyncMock, **kwargs: Any) -> BinanceClient:
+    """``_make``, then prime the symbol-info cache, which dispatch now requires.
+
+    Every filter-enforcing path reads the cache and refuses on a miss rather
+    than fetching (``M5e-016``), so a test that dispatches must state that the
+    cache is warm instead of relying on fetch-on-miss to fill it as a side
+    effect. That reliance was invisible: the tests set the *library* mock's
+    return value and the fetch happened inside the call under test.
+
+    Priming goes through the public :meth:`get_symbol_info`, so it uses the
+    same mock the test already configured and needs no reach into the private
+    cache. It costs one extra ``client.get_symbol_info`` await -- harmless
+    here, because the only two tests asserting on that mock's call count are
+    the cache-behaviour tests, and neither dispatches.
+
+    ``BTCUSDT`` is the only symbol any dispatching test in this file uses.
+    """
+    bc = _make(client, **kwargs)
+    await bc.get_symbol_info("BTCUSDT")
+    return bc
+
+
 def _limit_req() -> OrderRequest:
     return OrderRequest(
         symbol="BTCUSDT",
@@ -302,6 +325,135 @@ async def test_unknown_symbol_raises() -> None:
 
 
 # --------------------------------------------------------------------------
+# The timed-path cache assertion — M5e-016, docs/NEXT_MILESTONE.md item 9
+# --------------------------------------------------------------------------
+async def test_get_symbol_info_still_fetches_on_a_miss() -> None:
+    """The ruling scopes the refusal to the timed paths, NOT to the accessor.
+
+    Stated as its own test because it is the half most easily lost: it would
+    be tempting to make ``get_symbol_info`` itself refuse, which would break
+    the boot -- ``_prime_pairs`` populates the cache BY calling it, so a
+    refusing accessor could never be primed at all.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL
+    bc = _make(client)
+
+    info = await bc.get_symbol_info("BTCUSDT")
+
+    assert info.symbol == "BTCUSDT"
+    client.get_symbol_info.assert_awaited_once_with("BTCUSDT")
+
+
+async def test_the_cached_lookup_refuses_a_cold_cache_and_performs_no_io() -> None:
+    """A miss is a programming or config error, so it raises rather than fetching.
+
+    Both halves are asserted: the type, AND that the library mock was never
+    awaited. Asserting only the type would still pass under an implementation
+    that fetched, failed, and re-raised -- which is the behaviour this exists
+    to forbid.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL
+    bc = _make(client)
+
+    with pytest.raises(SymbolInfoNotPrimedError, match="not in the symbol-info cache"):
+        bc._cached_symbol_info("BTCUSDT")
+
+    client.get_symbol_info.assert_not_awaited()
+
+
+async def test_the_cached_lookup_returns_the_primed_value_without_io() -> None:
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL
+    bc = await _make_primed(client)
+    client.get_symbol_info.reset_mock()
+
+    info = bc._cached_symbol_info("BTCUSDT")
+
+    assert info.symbol == "BTCUSDT"
+    client.get_symbol_info.assert_not_awaited()
+
+
+async def test_create_order_refuses_a_cold_cache_without_dispatching() -> None:
+    """The assertion is pre-dispatch: the endpoint must never be reached.
+
+    ``create_order`` is one of the two callers item 9's arming condition
+    names.
+    """
+    client = AsyncMock()
+    client.get_symbol_info.return_value = SYMBOL
+    bc = _make(client, enforce_filters=True)
+
+    with pytest.raises(SymbolInfoNotPrimedError):
+        await bc.create_order(_limit_req())
+
+    client.create_order.assert_not_awaited()
+
+
+async def test_an_otoco_placement_refuses_a_cold_cache_without_dispatching() -> None:
+    """``_prepare_otoco`` is the other caller item 9's arming condition names."""
+    client = _list_client()
+    bc = _make(client)
+
+    with pytest.raises(SymbolInfoNotPrimedError):
+        await bc.create_otoco_order_list(_otoco_request())
+
+    client.v3_post_order_list_otoco.assert_not_awaited()
+
+
+async def test_an_oto_placement_refuses_a_cold_cache_without_dispatching() -> None:
+    """``_prepare_oto`` carries its own lookup line and needs its own test.
+
+    Written after noticing, while planning this commit's mutation survey, that
+    a mutation reverting ``_prepare_oto`` alone would have failed nothing --
+    the OTOCO test cannot express it, because the two methods share no code.
+    """
+    client = _list_client()
+    bc = _make(client)
+
+    with pytest.raises(SymbolInfoNotPrimedError):
+        await bc.create_oto_order_list(_oto_request())
+
+    client.v3_post_order_list_oto.assert_not_awaited()
+
+
+async def test_a_cold_cache_is_not_refused_when_enforcement_is_off() -> None:
+    """The lookup sits INSIDE the enforcement branch, so the escape hatch is free.
+
+    It used to sit ahead of the branch, which was invisible while the lookup
+    was a silent fetch-on-miss and became a spurious refusal the moment it
+    could refuse. Found by this commit's own test run, not by reading:
+    ``create_order`` gates enforcement at the call site while ``_prepare_*``
+    gated inside, and that asymmetry was assumed away.
+    """
+    client = _list_client()
+    bc = _make(client, enforce_filters=False)
+
+    await bc.create_otoco_order_list(_otoco_request())
+
+    client.v3_post_order_list_otoco.assert_awaited_once()
+    client.get_symbol_info.assert_not_awaited()
+
+
+async def test_an_oto_cold_cache_is_not_refused_when_enforcement_is_off() -> None:
+    """The OTO half of the branch-position rule, and it was UNCOVERED.
+
+    Written from a mutation that failed nothing: moving ``_prepare_oto``'s
+    lookup ahead of its enforcement branch passed the whole suite. The OTOCO
+    side had two tests covering that position -- one deliberate, one incidental
+    -- and the OTO side had none, because the two methods share no code.
+    """
+    client = _list_client()
+    bc = _make(client, enforce_filters=False)
+
+    await bc.create_oto_order_list(_oto_request())
+
+    client.v3_post_order_list_oto.assert_awaited_once()
+    client.get_symbol_info.assert_not_awaited()
+
+
+# --------------------------------------------------------------------------
 # Orders — happy path and filter enforcement
 # --------------------------------------------------------------------------
 async def test_create_order_sends_expected_params_and_maps() -> None:
@@ -328,7 +480,7 @@ async def test_create_order_rounds_to_filters() -> None:
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL
     client.create_order.return_value = ORDER_LIMIT_NEW
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -352,7 +504,7 @@ async def test_create_order_rounds_to_filters() -> None:
 async def test_create_order_rejects_below_min_notional_without_dispatch() -> None:
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # minNotional 5
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -370,7 +522,7 @@ async def test_create_order_rejects_below_min_notional_without_dispatch() -> Non
 async def test_create_order_rejects_below_min_qty_without_dispatch() -> None:
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL_HIGH_MINQTY  # minQty 0.001
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -397,7 +549,7 @@ async def test_create_order_rejects_an_off_tick_stop_price_without_dispatch() ->
     """
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # tickSize 0.01
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -423,7 +575,7 @@ async def test_create_order_accepts_an_on_tick_stop_price_untouched() -> None:
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # tickSize 0.01
     client.create_order.return_value = ORDER_LIMIT_NEW
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -445,7 +597,7 @@ async def test_create_order_rejects_a_stop_market_below_min_notional() -> None:
     """
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # minNotional 5
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -464,7 +616,7 @@ async def test_create_order_allows_a_stop_market_that_clears_min_notional() -> N
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # minNotional 5
     client.create_order.return_value = ORDER_LIMIT_NEW
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -488,7 +640,7 @@ async def test_a_plain_market_order_is_still_not_notional_checked() -> None:
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL  # minNotional 5
     client.create_order.return_value = ORDER_LIMIT_NEW
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -511,7 +663,7 @@ async def test_create_order_rounds_to_the_effective_step_not_the_raw_lot_step() 
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL_COARSE_MARKET_STEP
     client.create_order.return_value = ORDER_LIMIT_NEW
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -534,7 +686,7 @@ async def test_create_order_rejects_below_the_effective_min_qty() -> None:
     """
     client = AsyncMock()
     client.get_symbol_info.return_value = SYMBOL_HIGH_MARKET_MINQTY
-    bc = _make(client, enforce_filters=True)
+    bc = await _make_primed(client, enforce_filters=True)
 
     req = OrderRequest(
         symbol="BTCUSDT",
@@ -827,7 +979,7 @@ async def test_creating_an_otoco_list_posts_the_mapped_params() -> None:
     """The whole M5d chain in one call: request -> enforcement -> mapper ->
     endpoint. The parameter set is section 3's sixteen plus ``recvWindow``."""
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     await bc.create_otoco_order_list(_otoco_request())
 
@@ -843,7 +995,7 @@ async def test_creating_an_otoco_list_posts_the_mapped_params() -> None:
 
 async def test_creating_an_oto_list_posts_the_plain_pending_prefix() -> None:
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     await bc.create_oto_order_list(_oto_request())
 
@@ -860,7 +1012,7 @@ async def test_each_shape_posts_only_to_its_own_endpoint() -> None:
     type. A single method over a union would need an ``else`` that cannot
     occur."""
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     await bc.create_otoco_order_list(_otoco_request())
     assert client.v3_post_order_list_otoco.await_count == 1
@@ -887,7 +1039,7 @@ async def test_a_list_placement_is_not_retried_on_a_connection_error(
     position; the recovery is to QUERY the IDs we would have sent, which Q-C
     section 6 makes derivable without persistence."""
     client = _list_client(**{endpoint: ConnectionError("reset")})
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     with pytest.raises(ExchangeConnectionError):
         await call(bc)  # type: ignore[operator]
@@ -900,7 +1052,7 @@ async def test_a_list_placement_is_retried_on_a_rate_limit() -> None:
     safe -- the one exception ``_NON_IDEMPOTENT_RETRY`` admits."""
     client = _list_client()
     client.v3_post_order_list_otoco.side_effect = [_rate_limit_error(), ORDER_LIST_PLACED]
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     await bc.create_otoco_order_list(_otoco_request())
 
@@ -912,7 +1064,7 @@ async def test_filters_are_enforced_before_any_network_call() -> None:
     its place is that the endpoint was never reached: enforcement is a
     pre-dispatch gate, not a post-hoc complaint."""
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     with pytest.raises(FilterRejectedError):
         await bc.create_otoco_order_list(_otoco_request(entry_limit=Decimal("47268.315")))
@@ -924,7 +1076,7 @@ async def test_the_quantity_is_sized_before_sending() -> None:
     """Enforcement rounds the quantity DOWN to the step and the SENT value is
     the rounded one -- so the wire never carries a quantity the sizer refused."""
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     await bc.create_otoco_order_list(_otoco_request(quantity=Decimal("0.0012345678")))
 
@@ -942,7 +1094,7 @@ async def test_the_placement_response_maps_to_an_order_list() -> None:
     triples the read-back returns -- which is what makes ``to_order_list``
     correct here without a second mapper."""
     client = _list_client()
-    bc = _make(client)
+    bc = await _make_primed(client)
 
     result = await bc.create_otoco_order_list(_otoco_request())
 
