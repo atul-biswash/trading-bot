@@ -193,17 +193,48 @@ class BinanceMarketDataStream(MarketDataStream):
 
         Backoff and retry limits come from ``settings.config.engine``; a
         ``reconnect_max_retries`` of ``0`` maps to indefinite retrying.
+
+        **The source is closed if the constructor raises, and that guard is NOT
+        covering a live defect today.** ``__init__`` raises on three inputs --
+        ``backoff_base_s <= 0``, ``backoff_max_s < backoff_base_s`` and a
+        negative ``max_retries`` -- and every one is refused by
+        ``config/models.py`` before it can reach here: ``reconnect_backoff_s``
+        is ``Field(5.0, gt=0)``, ``reconnect_max_retries`` is ``Field(0, ge=0)``,
+        and ``EngineConfig._check_backoff_bounds`` refuses a ceiling below the
+        base. ``_Model`` carries ``validate_assignment=True``, so the assignment
+        path is closed too -- MEASURED: constructing or assigning any of the
+        three refuses with ``ValidationError``.
+
+        **THE COUPLING IS CROSS-MODULE AND NOTHING LINKS THE TWO FILES, which is
+        the whole reason this is worth a guard rather than a comment.** The
+        reason this code is safe lives in a different module, under a different
+        class, in constraints written for a different purpose. Relax one of
+        those fields, or construct this stream from anything other than an
+        ``EngineConfig``, and the window opens **silently** -- a raising
+        constructor drops ``source`` on the floor, and with it the second
+        ``AsyncClient`` that ``_BinanceSocketSource`` owns.
+
+        **:meth:`stop` does not cover it**, though it closes the source
+        unconditionally and is safe before :meth:`start`. Nothing can call
+        ``stop()`` on an object whose ``__init__`` raised: no reference is
+        returned, so there is nothing to call it on. The window is between the
+        source existing and the stream owning it, and only this function is
+        inside it.
         """
         engine = settings.config.engine
         source = await _BinanceSocketSource.create(settings)
-        return cls(
-            source,
-            backoff_base_s=engine.reconnect_backoff_s,
-            backoff_max_s=engine.reconnect_backoff_max_s,
-            max_retries=engine.reconnect_max_retries,
-            sleep=sleep,
-            random_fn=random_fn,
-        )
+        try:
+            return cls(
+                source,
+                backoff_base_s=engine.reconnect_backoff_s,
+                backoff_max_s=engine.reconnect_backoff_max_s,
+                max_retries=engine.reconnect_max_retries,
+                sleep=sleep,
+                random_fn=random_fn,
+            )
+        except Exception:
+            await source.aclose()
+            raise
 
     # -- subscription -------------------------------------------------------
     def subscribe(self, symbol: str, timeframe: str, handler: CandleHandler) -> None:

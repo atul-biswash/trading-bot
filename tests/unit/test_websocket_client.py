@@ -13,13 +13,18 @@ from __future__ import annotations
 
 import asyncio
 from decimal import Decimal
+from pathlib import Path
 from random import Random
 from typing import Any
 
 import pytest
 
+from trading_bot.config.settings import get_settings
 from trading_bot.core.models import Candle
-from trading_bot.exchange.websocket_client import BinanceMarketDataStream
+from trading_bot.exchange.websocket_client import (
+    BinanceMarketDataStream,
+    _BinanceSocketSource,
+)
 
 
 # --------------------------------------------------------------------------
@@ -158,6 +163,70 @@ def test_rejects_backoff_max_below_base() -> None:
 def test_rejects_negative_max_retries() -> None:
     with pytest.raises(ValueError):
         BinanceMarketDataStream(FakeSocketSource([]), max_retries=-1)
+
+
+# --------------------------------------------------------------------------
+# create(): the window between the source existing and the stream owning it
+# --------------------------------------------------------------------------
+class _RaisingStream(BinanceMarketDataStream):
+    """A stream whose constructor always raises, to open the window on demand.
+
+    A subclass rather than a monkeypatch of the real ``__init__``: ``create`` is
+    a classmethod, so ``cls(...)`` is this subclass and the production class is
+    left untouched.
+
+    **It exists because the window cannot be opened through config.** All three
+    inputs that make the real constructor raise are refused by ``EngineConfig``
+    before they reach it -- which is exactly the cross-module coupling the guard
+    is written against, and exactly what makes a config-driven test impossible.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError("constructor refused")
+
+
+def _serving(source: FakeSocketSource) -> Any:
+    """A stand-in for ``_BinanceSocketSource.create`` that hands back ``source``."""
+
+    async def create(settings: Any) -> FakeSocketSource:
+        return source
+
+    return create
+
+
+async def test_a_raising_constructor_closes_the_source(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The guard, asserted on the CALL rather than on the absence of a warning.
+
+    An unclosed ``aclose`` leaks the second ``AsyncClient`` that
+    ``_BinanceSocketSource`` owns, and a leaked aiohttp session fails no test on
+    its own -- so the only honest assertion is that the close happened.
+    """
+    source = FakeSocketSource([])
+    monkeypatch.setattr(_BinanceSocketSource, "create", staticmethod(_serving(source)))
+    settings = get_settings(str(config_path))
+
+    with pytest.raises(RuntimeError, match="constructor refused"):
+        await _RaisingStream.create(settings)
+
+    assert source.aclose_calls == 1
+
+
+async def test_a_successful_construction_leaves_the_source_open(
+    config_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The complement, and it is what stops the guard being satisfied by closing
+    unconditionally. A ``create`` that always closed would pass the test above
+    and hand every caller a stream whose connection is already gone."""
+    source = FakeSocketSource([])
+    monkeypatch.setattr(_BinanceSocketSource, "create", staticmethod(_serving(source)))
+    settings = get_settings(str(config_path))
+
+    stream = await BinanceMarketDataStream.create(settings)
+
+    assert source.aclose_calls == 0
+    assert stream._source is source
 
 
 # --------------------------------------------------------------------------
