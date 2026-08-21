@@ -70,6 +70,7 @@ from trading_bot.core.models import (
     Balance,
     Candle,
     Order,
+    OrderList,
     OrderRequest,
     Position,
     Signal,
@@ -193,6 +194,14 @@ class FakeRootClient(ExchangeClient):
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> Order:
+        raise NotImplementedError
+
+    async def get_all_order_lists(  # pragma: no cover
+        self,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[OrderList]:
         raise NotImplementedError
 
 

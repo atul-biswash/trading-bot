@@ -21,6 +21,7 @@ from trading_bot.core.models import (
     Balance,
     Candle,
     Order,
+    OrderList,
     OrderRequest,
     Signal,
     SizingDecision,
@@ -125,6 +126,35 @@ class ExchangeClient(ABC):
         :raises ValueError: neither identifier given, or both.
         :raises OrderNotFoundError: the venue has no such order -- which is an
             ANSWER, not a failure, and callers are expected to act on it.
+        """
+        ...
+
+    @abstractmethod
+    async def get_all_order_lists(
+        self,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[OrderList]:
+        """Every order list on the account, live and terminal, with its status.
+
+        **ENUMERATION RATHER THAN A POINT QUERY, and the reason is an ambiguity
+        rather than a preference.** A point query by our own client order id has
+        an undefined answer once that id has been used twice, and generation-0
+        ids repeat within a single dispatch by construction, because the id
+        derives from ``(symbol, entry_bar_time)``. Enumerating returns every
+        candidate and lets the caller reason about the SET.
+
+        **The set can genuinely hold more than one, MEASURED.** A Testnet census
+        found 14 lists carrying 12 distinct ``listClientOrderId`` values, with
+        one id mapping to THREE lists. A caller that keys a mapping on that id
+        silently discards the others.
+
+        ``timeout_s`` and ``attempts`` bound one call, as on
+        :meth:`get_own_open_orders`, and ``None`` means the implementation's own
+        policy.
+
+        This is a READ. It cannot create, amend or cancel anything.
         """
         ...
 
