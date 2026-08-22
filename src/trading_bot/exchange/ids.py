@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Final, NamedTuple
 
-from trading_bot.core.exceptions import ContractViolationError
+from trading_bot.core.exceptions import ClientContractViolationError
 
 __all__ = [
     "ID_PREFIX",
@@ -232,14 +232,14 @@ def _enforce_venue_rule(candidate: str) -> None:
     mislabelled.
     """
     if len(candidate) > MAX_CLIENT_ORDER_ID_LENGTH:
-        raise ContractViolationError(
+        raise ClientContractViolationError(
             f"client order ID is {len(candidate)} characters, over the venue's "
             f"limit of {MAX_CLIENT_ORDER_ID_LENGTH}: {candidate!r}. This is a "
             "LENGTH violation, not a character-class one -- the venue would "
             "report it as 'Illegal characters found', which names the wrong rule."
         )
     if _LEGAL_CHARS.fullmatch(candidate) is None:
-        raise ContractViolationError(
+        raise ClientContractViolationError(
             f"client order ID contains characters outside the venue's class "
             f"[A-Za-z0-9_-]: {candidate!r}. This is a CHARACTER-CLASS violation; "
             "the length is within the limit."

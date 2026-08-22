@@ -25,7 +25,51 @@ class ExchangeConnectionError(ExchangeError):
     """Network/transport failure talking to the exchange."""
 
 
-class SymbolInfoNotPrimedError(ExchangeError):
+class ClientRefusalError(TradingBotError):
+    """Marker: this refusal was computed HERE; no request left the process.
+
+    **The discriminator a caller needs to tell "we refused this" from "the venue
+    refused this"**, and the second may have landed. ``code`` cannot supply it:
+    three states share ``code=None`` -- a client-side refusal, a venue error
+    whose body carried no ``code`` key, and a 2xx whose body would not parse --
+    so a caller reading ``.code`` cannot separate "never sent" from "answered".
+
+    **Why a marker rather than a field.** The same class arrives from BOTH
+    sides: ``FilterRejectedError`` is raised locally by filter enforcement and
+    by the venue on ``-1013``; ``OrderError`` and ``ContractViolationError``
+    likewise. So the fact cannot live on the class every instance shares, and a
+    mixin on those classes would mark venue responses too. It lives on
+    narrower classes raised only at client-side sites.
+
+    **THE ERROR DIRECTION DECIDED THE SHAPE.** A client-side raise that forgets
+    the marker looks VENUE-side: the caller keeps a pending record and spends
+    one resolver call discovering nothing rests. Cheap, and self-correcting. The
+    alternative -- a field on the base defaulting to client-side -- fails the
+    other way: a classifier route that forgot to set it would present a venue
+    error as client-side, and a caller would skip recovery on a placement that
+    MAY HAVE LANDED. ``CLAUDE.md``: *"A default should be the value most likely
+    to be NOTICED when wrong; this is the value least likely to be."*
+
+    **Not every client-side refusal is a "never reached the venue" refusal**,
+    and three sites in ``src/`` are deliberately NOT marked: an unknown symbol
+    after ``get_symbol_info`` returned, a malformed ``exchangeInfo`` payload,
+    and an unparseable client order id on an order the venue sent us. In all
+    three the venue ANSWERED and we refused what it said. The marker means *no
+    request left this process*, which is the question a dispatch recovery asks.
+
+    **A ``TradingBotError`` rather than a bare mixin**, so ``except
+    ClientRefusalError`` catches every client-side refusal as a class -- the same
+    reason M5c made ``ContractViolationError`` a real parent, in its words:
+    *"nothing could catch 'our bug' as a class at all"*. A plain mixin would
+    also be rejected by ``pytest.raises``, which is a fair warning that a
+    non-exception marker is awkward to use.
+
+    Carries no state and defines no members, so it cannot collide with an
+    exception's own attributes and adds nothing to ``__init__``.
+    """
+
+
+class SymbolInfoNotPrimedError(ClientRefusalError, ExchangeError):
     """A dispatch path needed a symbol's filters and the cache does not hold them.
 
     **Our bug or our configuration, never a market condition or a transient.**
@@ -290,6 +334,18 @@ class FilterRejectedError(OrderError):
     def __init__(self, message: str, *, filter_name: str, code: int | None = None) -> None:
         super().__init__(message, code=code)
         self.filter_name = filter_name
+
+
+class ClientOrderError(ClientRefusalError, OrderError):
+    """An ``OrderError`` this process computed, without asking the venue."""
+
+
+class ClientFilterRejectedError(ClientRefusalError, FilterRejectedError):
+    """A filter rejection this process computed from cached symbol filters."""
+
+
+class ClientContractViolationError(ClientRefusalError, ContractViolationError):
+    """A contract violation this process detected in its own request."""
 
 
 # --- Data -------------------------------------------------------------------

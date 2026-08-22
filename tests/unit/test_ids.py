@@ -12,7 +12,12 @@ from datetime import datetime, timezone
 
 import pytest
 
-from trading_bot.core.exceptions import ContractViolationError, ExchangeAPIError
+from trading_bot.core.exceptions import (
+    ClientContractViolationError,
+    ClientRefusalError,
+    ContractViolationError,
+    ExchangeAPIError,
+)
 from trading_bot.exchange.ids import (
     LIST_SUFFIX,
     MAX_CLIENT_ORDER_ID_LENGTH,
@@ -86,8 +91,11 @@ def test_an_over_long_id_reports_a_length_violation() -> None:
     # The exact type AND the ancestry, because `MalformedRequestError` is a
     # subclass and an `isinstance` check alone would keep passing if this
     # started returning one.
-    assert type(excinfo.value) is ContractViolationError
+    assert type(excinfo.value) is ClientContractViolationError
     assert isinstance(excinfo.value, ExchangeAPIError)
+    # The MARKER: this guard runs on our own assembled id, before any
+    # request exists, so it is a client-side refusal by construction.
+    assert isinstance(excinfo.value, ClientRefusalError)
     # No venue answered, so there is no code to carry -- the same reason
     # `BinanceRequestException` maps to `code=None`.
     assert excinfo.value.code is None
@@ -101,7 +109,7 @@ def test_an_illegal_character_reports_a_character_class_violation() -> None:
 
     message = str(excinfo.value)
     assert "CHARACTER-CLASS violation" in message
-    assert type(excinfo.value) is ContractViolationError
+    assert type(excinfo.value) is ClientContractViolationError
 
 
 def test_the_two_violations_name_different_rules() -> None:

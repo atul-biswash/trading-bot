@@ -21,7 +21,11 @@ from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Protocol
 
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import ExchangeAPIError, FilterRejectedError, OrderError
+from trading_bot.core.exceptions import (
+    ClientFilterRejectedError,
+    ClientOrderError,
+    ExchangeAPIError,
+)
 from trading_bot.core.models import (
     Balance,
     Candle,
@@ -690,7 +694,7 @@ class BinanceClient(BaseExchangeClient):
         if request.stop_price is not None and (
             round_price(request.stop_price, info.price_tick) != request.stop_price
         ):
-            raise FilterRejectedError(
+            raise ClientFilterRejectedError(
                 f"stop_price {request.stop_price} for {request.symbol} is not a multiple "
                 f"of tickSize {info.price_tick}; protective levels arrive tick-rounded, "
                 "so this is an upstream contract violation rather than a market state",
@@ -711,11 +715,11 @@ class BinanceClient(BaseExchangeClient):
             )
 
         if quantity <= 0:
-            raise OrderError(
+            raise ClientOrderError(
                 f"Quantity for {request.symbol} rounds to zero at step {info.effective_step_size}"
             )
         if quantity < info.effective_min_qty:
-            raise OrderError(
+            raise ClientOrderError(
                 f"Quantity {quantity} below min_qty {info.effective_min_qty} for {request.symbol}"
             )
         # A stop-market order carries no price, but the exchange still evaluates
@@ -730,7 +734,7 @@ class BinanceClient(BaseExchangeClient):
         if notional_price is not None and info.min_notional > 0:
             notional = quantity * notional_price
             if notional < info.min_notional:
-                raise OrderError(
+                raise ClientOrderError(
                     f"Notional {notional} below min_notional {info.min_notional} "
                     f"for {request.symbol}"
                 )

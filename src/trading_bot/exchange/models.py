@@ -40,6 +40,8 @@ from binance.exceptions import (
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    ClientFilterRejectedError,
+    ClientOrderError,
     ContractViolationError,
     DuplicateOrderError,
     ExchangeAPIError,
@@ -543,13 +545,13 @@ def order_request_to_params(
 
     if request.type in _NEEDS_PRICE:
         if request.price is None:
-            raise OrderError(f"{request.type.value} order requires a price")
+            raise ClientOrderError(f"{request.type.value} order requires a price")
         params["price"] = format_decimal(request.price)
         params["timeInForce"] = (request.time_in_force or time_in_force).value
 
     if request.type in _NEEDS_STOP:
         if request.stop_price is None:
-            raise OrderError(f"{request.type.value} order requires a stop_price")
+            raise ClientOrderError(f"{request.type.value} order requires a stop_price")
         params["stopPrice"] = format_decimal(request.stop_price)
 
     if request.client_order_id is not None:
@@ -975,7 +977,7 @@ def _enforce_order_list_legs(
     """
     for leg, price in legs:
         if round_price(price, info.price_tick) != price:
-            raise FilterRejectedError(
+            raise ClientFilterRejectedError(
                 f"{leg} price {price} for {symbol} is not a multiple of tickSize "
                 f"{info.price_tick}; order-list prices arrive tick-rounded, so this "
                 "is an upstream contract violation rather than a market state",
@@ -984,15 +986,19 @@ def _enforce_order_list_legs(
 
     sized = round_step_size(quantity, info.effective_step_size)
     if sized <= 0:
-        raise OrderError(f"Quantity for {symbol} rounds to zero at step {info.effective_step_size}")
+        raise ClientOrderError(
+            f"Quantity for {symbol} rounds to zero at step {info.effective_step_size}"
+        )
     if sized < info.effective_min_qty:
-        raise OrderError(f"Quantity {sized} below min_qty {info.effective_min_qty} for {symbol}")
+        raise ClientOrderError(
+            f"Quantity {sized} below min_qty {info.effective_min_qty} for {symbol}"
+        )
 
     if info.min_notional > 0:
         leg, price = min(legs, key=lambda item: item[1])
         notional = sized * price
         if notional < info.min_notional:
-            raise OrderError(
+            raise ClientOrderError(
                 f"Notional {notional} on the {leg} leg is below min_notional "
                 f"{info.min_notional} for {symbol}"
             )

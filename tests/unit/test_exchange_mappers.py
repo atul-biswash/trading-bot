@@ -20,6 +20,10 @@ from pydantic import ValidationError
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
+    ClientContractViolationError,
+    ClientFilterRejectedError,
+    ClientOrderError,
+    ClientRefusalError,
     ContractViolationError,
     DuplicateOrderError,
     ExchangeAPIError,
@@ -31,6 +35,7 @@ from trading_bot.core.exceptions import (
     OrderError,
     OrderNotFoundError,
     RateLimitError,
+    SymbolInfoNotPrimedError,
 )
 from trading_bot.core.models import (
     OrderList,
@@ -1232,6 +1237,92 @@ def test_a_1013_matching_no_rule_falls_through_to_the_reject_set() -> None:
     """``-1013`` with an unrecognised message keeps today's classification."""
     exc = _api_error(code=-1013, status=400, message="Some other -1013 condition.")
     assert type(m.translate_binance_error(exc)) is OrderError
+
+
+# --------------------------------------------------------------------------
+# The client-side / venue-side discriminator
+#
+# `code` cannot supply it: a client-side refusal, a venue error whose body
+# carried no `code` key, and a 2xx whose body would not parse ALL present as
+# `code is None`. These pin the marker instead, and pin it for every family
+# that can arrive from BOTH sides -- one direction alone would not show that
+# the marker discriminates, only that it exists.
+# --------------------------------------------------------------------------
+@pytest.mark.parametrize(
+    ("code", "message", "expected"),
+    [
+        (-1013, "Filter failure: PRICE_FILTER", FilterRejectedError),
+        (
+            -1100,
+            "Illegal characters found in parameter 'x'; legal range is '^[a-z]$'.",
+            MalformedRequestError,
+        ),
+        (-1106, "whatever the venue said", ContractViolationError),
+        (-2010, "Account has insufficient balance for requested action.", InsufficientBalanceError),
+    ],
+)
+def test_a_venue_error_is_not_marked_a_client_refusal(
+    code: int, message: str, expected: type[Exception]
+) -> None:
+    """THE DANGEROUS DIRECTION, and the one a caller must be able to trust.
+
+    A venue response wrongly marked client-side would let a caller skip
+    recovery on a placement that MAY HAVE LANDED. Parametrised across families
+    that are ALSO raised locally, so this is a real discrimination rather than
+    a property of one class.
+    """
+    result = m.translate_binance_error(_api_error(code=code, status=400, message=message))
+
+    assert isinstance(result, expected)
+    assert not isinstance(result, ClientRefusalError)
+
+
+def test_a_locally_enforced_filter_rejection_is_marked() -> None:
+    """`FilterRejectedError` arrives from BOTH sides -- the venue on -1013 and
+    filter enforcement here -- so the local side needs its own pin.
+
+    Added after a mutation unmarking this exact site failed NOTHING: the first
+    attempt at this test drove `order_request_to_params` instead, which is a
+    different guard, and left `_enforce_order_list_legs` uncovered.
+    """
+    with pytest.raises(ClientRefusalError) as excinfo:
+        m.enforce_otoco_filters(_otoco_req(stop_price=Decimal("90.005")), INFO)
+
+    assert isinstance(excinfo.value, FilterRejectedError)
+    assert excinfo.value.code is None
+
+
+def test_a_locally_raised_order_error_is_marked() -> None:
+    """The same FAMILY as the -1013/-2010 cases above, from the other side.
+
+    `order_request_to_params` refuses a LIMIT with no price by pure inspection
+    of the request -- no venue, no cache, no I/O.
+    """
+    request = OrderRequest(
+        symbol="BTCUSDT", side=OrderSide.BUY, type=OrderType.LIMIT, quantity=Decimal("1")
+    )
+    with pytest.raises(ClientRefusalError) as excinfo:
+        m.order_request_to_params(request)
+
+    assert isinstance(excinfo.value, OrderError)
+    assert excinfo.value.code is None
+
+
+def test_the_marker_does_not_disturb_existing_catches() -> None:
+    """`except OrderError` must keep catching a marked refusal.
+
+    The marker is a mixin on NARROWER classes, so every existing `except`
+    clause resolves as it did. Asserted rather than assumed: a marker that
+    changed catch behaviour would be a silent behaviour change across every
+    caller, which is not what a discriminator is for.
+    """
+    assert issubclass(ClientOrderError, OrderError)
+    assert issubclass(ClientFilterRejectedError, FilterRejectedError)
+    assert issubclass(ClientContractViolationError, ContractViolationError)
+    assert issubclass(SymbolInfoNotPrimedError, ClientRefusalError)
+    # ...and the venue classes are NOT marked.
+    for cls in (OrderError, FilterRejectedError, ContractViolationError, ExchangeAPIError):
+        assert not issubclass(cls, ClientRefusalError)
 
 
 @pytest.mark.parametrize("code", sorted(m._ORDER_REJECT_CODES))
