@@ -1234,6 +1234,59 @@ def test_a_1013_matching_no_rule_falls_through_to_the_reject_set() -> None:
     assert type(m.translate_binance_error(exc)) is OrderError
 
 
+@pytest.mark.parametrize("code", sorted(m._ORDER_REJECT_CODES))
+def test_the_reject_set_fallback_carries_the_code(code: int) -> None:
+    """The site where discarding the code cost most.
+
+    Reaching the reject-set fallback means a rule KEYED on this code and its
+    message pattern did not match, so the wording is unrecognised by definition
+    and the code is the only identity left. Every member is parametrised rather
+    than one sampled: the set is the population, and a member added later
+    inherits the assertion instead of needing to be remembered.
+    """
+    exc = _api_error(code=code, status=400, message="wording no pattern recognises")
+    result = m.translate_binance_error(exc)
+
+    assert type(result) is OrderError
+    assert result.code == code
+
+
+def test_a_binance_order_exception_carries_its_code() -> None:
+    """`BinanceOrderException.__init__(self, code, message)` -- the library
+    supplies one and this branch discarded it."""
+    exc = BinanceOrderException(-1013, "Stop price would trigger immediately.")
+    result = m.translate_binance_error(exc)
+
+    assert type(result) is OrderError
+    assert result.code == -1013
+
+
+def test_an_insufficient_balance_order_exception_carries_its_code() -> None:
+    """The sibling branch, asserted separately: they are different call sites
+    and a single test could not tell which one had kept the code."""
+    exc = BinanceOrderException(-2010, "Account has insufficient balance.")
+    result = m.translate_binance_error(exc)
+
+    assert type(result) is InsufficientBalanceError
+    assert result.code == -2010
+
+
+def test_the_request_exception_route_still_has_no_code_and_that_is_not_a_gap() -> None:
+    """UNCHANGED, and pinned so the change above is not read as universal.
+
+    `BinanceRequestException` carries no code to forward -- and the library
+    raises it only after a 2xx, when the body will not parse, so for a placement
+    it means the venue returned SUCCESS and we cannot read what it said. That is
+    the most ambiguous outcome there is, and representing it needs something
+    `int | None` cannot say. UNRULED; this test exists so a later reader does
+    not mistake `code is None` here for "never reached the venue".
+    """
+    result = m.translate_binance_error(BinanceRequestException("Invalid Response: <html>"))
+
+    assert type(result) is ExchangeAPIError
+    assert result.code is None
+
+
 def test_a_filter_name_outside_the_character_class_falls_through_loudly(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

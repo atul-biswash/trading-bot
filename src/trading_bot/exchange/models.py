@@ -823,6 +823,30 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
     * any other API error -> :class:`ExchangeAPIError` (carries the code)
     * transport failures -> :class:`ExchangeConnectionError`
 
+    **Every venue-side route that HOLDS a code now carries it.** The reasoning
+    is :class:`ExchangeAPIError`'s own and predates this: *"a classification
+    that discards the code leaves an operator holding our vocabulary instead of
+    Binance's"*, and *"the better we classified, the less machine-readable
+    identity survived, which is backwards"*. Three routes did not follow it --
+    the reject-set fallback and both ``BinanceOrderException`` branches -- and
+    now do. M5c fixed the same defect once from the other side, by removing
+    ``-1111`` from the reject set so its code would survive; this fixes the set
+    itself rather than its membership.
+
+    **THIS DOES NOT MAKE ``code is None`` A DISCRIMINATOR FOR "never reached the
+    venue", and must not be read as doing so.** Two venue-side routes still
+    produce ``None``, and neither is an oversight:
+
+    * ``BinanceRequestException`` carries **no code at all** -- and it is raised
+      by the library only AFTER a 2xx, when the body will not parse. For a
+      placement that means **the venue returned success and we cannot read what
+      it said**, which is the most ambiguous outcome there is. UNRULED: it needs
+      a representation ``int | None`` cannot express.
+    * the non-int fallback below nulls a code the venue *did* respond with, when
+      its error body parsed but carried no ``code`` key.
+
+    A caller wanting "did this reach the venue?" cannot get it from ``.code``.
+
     ``BinanceAPIException`` is dispatched through :data:`_API_RULES` first and
     falls through to the ladder below; every other family is ladder-only,
     because none of them carries a code to key a row on.
@@ -875,14 +899,27 @@ def translate_binance_error(exc: Exception) -> TradingBotError:
                 message,
             )
         if code in _ORDER_REJECT_CODES:
-            return OrderError(message)
+            # THE CODE IS CARRIED, and this is the site where discarding it
+            # cost most. Reaching here means a rule KEYED on this code and its
+            # message pattern did not match -- the loud guard above has just
+            # said so -- so the wording is by definition unrecognised and the
+            # code is the ONLY identity left. `OrderError` inherits
+            # `ExchangeAPIError`'s `code`; it simply was never passed one.
+            return OrderError(message, code=code if isinstance(code, int) else None)
         return ExchangeAPIError(message, code=code if isinstance(code, int) else None)
 
     if isinstance(exc, BinanceOrderException):
         message = getattr(exc, "message", str(exc))
+        # `BinanceOrderException.__init__(self, code, message)` -- the library
+        # carries a code here and this branch never read it. Read from `exc`
+        # rather than the local `code`: that local is bound inside the
+        # `BinanceAPIException` branch, which returns on every path, so it is
+        # UNBOUND here and a bare `code` would be a `NameError`.
+        order_code = getattr(exc, "code", None)
+        order_code = order_code if isinstance(order_code, int) else None
         if "insufficient balance" in message.lower():
-            return InsufficientBalanceError(message)
-        return OrderError(message)
+            return InsufficientBalanceError(message, code=order_code)
+        return OrderError(message, code=order_code)
 
     if isinstance(exc, BinanceRequestException):
         return ExchangeAPIError(str(exc))
