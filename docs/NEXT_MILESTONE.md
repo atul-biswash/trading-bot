@@ -158,6 +158,101 @@ fillable, account total identical across all six captures.
   are ours and all are `ALL_DONE`. Whether terminated lists count toward the
   ceiling is still unmeasured — nothing approached 20.
 
+  > **"6 OF 20" CONFLATES TWO CEILINGS, AND ITS REAL DEFECT IS NOT THE
+  > ARITHMETIC — `M5f-067`.** Annotated rather than rewritten; the bullet above
+  > stands, including its own correct caveat, which is the part that makes this
+  > worth recording.
+  >
+  > **The two ceilings, stated separately so the conflation is not reproducible
+  > from the correction:**
+  >
+  > | | What it bounds | Value | Status |
+  > |---|---|---|---|
+  > | **A** | lists **OPEN at the venue** at once, a `SymbolInfo` filter | **20** | MEASURED on both configured symbols |
+  > | **B** | lists a **QUERY returns** — `allOrderList`'s default page | — | **UNMEASURED**; only bounded below at ≥ 14 |
+  >
+  > The 14 are ceiling **B**'s quantity — what a read returned — and the bullet
+  > subtracted them from ceiling **A**. They are unrelated numbers.
+  >
+  > **The sharper defect: "6 of 20" silently answered a question this file
+  > elsewhere forbids answering.** A headroom of 6 asserts that terminated lists
+  > **do** count against ceiling A. The open item further down this document says
+  > in terms that *"whether terminated lists age out of the count is UNKNOWN, and
+  > must not be assumed in either direction"* — so the figure did not merely
+  > mis-subtract, it resolved an explicitly-open question, in prose, without
+  > saying it had.
+  >
+  > **AND THE CORRECTION MUST NOT MAKE THE OPPOSITE MISTAKE.** MEASURED
+  > 2026-08-22, TESTNET, read-only: the account holds **14 lists, every one
+  > `ALL_DONE`, and 0 that are not**. If ceiling A counts live lists the headroom
+  > is 20; if it counts every list ever created the headroom is 6. **This probe
+  > does not distinguish them** — it did not approach the boundary any more than
+  > the last one did. So the honest figure is neither 6 nor 20: the question
+  > remains the one the open item states, and is still not to be assumed in
+  > either direction.
+  >
+  > Ruled by the reviewer under delegation, not by the project owner.
+
+- **THE ENUMERATION WINDOW DISCARDS FROM THE END THE RESOLVER NEVER READS** —
+  `M5f-068`. MEASURED 2026-08-22, TESTNET, read-only, and this is the
+  substantive result of that probe.
+
+  `get_all_order_lists` passes no `limit` and no `fromId`, so S3 — a list this
+  bot created but absent from the enumeration the resolver reads — was the
+  catastrophic arm of the `NOT_PLACED` question and its likelihood was
+  unbounded.
+
+  **What was measured.** With no `limit` the endpoint returned **all 14** lists
+  on the account, ordered **ascending** by `transactionTime` (oldest first).
+  With `limit=3` it returned `[172487, 172488, 172489]` — the **NEWEST three**,
+  discarding the oldest three (`72321, 72322, 72323`). So the page is ordered
+  oldest-first while the *selection* keeps the newest: **a saturated window
+  drops the OLDEST.**
+
+  **Why that bounds S3 by DIRECTION rather than by headroom, which is what makes
+  the bound durable.** The resolver only ever asks about a list created on the
+  current or previous bar — the **newest** list on the account. A
+  newest-kept window therefore discards from precisely the end the resolver
+  never queries, so its target is the last thing to be dropped. **This survives
+  the default page size staying unmeasured**, where a headroom argument would
+  not: headroom erodes as the account ages, direction does not.
+
+  **What is still UNBOUNDED, stated so it is not read as settled:** the default
+  page size itself. The account is far too small to saturate it, so the probe
+  bounds it only from below at ≥ 14. Closing it needs either enough lists to
+  exceed it — many writes — or vendor documentation, which this project treats
+  as weaker than measurement. Also observed and **not** interpreted: `limit=1001`
+  was **accepted** rather than refused, which with 14 lists cannot distinguish a
+  silent clamp from an unvalidated parameter.
+
+  **What this changes about the outstanding ruling, and what it does not.** S3
+  was the catastrophic arm of the `NOT_PLACED` re-place decision, and it is now
+  bounded structurally rather than by account size. **The ruling is unchanged
+  and remains the project owner's** — `M5f-061`, still UNRULED. Nothing here
+  rules it, recommends a direction, or describes the decision as easier; what
+  changed is the evidence under one arm of it.
+
+- **`M5f-066` WAS HALF RIGHT, AND THE HALF IT MISSED IS A SHAPE THIS PROJECT
+  KEEPS FINDING** — `M5f-069`. That finding said a read-only probe would bound
+  the `allOrderList` window. The probe bounded S3's **shape** — the direction
+  result above — and left the **page size** unmeasured. It settled the part that
+  mattered and not the part it named.
+
+  **The finding named a MEASUREMENT rather than the QUESTION the measurement
+  serves.** "Bound the window" is a measurement; "can the resolver's list be
+  absent" is the question, and the second was answerable without the first. Had
+  the probe been designed to the named measurement alone it would have reported
+  failure, because the page size cannot be reached read-only.
+
+  This is the arming-condition failure mode one level up. That rule says **an
+  arming condition names its CALLER, not an EVENT**, because an event-named
+  condition dates an item by when the world will supply an answer rather than by
+  what actually needs it. Here the same substitution happened to a finding: it
+  named the instrument rather than the thing the instrument is for. The project
+  has recorded the event-versus-caller version repeatedly — `M5d-072`,
+  `M5d-074`, `M5d-078` — and this is the first instance in the
+  measurement-versus-question form.
+
 ### The tree cost of a port declaration is the DOUBLES, not the declaration
 
 `M5f-040`, and it is stated here because **C4's placement declaration is the same
