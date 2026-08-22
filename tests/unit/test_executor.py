@@ -29,6 +29,11 @@ from trading_bot.core.enums import (
     RefusalStage,
     SignalAction,
 )
+from trading_bot.core.exceptions import (
+    ExchangeConnectionError,
+    FilterRejectedError,
+    SymbolInfoNotPrimedError,
+)
 from trading_bot.core.models import (
     Candle,
     OrderList,
@@ -633,6 +638,68 @@ class TestOptionFourResolution:
 
         assert _records(caplog, "dispatch_missed")[0].levelno == logging.ERROR
         assert logging.ERROR > logging.WARNING  # the self-clearing branch's level
+
+    async def test_a_client_refusal_leaves_no_pending_record(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No request left the process, so there is nothing to resolve.
+
+        The motivating case: `SymbolInfoNotPrimedError` was added to keep an
+        unbounded call out of a bounded sequence, and then caused a resolver
+        call next bar about an id that was never sent.
+        """
+        executor, _client, _ = build(
+            client=FakeClient(place_error=SymbolInfoNotPrimedError("cold cache"))
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert executor._pending == {}
+        refusals = _records(caplog, "dispatch_refused")
+        assert len(refusals) == 1
+        assert refusals[0].reason == "client_refusal"  # type: ignore[attr-defined]
+        assert refusals[0].error_type == "SymbolInfoNotPrimedError"  # type: ignore[attr-defined]
+        assert _records(caplog, "placement_ambiguous") == []
+
+    async def test_a_venue_refusal_still_keeps_its_pending_record(self) -> None:
+        """THE DIRECTION THAT MATTERS, and the one the ruling deliberately
+        left alone.
+
+        A venue refusal is UNMARKED, so it keeps its record and resolves next
+        bar. Treating it as client-side would skip recovery on a placement that
+        may have landed -- and this family is the sharp case, because
+        `FilterRejectedError` is raised BOTH locally and by the venue on -1013.
+        Only the venue-side one reaches here unmarked.
+        """
+        venue = FilterRejectedError(
+            "Filter failure: PRICE_FILTER", filter_name="PRICE_FILTER", code=-1013
+        )
+        executor, _, _ = build(client=FakeClient(place_error=venue))
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert SYMBOL in executor._pending
+
+    async def test_a_transport_failure_still_keeps_its_pending_record(self) -> None:
+        """The genuinely unknown case, untouched by this split."""
+        executor, _, _ = build(client=FakeClient(place_error=ExchangeConnectionError("reset")))
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert SYMBOL in executor._pending
+
+    async def test_a_client_refusal_does_not_block_the_next_bar(self) -> None:
+        """No record means no pending guard, so the symbol is dispatchable again
+        immediately rather than after a bar."""
+        client = FakeClient(place_error=SymbolInfoNotPrimedError("cold cache"))
+        executor, _, _ = build(client=client)
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        client.place_error = None
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert len(client.otoco) == 1
 
     async def test_a_bar_with_nothing_pending_queries_nothing(
         self, monkeypatch: pytest.MonkeyPatch

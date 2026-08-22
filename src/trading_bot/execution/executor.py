@@ -24,6 +24,7 @@ from typing import TYPE_CHECKING
 
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import PositionSide, ProtectionState
+from trading_bot.core.exceptions import ClientRefusalError
 from trading_bot.core.models import (
     Money,
     OrderRequest,
@@ -100,6 +101,7 @@ _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
 _REASON_PENDING = "placement_pending"
+_REASON_CLIENT_REFUSAL = "client_refusal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -432,7 +434,65 @@ class OrderExecutor:
         )
         try:
             order_list = await self._place(request, bounds.timeout_s, bounds.attempts)
+        except ClientRefusalError as exc:
+            # NO REQUEST LEFT THIS PROCESS, so there is nothing to resolve.
+            # Ruled by the PROJECT OWNER as "e3-narrow, at full scope".
+            #
+            # WHAT THIS BUYS. Every surviving pending record is now AMBIGUOUS
+            # BY CONSTRUCTION with respect to client-side failure: the only
+            # records that exist are ones where a request may have reached the
+            # venue. A future re-place rule operating on records is therefore
+            # already scoped to the failure `CLAUDE.md`'s locked timed-out-write
+            # rule was written about -- WITHOUT retaining any classification on
+            # the record. That is why (e2), retaining the failure reason on
+            # `PendingPlacement`, was held rather than ruled: this delivers its
+            # purpose as a side effect of recording less.
+            #
+            # THE ERROR DIRECTION, which is why only this half was ruled.
+            # Misclassifying a client refusal as ambiguous costs one wasted
+            # resolver call next bar. Misclassifying a VENUE failure as
+            # client-side SKIPS RECOVERY on a placement that may have landed,
+            # and no later edit un-places an order. The marker's silent failure
+            # is the cheap one: an unmarked client refusal simply looks
+            # venue-side and keeps its record.
+            #
+            # THE CASE THAT MOTIVATED THE RULING. `SymbolInfoNotPrimedError`
+            # was added at C4-b to keep an UNBOUNDED call out of a BOUNDED
+            # dispatch sequence -- and then caused a resolver call on the next
+            # bar asking the venue about an id that was never sent. A fix
+            # producing the cost it was written to prevent, one branch over.
+            #
+            # THE MARKER MEANS "NEVER SENT", NOT "OUR REFUSAL", and the
+            # distinction is not decorative. Three client-side refusals in
+            # `src/` deliberately do NOT carry it -- an unknown symbol after
+            # `get_symbol_info` RETURNED, a malformed `exchangeInfo` after the
+            # payload arrived, and an unparseable client order id on an order
+            # the venue SENT US. In each the venue answered and the refusal is
+            # ours. None of the three is on the placement path.
+            self._pending.pop(signal.symbol, None)
+            _log.warning(
+                "Dispatch refused before any request left the process",
+                extra={
+                    "event": _EVENT_REFUSED,
+                    "symbol": signal.symbol,
+                    "action": signal.action.value,
+                    "reason": _REASON_CLIENT_REFUSAL,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "candle_time": candle.close_time.isoformat(),
+                },
+            )
+            return
         except Exception as exc:  # never raises; see the module docstring
+            # EVERYTHING NOT MARKED KEEPS ITS RECORD, including venue refusals
+            # that almost certainly did not land. That half is UNRULED and rests
+            # on `CLAUDE.md`'s "a 429 is rejected pre-acceptance", which is
+            # REASONING rather than measurement -- settling it needs a measured
+            # rate-limited placement showing no order was created. And
+            # `BinanceRequestException` is raised only AFTER a 2xx, when the
+            # body will not parse, so for a placement the venue ACCEPTED and we
+            # cannot read what it said: it leans toward LANDED and must keep its
+            # record.
             _log.warning(
                 "Placement outcome unknown; resolution deferred to the next bar",
                 extra={
