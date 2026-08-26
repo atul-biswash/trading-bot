@@ -872,6 +872,32 @@ programming error, raise loudly. `-1158` / `-1159` / `-1128` → contract errors
 > a fill. Uniqueness is not a property of `timeInForce`, so the result should
 > generalise to a live `FOK` list — **INFERRED, NOT MEASURED.**
 
+> **THE TABLE'S FIRST ROW IS NO LONGER REACHED, BY THE PROJECT OWNER'S RULING
+> AT M5f. The table is not wrong and is not withdrawn** -- every row still
+> describes what the venue does. What changed is that the caller no longer
+> takes the "never placed" branch's action.
+>
+> **The ruling, verbatim: "Fail-closed on UNRESOLVED states for Ruling 2."** On
+> a verdict this repository calls `UNRESOLVED` -- the query failed, so which row
+> applies is unknown -- the caller keeps its pending record and **re-places
+> nothing**, retrying the query on the next candle-handler invocation. It is
+> annotated into `CLAUDE.md`'s timed-out-write rule at `107178f`, and the code
+> is `OrderExecutor.__call__` in `src/trading_bot/execution/executor.py`
+> (`8ca878e`, corrected at `0c10a38`).
+>
+> **THE GROUNDS ARE THIS TABLE'S OWN FOURTH ROW.** It is the only row marked
+> **REASONED, NOT MEASURED**, it needs a fill to settle, and it is the row in
+> which a re-place opens a **second, unprotected entry**. A recovery path cannot
+> know which row it is in -- that ambiguity is why it exists -- so the ruling
+> takes the reading whose wrong answer is reversible: a refused recovery costs a
+> missed trade, a duplicated entry cannot be un-placed.
+>
+> **What this does NOT touch.** Rows two and three are implemented rather than
+> merely intact: a resolution finding the list TERMINATED records no position,
+> and one finding it LIVE records the position it proves exists. The `-2010`
+> success signal and arm 10's measurement stand exactly as written. Only the
+> caller's behaviour when it cannot tell which row applies has changed.
+
 ## 9. Costs
 
 Order-list domain type; `ProtectionState`; three error classes; a reconciler.

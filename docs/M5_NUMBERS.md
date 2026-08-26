@@ -300,6 +300,33 @@ a warning when it means something.
 > `Position` in `src/`, so no position has ever aged against this value outside
 > a test.
 
+> **TWO SENTENCES ABOVE ARE FALSE AT M5f, AND BOTH WERE TRUE WHEN WRITTEN.**
+> Annotated rather than corrected: this is a measurement record, and what it
+> believed is the point of it.
+>
+> **1. "The only latency samples in existence are M5e probe 2's six
+> `get_open_orders` timings."** M5f timed **twelve more**, on a read-only and a
+> write path, and the write path is the one this document had none of.
+> `POST /api/v3/orderList/otoco`: 452.4, 471.2, 182.6, 181.7, 451.8, 454.1 ms.
+> `GET /api/v3/allOrderList`: 189.9, 459.9, 450.1, 184.1, 182.3, 196.3 ms.
+> *(TESTNET, 2026-08-21, six OTOCO placements with a working `LIMIT`+`FOK` 30%
+> below the ask, nothing fillable; account digest identical before and after.)*
+>
+> **What that changes, and what it does not.** The bimodality is CONFIRMED on a
+> second endpoint and on a WRITE -- the same ~182 ms / ~452 ms clusters with
+> nothing between -- so "their mean describes no call that happened" is now
+> measured across three endpoints rather than one. **A placement costs what a
+> read costs**, which is the fact any funding rule needs and which this document
+> could not previously state. What does NOT change: eighteen samples from one
+> host still bound no tail and still cannot produce a `p99`, so the floor
+> remains expressed in an unmeasured number and every PLACEHOLDER mark in this
+> document stands.
+>
+> **2. "Unexercised — nothing constructs a `Position` in `src/`."** The
+> executor constructs one, at `8ca878e`. The value is still unexercised **by a
+> run**, which is a different and weaker claim: no position has aged against it
+> outside a test because nothing has RUN, not because nothing can construct one.
+
 ---
 
 ## 5. `risk.dispatch_deadline_s`
