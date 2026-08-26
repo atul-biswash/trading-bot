@@ -164,7 +164,8 @@ src/trading_bot/
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
-  execution/     executor† · order_manager†
+  execution/     executor · placement · dispatch_budget · resolution
+                 · reconciliation · reconciliation_driver · order_manager†
   backtesting/   engine† · portfolio† · metrics†
   paper/         simulator†
   persistence/   database† · models†
@@ -2392,7 +2393,8 @@ four raise `ConfigError` inside `engine/modes.py`, while the unprimeable symbol
 `_prime_pairs`. Counting the `raise ConfigError` sites therefore finds four and
 misses the one that is not a refusal this file writes.
 
-**Nothing places an order.** `IntentLogger` is the terminal collaborator and it
+**Nothing placed an order at M4a's close.** `IntentLogger` was the terminal
+collaborator and it
 logs: three events (`risk_refused`, `intent_dispatched`, `collaborator_failed`)
 with a fixed field set each, absent fields absent rather than null. It is
 deliberately not called `Executor` and not in `execution/` — claiming that stub
@@ -2500,8 +2502,8 @@ constraint table's per-call column as `D` — and it did not survive re-adjudica
 on the corrected number. If it returns it belongs to the milestone that pays the
 cost on a real order, not to boot-time code whose only purpose is timing.
 
-**Still nothing places an order.** `IntentLogger` remains the terminal
-collaborator; `execution/` is still a pair of stubs.
+**Still nothing placed an order at M5a's close.** `IntentLogger` remained the
+terminal collaborator; `execution/` was still a pair of stubs.
 
 **M5b is complete, in commits 0 through 13, and it added no I/O.** Both of its
 prerequisites — the **mutation-on-read** in the portfolio's lazy day-roll, and
@@ -2582,10 +2584,10 @@ that has not activated. A read-only probe before it captured the first real
 order-list payload this repository has ever held.
 
 **The `ExchangeClient` ABC is untouched across all 11 commits**, verified by an
-empty diff rather than asserted. Nothing in `src/` places an order list except
-an executor, and `execution/` is still stubs — so declaring port surface would
-leave it uncalled, which is the harm finding GG names. The declaration lands
-with its caller at M5e.
+empty diff rather than asserted. Nothing in `src/` placed an order list except
+an executor, and at M5d's close `execution/` was still stubs — so declaring port
+surface would have left it uncalled, which is the harm finding GG names. The
+declaration landed with its caller at M5f, not M5e as this paragraph predicted.
 
 **Two defects were found by measurement and closed inside the milestone.** The
 response mapper read the leg array under an assumed key and mapped ZERO legs
@@ -2603,16 +2605,19 @@ due symbol, oldest stamp first, writing `Position.protection` and
 `last_reconciled_at`), `resolve_unresolved_legs` (point-querying legs the
 classifier could not resolve), and `ReconciliationDriver`, which subscribes to
 candles from the composition root and spends a budget derived from config.
-`core/interfaces.py` declares `get_own_open_orders` and `get_order`; **placement
-methods are still not declared**, because finding GG binds a port declaration to
-its production caller and the only honest caller is an executor.
+`core/interfaces.py` declares `get_own_open_orders` and `get_order`; **at M5e's
+close the placement methods were still not declared**, because finding GG binds
+a port declaration to its production caller and the only honest caller is an
+executor. M5f declared them, with that caller, at `8ca878e`.
 
-**Nothing constructs a `Position` in `src/`** — one `grep`, one hit, the class
-definition itself. So the classifier, the resolver, the pass, the driver, the
-L-leg reservation, `ACTIVE`'s trust and the staleness refusal have **never run
-against a real position**, and the first live one exercises all seven at once.
-Each is pinned by tests over fabricated positions; what nothing covers is their
-composition.
+**Nothing constructed a `Position` in `src/` at M5e's close** — one `grep`, one
+hit, the class definition itself. The executor now does, at `8ca878e`. So the
+classifier, the resolver, the pass, the driver, the L-leg reservation,
+`ACTIVE`'s trust and the staleness refusal had **never run against a real
+position** — and they still have not, because nothing has RUN. The first live
+position exercises all seven at once, plus the executor's own construction,
+dispatch, budget and resolution. Each is pinned by tests over fabricated
+positions; what nothing covers is their composition.
 
 **Four decisions in it are load-bearing and are locked above:** the reservation
 reserves what the first unresolved position *needs* rather than one call;
@@ -2622,8 +2627,9 @@ refuses while the ledger is not current; and **the executor must construct every
 `Position` with `ProtectionState.UNKNOWN`** — a constraint on a caller that does
 not exist yet, which is why it is written down rather than inferred.
 
-**Still nothing places an order.** `IntentLogger` remains the terminal
-collaborator and `execution/executor.py` is still a stub. The reconciler ships
+**Still nothing placed an order at M5e's close.** `IntentLogger` was the
+terminal collaborator and `execution/executor.py` was still a stub. The
+reconciler shipped
 before the first order by design: with only untrusted protection states, the
 first position the executor opened would have refused every entry after it.
 

@@ -57,8 +57,10 @@ Reading this list first will save you time if it is not the tool you want.
 `python -m trading_bot run` connects to Testnet and exercises
 data → strategy → risk end to end. It seeds a portfolio from your balance, primes
 each pair's exchange filters, and logs every signal's outcome as a structured
-`risk_refused` or `intent_dispatched` line. The terminal collaborator is
-`IntentLogger`, and it *logs* — it dispatches nothing.
+`risk_refused` or `intent_dispatched` line. **The executor is chained after
+`IntentLogger` and it places orders** — the logger still records every
+assessment, approved or refused, because the executor was chained after it
+rather than replacing it.
 
 **A reconciler now runs on every candle, and it has nothing to reconcile.** It
 reads the venue's open orders per symbol, compares them against what each
@@ -68,8 +70,8 @@ job and the executor is a stub — so the pass visits an empty list on every bar
 It ships before the first order deliberately: with no trusted protection state,
 the first position opened would have refused every entry after it.
 
-Twelve files are docstring-only placeholders: `execution/` (executor, order
-manager), `paper/simulator`, `persistence/`, `notifications/`, `backtesting/`,
+Eleven files are docstring-only placeholders: `execution/order_manager`,
+`paper/simulator`, `persistence/`, `notifications/`, `backtesting/`,
 `data/historical`, `data/repository`. Check before assuming behaviour;
 `backtest` exits with "not implemented yet".
 
@@ -280,7 +282,8 @@ src/trading_bot/
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
-  execution/     executor† · order_manager†
+  execution/     executor · placement · dispatch_budget · resolution
+                 · reconciliation · reconciliation_driver · order_manager†
   backtesting/   engine† · portfolio† · metrics†
   paper/         simulator†
   persistence/   database† · models†
