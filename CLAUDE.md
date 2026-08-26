@@ -635,6 +635,29 @@ data.
   working `LIMIT` leg that must be `FOK` says so itself. (This bullet read
   `TradeIntent` until M5b commit 9 deleted that type; the argument is about the
   intent family and is unchanged by the split described immediately below.)
+
+  > **"THREE OF THE FOUR BRANCHES" IS TWO. Annotated rather than corrected,
+  > because the sentence is part of a locked decision's REASONING and not a
+  > status line.** Everything else in this bullet stands, including the
+  > conclusion it supports -- `OrderRequest` needed `time_in_force`, and it got
+  > it at M5a.
+  >
+  > MEASURED, from two places that agree. Q-C section 2's table maps four
+  > configurations to THREE outcomes: `stop + TP` to an OTOCO list, `stop only`
+  > to an OTO list, `TP only` to **refused at config load**, and `neither` to a
+  > single `LIMIT`+`FOK`. And `build_placement` in
+  > `src/trading_bot/execution/placement.py` has exactly those four branches,
+  > of which two return an order-list request.
+  >
+  > **The take-profit-only row has no mapping target at all** -- it is refused
+  > before an intent exists, so it is not a branch the mapping serves. Counting
+  > it as one is what makes three out of four; counting only the rows that
+  > reach a request gives two out of four.
+  >
+  > Outstanding since `0c43b32` and declared as `M5f-020`. It had already
+  > propagated into one authorisation before being caught, which is why a count
+  > inside reasoning is worth annotating rather than leaving: the reasoning is
+  > what a later author quotes.
 - **`TradeIntent` splits into `EntryIntent` and `ExitIntent`; it does not fork a
   field.** Under Q-C an entry carries `entry_limit` — a derived, marketable limit
   — while a `CLOSE` dispatches `MARKET` and has no limit price at all. One field
@@ -1346,10 +1369,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  92 files already formatted
-mypy                                   Success: no issues found in 62 source files
-pytest                                 1043 passed, 3 skipped
-                                       (1046 passed with Testnet credentials present)
+ruff format --check src tests scripts  99 files already formatted
+mypy                                   Success: no issues found in 65 source files
+pytest                                 1165 passed, 3 skipped
+                                       (1168 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1358,14 +1381,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1046 passed` on a machine with Binance Testnet credentials in `.env`
-- `1043 passed, 3 skipped` on a machine without them
+- `1168 passed` on a machine with Binance Testnet credentials in `.env`
+- `1165 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1043 and must not read it as a regression against a documented
-1046. Quote the count with its condition, never bare.
+runner will see 1165 and must not read it as a regression against a documented
+1168. Quote the count with its condition, never bare.
 
-Only the `1046` is measured here; `1043` is `1046` minus the three `skipif`-gated
+Only the `1168` is measured here; `1165` is `1168` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -1380,7 +1403,7 @@ wrong; it now asserts the invariant common to both paths. See
 
 It went unidentified for several sessions because the run that first hit it was
 piped through `tail`, which discarded pytest's summary, and was re-run before the
-output was read. The unit suite is deterministic at 1043, so **treat a lone
+output was read. The unit suite is deterministic at 1165, so **treat a lone
 failure in a full run as suspect-integration, and read the output before
 re-running.** `addopts` carries `-ra`, so the summary is always printed — it only
 has to be allowed to reach the terminal.
@@ -1425,8 +1448,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 92 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 62 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 99 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 65 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
