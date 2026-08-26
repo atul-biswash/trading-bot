@@ -63,6 +63,34 @@ _REPORTED_ASSETS = ("BTC", "ETH", "USDT")
 #: unmanaged-holding arithmetic decide whether the bot can enter at all.
 _REPORTED_SYMBOLS = ("BTCUSDT", "ETHUSDT")
 
+#: Default survey for ``--candidates``: does ANY pair reachable by
+#: configuration alone hold a base balance small enough to be dust, and so
+#: escape the ``UNMANAGED_HOLDING`` refusal?
+#:
+#: Selected as USDT-quoted spot pairs listed on Binance for years and among the
+#: most liquid by volume, spanning large through mid cap so the survey is not
+#: all one tier. **The two configured pairs are included on purpose**: their
+#: answer is already known, and a survey carrying no known answer is an
+#: uncalibrated instrument. ``MATICUSDT`` is included expecting it to be
+#: absent, so the unsupported-symbol path is exercised rather than assumed.
+_CANDIDATE_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "SOLUSDT",
+    "ADAUSDT",
+    "DOGEUSDT",
+    "TRXUSDT",
+    "LTCUSDT",
+    "LINKUSDT",
+    "DOTUSDT",
+    "MATICUSDT",
+    "AVAXUSDT",
+    "ATOMUSDT",
+    "UNIUSDT",
+)
+
 #: List statuses from which nothing further happens. A **blacklist**, matching
 #: the direction :class:`~trading_bot.core.enums.OrderStatus` takes: a status
 #: nobody has classified is reported as live. Over-reporting a resting list
@@ -101,6 +129,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--config",
         default=None,
         help="Path to config.yaml (default: config.yaml or $BOT_CONFIG_PATH).",
+    )
+    parser.add_argument(
+        "--candidates",
+        default=",".join(_CANDIDATE_SYMBOLS),
+        help=(
+            "Comma-separated USDT-quoted symbols to survey for a dust-sized base "
+            "holding (default: a fifteen-symbol liquid set including both configured pairs)."
+        ),
     )
     return parser
 
@@ -143,11 +179,11 @@ def _print_filters(info: SymbolInfo) -> None:
     )
 
 
-def _print_holding_verdict(info: SymbolInfo, *, free_base: Decimal, last: Decimal) -> None:
-    """Show the arithmetic ``_snapshot_unmanaged_holdings`` performs.
+def _holding_verdict(info: SymbolInfo, *, free_base: Decimal, last: Decimal) -> str:
+    """``DUST`` or ``BLOCKS`` for one holding. **The only copy of the test.**
 
     Reproduced in the same direction and with the same strictness as the
-    comparison it mirrors::
+    comparison it mirrors, in ``engine.modes._snapshot_unmanaged_holdings``::
 
         if balance.free * price < pairs[symbol].symbol_info.min_notional:
             continue  # dust: too small to sell, so it must not block the pair
@@ -157,9 +193,18 @@ def _print_holding_verdict(info: SymbolInfo, *, free_base: Decimal, last: Decima
     sellability and locked base cannot be sold. All-``Decimal`` throughout:
     ``free_base`` and ``last`` are both ``Money``, so no float enters the
     product.
+
+    Both the per-pair report and the candidate survey call this rather than
+    repeating the comparison, so there is one place for it to be wrong.
     """
+    return "DUST" if free_base * last < info.min_notional else "BLOCKS"
+
+
+def _print_holding_verdict(info: SymbolInfo, *, free_base: Decimal, last: Decimal) -> None:
+    """Show the arithmetic :func:`_holding_verdict` performs, not just its answer."""
     value = free_base * last
-    verdict = "DUST (does not block)" if value < info.min_notional else "BLOCKS entries"
+    short = _holding_verdict(info, free_base=free_base, last=last)
+    verdict = "DUST (does not block)" if short == "DUST" else "BLOCKS entries"
     print(
         f"    unmanaged holding: free={free_base} x last={last} = {value} "
         f"vs min_notional={info.min_notional}  ->  {verdict}"
@@ -223,7 +268,67 @@ async def _report_symbol(
         _print_open_orders(orders)
 
 
-async def _check(mode: TradingMode, symbol: str, config: str | None) -> int:
+async def _survey_one(
+    client: BinanceClient,
+    symbol: str,
+    held: dict[str, Balance],
+    failures: list[str],
+) -> None:
+    """One candidate row: does its base holding block, or is it dust?
+
+    **A symbol the venue does not list is reported, not fatal.** One absent
+    candidate must not abort the survey, so ``get_symbol_info`` is caught here
+    rather than routed through :func:`_step`: an unlisted symbol is an answer
+    about the venue, not a failed read, and counting it as a failure would make
+    the exit code report a problem that is not one. The exception text is
+    printed beside the label so a transport failure stays distinguishable from
+    a genuinely unlisted symbol -- the label alone would merge them.
+
+    **No ticker is fetched when free base is exactly zero.** Zero is dust at
+    every price, so the call would buy nothing; on a survey this is most of the
+    round trips.
+    """
+    try:
+        info = await client.get_symbol_info(symbol)
+    except TradingBotError as exc:
+        print(f"    {symbol:<10}  UNSUPPORTED ON TESTNET  ({type(exc).__name__}: {exc})")
+        return
+
+    balance = held.get(info.base_asset.upper())
+    free_base = balance.free if balance is not None else Decimal(0)
+    if free_base == 0:
+        print(
+            f"    {symbol:<10}  free=0  min_notional={info.min_notional}  "
+            f"->  DUST  (zero is dust at any price; no ticker fetched)"
+        )
+        return
+
+    ticker = await _step(f"{symbol} get_ticker", client.get_ticker(symbol), failures)
+    if ticker is None:
+        return
+    verdict = _holding_verdict(info, free_base=free_base, last=ticker.last)
+    print(
+        f"    {symbol:<10}  free={free_base} x last={ticker.last} = "
+        f"{free_base * ticker.last}  vs min_notional={info.min_notional}  ->  {verdict}"
+    )
+
+
+async def _survey_candidates(
+    client: BinanceClient,
+    symbols: Sequence[str],
+    balances: Sequence[Balance],
+    failures: list[str],
+) -> None:
+    """Ask of every candidate whether its base holding would refuse entries."""
+    print(f"  candidate survey ({len(symbols)} symbol(s)):")
+    held = {balance.asset.upper(): balance for balance in balances}
+    for symbol in symbols:
+        await _survey_one(client, symbol, held, failures)
+
+
+async def _check(
+    mode: TradingMode, symbol: str, config: str | None, candidates: Sequence[str]
+) -> int:
     settings = get_settings(config)
     # Force the mode from the CLI (see module docstring: this utility ignores
     # the configured mode on purpose).
@@ -243,6 +348,13 @@ async def _check(mode: TradingMode, symbol: str, config: str | None) -> int:
         balances = await client.get_balances()
         nonzero = [b for b in balances if b.total > 0]
         print(f"  balances: {len(nonzero)} asset(s) with a non-zero balance")
+        # Of those, how many are spendable. `free` is what the dust test reads,
+        # so a holding that is entirely locked is dust however large it is.
+        free_zero = sum(1 for b in nonzero if b.free == 0)
+        print(
+            f"    of those: {len(nonzero) - free_zero} with free > 0, "
+            f"{free_zero} with free exactly zero (fully locked)"
+        )
         for balance in sorted(nonzero, key=lambda b: b.asset)[:_SAMPLE_ROWS]:
             print(f"    {balance.asset:>6}  free={balance.free}  locked={balance.locked}")
 
@@ -253,6 +365,8 @@ async def _check(mode: TradingMode, symbol: str, config: str | None) -> int:
 
         for pair in _REPORTED_SYMBOLS:
             await _report_symbol(client, pair, balances, failures)
+
+        await _survey_candidates(client, candidates, balances, failures)
 
         lists = await _step("get_all_order_lists", client.get_all_order_lists(), failures)
         if lists is not None:
@@ -286,8 +400,10 @@ def main(argv: list[str] | None = None) -> int:
     if mode is TradingMode.LIVE:
         print("!! LIVE selected — connecting to real Binance with real funds.")
 
+    candidates = [name.strip().upper() for name in args.candidates.split(",") if name.strip()]
+
     try:
-        return asyncio.run(_check(mode, args.symbol, args.config))
+        return asyncio.run(_check(mode, args.symbol, args.config, candidates))
     except ConfigError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
