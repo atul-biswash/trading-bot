@@ -172,10 +172,38 @@ def _print_key_balances(balances: Sequence[Balance]) -> None:
 
 
 def _print_filters(info: SymbolInfo) -> None:
-    """The four filters sizing and dispatch are bounded by."""
+    """Every filter that bounds an order, raw and effective.
+
+    **``MARKET_LOT_SIZE`` is printed beside ``LOT_SIZE`` rather than folded into
+    it**, because only the *effective* pair -- the coarser step and the higher
+    minimum -- bounds a MARKET order. A survey printing the raw step alone
+    understates the remainder a rounded-down market sell leaves behind, and that
+    remainder is what decides whether a holding can be cleared in one pass.
+
+    **``NOTIONAL.applyMinToMarket`` is NOT printed, and its absence is a
+    limitation rather than an omission.** ``to_symbol_info`` reads ``NOTIONAL``
+    for ``minNotional`` only, so the flag never reaches :class:`SymbolInfo` and
+    is unreachable from here; carrying it would be a ``src/`` change. It is
+    MEASURED **true** on both configured symbols and recorded on the adapter's
+    own ``_enforce``, which is why nothing here depends on re-reading it.
+    (Written without the class prefix on purpose: an audit that enumerates
+    ``BinanceClient.<method>`` to check this file's call surface would otherwise
+    match a sentence.)
+    """
+    if info.market_lot is None:
+        market = "MARKET_LOT_SIZE = ABSENT (LOT_SIZE alone binds)"
+    else:
+        market = (
+            f"MARKET_LOT_SIZE step={info.market_lot.step_size} "
+            f"min_qty={info.market_lot.min_qty} max_qty={info.market_lot.max_qty}"
+        )
     print(
         f"    filters: min_notional={info.min_notional}  tick_size={info.price_tick}  "
-        f"step_size={info.step_size}  min_qty={info.min_qty}"
+        f"LOT_SIZE step={info.step_size} min_qty={info.min_qty}"
+    )
+    print(f"             {market}")
+    print(
+        f"             effective: step={info.effective_step_size} min_qty={info.effective_min_qty}"
     )
 
 
