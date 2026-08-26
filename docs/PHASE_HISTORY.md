@@ -2508,3 +2508,143 @@ in `CLAUDE.md`. A later rotation grepping the digits will meet them; they are
 facts about this milestone's close, not counts to update.
 
 **Ruled by the reviewer under delegation, not by the project owner.**
+
+---
+
+## Phase 5 M5f — the executor, and the risk it did not retire
+
+M5f built the first code path in `src/` that places an order. **26 commits
+including this one — 19 numbered and seven of rotation — and 106 findings,
+every commit carrying a block.** The milestone's headline is not the executor.
+It is that **M5f made the composition risk REACHABLE without retiring it**: the
+older premise — nothing constructs a `Position` — is now false, while its
+conclusion holds unchanged, because nothing has RUN.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `3407b91` | An intent mapped to the placement shape it needs |
+| 2 | `7aa8f59` | The three-call `CLOSE` annotated, which counts steps as calls |
+| 3 | `cd7348a` | A dispatch sequence bounded by deadline, not call count |
+| 4 | `0c43b32` | Two `src/` docstrings that outlived their facts |
+| 5 | `276e1ee` | The boot reads balances once and shares the snapshot |
+| 6 | `03eccac` | The socket source closed if the stream constructor raises |
+| 7 | `0500e52` | Two more `src/` docstrings that outlived their facts |
+| 8 | `dce6165` | `cov` and `format` routed through `$(PYTHON)` |
+| 9 | `3438180` | A placement whose outcome we did not see, resolved |
+| 10 | `ae34b59` | M5f's state written into the tree before the context cleared |
+| 11 | `cc1feb5` | A dispatch refused whose symbol filters were never primed |
+| 12 | `8ca878e` | The executor, and the first code path that places an order |
+| 13 | `16857e3` | The executor's log lines say which outcome they are |
+| 14 | `0c10a38` | The position a resolved placement proves exists, recorded |
+| 15 | `b5cadea` | A missed dispatch is not a successful resolution |
+| 16 | `eb8ffe9` | The window probe landed, and a figure that answered an open question |
+| 17 | `418409f` | The venue code carried on the three routes that hold one |
+| 18 | `bc3d42e` | A marker distinguishing a client-side refusal from a venue response |
+| 19 | `59cf256` | A refusal that sent nothing has nothing to resolve |
+
+Seven rotation commits follow: `a28a464`, `107178f`, `954bb0e` (amended from
+`c8fe7a4`), `bdf12c4`, `ef215bc`, `f52f161`, and **this commit**, which cannot
+name its own SHA.
+
+### The milestone's finding: the risk grew
+
+M5e's entry recorded that the whole reconciliation subsystem was inert and that
+the first live position would exercise seven of its parts at once. M5f made
+that reachable and added four more parts to it — `build_placement`,
+`DispatchBudget`, `resolve_placement`, and the executor's own dispatch,
+position construction and Option-4 resolution.
+
+**Nothing has run any of it.** Every component is pinned by tests over
+fabricated inputs, and what remains uncovered is their composition — which no
+test can retire, because a test composing them would be composing fakes, and
+that already exists.
+
+### What was decided
+
+**The project owner ruled four things**, and they are his rather than the
+reviewer's: that the resolver lands in its own isolated commit; that the
+non-filling limit test be executed to establish venue write validity; that the
+recovery is **fail-closed on `UNRESOLVED`**; and that e3-narrow ships at full
+scope, so a client-side refusal creates no pending record. He also approved the
+`CLAUDE.md` annotation text landed at `107178f`.
+
+**The reviewer ruled, under delegation:** that `PendingPlacement` carries the
+requested economics (R23); that the `PLACED_LIVE` branch does what the success
+path does, including the debit (R24); that `NOT_PLACED` is untouched pending
+his ruling (R25); that `entry_bar_time` is forwarded from the candle rather
+than taken from `Signal.timestamp`; that the two dispatch-site refusals live at
+dispatch rather than at config load; and that the client-side marker takes the
+D-prime shape rather than F, because F may require port surface the reviewer
+cannot authorise.
+
+**Measured against a venue, read-only and write, on Testnet.** Six OTOCO
+placements timed at 452.4, 471.2, 182.6, 181.7, 451.8 and 454.1 ms against
+`allOrderList` reads at 189.9, 459.9, 450.1, 184.1, 182.3 and 196.3 ms — the
+same bimodal shape, so **a placement costs what a read costs**. `orderReports`
+was found present in the placement response carrying Q-C section 7's whole
+compare set. And the enumeration window **discards its oldest entries**, which
+bounds the resolver's exposure by direction rather than by headroom.
+
+### What was rejected
+
+A boot-time refusal of the unprotected configuration, dropped by the owner
+after the reviewer's own halt found six tests asserting that configuration is
+reachable — two of them declaring it locked. Retaining a failure classification
+on `PendingPlacement`, held rather than ruled, because e3-narrow delivers its
+purpose by recording less. And a mixin on the existing exception classes, which
+is unimplementable: the same class arrives from both sides.
+
+### DO NOT TIDY THESE — beliefs held, acted on, and then measured false
+
+Each was reasonable when held, and the record of holding it is the point.
+
+- **The three-call `CLOSE`.** Six documents and one constant asserted it.
+  Measured worst cases are OTOCO 5, OTO 4, unprotected 1, recovery-bearing
+  entry 3 — the claim counted Q-C section 4b's three STEPS as three CALLS.
+- **The resolution path was believed complete.** It deleted its pending record
+  on every outcome and acted on none of them, so a placement confirmed to have
+  LANDED left a live list with no `Position` and no debit — unbounded, because
+  nothing retried. Found while drafting an annotation about the branch beside
+  it.
+- **"The classifier breaks a contract its own docstring publishes."** The
+  `:param` line reads that way; the paragraph directly above it explicitly
+  weakens the guarantee. Half a docstring was quoted in a report whose whole
+  purpose was to decide whether that field could be relied on.
+- **"`MAX_NUM_ORDER_LISTS` headroom is now 6 of 20."** It subtracted a query's
+  result from an open-list ceiling, and in doing so silently answered a
+  question this project's own open items forbid answering.
+- **The five pre-dispatch families were assumed separable by type.** Three of
+  them share a class with venue refusals, so a type-based split would have
+  marked a venue refusal as never-sent — the one error direction the ruling
+  forbade.
+
+### Three things the method itself learned
+
+**A mutation that fails nothing is a hole in the code, not an uninteresting
+result.** Two of them found genuinely unpinned sites this milestone, and a
+third — predicted as a zero and confirmed — showed a guard redundant with its
+own defensive branch.
+
+**A crash is not a zero.** One mutation produced an MRO conflict, nothing
+collected, and the harness read zero failures against a prediction of one. The
+harness now flags a missing pytest summary as INVALID rather than recording it.
+
+**A check in the same command chain as the action it gates is not a gate.** A
+commit message's ASCII verification printed its verdict and then ran `git
+commit` in the same chain, so the number arrived alongside a commit that
+already existed. Distinct from the pipe rule: there the verdict cannot be read;
+here it was read, too late.
+
+### The historical figures in this entry
+
+**26 commits, 106 findings, and the gate at this commit's parent `f52f161` —
+`ruff check` clean, 99 files formatted, mypy clean over 65 source files, 1168
+passed credentialed.** These are HISTORICAL and must never move, exactly like
+the `470b47b` and `4926705` figures above. A later rotation grepping the digits
+will meet them; they are facts about this milestone's close, not counts to
+update.
+
+**Ruled by the reviewer under delegation, except where the project owner is
+named above.**
