@@ -7,10 +7,16 @@ risk manager and :class:`IntentLogger` -- hands them back as a frozen
 place in ``src/`` that knows how the pieces fit together, which is what keeps
 ``live_engine`` mode-agnostic.
 
-Nothing here dispatches an order. :class:`IntentLogger` is the terminal
-collaborator and it *logs*; it is deliberately not called ``Executor`` and does
-not live in ``execution/``, because claiming that stub would make the stub
-inventory lie about what exists.
+**This root dispatches orders.** The signal chain is :class:`IntentLogger`
+THEN :class:`~trading_bot.execution.executor.OrderExecutor`: the executor was
+chained AFTER the logger rather than replacing it, so every ``risk_refused``
+and ``intent_dispatched`` record survives -- including for the signals the
+executor then refuses to dispatch. The two answer different questions, what the
+risk layer decided and what execution did about it.
+
+The executor is also a CANDLE subscriber, registered after the reconciler and
+before the engine's own hook, so each bar runs reconcile, then resolve any
+ambiguous placement, then decide.
 
 Not re-exported from ``trading_bot.engine``
 -------------------------------------------
@@ -44,17 +50,20 @@ Boot order: all I/O before any socket exists
 4. Unmanaged base holdings, from the same snapshot, then one ``get_ticker``
    per candidate asset. Warns; never refuses.
 5. Market-data provider (this is the first step that can open a WebSocket).
-6. Engine, 7. risk manager, 8. intent logger, 9. the one signal handler,
-   10. the reconciliation driver, subscribed to candles.
+6. Engine, 7. risk manager, 8. intent logger, 9. the executor,
+   10. the one signal handler, 11. the reconciliation driver and 12. the
+   executor, both subscribed to candles in that order.
 
-Step 10 registers on ``provider.on_candle`` **before this function yields**, and
-``TradingEngine.start`` registers its own candle hook only when ``run()`` is
-called afterwards. Since ``_notify`` fans out in registration order, the
-reconciler is always subscriber zero -- **reconcile, then decide** -- so the
-same bar's ``evaluate`` reads a ledger this pass has just refreshed, and the
-reserved reconciliation floor is spent before anything else on the bar. That
-ordering is a consequence of *where* the two registrations happen, so it is
-pinned by tests rather than by a comment alone.
+Steps 11 and 12 register on ``provider.on_candle`` **before this function
+yields**, and ``TradingEngine.start`` registers its own candle hook only when
+``run()`` is called afterwards. Since ``_notify`` fans out in registration
+order, the reconciler is always subscriber ZERO and the executor subscriber ONE
+-- **reconcile, resolve, then decide** -- so the same bar's ``evaluate`` reads a
+ledger this pass has just refreshed, any ambiguous placement from the previous
+bar is settled out of THIS bar's fresh budget before a new one can be sent, and
+the reserved reconciliation floor is spent before anything else on the bar. That
+ordering is a consequence of *where* the registrations happen, so it is pinned
+by tests rather than by a comment alone.
 
 Steps 0 to 3 are the fail-fast: every boot refusal is raised there, before the
 first socket at step 5, so a refusal has exactly one REST client to unwind and
@@ -94,10 +103,11 @@ The portfolio is a boot snapshot
 --------------------------------
 It is built at step 3 and written once more at step 4, where
 :func:`_snapshot_unmanaged_holdings` records the base the account already held.
-After that **nothing mutates it** -- no fills, no realised P&L, no cooldowns,
-because nothing places an order yet. Every evaluation for the life of the
-process sees the balances the process started with. Execution is what makes it
-a ledger; until then it is a photograph.
+**The executor mutates it once a placement lands.** Recording a
+:class:`~trading_bot.core.models.Position` also debits its cost from
+``free_quote``, so this is a ledger rather than a photograph. Realised P&L and
+cooldowns still do not move it -- nothing closes a position yet -- so what the
+boot snapshot supplies is the STARTING balance, not the running one.
 
 The log schema
 --------------
@@ -219,7 +229,12 @@ def _common_fields(signal: Signal, pairs: Mapping[str, PairContext]) -> dict[str
 
 
 class IntentLogger:
-    """Terminal collaborator: records the intent stream. Dispatches nothing.
+    """Records the intent stream. Dispatches nothing, and is no longer last.
+
+    **The executor is chained after this**, so "terminal collaborator" -- which
+    this docstring said until the executor landed -- is now false. What remains
+    true is the half that matters here: this object performs no venue I/O and
+    decides nothing, it records.
 
     Owns the whole ``risk_refused`` / ``intent_dispatched`` schema, so a field
     name has exactly one definition and one test. The signal handler owns only
@@ -344,9 +359,13 @@ def _build_signal_handler(
     ``_on_candle``, itself awaited from the provider's ``_notify`` on the
     stream's dispatch task, so handler latency is charged directly to the
     candle pipeline. The rule is a budget, not an abstinence: the pipeline must
-    never be blocked by latency we do not bound ourselves. This handler happens
-    to perform no I/O because it has nothing to do yet -- the milestone that
-    places orders adds it under a deadline it sets itself.
+    never be blocked by latency we do not bound ourselves. **This handler now
+    awaits venue writes**: it calls ``executor.dispatch``, which may place an
+    order list and, on an ambiguous outcome, leaves a record for the next bar to
+    resolve. The bound is the executor's own
+    :class:`~trading_bot.execution.dispatch_budget.DispatchBudget`, derived from
+    ``risk.dispatch_deadline_s`` -- a budget it sets itself, which is what the
+    rule above requires.
     """
 
     async def handle(signal: Signal, candle: Candle) -> None:
