@@ -957,6 +957,59 @@ data.
   > since the pending legs' IDs remain live and a byte-identical re-place would
   > collide with them.
 
+  > **SUPERSEDED FOR ONE BRANCH ONLY, BY THE PROJECT OWNER, at M5f. The rule
+  > above is not falsified and the annotation immediately preceding this one is
+  > not withdrawn — both were correct when written and remain correct for every
+  > branch this block does not name.**
+  >
+  > **The ruling, verbatim: "Fail-closed on UNRESOLVED states for Ruling 2."**
+  >
+  > **WHICH BRANCH.** Exactly one: *"Query failed ⇒ re-place anyway."* On a
+  > verdict of `UNRESOLVED` the caller now **keeps its pending record and
+  > re-places nothing**, retrying the query on the next candle-handler
+  > invocation out of that invocation's fresh dispatch budget.
+  >
+  > **WHAT STANDS, unchanged.** That a timed-out write is resolved **by query,
+  > never by retry** — the whole first paragraph. That the IDs are derivable at
+  > generation 0 by pure computation. That `-2010 'Duplicate order sent.'` is a
+  > **success signal**, and the arm-10 measurement establishing it against a
+  > **live** list. The *"found"* branch is not merely untouched but implemented:
+  > a `PLACED_LIVE` verdict now records the position it proves exists.
+  >
+  > **THE GROUNDS, and they are the owner's rather than a new measurement.**
+  > Q-C §8's re-place branch table marks one row **REASONED and never
+  > measured**: placed, working leg **filled**, pendings still live. That is the
+  > row in which a re-place opens a **second, unprotected entry**. The preceding
+  > annotation names it as the one branch still unmeasured and says it *"needs a
+  > fill"*; obtaining that measurement is separately reserved. So the reversal is
+  > a choice about an **unmeasured** row, not a correction of a measured one —
+  > and it takes the reading whose wrong answer is reversible: a refused recovery
+  > costs a missed trade, a duplicated entry cannot be un-placed.
+  >
+  > **WHAT FAIL-CLOSED COSTS AS THE TREE NOW BEHAVES.** An `UNRESOLVED` verdict
+  > leaves an order list that **may be live** with no `Position` recorded against
+  > it, and `reconcile_open_positions` iterates `portfolio.open_positions` — so a
+  > list with no position is **structurally invisible** to the reconciler. What
+  > bounds that is the pending record surviving to the next invocation and the
+  > query being retried there: **up to one bar**, 60 s on the shipped pair list.
+  > Within the window `has_position` is false for that symbol, but `dispatch`
+  > refuses on it by its own pending guard rather than by any limit, so no second
+  > entry can be opened against it.
+  >
+  > **The residual cost is process death inside that window.** `PendingPlacement`
+  > is in-process and is not persisted, so a crash between the ambiguous write
+  > and the next bar loses the only record that a list may be resting. That is the
+  > whole of what fail-closed cannot bound, and it is smaller than it was: until
+  > `0c10a38` a *successfully resolved* `PLACED_LIVE` also stranded its list, with
+  > no bound at all.
+  >
+  > **WHERE THE CODE IS.** `OrderExecutor.__call__` in
+  > `src/trading_bot/execution/executor.py`, landed at `8ca878e` and corrected at
+  > `0c10a38`. Before `8ca878e` this conflict was two documents disagreeing; from
+  > it, one of them executes.
+  >
+  > Ruled by the project owner.
+
   **That guarantee is MEASURED for a duplicate client order ID and UNMEASURED for a
   duplicate order *list*.** The recovery path's classifier depends on it. Settled by
   a rejection — resubmit an accepted list's exact parameters and read the error —
