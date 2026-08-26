@@ -291,20 +291,37 @@ class Portfolio(BaseModel):
     def equity(self, marks: Mapping[str, Decimal]) -> Decimal:
         """Total portfolio value in the quote currency.
 
-        Free quote balance **plus** the mark-to-market value of every open
-        position -- the definition ``size_position`` documents, and the
-        difference between "2% of equity per position" meaning a stable size and
-        one that shrinks as capital deploys.
+        **Three terms, not two.** Free quote balance, **plus** the
+        mark-to-market value of every open position, **plus** the
+        mark-to-market value of every unmanaged base holding -- the definition
+        ``size_position`` documents, and the difference between "2% of equity
+        per position" meaning a stable size and one that shrinks as capital
+        deploys.
 
-        ``marks`` must price every open position. A missing mark raises rather
-        than defaulting to the entry price or to zero: both would silently
-        misstate equity, and equity is the denominator of every sizing and
-        daily-loss decision. The caller (the manager) checks first and turns the
-        condition into a representable refusal, so this raise is a contract
-        violation, not a market state.
+        **The third term is easy to miss and this docstring used to omit it.**
+        An unmanaged holding is counted for the reason the body's own comment
+        gives: it is the account's rather than the bot's, but it is still the
+        account's value, and equity is the denominator of every sizing decision
+        and of the daily-loss threshold.
+
+        Note the asymmetry with the boot step that records one.
+        ``engine.modes._snapshot_unmanaged_holdings`` stores ``balance.total``
+        into :attr:`unmanaged_holdings`, which is what this sums, while
+        deciding materiality on ``balance.free``. Both are right and they
+        answer different questions: equity asks what the account **owns**,
+        where dust asks what it could **sell**.
+
+        ``marks`` must price every open position **and every unmanaged
+        holding** -- :meth:`marked_symbols` returns exactly that union, which is
+        why it exists. A missing mark raises rather than defaulting to the entry
+        price or to zero: both would silently misstate equity, and equity is the
+        denominator of every sizing and daily-loss decision. The caller (the
+        manager) checks first and turns the condition into a representable
+        refusal, so these raises are a contract violation, not a market state.
 
         Raises:
-            ValueError: if a position cannot be marked, or is not ``LONG``.
+            ValueError: if an open position cannot be marked, if an unmanaged
+                holding cannot be marked, or if a position is not ``LONG``.
         """
         total = self.free_quote
         for position in self.open_positions:
