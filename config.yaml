@@ -26,7 +26,7 @@ trading:
       enabled: true
     - symbol: ETHUSDT
       timeframe: 5m
-      enabled: true
+      enabled: false
 
 data:
   # Market-data provider (see data/market_data.py). At startup each enabled pair
