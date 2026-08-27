@@ -195,6 +195,103 @@ async def test_stop_stops_the_provider() -> None:
     assert provider.stop_calls == 1
 
 
+def _stop_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """The engine's own stop lines.
+
+    **Selected by LOGGER NAME, never by position.** ``caplog.at_level`` lowers
+    the capture handler's level globally rather than one logger's, so any
+    collaborator that logs lands in the same buffer whenever an earlier test
+    has left the root level low. ``getMessage()`` rather than ``.message``,
+    which ``logging.Formatter.format`` assigns and a captured record has not.
+    """
+    return [
+        record
+        for record in caplog.records
+        if record.name == "trading_bot.engine.live_engine"
+        and "Trading engine stopped" in record.getMessage()
+    ]
+
+
+async def test_stop_twice_logs_once(caplog: pytest.LogCaptureFixture) -> None:
+    """THE DEFECT. Catches the idempotence guard being removed from ``stop()``.
+
+    ``M5g-079``, measured in supervised run 2: "Trading engine stopped" was
+    emitted twice at 19:19:32, once from ``run()``'s ``finally`` and once from
+    ``live_system``'s, because ``stop()`` had no guard where ``start()`` has
+    one. Nothing failed and nothing leaked -- what broke was the half of the
+    lifecycle contract forbidding a second call to **duplicate that work**.
+    """
+    engine, _provider, _strategy = build_engine()
+    await engine.start()
+
+    with caplog.at_level(logging.INFO, logger="trading_bot.engine.live_engine"):
+        await engine.stop()
+        await engine.stop()
+
+    assert len(_stop_lines(caplog)) == 1
+
+
+async def test_stop_twice_still_leaves_the_engine_stopped() -> None:
+    """Catches the guard being INVERTED to ``if self._started: return``.
+
+    That spelling makes the FIRST call the no-op, which is silent and far worse
+    than the defect it would be fixing: the provider is never stopped and the
+    feed leaks. So this asserts the first call's WORK, not the second call's
+    silence -- the direction ``test_stop_twice_logs_once`` cannot see.
+    """
+    engine, provider, _strategy = build_engine()
+    await engine.start()
+
+    await engine.stop()
+    await engine.stop()
+
+    assert provider.stop_calls == 1
+    assert engine._started is False
+
+
+async def test_stop_before_start_does_not_raise_and_stops_nothing() -> None:
+    """Catches the guard turning a never-started teardown into an error.
+
+    A boot that fails between ``TradingEngine.create`` and ``run()`` reaches
+    ``live_system``'s ``finally`` holding an engine that never started.
+    ``start()`` is what starts the provider, so an engine that never started
+    never started one and has nothing to release; the root stops the provider
+    in its own ``finally`` regardless, so no path leaks a feed.
+
+    ``stop_calls == 0`` is a deliberate behaviour change: before the guard this
+    was 1, a redundant stop of a provider the engine had never started.
+    """
+    engine, provider, _strategy = build_engine()
+
+    await engine.stop()
+
+    assert provider.stop_calls == 0
+    assert engine._started is False
+
+
+async def test_the_double_teardown_path_logs_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The real shape: ``run()``'s ``finally``, then the root's own ``stop()``.
+
+    Catches the guard being added to the wrong method -- to ``run()``, or to
+    ``provider.stop()`` -- either of which leaves this exact path logging twice
+    while ``test_stop_twice_logs_once`` still passes.
+    """
+    engine, provider, _strategy = build_engine()
+
+    with caplog.at_level(logging.INFO, logger="trading_bot.engine.live_engine"):
+        task = asyncio.create_task(engine.run())
+        await asyncio.sleep(0)  # let run() reach the wait
+        engine.request_stop()
+        await asyncio.wait_for(task, timeout=1)
+        # live_system's own finally, reaching a stop run() has already made.
+        await engine.stop()
+
+    assert len(_stop_lines(caplog)) == 1
+    assert provider.stop_calls == 1
+
+
 async def test_run_returns_once_stop_is_requested() -> None:
     engine, provider, _ = build_engine()
 

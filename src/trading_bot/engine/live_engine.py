@@ -174,7 +174,39 @@ class TradingEngine:
         )
 
     async def stop(self) -> None:
-        """Stop the provider and release its resources. Safe to call any time."""
+        """Stop the provider and release its resources.
+
+        Idempotent. Safe to call any time.
+
+        **The guard reads ``self._started``, because the object already owns
+        that fact.** Until M5g this method had none: it set the flag, signalled,
+        stopped the provider and logged, every time it was called. The double
+        teardown ``live_system`` performs -- ``run()``'s ``finally`` and the
+        root's own -- therefore emitted *"Trading engine stopped"* twice, which
+        is how the gap was found (`M5g-079`, run 2, 19:19:32). Nothing failed
+        and nothing leaked, because ``provider.stop()`` is safe to repeat; what
+        broke was the half of the contract that forbids **duplicating that
+        work**.
+
+        A "did I already stop?" flag was not added, and ``CLAUDE.md`` is why:
+        it forbids a root papering over double-teardown that way, on the
+        grounds that such a flag is *a second source of truth for a fact the
+        object already owns*. ``_started`` is that fact, read where it lives.
+
+        **Stopping an engine that never started is a no-op, and that is the
+        symmetric reading rather than a gap.** :meth:`start` is what starts the
+        provider, so an engine that never started never started one and has
+        nothing to release. ``live_system`` stops the provider in its own
+        ``finally`` regardless, so no path leaks a feed.
+
+        One consequence worth stating: on that path ``_stop_requested`` is no
+        longer set. That sharpens a separation which was blurred --
+        :meth:`request_stop` *arms* a shutdown and this *performs* one -- so a
+        stop issued before the engine ever ran no longer pre-arms the next
+        :meth:`run`.
+        """
+        if not self._started:
+            return
         self._started = False
         self._stop_requested.set()
         await self._provider.stop()
