@@ -44,10 +44,12 @@ __all__ = [
     "MAX_CLIENT_ORDER_ID_LENGTH",
     "MAX_GENERATION",
     "ClientOrderIdParts",
+    "ListClientOrderIdParts",
     "OrderListLeg",
     "client_order_id",
     "list_client_order_id",
     "parse_client_order_id",
+    "parse_list_client_order_id",
 ]
 
 #: Section 6's prefix. See the module docstring for why it is required.
@@ -101,11 +103,27 @@ _EPOCH: Final = datetime(1970, 1, 1, tzinfo=timezone.utc)
 #: guard exists to prevent.
 _LEGAL_CHARS: Final = re.compile(r"^[A-Za-z0-9_-]+$")
 
-#: Symbols carry no ``-``, and both numeric segments are digits, so the split is
-#: unambiguous and the parser needs no backtracking heuristics.
-_ID_PATTERN: Final = re.compile(
-    r"^tb1-(?P<symbol>[A-Za-z0-9]+)-(?P<ms>\d+)-(?P<generation>\d+)-(?P<leg>W|SL|TP)$"
-)
+#: The seed segments both IDs share. Symbols carry no ``-``, and both numeric
+#: segments are digits, so the split is unambiguous and neither parser needs
+#: backtracking heuristics.
+#:
+#: Factored out so the seeds have ONE definition while the suffixes stay in TWO
+#: patterns. That split is deliberate -- see :data:`_LIST_ID_PATTERN`.
+_ID_BODY: Final = r"^tb1-(?P<symbol>[A-Za-z0-9]+)-(?P<ms>\d+)-(?P<generation>\d+)-"
+
+_ID_PATTERN: Final = re.compile(_ID_BODY + r"(?P<leg>W|SL|TP)$")
+
+#: **A SECOND PATTERN RATHER THAN ONE ALTERNATION, and the reason is a raise on
+#: the reconciliation hot path.** Admitting ``L`` to :data:`_ID_PATTERN`'s group
+#: would make :func:`parse_client_order_id` accept a list ID, and its two
+#: production callers cannot survive that: ``get_own_open_orders`` would count
+#: one as ours, and ``_compare_set`` would reach ``OrderListLeg("L")`` -- which
+#: has no such member -- raising ``ValueError`` where it promises
+#: ``ContractViolationError``.
+#:
+#: With two patterns the disjointness is STRUCTURAL: neither can match the
+#: other's suffix, and there is no shared alternation for a later hand to widen.
+_LIST_ID_PATTERN: Final = re.compile(_ID_BODY + re.escape(LIST_SUFFIX) + r"$")
 
 
 class OrderListLeg(str, Enum):
@@ -142,6 +160,21 @@ class ClientOrderIdParts(NamedTuple):
     entry_bar_time: datetime
     generation: int
     leg: OrderListLeg
+
+
+class ListClientOrderIdParts(NamedTuple):
+    """The segments of one of our LIST-level client order IDs.
+
+    **A separate type, and the absence of ``leg`` is the point.** A list is not
+    a leg, which is why :data:`LIST_SUFFIX` is deliberately not a member of
+    :class:`OrderListLeg`; reusing :class:`ClientOrderIdParts` would need a
+    ``leg`` value that does not exist. The two decompositions are different
+    shapes because the two identities are.
+    """
+
+    symbol: str
+    entry_bar_time: datetime
+    generation: int
 
 
 def client_order_id(
@@ -189,6 +222,16 @@ def list_client_order_id(
     recognises legs. A list ID never appears in ``get_open_orders`` -- that
     endpoint returns orders -- so the filter that parser exists for never meets
     one.
+
+    **ANNOTATED: the paragraph above is still true of the LEG parser, and its
+    second sentence no longer justifies having no list parser at all.** It
+    reasons from one endpoint, and a caller has since arrived at another:
+    ``get_all_order_lists`` returns ``listClientOrderId``, so a boot-time check
+    asking *"is one of OUR lists still live on this symbol"* meets list IDs
+    routinely. :func:`parse_list_client_order_id` serves that caller. The two
+    parsers remain disjoint -- see :data:`_LIST_ID_PATTERN` for why that is
+    structural rather than maintained -- so nothing about the leg filter
+    changes.
 
     :raises ValueError: as :func:`client_order_id`.
     :raises ContractViolationError: as :func:`client_order_id`.
@@ -267,4 +310,37 @@ def parse_client_order_id(value: str) -> ClientOrderIdParts | None:
         entry_bar_time=_EPOCH + timedelta(milliseconds=int(match["ms"])),
         generation=int(match["generation"]),
         leg=OrderListLeg(match["leg"]),
+    )
+
+
+def parse_list_client_order_id(value: str) -> ListClientOrderIdParts | None:
+    """Decompose one of our LIST IDs, or return ``None`` if it is not ours.
+
+    ``None`` rather than a raise, for :func:`parse_client_order_id`'s reason:
+    the caller enumerates every list on the account, so foreign IDs are the
+    expected case rather than an exceptional one.
+
+    **RECOGNITION IS BY PARSING, NEVER BY PREFIX.** A raw
+    ``startswith("tb1-")`` admits ``tb1-garbage``, which this refuses -- the
+    hardening ``get_own_open_orders`` already applies to legs, applied to lists
+    for the same reason.
+
+    **What it recovers is not all it can VERIFY.** ``symbol`` is checkable
+    against a configured pair. ``entry_bar_time`` and ``generation`` are read
+    off the string and are **unverifiable after a restart**, because the bar a
+    previous process traded on lived only in that process's memory -- there is
+    nothing to compare them to. They are returned anyway rather than discarded:
+    the regex captures them for free, an operator reading a refusal wants to
+    know which bar the orphaned list came from, and throwing away recoverable
+    evidence is the shape ``resolution.py`` records as discarding what the
+    account demonstrably holds. A caller that MATCHES on them is the misuse;
+    the symbol is the only field a boot-time check may key on.
+    """
+    match = _LIST_ID_PATTERN.fullmatch(value)
+    if match is None:
+        return None
+    return ListClientOrderIdParts(
+        symbol=match["symbol"],
+        entry_bar_time=_EPOCH + timedelta(milliseconds=int(match["ms"])),
+        generation=int(match["generation"]),
     )

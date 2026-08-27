@@ -23,10 +23,12 @@ from trading_bot.exchange.ids import (
     MAX_CLIENT_ORDER_ID_LENGTH,
     MAX_GENERATION,
     ClientOrderIdParts,
+    ListClientOrderIdParts,
     OrderListLeg,
     client_order_id,
     list_client_order_id,
     parse_client_order_id,
+    parse_list_client_order_id,
 )
 
 BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
@@ -194,12 +196,20 @@ def test_the_list_id_uses_the_list_suffix_and_the_same_seeds() -> None:
 
 
 def test_the_list_id_is_not_a_leg_and_does_not_parse_as_one() -> None:
-    """A list is not a leg, and the parser is about legs.
+    """A list is not a leg, and the LEG parser is about legs.
 
     Not a gap: a list ID never appears in ``get_open_orders``, which returns
     orders, so the foreign-ID filter that parser exists for never meets one.
     Asserted rather than assumed, because the natural reading of "parse our IDs"
     would include it.
+
+    **ANNOTATED: the assertion is unchanged and the paragraph above is now the
+    reason for only half of it.** "There is no list parser" was true when this
+    was written and is not: ``parse_list_client_order_id`` serves
+    ``get_all_order_lists``, an endpoint that does return list IDs. What this
+    test pins is the DISJOINTNESS -- the leg parser still refuses a list ID --
+    which matters more now than it did, because there are two parsers to keep
+    apart rather than one to keep narrow.
     """
     assert parse_client_order_id(list_client_order_id("BTCUSDT", BAR)) is None
 
@@ -215,3 +225,55 @@ def test_the_list_id_shares_the_generation_bound(generation: int) -> None:
 def test_the_list_id_shares_the_naive_time_refusal() -> None:
     with pytest.raises(ValueError, match="timezone-aware"):
         list_client_order_id("BTCUSDT", datetime(2026, 8, 14, 12, 0))
+
+
+def test_the_list_id_round_trips() -> None:
+    """Generate then parse recovers every seed the string carries.
+
+    The generation is non-zero for the reason the leg round-trip gives: at 0 a
+    parser that dropped the segment and defaulted would still pass.
+    """
+    generated = list_client_order_id("ETHUSDT", BAR, generation=7)
+
+    assert parse_list_client_order_id(generated) == ListClientOrderIdParts(
+        symbol="ETHUSDT", entry_bar_time=BAR, generation=7
+    )
+
+
+def test_a_leg_id_does_not_parse_as_a_list() -> None:
+    """The mirror of ``test_the_list_id_is_not_a_leg_and_does_not_parse_as_one``,
+    and the pair is what makes the two parsers DISJOINT rather than merely
+    narrow.
+
+    Each test alone permits a parser that accepts both forms in one direction.
+    Together they forbid it, which is what a later hand widening either suffix
+    group would break -- and widening the LEG group is the dangerous one, since
+    ``_compare_set`` would reach ``OrderListLeg("L")`` and raise ``ValueError``
+    where it promises ``ContractViolationError``.
+    """
+    for leg in OrderListLeg:
+        assert parse_list_client_order_id(client_order_id("BTCUSDT", BAR, leg)) is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "x-HNA2TXFJ7f3a91",  # library-tagged: what `create_order` injects
+        "tb1-garbage",  # THE PREFIX-MATCHING REGRESSION -- see the docstring
+        f"tb1-BTCUSDT-{BAR_MS}-0-LL",  # our prefix, suffix outside the form
+        f"tb1-BTC-USDT-{BAR_MS}-0-L",  # our prefix, hyphen inside the symbol
+        f"tb1-BTCUSDT-{BAR_MS}-0",  # our prefix, suffix segment missing
+    ],
+    ids=["library_tag", "prefix_only", "bad_suffix", "hyphenated_symbol", "truncated"],
+)
+def test_a_list_id_that_is_not_ours_parses_to_none(value: str) -> None:
+    """``None``, never a raise -- the enumeration returns every list on the
+    account, so foreign IDs are the ordinary case.
+
+    **``tb1-garbage`` is the one that earns this test.** A raw
+    ``startswith("tb1-")`` accepts it, and Q-C records that admitting a human's
+    order that merely starts the same way is the failure the parse-don't-prefix
+    rule exists to prevent. A boot-time check keyed on a prefix would refuse a
+    symbol on the strength of somebody else's string.
+    """
+    assert parse_list_client_order_id(value) is None
