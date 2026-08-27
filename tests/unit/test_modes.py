@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import FrozenInstanceError
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -89,6 +89,7 @@ from trading_bot.engine.modes import (
     _seed_portfolio,
     live_system,
 )
+from trading_bot.exchange.ids import list_client_order_id
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.logger import surplus_fields
 
@@ -113,6 +114,40 @@ _MODES_LOGGER = "trading_bot.engine.modes"
 #: function in a signature default.
 _DEFAULT_TICKER_LAST = D("100")
 
+#: Distinguishes "no client id was given, derive one" from an explicit ``None``,
+#: which is a real venue state -- the placement response returns ``null`` when a
+#: list terminates in the same call.
+_UNSET_CLIENT_ID = "<derive>"
+
+#: A bar far enough in the past to be unmistakably not "now" -- the boot scan
+#: must match on SYMBOL alone, since `entry_bar_time` is unknowable after a
+#: restart, and a fixture whose bar happened to be current could hide a matcher
+#: that compared it.
+_LIST_BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
+
+
+def _live_list_for(
+    symbol: str,
+    *,
+    status: str = "EXECUTING",
+    client_id: str | None = _UNSET_CLIENT_ID,
+) -> OrderList:
+    """One entry of the boot scan's enumeration, as `get_all_order_lists` returns it.
+
+    ``client_id`` defaults to a correctly derived id for ``symbol``. Passing one
+    explicitly is how a fixture expresses a list that is NOT ours -- which is
+    the only way the prefix-matching regression can be caught.
+    """
+    return OrderList(
+        order_list_id="255471",
+        symbol=symbol,
+        list_client_order_id=(
+            list_client_order_id(symbol, _LIST_BAR) if client_id is _UNSET_CLIENT_ID else client_id
+        ),
+        list_status_type="EXEC_STARTED",
+        list_order_status=status,
+    )
+
 
 class FakeRootClient(ExchangeClient):
     """Serves the boot calls -- symbol info, balances, tickers -- and counts closes."""
@@ -125,6 +160,8 @@ class FakeRootClient(ExchangeClient):
         journal: list[str] | None = None,
         balances_error: Exception | None = None,
         ticker_last: Decimal = _DEFAULT_TICKER_LAST,
+        order_lists: list[OrderList] | None = None,
+        order_lists_error: Exception | None = None,
     ) -> None:
         self._balances = (
             balances
@@ -135,7 +172,10 @@ class FakeRootClient(ExchangeClient):
         self._journal = journal if journal is not None else []
         self._balances_error = balances_error
         self._ticker_last = ticker_last
+        self._order_lists = order_lists if order_lists is not None else []
+        self._order_lists_error = order_lists_error
         self.symbol_info_calls: list[str] = []
+        self.order_list_calls = 0
         self.close_calls = 0
 
     async def get_symbol_info(self, symbol: str) -> SymbolInfo:
@@ -198,13 +238,23 @@ class FakeRootClient(ExchangeClient):
     ) -> Order:
         raise NotImplementedError
 
-    async def get_all_order_lists(  # pragma: no cover
+    async def get_all_order_lists(
         self,
         *,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[OrderList]:
-        raise NotImplementedError
+        """The boot's live-order-list scan. Empty by default: the ordinary boot.
+
+        It stopped being ``NotImplementedError`` when ``live_system`` began
+        calling it -- every test of the boot path reaches it now, so a raise
+        here would make the fixture, not the code, decide the result.
+        """
+        self.order_list_calls += 1
+        self._journal.append("order_lists")
+        if self._order_lists_error is not None:
+            raise self._order_lists_error
+        return list(self._order_lists)
 
     async def create_otoco_order_list(  # pragma: no cover
         self,
@@ -442,6 +492,25 @@ def _case_unmanaged_holding() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
+def _case_live_order_list() -> Case:
+    """An order list of OURS still working at the venue on the signal's symbol.
+
+    `positions` is empty and doing the same double duty as the unmanaged-holding
+    case: nothing to price, nothing uncomputable, and `ALREADY_IN_POSITION`
+    silent -- which is exactly the hazard. A restart forgets the `Position`, so
+    the BUY would pyramid onto a live list without this guard.
+    """
+    pairs = default_pairs()
+    manager, _ = build_manager(pairs=pairs)
+    portfolio = Portfolio(
+        free_quote=D("10000"),
+        positions={},
+        blocked_symbols={SYMBOL: "venue list 255471 is still working"},
+    )
+    signal = buy()
+    return signal, manager.evaluate(signal, portfolio=portfolio), pairs
+
+
 def _case_limit_refused() -> Case:
     manager, _ = build_manager()
     signal = buy()
@@ -521,6 +590,7 @@ _STAGE_CASES = [
     (RefusalStage.POSITION_STALE, _case_position_stale),
     (RefusalStage.COMMITTED_RISK_UNKNOWN, _case_committed_risk_unknown),
     (RefusalStage.LIMIT_REFUSED, _case_limit_refused),
+    (RefusalStage.LIVE_ORDER_LIST, _case_live_order_list),
     (RefusalStage.UNMANAGED_HOLDING, _case_unmanaged_holding),
     (RefusalStage.ATR_UNAVAILABLE, _case_atr_unavailable),
     (RefusalStage.STOP_UNPLACEABLE, _case_stop_unplaceable),
@@ -1281,6 +1351,141 @@ class TestUnmanagedHoldings:
 
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             assert system.portfolio.unmanaged_holdings == {}
+
+    # ----------------------------------------------------------------------
+    # The boot-time live-order-list scan (B2) and the nothing-tradeable exit (V2)
+    # ----------------------------------------------------------------------
+    async def test_a_live_list_of_ours_blocks_only_its_own_symbol(self, tmp_path: Path) -> None:
+        """B2 refuses ONE symbol. Catches B1 -- a whole-boot refusal -- creeping in.
+
+        Two pairs enabled, one carrying a live list of ours: the boot completes
+        and the other pair stays tradeable. A B1 implementation would raise here.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL)])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert set(system.portfolio.blocked_symbols) == {SYMBOL}
+            assert not system.portfolio.is_blocked("ETHUSDT")
+            assert client.order_list_calls == 1  # one call, account-wide
+
+    async def test_a_terminal_list_does_not_block(self, tmp_path: Path) -> None:
+        """Catches the liveness test inverted -- the whole mechanism firing on
+        the fourteen finished lists this account already carries."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL, status="ALL_DONE")])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.blocked_symbols == {}
+
+    async def test_an_unrecognised_list_status_blocks(self, tmp_path: Path) -> None:
+        """R-LV: the TERMINAL test is a blacklist, so an unknown status blocks.
+
+        Catches a reviewer or author reaching for `resolution._is_live`, whose
+        whitelist defaults the other way -- correctly, for its own caller.
+
+        TWO pairs, so V2 does not fire and swallow the property under test. A
+        one-pair fixture asserts B2 and V2 at once and cannot tell them apart --
+        which it did, on the first run of this test.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL, status="SOME_NEW_STATE")])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.is_blocked(SYMBOL)
+            assert not system.portfolio.is_blocked("ETHUSDT")
+
+    async def test_a_failed_enumeration_blocks_every_enabled_symbol(self, tmp_path: Path) -> None:
+        """R-FC, and the highest-value mutation here: catches FAIL-OPEN.
+
+        The call is account-wide, so its failure carries no symbol-specific
+        information. Blocking one symbol -- or none -- would assert knowledge
+        about the others that the boot does not have.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        client = FakeRootClient(order_lists_error=ExchangeAPIError("venue unreachable"))
+
+        with pytest.raises(ConfigError, match="every enabled pair is blocked"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+    async def test_a_foreign_list_id_does_not_block(self, tmp_path: Path) -> None:
+        """Catches prefix matching. `tb1-garbage` is ours-looking and is not ours;
+        the library's own tag is not either. Refusing a symbol on somebody else's
+        string is the failure the parse-don't-prefix rule exists to prevent."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            order_lists=[
+                _live_list_for(SYMBOL, client_id="x-HNA2TXFJ7f3a91"),
+                _live_list_for(SYMBOL, client_id="tb1-garbage"),
+                _live_list_for(SYMBOL, client_id=None),
+            ]
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.blocked_symbols == {}
+
+    async def test_a_live_list_on_an_unconfigured_symbol_warns_and_blocks_nothing(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R-NE. `evaluate` already refuses an unconfigured symbol at
+        UNKNOWN_PAIR, so a block would be a second mechanism for a refusal that
+        already happens -- but the operator still needs telling."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(order_lists=[_live_list_for("DOGEUSDT")])
+
+        with caplog.at_level(logging.WARNING):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert system.portfolio.blocked_symbols == {}
+
+        records = [r for r in caplog.records if r.name == "trading_bot.engine.modes"]
+        assert any(getattr(r, "symbol", None) == "DOGEUSDT" for r in records)
+
+    async def test_a_blocked_symbol_is_not_priced_and_not_counted_in_equity(self) -> None:
+        """M2, and it catches M1 creeping back.
+
+        `unmanaged_holdings` is summed by `equity` and enumerated by
+        `marked_symbols`, and a symbol it cannot price refuses PORTFOLIO-WIDE
+        under NO_MARK_PRICE. A block must not buy that coupling.
+        """
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            blocked_symbols={SYMBOL: "venue list 255471 is still working"},
+        )
+
+        assert portfolio.is_blocked(SYMBOL)
+        assert portfolio.marked_symbols() == []
+        assert portfolio.equity({}) == D("1000")
+
+    async def test_the_boot_survives_when_one_pair_of_two_is_blocked(self, tmp_path: Path) -> None:
+        """V2 is a FLOOR, not a policy: it fires only when nothing is left."""
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL)])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.is_blocked(SYMBOL)
+
+    async def test_the_boot_exits_when_every_enabled_pair_is_blocked(self, tmp_path: Path) -> None:
+        """V2. A bot with nothing tradeable would otherwise connect, seed, and
+        refuse every signal silently -- `M5_NUMBERS.md`'s "looks healthy while
+        never trading". The message names each blocked symbol and its reason."""
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL)])
+
+        with pytest.raises(ConfigError, match="nothing this bot can trade") as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        assert SYMBOL in str(excinfo.value)
+        assert "255471" in str(excinfo.value)
 
     async def test_the_quote_asset_is_never_counted_as_an_unmanaged_holding(
         self, tmp_path: Path

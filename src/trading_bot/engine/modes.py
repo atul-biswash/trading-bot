@@ -127,7 +127,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from trading_bot.core.assessment import EntryIntent
-from trading_bot.core.exceptions import ConfigError
+from trading_bot.core.exceptions import ConfigError, TradingBotError
 from trading_bot.core.interfaces import (
     ExchangeClient,
     MarketDataProvider,
@@ -136,6 +136,7 @@ from trading_bot.core.interfaces import (
 )
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.engine.live_engine import TradingEngine
+from trading_bot.exchange.ids import parse_list_client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
 from trading_bot.execution.executor import OrderExecutor
 from trading_bot.execution.reconciliation_driver import (
@@ -158,6 +159,12 @@ __all__ = ["IntentLogger", "LiveSystem", "live_system"]
 
 #: The three ``event`` values. One constant per event so a rename cannot leave
 #: the emitter and its test disagreeing silently.
+#: The boot-time order-list scan's two events. Its own names rather than reusing
+#: a refusal event: this fires once at boot, before any signal exists, and an
+#: operator filtering for `risk_refused` is looking at a different moment.
+_EVENT_BOOT_BLOCKED = "boot_symbol_blocked"
+_EVENT_BOOT_FOREIGN_SYMBOL = "boot_live_list_unconfigured_symbol"
+
 _EVENT_RISK_REFUSED = "risk_refused"
 _EVENT_INTENT_DISPATCHED = "intent_dispatched"
 _EVENT_COLLABORATOR_FAILED = "collaborator_failed"
@@ -639,6 +646,174 @@ async def _snapshot_unmanaged_holdings(
 # --------------------------------------------------------------------------
 # The root
 # --------------------------------------------------------------------------
+#: List statuses from which nothing further can happen. **A BLACKLIST, and it
+#: is deliberately NOT ``resolution._is_live``.**
+#:
+#: That helper is a WHITELIST of live states (``EXECUTING``, ``EXEC_STARTED``),
+#: so a status nobody has classified reads as *terminal* -- the permissive
+#: direction, which is right for its caller: ``resolve_placement`` asks *"did my
+#: write land and is it working"*, and answering "not live" costs a re-query.
+#:
+#: This asks the opposite question -- *"is it safe to trade this symbol"* -- and
+#: under fail-closed an unrecognised status must BLOCK. So the default has to
+#: invert, and the only way to invert it is to test TERMINAL rather than negate
+#: LIVE. ``_is_live`` is not reused and not changed: it has other callers whose
+#: direction is correct for them.
+#:
+#: Two definitions answering opposite questions with opposite defaults, on
+#: purpose. Neither is a copy of the other.
+_TERMINAL_LIST_STATUSES = frozenset({"ALL_DONE", "REJECT"})
+
+
+async def _snapshot_live_order_lists(
+    client: ExchangeClient,
+    *,
+    pairs: Mapping[str, PairContext],
+    portfolio: Portfolio,
+) -> None:
+    """Block any enabled symbol carrying an order list of OURS that still works.
+
+    **The failure this exists to prevent, measured.** ``Position`` is
+    in-process only, so a restart forgets it entirely and
+    ``reconcile_open_positions`` -- which iterates ``portfolio.open_positions``
+    -- is structurally silent about it. Meanwhile the base is *locked* by the
+    resting protective legs, so ``balance.free`` is zero, so
+    :func:`_snapshot_unmanaged_holdings` reads it as dust and blocks nothing.
+    The bot would then enter again, on top of a live list it does not know
+    about. Measured on this account: BTC ``free=0``, ``locked=0.02310000``,
+    order list ``255471`` ``EXECUTING``, two legs resting.
+
+    **The ``-2010`` collision does not save a restart.** Two processes on ONE
+    bar derive the same client order id and the venue refuses the second. A
+    restart signals on a DIFFERENT bar, so ``entry_bar_time`` differs, so the
+    ids differ, so both are accepted. The accidental protection that contained
+    the concurrent case is absent from the sequential one.
+
+    **ONE call, account-wide**, regardless of how many pairs are enabled --
+    ``get_all_order_lists`` enumerates the account and the filtering is local.
+
+    **Recognition is by PARSING, never by prefix.** A raw
+    ``startswith("tb1-")`` admits ``tb1-garbage``; a human's order that merely
+    starts the same way would refuse a symbol. Only ``symbol`` is matched:
+    ``entry_bar_time`` and ``generation`` are recovered by the parser but are
+    unverifiable after a restart, because the bar a previous process traded on
+    lived only in that process's memory.
+
+    **FAIL CLOSED, and account-wide.** If the enumeration raises, every enabled
+    symbol is blocked -- not one. The call is a single account-wide read, so its
+    failure carries no symbol-specific information; blocking one would assert
+    knowledge about the others that we do not have. A boot that cannot see the
+    venue cannot know whether it is about to pyramid.
+
+    Blocks rather than raising, so it is **not** a sixth ``ConfigError`` boot
+    refusal: the ruling is to refuse a symbol, not the boot. Whether anything
+    remains tradeable is a separate question, answered by the caller.
+    """
+    try:
+        lists = await client.get_all_order_lists()
+    except TradingBotError as exc:
+        for symbol in pairs:
+            portfolio.blocked_symbols[symbol] = (
+                "could not enumerate order lists at boot, so whether one of ours is still "
+                f"working here is UNKNOWN ({type(exc).__name__}: {exc}). Refusing rather than "
+                "assuming: a boot that cannot see the venue cannot know whether it is about "
+                "to open a second position on top of a live one"
+            )
+        _log.error(
+            "Order-list enumeration FAILED at boot; every enabled symbol is blocked. "
+            "Nothing will be entered until the venue can be read and the bot restarted.",
+            extra={
+                "event": _EVENT_BOOT_BLOCKED,
+                "symbols": ",".join(sorted(pairs)),
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            },
+        )
+        return
+
+    for order_list in lists:
+        if order_list.list_order_status in _TERMINAL_LIST_STATUSES:
+            continue
+        parts = parse_list_client_order_id(order_list.list_client_order_id or "")
+        if parts is None:
+            continue  # not ours: a human's list, or another tool's
+
+        symbol = parts.symbol
+        if symbol not in pairs:
+            # R-NE: nothing to block. `evaluate` already refuses an unconfigured
+            # symbol at `UNKNOWN_PAIR`, so a block here would be a second
+            # mechanism for a refusal that already happens. The operator still
+            # needs telling -- money is resting there, and re-enabling the pair
+            # would make it matter.
+            _log.warning(
+                "%s carries a live order list of ours (%s) but is not an enabled pair. "
+                "Nothing is blocked; enabling this pair while that list works would.",
+                symbol,
+                order_list.order_list_id,
+                extra={
+                    "event": _EVENT_BOOT_FOREIGN_SYMBOL,
+                    "symbol": symbol,
+                    "order_list_id": order_list.order_list_id,
+                    "list_client_order_id": order_list.list_client_order_id,
+                },
+            )
+            continue
+
+        portfolio.blocked_symbols[symbol] = (
+            f"an order list this bot placed is still working at the venue (venue list "
+            f"{order_list.order_list_id}, our id {order_list.list_client_order_id}, status "
+            f"{order_list.list_order_status}). Money is resting there that this bot is NOT "
+            "watching: the position it belongs to was lost when the previous process ended. "
+            "Entries here are refused until that list is cancelled at the venue AND the bot "
+            "is restarted"
+        )
+        _log.error(
+            "%s is BLOCKED: a live order list of ours is working at the venue",
+            symbol,
+            extra={
+                "event": _EVENT_BOOT_BLOCKED,
+                "symbol": symbol,
+                "order_list_id": order_list.order_list_id,
+                "list_client_order_id": order_list.list_client_order_id,
+                "list_order_status": order_list.list_order_status,
+            },
+        )
+
+
+def _require_something_tradeable(pairs: Mapping[str, PairContext], portfolio: Portfolio) -> None:
+    """V2: refuse the boot when nothing is left to trade.
+
+    **This is NOT B1.** B1 refuses whenever any live list exists, which would
+    stop a two-pair bot over one blocked symbol. This adds no judgement about
+    what to block -- it observes that :func:`_snapshot_live_order_lists` blocked
+    everything and says so. With two pairs enabled and one blocked it does not
+    fire.
+
+    **Why exit rather than idle.** A bot with every symbol blocked connects,
+    seeds history, evaluates strategies and refuses every signal -- indefinitely
+    and quietly, among five hundred boot warnings. That is
+    ``docs/M5_NUMBERS.md``'s own failure shape: *"the bot looks healthy while
+    never trading."* An exit is the one outcome an operator cannot miss.
+
+    It is the family of the five existing boot refusals -- a ``ConfigError``
+    raised before the first socket -- and joins them for the same reason: the
+    honest failure is immediate and names its cause.
+    """
+    tradeable = [symbol for symbol in pairs if symbol not in portfolio.blocked_symbols]
+    if tradeable:
+        return
+    detail = "\n".join(
+        f"  {symbol}: {portfolio.blocked_symbols[symbol]}" for symbol in sorted(pairs)
+    )
+    raise ConfigError(
+        "every enabled pair is blocked, so there is nothing this bot can trade. Stopping "
+        "rather than running with no reachable action:\n"
+        f"{detail}\n"
+        "Cancel the listed order lists at the venue, or enable a pair that is not blocked, "
+        "then restart."
+    )
+
+
 @asynccontextmanager
 async def live_system(
     settings: Settings,
@@ -684,6 +859,11 @@ async def live_system(
         await _snapshot_unmanaged_holdings(
             resolved_client, balances=balances, pairs=pairs, portfolio=portfolio
         )
+        # Beside the holdings snapshot, and after it: the two blocking
+        # mechanisms are established together, so an operator meets both
+        # verdicts before anything opens a socket. Still ahead of step 5.
+        await _snapshot_live_order_lists(resolved_client, pairs=pairs, portfolio=portfolio)
+        _require_something_tradeable(pairs, portfolio)
 
         provider = await BufferedMarketDataProvider.create(
             settings, client=resolved_client, stream=stream

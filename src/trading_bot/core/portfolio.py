@@ -184,6 +184,29 @@ class Portfolio(BaseModel):
     #: ``equity`` would then double-count and the refusal would mislabel.
     unmanaged_holdings: dict[str, Money] = Field(default_factory=dict)
 
+    #: Symbols this bot may not enter because an order list of **ours** is still
+    #: working at the venue, mapped to the reason an operator needs. Recorded at
+    #: boot by ``engine.modes._snapshot_live_order_lists``.
+    #:
+    #: **NOT ``unmanaged_holdings``, and the separation is load-bearing rather
+    #: than tidy.** That dict is summed by :meth:`equity` and enumerated by
+    #: :meth:`marked_symbols`, so writing a symbol into it makes the whole bot
+    #: depend on being able to price that symbol -- and ``NO_MARK_PRICE``
+    #: refuses **portfolio-wide**, not just for the symbol it could not price.
+    #: A blocking mechanism that can halt every pair is the wrong instrument for
+    #: "do not enter this one".
+    #:
+    #: **A ``str`` value, not a quantity, because there is no honest quantity to
+    #: store.** The bot holds no ``Position`` for the list -- that is the whole
+    #: problem -- and the enumeration carries identity only:
+    #: ``OrderListEntry`` is ``{symbol, order_id, client_order_id}`` with no
+    #: size. What the operator needs is which list, not how much.
+    #:
+    #: **Immutable for the process lifetime, by the same convention as
+    #: ``unmanaged_holdings``**: recorded once at boot, and cleared only by
+    #: cancelling the list at the venue and restarting.
+    blocked_symbols: dict[str, str] = Field(default_factory=dict)
+
     # -- positions ----------------------------------------------------------
     @property
     def open_positions(self) -> list[Position]:
@@ -203,6 +226,15 @@ class Portfolio(BaseModel):
     def has_unmanaged_holding(self, symbol: str) -> bool:
         """Whether ``symbol``'s base asset carries a holding the bot did not open."""
         return symbol in self.unmanaged_holdings
+
+    def is_blocked(self, symbol: str) -> bool:
+        """Whether an order list of ours is still working on ``symbol``.
+
+        Deliberately NOT reflected in :meth:`marked_symbols` or :meth:`equity`:
+        see :attr:`blocked_symbols` for why a blocking mechanism that can halt
+        every pair is the wrong instrument for one symbol.
+        """
+        return symbol in self.blocked_symbols
 
     def marked_symbols(self) -> list[str]:
         """Every symbol ``equity`` needs a mark for, open positions first.

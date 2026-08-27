@@ -420,6 +420,24 @@ class RiskManager(RiskManagerPort):
         if not decision.approved:
             return refuse(decision.reason, stage=RefusalStage.LIMIT_REFUSED, decision=decision)
 
+        # BESIDE the unmanaged-holding check below and AHEAD of it. Both are
+        # facts about one symbol that leave every limit computable, so both
+        # belong after the limits rather than beside `NO_MARK_PRICE`. This one
+        # goes first because it is the one an operator must act on: an order
+        # list of OURS is working at the venue with no `Position` against it,
+        # where an unmanaged holding is somebody else's asset sitting still.
+        #
+        # The two are near-disjoint in practice and not exclusive. Base locked
+        # by our own protective legs reads as dust to the holdings snapshot --
+        # it tests `balance.free` -- so the measured case blocks here and not
+        # there; a partly-free holding could do both.
+        if portfolio.is_blocked(symbol):
+            return refuse(
+                f"{symbol}: {portfolio.blocked_symbols[symbol]}",
+                stage=RefusalStage.LIVE_ORDER_LIST,
+                decision=decision,
+            )
+
         # AFTER the limits, not before, and the position is the argument. An
         # unmanaged holding leaves the ledger INTACT -- nothing is uncomputable,
         # one symbol is simply not ours to trade -- so it does not belong beside

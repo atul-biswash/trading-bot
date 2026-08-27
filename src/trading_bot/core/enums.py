@@ -191,6 +191,23 @@ class RefusalStage(str, Enum):
     symbol is simply not ours to trade. Placing it beside the two guards above
     would assert the opposite in the structure of the code.
 
+    :attr:`LIVE_ORDER_LIST` sits beside it, for the same structural reason and
+    on a fact that is nearly its opposite. **Both clauses above are FALSE
+    here.** The ledger is *not* intact: an order list of ours is working at the
+    venue and no ``Position`` corresponds to it, because ``Position`` is
+    in-process only and a restart forgets it. And the symbol *is* ours to
+    trade -- the problem is that we already are. Reusing
+    ``UNMANAGED_HOLDING`` would file this under a name whose own documentation
+    asserts the reverse, and its message would tell an operator the bot did not
+    open something it did.
+
+    What the two share is the only thing that decides placement: both are facts
+    about ONE symbol, discovered at boot, that leave every limit computable. So
+    both are checked after the limits and neither belongs beside the guards
+    above. :attr:`LIVE_ORDER_LIST` is checked FIRST of the two, because it is
+    the one an operator must act on -- money is resting at the venue unwatched
+    -- where an unmanaged holding is somebody else's asset sitting still.
+
     There is no ``UNCLASSIFIED``. Every member here is reachable, because
     ``RiskAssessment``'s validator binds a refusal to naming one; an
     unreachable member would invite defensive branching on a state the domain
@@ -206,6 +223,7 @@ class RefusalStage(str, Enum):
     POSITION_STALE = "position_stale"
     COMMITTED_RISK_UNKNOWN = "committed_risk_unknown"
     LIMIT_REFUSED = "limit_refused"
+    LIVE_ORDER_LIST = "live_order_list"
     UNMANAGED_HOLDING = "unmanaged_holding"
     ATR_UNAVAILABLE = "atr_unavailable"
     STOP_UNPLACEABLE = "stop_unplaceable"
