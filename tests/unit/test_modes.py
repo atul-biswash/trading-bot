@@ -1925,7 +1925,19 @@ class TestTeardown:
 
     async def test_stopping_a_never_started_engine_does_not_raise(self, tmp_path: Path) -> None:
         """The root's inner `finally` runs whether or not `run()` was ever
-        called, so `stop()` has to tolerate an engine that never started."""
+        called, so `stop()` has to tolerate an engine that never started.
+
+        **The assertion was `>= 1` and is now exact (`M5g-093`).** It drove this
+        path all along and could see only half of it: `>= 1` catches a teardown
+        that never happened and is blind to one that happened three times, which
+        is precisely the direction the missing idempotence guards failed in. An
+        expressive fixture whose assertion did not look.
+
+        One is the whole count, and it is reached the long way: both
+        `engine.stop()` calls return early -- the engine never started, so it
+        started no provider and has nothing to release -- and the single
+        `stream.stop()` comes from the root's own `provider.stop()`.
+        """
         settings = write_settings(tmp_path)
         stream = FakeStream()
 
@@ -1933,7 +1945,7 @@ class TestTeardown:
             assert stream.start_calls == 0
             await system.engine.stop()  # explicit, before the finally does it again
 
-        assert stream.stop_calls >= 1
+        assert stream.stop_calls == 1
 
 
 # --------------------------------------------------------------------------

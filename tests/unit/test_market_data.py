@@ -748,6 +748,49 @@ async def test_stop_closes_a_client_the_provider_owns() -> None:
 
 
 async def test_stop_is_safe_before_start() -> None:
+    """A provider built and never started STILL stops its stream.
+
+    Not a courtesy: ``_BinanceSocketSource.create`` opens the stream's own
+    ``AsyncClient`` at construction, so this call is the only thing that
+    releases it. This is why :meth:`stop` cannot key on ``_started`` the way
+    ``TradingEngine.stop`` does -- MEASURED, that predicate fails this test.
+    """
     provider, _, stream = build_provider({("BTCUSDT", "1m"): []})
     await provider.stop()
+    assert stream.stop_calls == 1
+
+
+async def test_stop_twice_does_the_work_once() -> None:
+    """THE DEFECT (`M5g-090`). Catches the idempotence guard being removed.
+
+    **The observable is a call count, not a log line, and that is the whole
+    reason this sibling outlived ``TradingEngine.stop``'s.** That method logged
+    twice on every teardown, so a supervised run surfaced it in one evening.
+    This one logs nothing at all, so no run could ever have shown it: it was
+    found by reading the family, not by watching the bot.
+    """
+    provider, client, stream = build_provider(
+        {("BTCUSDT", "1m"): [rest_candle(0)]}, owns_client=True
+    )
+    await provider.start()
+
+    await provider.stop()
+    await provider.stop()
+
+    assert stream.stop_calls == 1
+    assert client.close_calls == 1
+
+
+async def test_stop_twice_before_start_does_the_work_once() -> None:
+    """Catches a guard that keys on ``_started`` instead of ``_stopped``.
+
+    The never-started path is the one where the two predicates disagree: it
+    must still stop the stream (once), which ``_started`` would skip entirely
+    and a correct guard performs exactly once.
+    """
+    provider, _, stream = build_provider({("BTCUSDT", "1m"): []})
+
+    await provider.stop()
+    await provider.stop()
+
     assert stream.stop_calls == 1

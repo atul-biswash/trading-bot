@@ -258,10 +258,39 @@ belongs here rather than in a docstring.**
 | `Safe to call any time.` | `BufferedMarketDataProvider.stop`, `TradingEngine.stop` |
 | `Safe to call more than once and even if start was never called.` | `BinanceMarketDataStream.stop` |
 
-**A grep for `Idempotent` finds six of the nine and misses `TradingEngine.stop`** —
-one of the two methods the root's double-teardown actually depends on. Anyone
-checking whether the contract holds before relying on it would have concluded it
-does not.
+**A grep for `Idempotent` finds eight of the nine and misses
+`BinanceMarketDataStream.stop`** — which spells the contract out in full
+instead, and is the one site where the longer phrase says more than the word
+would. Every method the root's double-teardown depends on is now reachable that
+way. The grep is looser than it sounds, though: it returns **eleven** hits in
+`src/`, three of them `binance_client.py` docstrings about **HTTP-retry**
+idempotence, which is a different sense of the word.
+
+> **THIS READ "six of the nine and misses `TradingEngine.stop`" UNTIL M5g, AND
+> THE COUNT IS CORRECTED IN PLACE RATHER THAN ANNOTATED.** A count is a live
+> description of the tree, not a record of an observation: when the tree moves
+> the old number is simply wrong, and this file's own count-coupling rule
+> treats documented counts as hand-updated facts. What is genuinely historical
+> is kept here instead.
+>
+> **Both `stop` methods were unguarded, and each was found by a different
+> instrument.** `TradingEngine.stop` logged twice on every teardown, so
+> supervised run 2 surfaced it in one evening (`M5g-079`, guarded at
+> `1d299a6`). `BufferedMarketDataProvider.stop` **logs nothing**, so no run
+> could ever have shown it — it was found only by surveying the family by hand
+> (`M5g-090`). The original point stands and is sharpened: the spelling drift
+> was real, it concealed two defects, and running the bot could reach only one
+> of them.
+>
+> **The two guards key on DIFFERENT predicates, deliberately, and that is the
+> transferable part.** `TradingEngine.stop` reads `_started`, because it
+> releases only what `start()` acquired. `BufferedMarketDataProvider.stop`
+> reads a separate `_stopped`, because the stream's own `AsyncClient` is opened
+> at CONSTRUCTION and a never-started provider still has to release it —
+> MEASURED, the `_started` predicate there fails three existing tests. So
+> "guard your lifecycle method with the started flag" is the wrong lesson to
+> carry away: **the predicate is "have I already released?", and only sometimes
+> is that the same question as "did I start?"**
 
 Two consequences. **A new lifecycle method inherits the obligation** — a
 `reconciler.stop()` that raises on a second call breaks teardown, not itself. And

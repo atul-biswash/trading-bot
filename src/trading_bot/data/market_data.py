@@ -173,6 +173,13 @@ class BufferedMarketDataProvider(MarketDataProvider):
         self._frames: dict[_Key, pd.DataFrame] = {}
         self._handlers: list[CandleHandler] = []
         self._started = False
+        # **A SECOND FLAG, and `_started` deliberately cannot serve.** Teardown
+        # releases resources this object holds from CONSTRUCTION -- the stream's
+        # own `AsyncClient`, opened in `_BinanceSocketSource.create` -- so
+        # "have I released?" is not "did I start?". A provider built and never
+        # started still has a socket manager to close, which is why `stop()`
+        # keys on this rather than on `_started`. See `stop()`.
+        self._stopped = False
 
     # -- construction -------------------------------------------------------
     @classmethod
@@ -288,11 +295,42 @@ class BufferedMarketDataProvider(MarketDataProvider):
         _log.info("Market-data provider started for %d pair(s)", len(self._buffers))
 
     async def stop(self) -> None:
-        """Stop the stream and release owned resources. Safe to call any time.
+        """Stop the stream and release owned resources.
+
+        Idempotent. Safe to call any time.
 
         The client is closed in a ``finally`` so a stream that fails to shut
         down cleanly still cannot leak the REST connection pool.
+
+        **THE GUARD KEYS ON ``_stopped``, AND ``_started`` DELIBERATELY CANNOT
+        SERVE.** This is the asymmetry with :meth:`TradingEngine.stop`, which
+        keys on ``_started`` correctly: that method releases only what
+        :meth:`TradingEngine.start` acquired, so an engine that never started
+        has nothing to release. **This one is different.** The stream owns a
+        second ``AsyncClient``, opened in ``_BinanceSocketSource.create`` at
+        CONSTRUCTION time, and :meth:`stop` is the only thing that closes it --
+        so a provider built and never started still holds a live aiohttp
+        session. MEASURED: an ``if not self._started: return`` guard here fails
+        three existing tests, ``test_stop_is_safe_before_start`` among them,
+        each reporting a stream that was never stopped.
+
+        So the fact being guarded is *"have I released?"*, which nothing on this
+        object previously encoded. ``CLAUDE.md`` forbids a **root** papering
+        over double-teardown with a "did I already stop?" flag, on the grounds
+        that it duplicates a fact the object owns and goes stale when anything
+        else calls ``stop()``; neither applies to an object tracking itself
+        inside its own ``stop()``. Swapping ``_stream`` to ``None`` -- the idiom
+        :meth:`BinanceMarketDataStream.stop` uses for its task -- was rejected
+        only because ``_stream`` is non-Optional and read by four other methods.
+
+        **It is set BEFORE the work, so a teardown that raises is not retried.**
+        The ``finally`` still closes the client on that path, and a second
+        attempt at a stream that already failed to stop would re-raise over the
+        original error -- the masking the nested teardown exists to prevent.
         """
+        if self._stopped:
+            return
+        self._stopped = True
         self._started = False
         try:
             await self._stream.stop()
