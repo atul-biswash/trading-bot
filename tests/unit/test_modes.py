@@ -1591,7 +1591,14 @@ class TestUnmanagedHoldings:
     ) -> None:
         """Refusing the boot over an asset the bot does not trade is overreach.
         The resulting equity error is conservative -- understated -- and the
-        warning is what stops it being invisible."""
+        warning is what stops it being invisible.
+
+        **ROUTED, NOT WEAKENED (`M5g-080`).** This asserted the per-asset line
+        at WARNING. Those lines are now DEBUG and one WARNING summary carries
+        the fact, so the assertion follows the detail down a level rather than
+        being dropped: it still demands the asset be NAMED, which is the half
+        an operator can act on.
+        """
         settings = write_settings(tmp_path)
         client = FakeRootClient(
             balances=[
@@ -1600,12 +1607,135 @@ class TestUnmanagedHoldings:
             ]
         )
 
-        with caplog.at_level(logging.WARNING, logger="trading_bot.engine.modes"):
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.engine.modes"):
             async with live_system(settings, client=client, stream=FakeStream()) as system:
                 assert system.portfolio.unmanaged_holdings == {}
 
         messages = [r.getMessage() for r in caplog.records if r.name == "trading_bot.engine.modes"]
         assert any("DOGE" in m and "EXCLUDED FROM EQUITY" in m for m in messages)
+
+    async def test_many_excluded_assets_produce_exactly_one_warning(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """THE DEFECT (`M5g-080`). Catches the collapse being reverted.
+
+        Run 2 put 501 of these into a 609-line log -- 82.3% of the run, and 501
+        of its 503 WARNING lines -- so a B2 block line would have sat among them
+        at an adjacent level. EXACT count, never `>=`: `M5g-097` is what an
+        inequality costs, and over-counting is the direction this defect failed
+        in.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                *(Balance(asset=f"COIN{n}", free=D("1000"), locked=D("0")) for n in range(25)),
+            ]
+        )
+
+        with caplog.at_level(logging.WARNING, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        # **The assertion is on EVERY warning this logger emitted, not on the
+        # summaries.** Filtering by event name first would count one summary
+        # whether or not 25 per-asset lines came back beside it -- the flood is
+        # exactly what must fail here, so the total is what is asserted.
+        warned = [
+            r
+            for r in caplog.records
+            if r.name == "trading_bot.engine.modes" and r.levelno == logging.WARNING
+        ]
+        assert len(warned) == 1
+        assert getattr(warned[0], "event", None) == "boot_assets_excluded"
+        assert warned[0].excluded_count == 25  # type: ignore[attr-defined]
+        assert "25 asset(s) are EXCLUDED FROM EQUITY" in warned[0].getMessage()
+
+    async def test_no_excluded_assets_produce_no_summary_at_all(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Catches a summary that reports zero.
+
+        Silence is the pass, matching the B2 scan beside it. A line saying
+        "0 asset(s) excluded" would fire on every healthy boot forever, which is
+        the banner this collapse exists to remove rather than relocate.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(balances=[Balance(asset="USDT", free=D("5000"), locked=D("0"))])
+
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        assert [
+            r for r in caplog.records if getattr(r, "event", None) == "boot_assets_excluded"
+        ] == []
+
+    async def test_the_per_asset_detail_is_complete_at_debug(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Catches the detail being sampled into the summary, or dropped.
+
+        An operator debugging equity needs every excluded asset, not an
+        arbitrary five of five hundred -- a sample reads as the whole set. The
+        full list survives at DEBUG; the summary carries no names at all.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="DOGE", free=D("1000"), locked=D("0")),
+                Balance(asset="SHIB", free=D("2000"), locked=D("0")),
+            ]
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        debug = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "trading_bot.engine.modes" and r.levelno == logging.DEBUG
+        ]
+        assert any("DOGE" in m and "EXCLUDED FROM EQUITY" in m for m in debug)
+        assert any("SHIB" in m and "EXCLUDED FROM EQUITY" in m for m in debug)
+
+    async def test_a_non_ascii_asset_name_cannot_break_the_summary(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Catches an asset name being interpolated back into the summary.
+
+        Run 2's account really held assets named `这是测试币` and `币安人生`. The
+        summary is unbreakable by them because it carries NO name -- only a
+        count and the quote asset -- and this pins that property rather than
+        trusting it. The DEBUG line does carry the name, and must survive it.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="这是测试币", free=D("999"), locked=D("0")),
+            ]
+        )
+
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.engine.modes"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        summaries = [
+            r for r in caplog.records if getattr(r, "event", None) == "boot_assets_excluded"
+        ]
+        assert len(summaries) == 1
+        assert "这是测试币" not in summaries[0].getMessage()
+        assert "1 asset(s) are EXCLUDED FROM EQUITY" in summaries[0].getMessage()
+
+        debug = [
+            r.getMessage()
+            for r in caplog.records
+            if r.name == "trading_bot.engine.modes" and r.levelno == logging.DEBUG
+        ]
+        assert any("这是测试币" in m for m in debug)
 
     async def test_the_escalation_is_a_boot_warning_never_critical(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture

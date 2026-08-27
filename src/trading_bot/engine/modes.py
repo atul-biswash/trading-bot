@@ -165,6 +165,10 @@ __all__ = ["IntentLogger", "LiveSystem", "live_system"]
 #: operator filtering for `risk_refused` is looking at a different moment.
 _EVENT_BOOT_BLOCKED = "boot_symbol_blocked"
 _EVENT_BOOT_FOREIGN_SYMBOL = "boot_live_list_unconfigured_symbol"
+#: The excluded-holdings SUMMARY, emitted once per boot and only when non-empty.
+#: It has an event name where the per-asset lines it replaced had none, because
+#: the whole point of collapsing them is that this one is machine-findable.
+_EVENT_BOOT_EXCLUDED = "boot_assets_excluded"
 
 _EVENT_RISK_REFUSED = "risk_refused"
 _EVENT_INTENT_DISPATCHED = "intent_dispatched"
@@ -606,6 +610,13 @@ async def _snapshot_unmanaged_holdings(
         if context.symbol_info.quote_asset == quote
     }
 
+    # Collected, then reported ONCE below. Per-asset WARNING lines put 501 of
+    # them into run 2's 609-line log -- 82.3% of the run, and 501 of its 503
+    # WARNING lines -- so a B2 block line would have sat among them at an
+    # adjacent level, and the silence-as-pass check B2 relies on was unreadable
+    # (`M5g-080`, `M5g-076`).
+    excluded: list[str] = []
+
     for balance in balances:
         asset = balance.asset.upper()
         # The quote asset is already `free_quote`; counting it here would
@@ -615,7 +626,17 @@ async def _snapshot_unmanaged_holdings(
 
         symbol = by_base.get(asset)
         if symbol is None:
-            _log.warning(
+            excluded.append(asset)
+            # DEBUG, not WARNING, and the QUANTITY is why this detail is worth
+            # keeping but not worth announcing. This branch runs precisely
+            # because no enabled pair quoted in `quote` prices the asset, so
+            # the amount cannot be valued here at all: 501 such quantities
+            # cannot be summed and do not bound the equity error. The ASSET
+            # NAME is the half an operator can act on -- it says what to enable
+            # -- so the full list stays available under `logging.level: DEBUG`
+            # rather than being sampled into the summary, where an arbitrary
+            # five of five hundred would read as the whole set.
+            _log.debug(
                 "%s: holding of %s is EXCLUDED FROM EQUITY -- no enabled %s pair, so it "
                 "cannot be priced. Equity is understated by its value.",
                 asset,
@@ -641,6 +662,36 @@ async def _snapshot_unmanaged_holdings(
             balance.total,
             asset,
             symbol,
+        )
+
+    # ONE line, and only when there is something to say. A line reporting zero
+    # exclusions would fire on every healthy boot forever, which is the banner
+    # this collapse exists to remove rather than relocate -- and it is the same
+    # silence-as-pass convention the B2 scan beside it already uses.
+    #
+    # WARNING and NOT downgraded, deliberately. On a faucet-funded Testnet
+    # account this fires every boot and looks structural; on a live account it
+    # fires only when the operator holds something the bot cannot price, which
+    # is genuinely exceptional. Lowering the level to suit the development
+    # environment would hide a real degradation in the one that matters --
+    # equity is the denominator of every sizing decision AND of the daily-loss
+    # threshold. The volume was the defect; the level was not.
+    #
+    # **NO ASSET NAME CROSSES THIS LINE**, which is what makes it unbreakable by
+    # a name like `这是测试币` -- measured on this account in run 2. Only a count
+    # and the quote asset appear, both plain types the `extra=` whitelist admits.
+    if excluded:
+        _log.warning(
+            "%d asset(s) are EXCLUDED FROM EQUITY -- no enabled %s pair prices them, so "
+            "equity is UNDERSTATED by their combined value, which cannot be computed here. "
+            "Set logging.level to DEBUG for the per-asset list.",
+            len(excluded),
+            quote,
+            extra={
+                "event": _EVENT_BOOT_EXCLUDED,
+                "excluded_count": len(excluded),
+                "quote_asset": quote,
+            },
         )
 
 
