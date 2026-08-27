@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from decimal import Decimal
 
 import pytest
@@ -112,9 +113,20 @@ class TestNoExtraIsUnchanged:
     trailing space here regresses every line it writes."""
 
     def test_plain_output_has_no_trailing_separator(self) -> None:
+        """**The `pid=` column arrived at M5g-19 and this baseline moved with it.**
+
+        Two concurrent bots wrote to one file on 2026-08-27 with nothing saying
+        which record came from which, and the resulting doubling read as three
+        different defects before it read as two processes. The column is not
+        decoration.
+
+        `os.getpid()` rather than a literal: the value is whatever process runs
+        the suite, and pinning a literal would fail on every machine but one.
+        """
         line = PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT).format(make_record())
         assert line == (
-            "2023-11-15 04:13:20 | INFO     | trading_bot.probe | signal BTCUSDT accepted"
+            f"2023-11-15 04:13:20 | INFO     | pid={os.getpid()} | "
+            "trading_bot.probe | signal BTCUSDT accepted"
         )
         assert not line.endswith(" ")
 
@@ -123,9 +135,18 @@ class TestNoExtraIsUnchanged:
         alone -- with nothing appended when there are no extras."""
         assert PlainFormatter("%(message)s").format(make_record()) == "signal BTCUSDT accepted"
 
-    def test_json_output_has_only_the_four_base_keys(self) -> None:
+    def test_json_output_has_only_the_base_keys(self) -> None:
+        """`pid` joined the base set at M5g-19, and it needed its OWN line in
+        `JsonFormatter.format` to do so.
+
+        It cannot arrive through `extra=`: `process` is a native `LogRecord`
+        attribute, so `surplus_fields` filters it out. That is why the two sinks
+        carry two independent edits, and why a two-sink agreement test exists in
+        `test_modes.py` to catch them disagreeing.
+        """
         payload = json.loads(JsonFormatter().format(make_record()))
-        assert set(payload) == {"time", "level", "logger", "message"}
+        assert set(payload) == {"time", "level", "logger", "pid", "message"}
+        assert payload["pid"] == os.getpid()
 
     def test_formatter_side_effects_are_not_reported_as_fields(self) -> None:
         """``logging.Formatter.format`` assigns ``message`` and ``asctime`` onto

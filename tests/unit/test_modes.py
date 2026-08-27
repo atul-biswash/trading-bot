@@ -19,6 +19,7 @@ proven to reach those branches.
 from __future__ import annotations
 
 import logging
+from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -91,11 +92,11 @@ from trading_bot.engine.modes import (
 )
 from trading_bot.exchange.ids import list_client_order_id
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
+from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
 from trading_bot.utils.logger import surplus_fields
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Mapping, Sequence
-    from datetime import datetime
+    from collections.abc import Iterator, Mapping, Sequence
     from pathlib import Path
 
 D = Decimal
@@ -910,6 +911,31 @@ class TestLogSchema:
         assert '"action": "BUY"' in JsonFormatter().format(record)
         assert "SignalAction" not in PlainFormatter("%(message)s").format(record)
 
+    async def test_the_pid_reaches_both_sinks_with_the_same_value(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """D5, and it needs the two-sink shape for the reason the enum test does.
+
+        `record.process` is a NATIVE LogRecord attribute, so `surplus_fields`
+        filters it out and it cannot arrive through `extra=`. Each sink
+        therefore needs its own line -- `%(process)d` in the plain format, an
+        explicit `"pid"` key in the JSON payload -- and two independent lines
+        are exactly what can disagree. Catches either one being removed, and
+        catches them rendering different values.
+        """
+        import os
+
+        from trading_bot.utils.logger import _PLAIN_FORMAT, JsonFormatter, PlainFormatter
+
+        signal, assessment, pairs = _case_limit_refused()
+        record = await _emit_one(caplog, signal, assessment, pairs)
+
+        plain = PlainFormatter(_PLAIN_FORMAT).format(record)
+        rendered = JsonFormatter().format(record)
+
+        assert f"pid={os.getpid()}" in plain
+        assert f'"pid": {os.getpid()}' in rendered
+
     async def test_decimals_render_identically_and_exactly_in_both_sinks(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -1486,6 +1512,68 @@ class TestUnmanagedHoldings:
 
         assert SYMBOL in str(excinfo.value)
         assert "255471" in str(excinfo.value)
+
+    # ----------------------------------------------------------------------
+    # The single-instance lock's wiring (D1). The lock itself is pinned in
+    # tests/unit/test_instance_lock.py; these two pin where it sits.
+    # ----------------------------------------------------------------------
+    async def test_an_injected_client_does_not_take_the_lock(self, tmp_path: Path) -> None:
+        """L1. Catches unconditional acquisition.
+
+        An injected client authenticates nothing, so there is no venue access to
+        serialise -- and acquiring anyway would make every test in this file
+        contend for one lock file, serialising a suite over a resource that
+        exists to serialise PROCESSES. That this test's own neighbours all pass
+        is the other half of the evidence.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()):
+            # Nothing holds it, so a bystander can take it.
+            with acquire_instance_lock(tmp_path / ".bot.lock"):
+                pass
+
+    async def test_the_lock_is_taken_before_the_client_is_built(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """R-ORDER, and R-C beneath it: a refused instance must never authenticate.
+
+        Catches the acquisition moved after client construction -- which reads
+        as harmless and is not: a second process would sign in, prime symbols
+        and read balances before being told to stop.
+
+        `client=None` is what makes this reachable at all, since L1 gates
+        acquisition on exactly that.
+        """
+        order: list[str] = []
+        settings = write_settings(tmp_path)
+        lock_path = tmp_path / ".bot.lock"
+
+        from trading_bot.engine import modes as modes_module
+
+        real_acquire = modes_module.acquire_instance_lock
+
+        @contextmanager
+        def recording_acquire(path: Path = lock_path) -> Iterator[None]:
+            order.append("lock")
+            with real_acquire(lock_path):
+                yield
+
+        class RecordingBinanceClient:
+            @staticmethod
+            async def create(_settings: Any) -> FakeRootClient:
+                order.append("client")
+                return FakeRootClient()
+
+        monkeypatch.setattr(modes_module, "acquire_instance_lock", recording_acquire)
+        monkeypatch.setattr(
+            "trading_bot.exchange.binance_client.BinanceClient", RecordingBinanceClient
+        )
+
+        async with live_system(settings, stream=FakeStream()):
+            pass
+
+        assert order == ["lock", "client"]
 
     async def test_the_quote_asset_is_never_counted_as_an_unmanaged_holding(
         self, tmp_path: Path

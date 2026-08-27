@@ -122,7 +122,7 @@ so passing the member itself makes the two sinks disagree about the same field.
 from __future__ import annotations
 
 import logging
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -145,6 +145,7 @@ from trading_bot.execution.reconciliation_driver import (
 )
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.helpers import utc_now
+from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -842,6 +843,25 @@ async def live_system(
     from trading_bot.data.market_data import BufferedMarketDataProvider
     from trading_bot.exchange.binance_client import BinanceClient
 
+    # THE OUTERMOST SCOPE, and BEFORE the client. A refused instance must never
+    # authenticate, so the lock precedes every venue call -- the only thing
+    # ahead of it is the pure mode check. It is released in the innermost
+    # `finally` of the outermost one, AFTER the client closes, so it outlives
+    # every other resource: no window exists in which this process has torn
+    # down but still holds the account.
+    #
+    # A `contextlib.ExitStack` rather than a `with` block, and the reason is
+    # reviewability rather than taste: a `with` here would re-indent this
+    # function's entire body, mixing a mechanical change into a semantic commit.
+    #
+    # ONLY WHEN THE CLIENT IS OURS TO BUILD. An injected client authenticates
+    # nothing, and acquiring unconditionally would make every test of this boot
+    # path contend for one lock file -- serialising a suite over a resource
+    # that exists to serialise PROCESSES.
+    instance_lock = ExitStack()
+    if client is None:
+        instance_lock.enter_context(acquire_instance_lock())
+
     resolved_client = client if client is not None else await BinanceClient.create(settings)
     try:
         timeframes = _pair_timeframes(settings)
@@ -940,4 +960,10 @@ async def live_system(
             # on this path is documented idempotent.
             await provider.stop()
     finally:
-        await resolved_client.close()
+        # Nested so the lock is released even if closing the client raises,
+        # and released AFTER it -- which is what makes it the outermost
+        # teardown despite not being the outermost `with`.
+        try:
+            await resolved_client.close()
+        finally:
+            instance_lock.close()

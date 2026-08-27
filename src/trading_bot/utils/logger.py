@@ -17,7 +17,18 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.config.models import LoggingConfig
 
-_PLAIN_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(message)s"
+#: **``%(process)d`` is here so interleaved processes are separable.** One log
+#: file carried two concurrent bots on 2026-08-27 with nothing in it saying
+#: which record came from which, and the doubling that resulted read as a
+#: duplicated subscriber, a duplicated handler and a duplicated candle delivery
+#: before it read as two processes.
+#:
+#: ``record.process`` rather than a record factory: the stdlib already sets it
+#: to ``os.getpid()`` on every record, so a factory would be a second source of
+#: truth for a value that exists. The JSON sink needs its own line -- ``process``
+#: is a native ``LogRecord`` attribute and is therefore filtered out of
+#: ``surplus_fields``, so it cannot arrive there via ``extra=``.
+_PLAIN_FORMAT = "%(asctime)s | %(levelname)-8s | pid=%(process)d | %(name)s | %(message)s"
 _DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _configured = False
 
@@ -65,6 +76,11 @@ class JsonFormatter(logging.Formatter):
             "time": self.formatTime(record, _DATE_FORMAT),
             "level": record.levelname,
             "logger": record.name,
+            # Explicit, because `surplus_fields` filters every native
+            # `LogRecord` attribute and `process` is one -- so this cannot
+            # arrive through `extra=`. Same value the plain sinks render from
+            # `%(process)d`; the two-sink agreement test pins that.
+            "pid": record.process,
             "message": record.getMessage(),
         }
         if record.exc_info:
