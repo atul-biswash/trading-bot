@@ -14,9 +14,20 @@ script's own ``TestnetCancelAPI`` protocol, and the credential tests construct
 ``Secrets`` explicitly rather than reading ``.env``.
 
 **What is NOT covered**, stated rather than left to be discovered: the venue
-interaction itself. No test may make a network call, so the ``DELETE``'s
-acceptance, its response shape and the re-read confirmation are unverified in
-exactly the sense ``test_clear_testnet_holdings.py`` records for the seller.
+interaction itself. No test may make a network call, so nothing here exercises
+the ``DELETE``'s acceptance, its response shape or the re-read confirmation --
+uncovered in exactly the sense ``test_clear_testnet_holdings.py`` records for
+the seller.
+
+**Exercised once against Testnet, which is NOT coverage.** On 2026-08-27 the
+script cancelled order list ``263866``: the ``DELETE`` was accepted, its
+response carried ``listOrderStatus``, and the re-read reported ``ALL_DONE``.
+That is one observation, of one list, in one state. It survives only in a
+console transcript -- this script prints and does not log, so
+``logs/trading_bot.log`` holds no record of it -- and it defends nothing
+against a future edit. The gap these tests declare is unchanged; only the word
+"unverified" was wrong, because it read as absolute where the claim is about
+the suite.
 """
 
 from __future__ import annotations
