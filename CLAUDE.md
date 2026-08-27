@@ -2642,6 +2642,29 @@ position exercises all seven at once, plus the executor's own construction,
 dispatch, budget and resolution. Each is pinned by tests over fabricated
 positions; what nothing covers is their composition.
 
+> **SUPERSEDED BY TWO SUPERVISED RUNS, and only PARTLY — the paragraph above
+> is annotated rather than rewritten because its conclusion was right and its
+> scope is now wrong.** *"They still have not, because nothing has RUN"* is
+> FALSE: run 1 dispatched on 2026-08-27 and run 2 ran 2h 08m 51s the same day.
+>
+> **What ran, MEASURED over run 2's 81 reconciliation passes:**
+> `classify_protection`, `reconcile_open_positions`, `ReconciliationDriver`,
+> `ACTIVE`'s trust, `build_placement`, `DispatchBudget`, and the executor's
+> dispatch and `Position` construction. Seven of eleven.
+>
+> **What did NOT, and this is the half that matters.**
+> `resolve_unresolved_legs` was **called 81 times and made ZERO venue calls** —
+> an `ACTIVE` assessment carries nothing unresolved and the resolver
+> early-continues, so the log's `queries=2` is budget headroom rather than work
+> (`M5g-085`). The L-leg reservation never bound, `RefusalStage.POSITION_STALE`
+> never fired, and `resolve_placement` never ran because no placement was ever
+> ambiguous.
+>
+> **The transferable part: a component that could not have failed was not
+> confirmed.** Reading 81 clean passes as retiring the composition risk is the
+> error this annotation exists to prevent — the passes are real evidence about
+> the classifier and no evidence at all about the resolver.
+
 **Four decisions in it are load-bearing and are locked above:** the reservation
 reserves what the first unresolved position *needs* rather than one call;
 `ACTIVE` joined `_TRUSTED_PROTECTION`, which is what stops a correctly protected

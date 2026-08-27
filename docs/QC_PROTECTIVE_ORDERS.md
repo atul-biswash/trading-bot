@@ -768,6 +768,23 @@ the natural fix and is deliberately **not** prescribed here.
 > hit, the class definition — so no position has ever carried `DIVERGED` outside
 > a test. Site 3 is closed by construction and unobserved in operation.
 
+> **FALSIFIED ON BOTH CLAUSES, and the second is the interesting one.**
+> `OrderExecutor._open_position` has constructed a `Position` since M5f
+> `8ca878e`. And a position HAS carried `DIVERGED` outside a test: the first
+> supervised run (2026-08-27) reported `states="diverged=1"` on 28 consecutive
+> reconciliation passes.
+>
+> **It was a defect, not site 3.** Every one of those was the identifier-space
+> mismatch fixed at `3970968` — `classify_protection` compared the venue's
+> numeric `orderListId` against our derived `tb1-` client id, so *correctly
+> protected* positions read `DIVERGED`. The second run, after the fix, reported
+> `active=1` on all 81 passes.
+>
+> **So site 3 remains unobserved in operation, and the sentence above is still
+> the right conclusion reached through a premise that has expired.** What is
+> now known is narrower and worth stating exactly: `DIVERGED` has been written
+> in production, and every instance was our bug rather than a venue divergence.
+
 ## 8. Errors
 
 `translate_binance_error` must match **message text, not code**. `-2010 'Duplicate

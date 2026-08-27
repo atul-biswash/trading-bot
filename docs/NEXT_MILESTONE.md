@@ -81,6 +81,25 @@ under per-call bounds, and on success records a `Position` at
 
 **Nothing has run this.** No `main.py` invocation has dispatched anything.
 
+> **FALSIFIED 2026-08-27 by two supervised runs.** Run 2 dispatched an OTOCO,
+> filled, and held one position for 2h 08m 51s across 81 reconciliation passes.
+>
+> **Three items this file carries are now live rather than hypothetical:**
+>
+> - **`CLOSE` is refused by name, and the cost compounds.** Post-entry the
+>   strategy signalled CLOSE, BUY, CLOSE. Both CLOSEs were refused
+>   `close_not_implemented`; the BUY was refused `already_in_position`. The
+>   strategy traded a full round trip in its own view while the ledger held one
+>   position. Edge-triggered strategies do not re-emit, so both exits are gone
+>   (`M5g-078`). This is the strongest argument the tree now carries for what
+>   the next milestone builds.
+> - **Testnet charges NO commission** (`M5g-082`). `config.yaml` carries
+>   `fee_percent: 0.1` for `backtesting` and `paper_trading`, and no document
+>   here mentions fees. Whoever writes that fee model cannot validate it on
+>   Testnet, and must not read a clean Testnet round trip as evidence it works.
+> - **The carried-risk table above is about half retired** — see `CLAUDE.md`'s
+>   annotation for which seven ran and which four did not.
+
 ---
 
 ## The project owner's outstanding rulings — ask precisely

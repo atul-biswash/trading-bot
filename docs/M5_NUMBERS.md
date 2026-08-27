@@ -75,6 +75,25 @@ bars, measured <date> on Testnet.`
 
 **Status: PLACEHOLDER — NOT MEASURED.**
 
+> **ONE OBSERVATION EXISTS AND THE STATUS DOES NOT MOVE.** MEASURED
+> 2026-08-27, run 2: a marketable limit at `79780.75` filled at `79701.05`
+> against a bar close of `79701.04` — **one tick**, `1.25e-7` against a `1e-3`
+> budget, leaving `79.70` of the limit unused.
+>
+> **It is a sample of the wrong distribution's tail, and recording it plainly
+> would be worse than not recording it.** The prescription above asks for a
+> percentile of **close-to-ask**; this is close-to-**fill**, a different
+> quantity. It was taken with the ask unmoved for roughly one second, on the
+> deepest book Testnet offers, for a `1821` USDT notional, on a quiet bar. It
+> bounds nothing about a thin book, a fast bar, or an order large enough to
+> walk the book — which are the only conditions under which this number does
+> any work.
+>
+> **PLACEHOLDER — NOT MEASURED stands, and the value is unchanged.** What this
+> adds is a single data point and the reason it is not evidence.
+> `config.yaml`'s *"no sample exists"* is deliberately left alone: one
+> observation of a different quantity is not a sample of this one.
+
 ---
 
 ## 2. The `PERCENT_PRICE_BY_SIDE` band margin
@@ -326,6 +345,31 @@ a warning when it means something.
 > executor constructs one, at `8ca878e`. The value is still unexercised **by a
 > run**, which is a different and weaker claim: no position has aged against it
 > outside a test because nothing has RUN, not because nothing can construct one.
+
+> **ITEM 2'S CONCLUSION SURVIVES THE FIRST RUNS; ITS STATED REASON DOES NOT.**
+> Annotated rather than corrected, because the two halves expired separately
+> and only one of them did.
+>
+> **The reason is FALSE.** *"Because nothing has RUN"* — two supervised runs
+> dispatched on 2026-08-27, the second holding one position for 2h 08m 51s.
+>
+> **The conclusion still HOLDS, by a mechanism the sentence never named.** No
+> position aged against this value because the reconciler kept it fresh.
+> MEASURED over run 2's 81 passes: inter-pass gaps of 60, 61, 119, 120 and
+> 121 s, so the stamp's worst observed age was **121 s against a 180 s
+> threshold** — 59 s of margin. `RefusalStage.POSITION_STALE` did not fire, and
+> `_stale_positions` remains **unexercised by a run**, exactly as claimed.
+>
+> **Why annotate a sentence that is still true.** The conclusion now rests on a
+> budget that was never contended rather than on the absence of a run, and the
+> two fail differently: a second enabled pair, a slower venue or a skipped pass
+> moves the first, and nothing moves the second. A later reader re-uses the
+> reason, not the verdict. That is `M5f-011`'s shape — a justification going
+> stale because nothing at its site re-checks the fact it rests on — reached
+> here by the fact being superseded rather than moved.
+>
+> **PLACEHOLDER — NOT MEASURED stands.** Nothing here samples the quantity the
+> number is about.
 
 ---
 
