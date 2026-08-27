@@ -134,7 +134,6 @@ def classify_protection(
     entry_bar_time: datetime,
     generation: int,
     quantity: Decimal,
-    order_list_id: str | None,
     stop_loss: Decimal | None,
     take_profit: Decimal | None,
     resting: Sequence[tuple[ClientOrderIdParts, Order]],
@@ -147,11 +146,20 @@ def classify_protection(
     neighbouring position's legs to this one.
 
     **The compared set, and its two deliberate exclusions.** Existence, status,
-    ``executedQty``, ``origQty``, ``orderListId`` and the trigger price are
-    compared; the client order id is compared implicitly, since it is what
-    selects a leg at all. ``price`` and ``timeInForce`` on a stop-market leg are
+    ``executedQty``, ``origQty``, the **client order id** and the trigger price
+    are compared. ``price`` and ``timeInForce`` on a stop-market leg are
     **server defaults and are excluded entirely** -- comparing them manufactures
     divergence on every pass.
+
+    **``orderListId`` IS NOT COMPARED, and the reason is a defect this function
+    shipped with.** It used to be, against ``Position.order_list_id`` -- and
+    those are two different identifier spaces. ``to_order`` builds
+    ``Order.order_list_id`` from the venue's numeric ``orderListId`` (``255471``
+    in the first live run), while both writers of ``Position.order_list_id``
+    store the ``listClientOrderId`` **we** derived (``tb1-BTCUSDT-...-0-L``).
+    Both are ``str | None``, so no type could see it: every correctly protected
+    position read ``DIVERGED`` on the healthy path, which is the interlock
+    firing on the case it exists to bless.
 
     **The trigger is compared NUMERICALLY.** The venue pads what it returns --
     ``"40917.83"`` comes back ``"40917.83000000"`` -- so a string comparison
@@ -271,12 +279,36 @@ def classify_protection(
                     "was requested"
                 ),
             )
-        if order_list_id is not None and order.order_list_id != order_list_id:
+        # WHOLE-STRING, where `mine` matched decomposed components. That is the
+        # whole of what this adds: `mine` is keyed on `parts.symbol`,
+        # `parts.entry_bar_time` and `parts.generation` from a PARSED id, so a
+        # generator and parser that disagreed -- one rendering what the other
+        # would not produce -- would agree on the components and differ on the
+        # string. Nothing else in the pass would notice.
+        #
+        # WHAT THIS ASSUMES, and it is not unconditionally true: that a leg
+        # carrying our derived client order id belongs to the list WE placed.
+        # Q-C section 6 measures the limit of that -- *"a client order id is
+        # unique against LIVE orders only; a terminal order's id is RELEASED and
+        # immediately reusable"* -- so the assumption holds while our list is
+        # live and fails once it terminates and the id is reused.
+        #
+        # THE FALSIFIER IS OBSERVED, not hypothetical. `execution/resolution.py`
+        # records a census in those words: *"14 order lists carrying 12 distinct
+        # `listClientOrderId` values, with one id mapping to THREE lists"*. If a
+        # released-then-reused leg id ever surfaces alongside a live one, only
+        # the venue's numeric `orderListId` separates them -- and this function
+        # does not carry it, because `Position` does not. That is the open
+        # question S2 would have closed and this shape does not.
+        expected_id = client_order_id(symbol, entry_bar_time, leg, generation=generation)
+        if order.client_order_id != expected_id:
             return ProtectionAssessment(
                 state=ProtectionState.DIVERGED,
                 reason=(
-                    f"{symbol} leg {leg.value} belongs to list {order.order_list_id} where "
-                    f"{order_list_id} was requested"
+                    f"{symbol} leg {leg.value} rests under client order id "
+                    f"{order.client_order_id} where {expected_id} was requested; this leg is "
+                    f"not the one this position placed. It sits on venue list "
+                    f"{order.order_list_id} -- query that list before cancelling anything"
                 ),
             )
 
@@ -499,7 +531,6 @@ async def reconcile_open_positions(
             entry_bar_time=position.entry_bar_time,
             generation=_NO_GENERATION_SOURCE,
             quantity=position.quantity,
-            order_list_id=position.order_list_id,
             stop_loss=position.stop_loss,
             take_profit=position.take_profit,
             resting=_compare_set(orders, symbol=position.symbol),

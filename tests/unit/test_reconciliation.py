@@ -25,7 +25,22 @@ SYMBOL = "BTCUSDT"
 BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
 GEN = 0
 QTY = Decimal("0.00100000")
-LIST_ID = "91590"
+#: THE VENUE'S numeric list id, stringified -- what `to_order` puts on
+#: `Order.order_list_id`. Deliberately numeric-shaped so a reader can tell at a
+#: glance which identifier space a fixture value belongs to.
+VENUE_LIST_ID = "91590"
+
+#: OURS, derived -- the shape `Position.order_list_id` actually carries in
+#: production, from `OrderList.list_client_order_id`. The two were the SAME
+#: CONSTANT until M5g-14, which is why no test could fail on the
+#: identifier-space mismatch: the fixture could not express it.
+CLIENT_LIST_ID = f"tb1-{SYMBOL}-1786694400000-0-L"
+
+#: A leg id we would never render for this position -- a different bar. It is
+#: the route to DIVERGED now that a differing VENUE list id is correctly not
+#: one, and it is shared so the two reachability tripwires below and the
+#: divergence test agree on what divergence means.
+FORGED_LEG_ID = f"tb1-{SYMBOL}-9999999999999-0-SL"
 
 # Requested unpadded, as `risk/rules.py` produces them after tick rounding.
 STOP = Decimal("44117.09")
@@ -39,12 +54,19 @@ def _leg(
     status: OrderStatus = OrderStatus.NEW,
     quantity: Decimal = QTY,
     filled: Decimal = Decimal(0),
-    list_id: str | None = LIST_ID,
+    list_id: str | None = VENUE_LIST_ID,
     bar: datetime = BAR,
     generation: int = GEN,
     symbol: str = SYMBOL,
+    cid: str | None = None,
 ) -> tuple[ClientOrderIdParts, Order]:
-    """One entry of the compare set, as `get_own_open_orders` returns it."""
+    """One entry of the compare set, as `get_own_open_orders` returns it.
+
+    ``cid`` overrides the leg's own client order id INDEPENDENTLY of ``parts``,
+    which is what lets a fixture express a leg that reaches ``mine`` (its parsed
+    components match) while carrying an id we never sent. Without that
+    separation the whole-string check has no input that can falsify it.
+    """
     parts = ClientOrderIdParts(symbol=symbol, entry_bar_time=bar, generation=generation, leg=leg)
     order = Order(
         order_id="1",
@@ -56,7 +78,9 @@ def _leg(
         filled_quantity=filled,
         stop_price=Decimal(stop_price) if stop_price is not None else None,
         order_list_id=list_id,
-        client_order_id=client_order_id(symbol, bar, leg, generation=generation),
+        client_order_id=cid
+        if cid is not None
+        else client_order_id(symbol, bar, leg, generation=generation),
     )
     return parts, order
 
@@ -67,7 +91,6 @@ def _classify(**overrides: object) -> ProtectionAssessment:
         "entry_bar_time": BAR,
         "generation": GEN,
         "quantity": QTY,
-        "order_list_id": LIST_ID,
         "stop_loss": STOP,
         "take_profit": TARGET,
         "resting": [],
@@ -218,7 +241,7 @@ def test_no_state_this_can_return_is_trusted_except_absent_by_design() -> None:
     producible = {
         _classify(resting=_both_legs_resting()).state,
         _classify(resting=_both_legs_resting(status=OrderStatus.PENDING_NEW)).state,
-        _classify(resting=_both_legs_resting(list_id="99999")).state,
+        _classify(resting=_both_legs_resting(cid=FORGED_LEG_ID)).state,
         _classify(resting=[]).state,
         _classify(stop_loss=None, take_profit=None).state,
     }
@@ -267,11 +290,58 @@ def test_legs_from_another_bar_are_not_attributed_to_this_position() -> None:
     }
 
 
-def test_a_leg_on_the_wrong_order_list_is_divergence() -> None:
+def test_a_differing_venue_list_id_is_not_divergence() -> None:
+    """THE REGRESSION TEST for M5g-14, and it fails on the code it replaced.
+
+    This test used to be ``test_a_leg_on_the_wrong_order_list_is_divergence``
+    and asserted the opposite. It passed only because the fixture put ONE
+    constant on both sides of a comparison whose two sides are different
+    identifier spaces: ``Order.order_list_id`` is the venue's numeric id, and
+    ``Position.order_list_id`` is the ``tb1-`` id we derived. In production
+    those never match, so every correctly protected position read ``DIVERGED``
+    -- measured on the first live run, eighteen passes, all diverged.
+
+    A venue list id we did not choose is not evidence about our leg. What
+    identifies the leg is the id we generated for it, and this fixture carries
+    the right one.
+    """
     result = _classify(resting=_both_legs_resting(list_id="99999"))
 
+    assert result.state is ProtectionState.ACTIVE
+
+
+def test_a_leg_carrying_an_id_we_never_sent_is_divergence() -> None:
+    """The whole-string check biting: parsed components agree, the id does not.
+
+    ``mine`` is keyed on ``parts``, so this leg reaches the comparison loop --
+    which is the only way to exercise the check at all. Its ``client_order_id``
+    is a string we would never render, so a generator and parser that disagreed
+    would be caught here and nowhere else in the pass.
+    """
+    result = _classify(
+        resting=[
+            _leg(OrderListLeg.STOP_LOSS, stop_price="44117.09000000", cid=FORGED_LEG_ID),
+            _leg(OrderListLeg.TAKE_PROFIT, stop_price="50419.53000000"),
+        ]
+    )
+
     assert result.state is ProtectionState.DIVERGED
-    assert "99999" in result.reason
+    assert FORGED_LEG_ID in result.reason
+    assert client_order_id(SYMBOL, BAR, OrderListLeg.STOP_LOSS, generation=GEN) in result.reason
+
+
+def test_a_leg_whose_venue_list_is_unknown_still_classifies_from_its_own_id() -> None:
+    """The case S1 handles and S2 could not.
+
+    ``to_order`` maps the venue's ``-1`` sentinel to ``None``, and
+    ``_matched_list_id`` returns ``None`` whenever the live match is ambiguous.
+    Under a venue-numeric comparison both states disable the check entirely --
+    a guard that switches itself off in the state it most needs to fire in.
+    The leg's own id is present either way, so the verdict is reachable.
+    """
+    result = _classify(resting=_both_legs_resting(list_id=None))
+
+    assert result.state is ProtectionState.ACTIVE
 
 
 def test_the_verdict_is_frozen() -> None:
@@ -293,7 +363,7 @@ def test_every_protection_state_has_a_writer_here() -> None:
     produced = {
         _classify(resting=_both_legs_resting()).state,
         _classify(resting=_both_legs_resting(status=OrderStatus.PENDING_NEW)).state,
-        _classify(resting=_both_legs_resting(list_id="99999")).state,
+        _classify(resting=_both_legs_resting(cid=FORGED_LEG_ID)).state,
         _classify(resting=[]).state,
         _classify(stop_loss=None, take_profit=None).state,
     }

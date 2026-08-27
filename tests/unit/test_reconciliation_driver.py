@@ -36,7 +36,12 @@ NOW = datetime(2026, 8, 15, 12, 0, tzinfo=timezone.utc)
 BAR = datetime(2026, 8, 15, 11, 0, tzinfo=timezone.utc)
 QTY = Decimal("0.00100000")
 STOP = Decimal("44117.09")
-LIST_ID = "91590"
+#: THE VENUE's numeric list id -- what `to_order` puts on `Order.order_list_id`.
+VENUE_LIST_ID = "91590"
+#: OURS, derived -- the shape `Position.order_list_id` carries in production.
+#: Distinct from VENUE_LIST_ID on purpose: they were one constant until
+#: M5g-14, and that is why no fixture could express the mismatch.
+CLIENT_LIST_ID = "tb1-BTCUSDT-1786694400000-0-L"
 
 BUDGET = ReconciliationBudget(
     dedup_interval=timedelta(minutes=1),
@@ -119,7 +124,7 @@ def _order(symbol: str, leg: OrderListLeg) -> Order:
         status=OrderStatus.NEW,
         quantity=QTY,
         stop_price=STOP,
-        order_list_id=LIST_ID,
+        order_list_id=VENUE_LIST_ID,
         client_order_id=client_order_id(symbol, BAR, leg, generation=0),
     )
 
@@ -137,7 +142,7 @@ def _position(
         entry_price=Decimal("47000.00"),
         entry_bar_time=BAR,
         protection=ProtectionState.UNKNOWN,
-        order_list_id=LIST_ID,
+        order_list_id=CLIENT_LIST_ID,
         last_reconciled_at=stamp,
         stop_loss=stop_loss,
     )

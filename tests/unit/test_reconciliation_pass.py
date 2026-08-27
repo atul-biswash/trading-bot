@@ -47,7 +47,12 @@ STOP = Decimal("44117.09")
 #: A take-profit, so a position can request TWO protective legs. The
 #: reservation is a leg COUNT, and a one-leg fixture cannot express that.
 TAKE = Decimal("52000.00")
-LIST_ID = "91590"
+#: THE VENUE's numeric list id -- what `to_order` puts on `Order.order_list_id`.
+VENUE_LIST_ID = "91590"
+#: OURS, derived -- the shape `Position.order_list_id` carries in production.
+#: Distinct from VENUE_LIST_ID on purpose: they were one constant until
+#: M5g-14, and that is why no fixture could express the mismatch.
+CLIENT_LIST_ID = "tb1-BTCUSDT-1786694400000-0-L"
 
 
 class _StubClient:
@@ -132,7 +137,7 @@ def _order(
         status=status,
         quantity=QTY,
         stop_price=Decimal(stop_price) if stop_price is not None else None,
-        order_list_id=LIST_ID,
+        order_list_id=VENUE_LIST_ID,
         client_order_id=cid if cid is not None else client_order_id(symbol, BAR, leg, generation=0),
     )
 
@@ -151,7 +156,7 @@ def _position(
         entry_price=Decimal("47000.00"),
         entry_bar_time=BAR,
         protection=ProtectionState.UNKNOWN,
-        order_list_id=LIST_ID,
+        order_list_id=CLIENT_LIST_ID,
         last_reconciled_at=stamp,
         stop_loss=stop_loss,
         take_profit=take_profit,

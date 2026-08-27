@@ -523,7 +523,17 @@ class OrderExecutor:
                 "quantity": intent.quantity,
                 "entry": intent.entry_limit,
                 "stop_loss": intent.levels.stop_loss,
-                "order_list_id": order_list.list_client_order_id,
+                # BOTH IDS, UNDER DISTINCT KEYS. `order_list_id` used to carry
+                # the CLIENT id, which is how the first live run printed
+                # `order_list_id=tb1-BTCUSDT-...-0-L` -- a venue-sounding key
+                # holding a value the venue never issued. `order_list_id` now
+                # means what it means everywhere else in this tree (`Order`,
+                # `OrderList`, and `docs/QB_ESCALATION.md`'s CRITICAL schema):
+                # the venue's numeric id. Ours gets its own key. Emitting both
+                # rather than renaming one is what lets an operator move
+                # between our log and the venue's UI without a lookup.
+                "order_list_id": order_list.order_list_id,
+                "list_client_order_id": order_list.list_client_order_id,
                 "entry_bar_time": entry_bar_time.isoformat(),
             },
         )
