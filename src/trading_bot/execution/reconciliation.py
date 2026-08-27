@@ -235,7 +235,7 @@ def classify_protection(
                 state=ProtectionState.UNKNOWN,
                 reason=(
                     f"{symbol} leg {leg.value} reports status {order.status.value} with "
-                    f"{order.filled_quantity} executed; the fill path is unmeasured, so this "
+                    f"{order.filled_quantity} executed; the fill PRICE is unmeasured, so this "
                     "state is refused rather than interpreted"
                 ),
             )
@@ -567,12 +567,51 @@ def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[_ResolvedS
     classified still lands somewhere defensible: ``OrderStatus.is_open`` is a
     blacklist of terminal states, and its unclassified members default to OPEN
     -- which here means UNKNOWN, which refuses. The reversible direction.
+
+    THE OPEN MEASUREMENT: DOES A TRIGGERED STOP CARRY ``average_price``?
+    ---------------------------------------------------------------------
+    **This function is where a venue-triggered exit is first seen, and it
+    discards the one field that would let the exit be booked.** MEASURED at
+    M5g's run 3: a ``STOP_LOSS`` leg reported ``FILLED`` with ``0.02257000``
+    executed on nine consecutive passes, the account realised ``-35.38691640``
+    USDT, and nothing in ``src/`` recorded any of it -- ``Portfolio``'s only
+    accrual path, :meth:`record_realised_pnl`, is reachable solely from
+    :meth:`close_position`, which has no caller.
+
+    **The exit price is already carried and already thrown away.**
+    :class:`~trading_bot.core.models.Order` has ``average_price``, which
+    ``to_order`` derives as ``cummulativeQuoteQty / executedQty``; it has ZERO
+    readers in ``src/``, and the branch below reads ``status`` and
+    ``filled_quantity`` only. So the question is not where an exit price would
+    come from. It is narrower and answerable in one observation:
+
+        **On a TRIGGERED stop-market leg, does the venue populate
+        ``cummulativeQuoteQty``, so that ``average_price`` is non-``None``?**
+
+    DOCUMENTED, NOT MEASURED. ``GET /api/v3/order`` is documented to return
+    ``cummulativeQuoteQty``; whether it is non-zero for a leg the venue
+    triggered -- rather than one we placed and filled -- has never been
+    observed here, and run 3 could not answer it because nothing read the
+    field.
+
+    **Why it must be answered BEFORE any exit booking, not alongside it.**
+    The obvious shortcut is to book at the requested trigger price, which
+    needs no measurement. Run 3 refutes it: entry-to-stop implies
+    ``0.02257 x (80756.69 - 79141.56) = 36.45`` and the account moved
+    ``35.39``. Booking the trigger is wrong by roughly 3% here, and in a
+    gapping market it errs by UNDER-reporting the loss -- the one direction a
+    risk control may not take.
+
+    **It arms on the next run that fills**, and cannot be taken before one:
+    it needs a live stop the venue triggers. Recorded here rather than in
+    ``docs/NEXT_MILESTONE.md`` because that file is rewritten at every
+    rotation, which is how ``M5f-092`` was nearly lost.
     """
     if order.status is OrderStatus.FILLED or order.filled_quantity > 0:
         return (
             ProtectionState.UNKNOWN,
             f"{symbol} leg {leg.value} reports {order.status.value} with "
-            f"{order.filled_quantity} executed; the fill path is unmeasured, so this state is "
+            f"{order.filled_quantity} executed; the fill PRICE is unmeasured, so this state is "
             "refused rather than interpreted",
         )
     if order.status.is_open:
