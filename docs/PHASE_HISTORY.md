@@ -2648,3 +2648,179 @@ update.
 
 **Ruled by the reviewer under delegation, except where the project owner is
 named above.**
+
+---
+
+## Phase 5 M5g — the milestone that ran the bot, and found what running costs
+
+M5g was scoped as one supervised Testnet run. It became **four runs, a defect
+hunt, three operator scripts and a rotation that had to be suspended
+mid-flight.** **21 commits including this one — 17 numbered and four of
+rotation — and 144 findings, every commit carrying a block.** The milestone's
+headline is not that the bot ran. It is that **running it revealed a defect
+1184 passing tests and a strict type gate could not see, and then a second one
+that no test could ever have seen**: the venue closed a position and the ledger
+did not notice.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `47039f5` | The read-only probe answers the account precondition |
+| 2 | `f2fb5bd` | Whether any candidate pair escapes the holding refusal |
+| 3 | `00d527c` | `equity`'s docstring omitted a term its body sums |
+| 4 | `c6acdfc` | `MARKET_LOT_SIZE` measured, which decides a one-pass clear |
+| 5 | `48bfcba` | A Testnet-only clearer, with its guards under test |
+| 6 | `50691b3` | The configuration of the first supervised run, committed |
+| 7 | `3970968` | **D2**: protection classified from the leg's own id |
+| 8 | `28a151b` | A parser for the list-level client order id |
+| 9 | `b81eb1c` | **B2 and V2**: a symbol whose own order list still works |
+| 10 | `041d54c` | **D1 and D5**: one instance per checkout, a PID per record |
+| 11 | `f6af2b0` | A Testnet-only canceller, built cold against a clean account |
+| 12 | `92c59d6` | What the second run measured, and what it falsified |
+| 13 | `1d299a6` | `TradingEngine.stop` is idempotent, where only `start` was |
+| 14 | `ffdfcf0` | The lifecycle family's last guard, and the count it moves |
+| 15 | `7f8db8d` | The excluded-holdings flood collapsed to one summary line |
+| 16 | `3d96495` | The cut-off inventory: four runs, not one |
+| 17 | `ae4eb43` | The exit-price measurement armed where the exit is seen |
+
+Rotation: `c304b5d` (step A, the canceller's falsified coverage claim),
+`8f1cb1a` (step C, `CLAUDE.md` and `README.md`), `4f08741` (step D,
+`NEXT_MILESTONE` rewritten for M5h), **and this commit**, which records the
+milestone. **Step B — the contracts re-read — was measured and produced no
+commit**, which is the correct outcome for a step whose targets were all
+already annotated.
+
+### The four runs, and the two that were nearly lost
+
+The bot ran four times. **Two of them happened between sessions and no report
+in the milestone knew of them** until a rotation step enumerated the log's pids
+and got three where it expected one. Their entire record was
+`logs/trading_bot.log`, which is gitignored, and the rotation would otherwise
+have sealed them out of the milestone.
+
+That is a fifth drift surface, and it is worse than the four already recorded:
+those hold **stale claims**, which a reader can disagree with. This one holds
+**no claim at all**. The failure is silence rather than error.
+
+### D2 — the defect that made the bot single-shot
+
+`classify_protection` compared the venue's numeric `orderListId` against our
+derived `tb1-` client order id. Both operands are `str | None`, so **mypy
+strict cannot see it and 1184 tests passed over it.** Every correctly protected
+position read `DIVERGED`, which is untrusted, which makes committed risk
+uncomputable, which refuses every entry portfolio-wide. The bot could open one
+position and never a second.
+
+Only a live run surfaced it, and only because the reconciler reported on
+protection that was demonstrably correct. Fixed at `3970968` by comparing the
+leg's own client id to the one `client_order_id()` derives, and confirmed over
+**81 consecutive passes reading `active=1`** against the first run's 28
+consecutive `diverged=1`.
+
+The fixtures were the accomplice: one constant, `LIST_ID = "91590"`, supplied
+both the venue value and the requested id across three test modules. **A test
+cannot fail on a mutation its input cannot express.** They now use visibly
+different shapes per identifier space.
+
+### What else the runs confirmed
+
+**B2 and V2** (`b81eb1c`): a live order list of ours on an enabled symbol
+blocks that symbol at boot under `RefusalStage.LIVE_ORDER_LIST`, and if every
+enabled symbol is blocked the boot exits rather than idling. Run 4 emitted
+nothing from the scan, which is the pass condition — and, recorded honestly, is
+a near-vacuous confirmation: on an account with no live lists the loop
+`continue`s before the parser, so no input could have produced a different
+result.
+
+**D1 and D5** (`041d54c`): an OS-level instance lock acquired before the client
+is constructed, and `pid=` on every record. The lock has no success log line, so
+the file's PID bytes are its only proof — and it is a single slot with no
+history, so the measurement had to be taken live or not at all.
+
+**The excluded-holdings collapse** (`7f8db8d`): run 2 put 501 identical warnings
+into a 609-line log — 82.3% of the run, and 501 of its 503 WARNING lines — so a
+B2 block line would have sat among them at an adjacent level. Run 4 booted under
+the collapsed code and logged **one** line carrying `excluded_count=501`, with a
+total WARNING count of 1.
+
+**Nine of eleven carried-risk components have now run.** `resolve_placement` and
+`RefusalStage.POSITION_STALE` have not, after four runs, and neither is armed by
+a caller: one needs an ambiguous placement, the other needs the reconciliation
+pass to stop running.
+
+### The headline, and it is a thing M5g did NOT do
+
+**Run 3 took the project's first complete trade. The venue triggered the
+stop-loss. The account realised `-35.38691640` USDT, and nothing in `src/`
+booked it.**
+
+- `Portfolio.record_realised_pnl` has **exactly one call site**, inside
+  `Portfolio.close_position`.
+- `Portfolio.close_position` has **zero callers**.
+- So the credit, the deletion and the accrual are all unreachable. **The ledger
+  can be opened and never closed.**
+- `realised_today` therefore returns `Decimal(0)` permanently, and the
+  daily-loss check's realised term is structurally dead. **It is a
+  committed-risk limit wearing a daily-loss limit's name.**
+
+The reconciler saw it on nine consecutive passes and did the only thing it
+knows: classified `UNKNOWN`, logged, and refused further entries. The bot halted
+— by the wrong mechanism, for a wrong stated reason, and only in-process.
+**A restart heals the balance sheet and erases the income statement**: equity is
+re-read from the venue at boot, realised P&L is not, because nothing ever wrote
+it. Run 4 proved it by booting with the post-loss balance and no knowledge a
+trade had occurred.
+
+The same gap swallows a take-profit fill and a manual exit at the venue.
+M5h's scope — persistence, then exit booking, then `CLOSE` — was ruled by the
+project owner on this evidence, and the ordering is forced: booking without
+persistence yields a halt that resets on restart and *looks* like a control.
+
+### The process record
+
+**The heredoc rule failed twice more after being written into the tree.** The
+section recording it diagnosed three earlier failures as the `phase_5_` shape —
+the instruction *"had lived only in prompts"* — which implies that writing it
+down would end them. It was written down. `M5g-046` is the fourth and the first
+where damage **landed**: a Python heredoc wrote 1148 and 476 CR bytes into two
+LF-pinned fixture files, and **`git diff` hid it** because the index normalises.
+`M5g-106` is the fifth, in a task whose own prompt forbade heredocs in capitals.
+The rule was deliberately not restated a sixth time; what was recorded instead
+is the evidence about the remedy.
+
+**The rescue sweep found four rules living only in `NEXT_MILESTONE.md`** — the
+finding-ID scheme, the milestone-paragraph re-tensing convention, `M5f-091` and
+`M5f-094` — where the rotation expected two. The extra two were found only
+because the audit looked for the general case rather than for named items, and
+step D's rewrite would have destroyed them.
+
+**And the instrument used to check for missing rules itself failed**, in the
+direction that manufactures work: two case-sensitive `grep -F` calls reported
+rules absent from `CLAUDE.md` that were present, one in capitals and one under
+different wording.
+
+### Two mislabelled observables, recorded because both are still live
+
+**`reconciliation_pass`'s `queries=` field reports budget HEADROOM, not work
+done.** It is `max_calls - len(assessments)`, constant at 2 across every pass of
+both runs. In run 2 it read 2 while **zero** queries were made; in run 3 it read
+2 while **exactly two** were made. A field that is accidentally correct is more
+dangerous than one plainly wrong, because inspection cannot catch it.
+
+**The log records no fill price and no balance.** `order_placed` logs the LIMIT
+that was sent, never the fill. Run 3's realised loss is derivable only from two
+console readings taken by hand — the bot's own record cannot answer *"what did I
+pay?"*.
+
+### The historical figures in this entry
+
+**21 commits, 144 findings, and the gate at this commit's parent `4f08741` —
+`ruff check` clean, 105 files formatted, mypy clean over 68 source files, 1273
+passed credentialed.** These are HISTORICAL and must never move, exactly like
+the `f52f161`, `470b47b` and `4926705` figures above. A later rotation grepping
+the digits will meet them; they are facts about this milestone's close, not
+counts to update.
+
+**M5h's scope was ruled by the project owner. Everything else here was ruled by
+the reviewer under delegation.**
