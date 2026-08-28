@@ -176,10 +176,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  99 files already formatted
-mypy                                   Success: no issues found in 65 source files
-pytest                                 1165 passed, 3 skipped
-                                       (1168 = 1165 + 3 with Testnet credentials)
+ruff format --check src tests scripts  105 files already formatted
+mypy                                   Success: no issues found in 68 source files
+pytest                                 1270 passed, 3 skipped
+                                       (1273 = 1270 + 3 with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -188,9 +188,9 @@ pytest                                 1165 passed, 3 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `1165 passed, 3 skipped` on a machine without
-  them and `1168 passed` on a machine with them. **Both are green.** A fresh clone
-  seeing 1165 is not looking at a regression — quote the count with its condition,
+  keys. The *same commit* reports `1270 passed, 3 skipped` on a machine without
+  them and `1273 passed` on a machine with them. **Both are green.** A fresh clone
+  seeing 1270 is not looking at a regression — quote the count with its condition,
   never bare.
 - **Network.** Those three tests make live read-only calls to Testnet and two wait
   on a real 1-minute bar, so a full run takes ~90s longer and can fail for reasons

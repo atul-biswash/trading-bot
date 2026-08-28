@@ -254,7 +254,7 @@ belongs here rather than in a docstring.**
 
 | Spelling | Sites |
 |---|---|
-| `Idempotent.` | `MarketDataProvider.stop` (the port), `BufferedMarketDataProvider.track` / `.start`, `TradingEngine.start`, `BinanceMarketDataStream.start`, `setup_logging` |
+| `Idempotent.` | `MarketDataProvider.stop` (the port), `BufferedMarketDataProvider.track` / `.start` / `.stop`, `TradingEngine.start` / `.stop`, `BinanceMarketDataStream.start`, `setup_logging` |
 | `Safe to call any time.` | `BufferedMarketDataProvider.stop`, `TradingEngine.stop` |
 | `Safe to call more than once and even if start was never called.` | `BinanceMarketDataStream.stop` |
 
@@ -1117,6 +1117,28 @@ data.
   two. Positions are visited **oldest stamp first**, so a pass cut short by the
   budget always advances the stalest one instead of starving a fixed tail.
 
+  > **TRUE, AND RADICALLY INCOMPLETE: OBSERVATION IS WHERE IT ENDS.** MEASURED
+  > at M5g's run 3 — a `STOP_LOSS` leg reported `FILLED` with `0.02257000`
+  > executed on nine consecutive passes, the account realised `-35.38691640`
+  > USDT, and **the ledger did not change**. Fills are observed. Nothing is
+  > *done* with the observation.
+  >
+  > **What happens when a fill is seen:** the leg classifies `UNKNOWN`, that is
+  > written to `Position.protection`, a warning is logged, and — because
+  > `UNKNOWN` is outside `_TRUSTED_PROTECTION` — committed risk becomes
+  > uncomputable and further entries are refused. **What does NOT happen:** the
+  > position is not closed, no proceeds are credited, no realised P&L is
+  > accrued. `record_realised_pnl` has one call site, inside `close_position`,
+  > which has **zero callers** — so `realised_today` returns `Decimal(0)`
+  > forever and the daily-loss limit's realised term is structurally dead.
+  >
+  > The bot does halt after a stop-out, but by the wrong mechanism and for a
+  > wrong stated reason: it says protection is untrusted where the truth is that
+  > the position is gone. That halt is in-process only, and a restart clears it
+  > — equity self-corrects from the venue at boot while realised P&L cannot,
+  > because nothing ever wrote it. **A restart heals the balance sheet and
+  > erases the income statement.**
+
   A user-data stream is the correct successor and is deliberately deferred: a
   listen-key lifecycle, a second socket with its own reconnect story, and a **worse**
   failure mode than polling — a silently dead stream leaves us believing we are
@@ -1250,6 +1272,30 @@ data.
   The shell is still the right tool for *commands*. The boundary is whether the
   bytes are the point: `git commit -F <file>` is shell, and the file it names
   was written by the editor.
+
+  > **THE COUNT IS FIVE, AND THE REMEDY THIS SECTION PRESCRIBES HAS BEEN TRIED
+  > AND HAS NOT WORKED.** The paragraph above diagnoses three failures as the
+  > `phase_5_` shape — *"the instruction against it had lived only in prompts"* —
+  > which implies that writing it into the tree would end them. It was written
+  > into the tree. It failed twice more.
+  >
+  > **`M5g-046` is the fourth and the first where damage LANDED.** A Python
+  > heredoc wrote CRLF into two LF-pinned fixture files — 1148 and 476 CR bytes
+  > against a `.gitattributes` of `* text=auto eol=lf` — and **`git diff` hid
+  > it**, showing only the eleven intended lines, because the index normalises.
+  > The three earlier failures all aborted *before* writing, which is why this
+  > read as a style rule; this one did not.
+  >
+  > **`M5g-106` is the fifth**, in a rotation task whose own prompt forbade
+  > heredocs in capital letters. It aborted at the shell parser, so no damage —
+  > but it happened under the written rule, with the rule quoted in the
+  > instruction being followed.
+  >
+  > **The rule is not restated here, deliberately.** A sixth statement of it
+  > would be the same remedy a sixth time. What is recorded instead is the
+  > evidence about the remedy: five occurrences, two of them after the rule
+  > entered the repository, and one that reached disk with the tree's own diff
+  > tool concealing it.
 - **Text that LEAVES a document to be committed or executed is ASCII. Text that
   stays in the document is house style, em dashes included.** This is a
   **propagation boundary, not a file rule**, which is why the right answer can
@@ -1398,10 +1444,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  99 files already formatted
-mypy                                   Success: no issues found in 65 source files
-pytest                                 1165 passed, 3 skipped
-                                       (1168 passed with Testnet credentials present)
+ruff format --check src tests scripts  105 files already formatted
+mypy                                   Success: no issues found in 68 source files
+pytest                                 1270 passed, 3 skipped
+                                       (1273 passed with Testnet credentials present)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1410,14 +1456,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1168 passed` on a machine with Binance Testnet credentials in `.env`
-- `1165 passed, 3 skipped` on a machine without them
+- `1273 passed` on a machine with Binance Testnet credentials in `.env`
+- `1270 passed, 3 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1165 and must not read it as a regression against a documented
-1168. Quote the count with its condition, never bare.
+runner will see 1270 and must not read it as a regression against a documented
+1273. Quote the count with its condition, never bare.
 
-Only the `1168` is measured here; `1165` is `1168` minus the three `skipif`-gated
+Only the `1273` is measured here; `1270` is `1273` minus the three `skipif`-gated
 integration tests. Say which is which rather than presenting both as observed.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
@@ -1477,8 +1523,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 99 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 65 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 105 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 68 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -1721,6 +1767,53 @@ that coupling was invisible until a prediction was wrong about it. Predicted
 cardinalities of 1, 2, 3, 5, 8, 9, 11 and 18 have since held; the discipline is
 to state the number *and* the list before running.
 
+**AND THE ABSTENTIONS, IN ADVANCE — not only the failures.** The rule above
+asks for the list of tests that WILL fail. Name also the tests that will NOT,
+and why, **before** running: an undeclared pass is indistinguishable from
+coverage, and after the fact nobody re-examines a green test. The existing
+weaker forms are a docstring declaration made *after* the discovery, and the
+post-hoc union audit across several mutations; both are useful and neither
+prevents the same discovery being made twice.
+
+**It pays before the mutation runs.** At M5g a new test asserting "exactly one
+warning" filtered records by event name before counting — so it would have found
+one summary whether or not 501 per-asset lines came back beside it. Writing the
+prediction is what exposed it, and the test was rewritten to assert the total
+before it ever landed. **The prediction is a review instrument, not merely a
+scorekeeping one.**
+
+**ONE MEMBER OF A FAMILY WITH A DEFECT IS A REASON TO READ THE WHOLE FAMILY.**
+`TradingEngine.stop` was missing its idempotence guard and a two-hour supervised
+run surfaced it, because it logged twice. Its sibling
+`BufferedMarketDataProvider.stop` had the same defect, **logs nothing**, and no
+run could ever have shown it — it was found by reading all nine lifecycle
+methods in one pass. **A defect found by running is evidence about a family, not
+about a method**, and the cheap move after any such find is to enumerate the
+siblings and check each. The nine-site table above is what made that enumeration
+possible in minutes.
+
+**A COUNT IS NOT A FINDING, AND THEY ARE MAINTAINED IN OPPOSITE WAYS.** A count
+describes the tree *now* — how many files the formatter sees, how many sites
+carry a phrase — and when the tree moves the old number is simply **wrong**, so
+it is **corrected in place**. A finding records **what was observed and when**,
+and annotate-never-delete governs it: it is **annotated**, never amended, because
+the value of the log is that it preserves what was believed. The test is not the
+sentence's tone but its subject: *does this describe the tree, or does it record
+an observation of it?* Getting this backwards produces either a permanent
+annotation beside a stale number, or a silently rewritten record of a
+measurement.
+
+**THE SMALLEST CHANGE CAN BE WRONG IN THE ONE DIRECTION A CONTROL MAY NEVER
+ERR.** Where a fix touches a risk control, ask which way its error points before
+asking how small it is. M5g's worked example: booking a venue-triggered exit at
+the stop price we *requested* needs no new measurement and is therefore the
+smallest change available — and it is wrong, because a stop-market fills at
+whatever the book gives. Measured on run 3, the trigger implies a loss of
+`36.45` where the account moved `35.39`; in a gapping market the error grows and
+always **under-reports the loss**. A control that errs permissively is worse than
+no control, because it reports safety. **When the smallest change errs that way,
+the first correct step is a measurement, not code.**
+
 **MECHANISING THAT ENUMERATION MAKES IT AUDITABLE, NOT CORRECT (`M5e-080`),
 and the difference is the hazard.** M5e's staleness commit parsed both test
 modules with `ast` to find every test that drives `evaluate` while holding an
@@ -1829,6 +1922,15 @@ script that could not be re-run without placing a second. Recovery was possible
 only because the teardown happened to be independently observable. **Partly
 mechanisable** — `scripts/check.py`'s FIFO refusal is the working precedent, and
 a probe harness can refuse a piped stdout the same way.
+
+**A CHECK IN THE SAME COMMAND CHAIN AS THE ACTION IT GATES IS NOT A GATE**
+(`M5f-094`). Distinct from the pipe rule, and the distinction is where the
+verdict goes: there the verdict **cannot be read**, here it **was** read — too
+late, because the action had already run. A precondition joined to its action by
+`&&` or `;` is a description of what should have been true, not a guard. This is
+why every halt in this project's task prompts is *its own invocation*, and why an
+authorisation states its precondition as a **check to run first** rather than as
+a sentence for whoever pastes it.
 
 > **ANNOTATED at M5e with a SECOND, INDEPENDENT reason. Regenerability stays
 > the scope stated above; this adds a case that reaches commands whose output
@@ -2013,6 +2115,31 @@ renames) in **separate commits** from semantic ones. Never mix them.
    diff, and **`git push` does not carry it**: `git push origin milestone/<name>`
    is a separate act. Forget it and every clone but yours cannot run the next
    rotation's extraction at all, which is the hard failure working as designed.
+
+**THREE RULES RESCUED FROM `docs/NEXT_MILESTONE.md` AT M5g'S ROTATION, BECAUSE
+STEP 3 REWRITES THAT FILE AND THEY LIVED NOWHERE ELSE.** Each was measured at
+zero occurrences here and one there. `M5f-092` was recovered once already by
+`git log -S` archaeology; that is the cost of leaving a rule in the file the
+rotation destroys.
+
+1. **A milestone paragraph is RE-TENSED and SCOPED, never left standing as
+   current.** When the next milestone's paragraph is added, the previous one is
+   bound to its own close — *"still nothing placed an order at M5c's close"* is
+   the shape — so a reader cannot mistake a past state for the present one.
+   Recovered from `46da8ae` by `git log -S`, and written down here for the first
+   time.
+2. **A finding ID is `<milestone>-NNN`: three digits, zero-padded.** Not
+   letters. M5d needed 90 identifiers and M5c exhausted a 26-letter namespace
+   mid-milestone, so the two-character letter extension does not apply. This
+   file previously *described* M5d's usage in an annotation and prescribed
+   nothing; the prescription lived only in the rewritten file.
+3. **A rotation must READ every structural list in this file against the tree**
+   (`M5f-091`). A stale *claim* asserts something false and can be searched for;
+   a stale **enumeration** stops early and **no phrase finds it**. Measured
+   instances: a boot-order list ending at step 10, a subscriber paragraph naming
+   subscriber zero only, two architecture trees listing two files under
+   `execution/` where there are seven, and a count of an enumeration that
+   drifted twice. Grepping cannot substitute; the lists must be read.
 
 **The `PHASE_HISTORY` entry is written LAST, and it COUNTS ITSELF.** A rotation
 cannot count itself if it writes the count before the commit that writes it
@@ -2416,6 +2543,27 @@ harmless if never followed. `phase_5_` was **stale content presented as current*
 which is the failure mode that actually misleads, and the one this surface will
 keep producing as long as anything is restated there.
 
+**A FIFTH DRIFT SURFACE, AND IT IS INSIDE THE REPOSITORY: NOTHING NOTICES THAT
+A RUN HAPPENED.** `logs/trading_bot.log` is gitignored, the bot writes nowhere
+else, and a run's findings reach disk only if somebody chooses to look. At M5g
+**two supervised runs happened between sessions and no report in the milestone
+knew of them** — one of which took the project's first complete trade and its
+first realised loss. They were found only because a rotation step enumerated the
+log's pids and got three where it expected one, and the rotation would otherwise
+have sealed them out of the milestone entirely.
+
+This is worse than the four surfaces above in one specific way: those hold
+**stale claims**, which a reader can at least disagree with. This one holds
+**no claim at all** — the evidence exists, in a file no gate, grep or review
+reads, and the failure is silence rather than error. The log also rotates
+(`backup_count: 5`), so a longer deployment discards old runs and any check
+would then report clean because the evidence is gone.
+
+**No mechanism is proposed here; that is the project owner's.** What is recorded
+is the gap, its two instances, and the shape of the thing that found them —
+comparing the log's distinct pids against the pids named in committed findings
+blocks.
+
 ---
 
 ## Current state
@@ -2694,6 +2842,29 @@ positions; what nothing covers is their composition.
 > error this annotation exists to prevent — the passes are real evidence about
 > the classifier and no evidence at all about the resolver.
 
+> **TWO CLAUSES ABOVE ARE FALSE AFTER RUN 3, AND THE LESSON IS STRENGTHENED BY
+> THE SAME RUN.** Annotated rather than corrected: the block above is a record
+> of what run 2 measured, and its scoping clause — *"MEASURED over run 2's 81
+> reconciliation passes"* — is what keeps most of it true.
+>
+> **False now.** *"The L-leg reservation never bound"*: in run 3 it was spent to
+> its exact limit — a remainder of 2 against 2 unresolved legs, 18 point queries
+> across 9 passes, and zero legs reporting `NOT YET QUERIED`. And **"seven of
+> eleven" is nine of eleven**; `resolve_unresolved_legs` ran. What has still not
+> run after FOUR runs is `resolve_placement` and `RefusalStage.POSITION_STALE`.
+>
+> **THE LESSON STANDS, AND RUN 3 IS ITS PROOF RATHER THAN ITS REFUTATION.** The
+> resolver worked — but that is a *new observation*, not something run 2
+> established. Anyone who had read run 2's clean passes as retiring the
+> resolver's risk was asserting without evidence and was merely lucky.
+>
+> **Run 3 supplies a sharper instance than the one above.** `queries=2` appeared
+> while **exactly two real queries were made** — the field's value coincided with
+> the work done. A reader treating it as a query count is wrong in run 2 and
+> right in run 3, with nothing in the line to separate them. **A field that is
+> accidentally correct is more dangerous than one that is plainly wrong**,
+> because inspection cannot catch it.
+
 **Four decisions in it are load-bearing and are locked above:** the reservation
 reserves what the first unresolved position *needs* rather than one call;
 `ACTIVE` joined `_TRUSTED_PROTECTION`, which is what stops a correctly protected
@@ -2708,6 +2879,52 @@ reconciler shipped
 before the first order by design: with only untrusted protection states, the
 first position the executor opened would have refused every entry after it.
 
-**Q-A** stays unscheduled: its thresholds need soak data and nothing has
-dispatched an order yet, so the `collaborator_failed` lines it would be
-calibrated from do not exist. See `docs/NEXT_MILESTONE.md`.
+**M5f built the executor, in 19 numbered commits, and did not retire the risk
+it made reachable.** `OrderExecutor` became the first code path in `src/` that
+places an order: it refuses `CLOSE` by name, refuses the unprotected branch,
+refuses while a placement is pending, refuses an exhausted budget and refuses a
+client-side failure immediately, and otherwise builds an OTOCO or OTO seeded
+from `candle.close_time`, marks a `PendingPlacement`, places under per-call
+bounds, and on success records a `Position` at `ProtectionState.UNKNOWN`.
+`build_placement`, `DispatchBudget` and `resolve_placement` landed with it, and
+the two placement methods were declared on the port **with** that caller,
+honouring finding GG. Its own summary is the durable part: **M5f made the
+composition risk REACHABLE without retiring it** — the older premise, that
+nothing constructs a `Position`, became false while its conclusion held,
+because nothing had run.
+
+**M5g ran it. Four times, and two of those runs were invisible to every report
+in the milestone until a rotation step went looking.** The log carries three
+pids where one was expected; runs 3 and 4 happened between sessions, and their
+entire record was a gitignored file. That is recorded because the rotation
+nearly sealed them out.
+
+*What the runs proved.* **D2 is confirmed**: 81 reconciliation passes reading
+`states="active=1"`, against the first run's 28 consecutive `diverged=1` — which
+were the identifier-space defect, not divergence, fixed at `3970968` by
+comparing a leg's own client id rather than the venue's numeric `orderListId`.
+B2, V2, the instance lock and the PID field all ran. The excluded-holdings
+collapse is verified in production: 501 lines became one, on the same account.
+
+*What they exposed, and it is the largest open item in the tree.* Run 3 took
+**the project's first complete trade**. The venue triggered the stop-loss, the
+account realised **−35.38691640 USDT**, and **nothing in `src/` booked it**.
+`Portfolio.record_realised_pnl` has exactly one call site — inside
+`close_position` — and `close_position` has **zero callers**. So the ledger can
+be opened and never closed: no proceeds credited, no position deleted, no
+realised P&L accrued, and `realised_today` therefore returns `Decimal(0)`
+permanently. **The daily-loss limit is a committed-risk limit wearing a
+daily-loss limit's name**; no number of stop-outs can move it. The same gap
+swallows a take-profit fill and a manual exit at the venue.
+
+*The carried risk is nine of eleven, not retired.* `resolve_unresolved_legs`
+ran for the first time in run 3 — 18 point queries, the L-leg reservation spent
+to its exact limit — and the classifier reached `UNKNOWN` on a real divergence.
+**`resolve_placement` and `RefusalStage.POSITION_STALE` have still not run after
+four runs.**
+
+**Q-A** stays unscheduled, and the reason has changed rather than gone away. It
+needs soak data from `collaborator_failed` lines; the bot has now run four times
+and placed three order lists, and **not one such line has ever been emitted** —
+measured across the whole log. The sample is still empty, so the thresholds are
+still uncalibratable. See `docs/NEXT_MILESTONE.md`.
