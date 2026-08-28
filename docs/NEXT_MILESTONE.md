@@ -24,8 +24,8 @@ rewrite.
 `CLAUDE.md`'s rotation procedure rather than here, which is why this section is
 three lines instead of fifteen.
 
-**M5g's namespace is CLOSED at `M5g-134`**, verified over `milestone/M5f..HEAD`:
-134 declarations, 134 unique, `M5g-001`–`M5g-134`, no gap and no duplicate. Do
+**M5g's namespace is CLOSED at `M5g-144`**, verified over `milestone/M5f..HEAD`:
+144 declarations, 144 unique, `M5g-001`–`M5g-144`, no gap and no duplicate. Do
 not reuse an M5g identifier.
 
 ---

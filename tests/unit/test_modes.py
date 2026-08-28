@@ -580,7 +580,7 @@ def _case_unaffordable() -> Case:
     return signal, manager.evaluate(signal, portfolio=portfolio), pairs
 
 
-# Twelve paths, one row each. Defined at module level rather than inline in
+# Fourteen paths, one row each. Defined at module level rather than inline in
 # `parametrize` so the correspondence to `evaluate`'s branches stays readable.
 _STAGE_CASES = [
     (RefusalStage.UNKNOWN_PAIR, _case_unknown_pair),
