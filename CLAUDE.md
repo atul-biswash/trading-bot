@@ -2482,8 +2482,25 @@ range rather than alone.
 > **The base is now a TAG applied at milestone close**, named `milestone/<name>`:
 >
 > ```bash
-> git log "milestone/M5d..HEAD" --format='@@@%h %s%n%b' | awk '/^@@@/{h=substr($0,4);p=0;next} /^Findings:/{print "";print h;p=1} p'
+> git log "milestone/M5d..HEAD" --format='@@@%h %s%n%b' | awk '/^@@@/{h=substr($0,4);p=0;next} /^Findings:[[:space:]]*$|^Findings: none[[:space:]]*$/{print "";print h;p=1} p'
 > ```
+>
+> **BASH ONLY — it is `awk`, and it is a DISPLAY command whose output a human
+> reads.** It produces no verdict and counts nothing; everything countable is
+> the second check's. That is why it is not worth porting.
+>
+> **THE ANCHOR IS EXACT, AND BOTH HALVES ARE MANDATORY.** It read
+> `/^Findings:/` until M5h, which matched any body line beginning with that
+> token — **a WRAPPED PROSE SENTENCE included.** MEASURED: over M5g the loose
+> anchor found 22 headers across 21 commits, because a line break in `c304b5d`
+> put the word at column 0, and eighteen lines of ordinary prose printed as a
+> findings block. Anchoring `^Findings:$` alone would be worse than the defect
+> it fixes: it would silently drop all **13** `Findings: none` blocks in
+> history. The trailing `[[:space:]]*` costs nothing — MEASURED byte-identical
+> to a strict anchor on all four ranges, 850/1213/1067/657 lines, with
+> declaration counts unmoved at 97/106/144/75 — and it removes a LATENT SILENT
+> failure: a real header carrying trailing whitespace would otherwise match
+> nothing, and the entire block would vanish with no sign that it had.
 >
 > **THE REASON TO RECORD IS THE FAILURE MODE, NOT THE CONVENIENCE.** An unknown
 > ref is fatal — MEASURED: `fatal: ambiguous argument 'milestone/M5x..HEAD':
@@ -2499,27 +2516,65 @@ range rather than alone.
 > procedure at all — which is the hard failure above, working as intended.
 >
 > **A SECOND CHECK, because no anchor could ever have provided it.** The command
-> above prints blocks; it cannot tell you a finding was cited and never declared.
-> Diff every ID mentioned anywhere in the range's commit bodies against those
-> appearing inside a `Findings:` block, and treat a non-empty difference as a
-> defect:
+> above PRINTS; it counts nothing. It cannot tell you a finding was cited and
+> never declared, and it cannot tell you a namespace carries a gap, a duplicate,
+> or a commit with no block at all. **Until M5h nothing could** — and
+> `docs/NEXT_MILESTONE.md` nonetheless asserted of M5g *"144 declarations, 144
+> unique … no gap and no duplicate"*, four quantities no documented command
+> produced. This is the command that produces them:
 >
-> ```bash
-> R="milestone/M5d..HEAD"; P='M5e-[0-9]{3}'
-> comm -23 \
->   <(git log "$R" --format='%B' | grep -oE "$P" | sort -u) \
->   <(git log "$R" --format='@@@%n%b' | awk '/^@@@/{p=0;next} /^Findings:/{p=1} p' | grep -oE "$P" | sort -u)
+> ```powershell
+> function Check-Findings($R, $MS) {
+>   $P = "$MS-\d{3}"
+>   $cited = @((git --no-pager log $R --format='%B' | Select-String -Pattern $P -AllMatches).Matches.Value | Sort-Object -Unique)
+>   $decl  = @(git --no-pager log $R --format='%b' | ForEach-Object { if ($_ -match "^- ($MS-\d{3}) -- ") { $Matches[1] } })
+>   $uniq  = @($decl | Sort-Object -Unique)
+>   $dupes = @($decl | Group-Object | Where-Object Count -gt 1 | ForEach-Object { $_.Name })
+>   $nums  = @($uniq | ForEach-Object { [int]$_.Substring($_.Length - 3) } | Sort-Object)
+>   if ($nums.Count -gt 0) { $gaps = @(1..$nums[-1] | Where-Object { $nums -notcontains $_ }) } else { $gaps = @() }
+>   $undecl = @($cited | Where-Object { $uniq -notcontains $_ })
+>   $blockless = @()
+>   foreach ($c in (git --no-pager rev-list $R)) {
+>     $b = git --no-pager log -1 --format='%b' $c
+>     if (-not ($b | Select-String -Pattern '^Findings:\s*$|^Findings: none\s*$' -Quiet)) { $blockless += (git --no-pager log -1 --format='%h' $c) }
+>   }
+>   "$MS declared=$($decl.Count) distinct=$($uniq.Count) dupes=[$($dupes -join ',')] gaps=[$($gaps -join ',')] cited-not-declared=[$($undecl -join ',')] blockless=[$($blockless -join ',')]"
+> }
+> Check-Findings "milestone/M5g..HEAD" "M5h"
 > ```
 >
-> **MEASURED: run against M5d it returns exactly `M5d-085` and `M5d-088`** — the
-> two findings that were cited as authority and declared nowhere — and nothing
-> else. That is the defect it exists to catch, caught.
+> **POWERSHELL — AND THE CHECK IT REPLACES COULD NOT BE RUN HERE AT ALL.** That
+> one used `<(...)` twice, and PowerShell rejects process substitution at the
+> PARSER, before anything executes: `The '<' operator is reserved for future
+> use.` MEASURED. It ran only under Git Bash, and no sentence in this file ever
+> said so — which is how a documented procedure comes to be unrunnable on the
+> machine the work happens on.
 >
-> **What it does NOT catch, stated so it is not mistaken for complete:** an ID
-> that lives only in a *document* body and never in a commit message. `M5d-086`
-> is the worked example, and both sides of this diff read commit messages, so it
-> is invisible to both. Closing that needs a third source, which is not written
-> here.
+> **What it produces**, per range and in one line: the declaration-line count,
+> the distinct-id count — *the two differing IS the duplicate* — every
+> duplicated id, every gap in `001..max`, every id cited in a commit body and
+> never declared, and every commit carrying no block.
+>
+> **MEASURED against three known answers.** It returns `M5d-085` and `M5d-088`
+> for M5d, exactly as the check it replaces did. It returns
+> `dupes=[M5e-054]` for the known-defective M5e range, so the negative control
+> still fails. And it found `gaps=[85,86,87,88,89]` in M5d — **three of them,
+> `M5d-086`, `M5d-087` and `M5d-089`, previously unknown**, with `M5d-087` and
+> `M5d-089` appearing NOWHERE in the repository, in no commit message and no
+> tracked file. Both older checks were blind to them by construction.
+>
+> **The "declared" side is a DECLARATION LINE, not merely "inside a block".** An
+> id mentioned in another finding's prose no longer counts as declared. MEASURED
+> free: the two definitions agree on every range — 85/85, 96/96, 106/106,
+> 144/144, 75/75 — so the tightening closes a hole nobody has yet fallen into.
+>
+> **What it does NOT catch, stated so it is not mistaken for complete.** An ID
+> living only in a *document* body and never in a commit message — `M5d-086` is
+> the worked example, and every source here is a commit message. A declaration
+> whose TEXT is wrong. A wrongly-marked `MEASURED` / `REASONED` / `UNMEASURED`.
+> And a namespace that simply STOPS SHORT: ids are checked against the maximum
+> *declared*, so a milestone that allocated 90 and declared 1..85 leaves no gap
+> to find. Closing any of those needs a third source, which is not written here.
 >
 > Ruled by the reviewer under delegation, not by the project owner.
 
