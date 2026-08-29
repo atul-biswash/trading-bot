@@ -26,12 +26,15 @@ turning every unrecognised object into its ``repr``.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+# The one test below reaches into `execution/` on purpose; see its docstring.
+from trading_bot.execution.executor import PendingPlacement
 from trading_bot.persistence import store as s
 
 D = Decimal
@@ -294,6 +297,59 @@ class TestDefaults:
     def test_the_state_is_frozen(self) -> None:
         with pytest.raises(Exception, match="frozen"):
             s.PersistedState().pending = (_record(),)  # type: ignore[misc]
+
+
+class TestFieldAgreementWithPendingPlacement:
+    """The two pending types must carry the same field NAMES. Nothing else
+    checks it.
+
+    ``PendingPlacement`` is a frozen dataclass in ``execution/`` and
+    ``PendingRecord`` is a pydantic model here: seven fields each, maintained
+    by hand in two layers. A field added to one and not the other is a SILENT
+    persistence gap -- the executor would hold it, the store would drop it,
+    and nothing would raise. The record would simply come back from disk
+    missing something.
+
+    **It lives with the store's tests rather than the executor's**, because of
+    where the failure is READ. A disagreement means the store cannot hold what
+    it exists to hold; a reader seeing this file fail is told the persistence
+    layer is incomplete, which is actionable. The same failure under
+    ``test_executor.py`` would read as "the executor is broken", which it
+    would not be. That is also why this file imports from ``execution/`` --
+    the coupling is real and the test is where its consequence lands.
+
+    **WHAT THIS DOES NOT CHECK**, stated because a test whose name overclaims
+    is a recorded defect class here (``M5f-088``, ``M5f-073``, ``M5h-045``):
+
+    * **Types.** MEASURED and deliberately declined. The two machineries
+      report the same declaration irreconcilably: ``dataclasses.fields()``
+      yields the *string* ``'Money'``, because that module carries
+      ``from __future__ import annotations``, while pydantic yields the
+      resolved ``Optional[Annotated[Decimal, BeforeValidator(...)]]``. A type
+      check would have to hand-write the very mapping it exists to verify.
+    * **Optionality.** ``PendingRecord``'s ``stop_loss`` and ``take_profit``
+      default to ``None`` where ``PendingPlacement``'s are required
+      arguments. That asymmetry is real, it lets a stored record omit them and
+      parse, and it is declared as a finding rather than fixed here.
+    * **Ordering**, because the store dumps by name and order carries nothing.
+    * **Semantics.** Two fields agreeing in name and meaning nothing alike
+      would pass this.
+    * **Arity.** No ``== 7`` assertion: adding a field to BOTH types is a
+      legitimate change and must not fail. Agreement is the property, not
+      count.
+
+    **Aliases were checked and are absent.** MEASURED: no ``PendingRecord``
+    field carries ``alias`` or ``validation_alias``, and ``_dump_pending``
+    writes keys by hand rather than through pydantic -- so an alias could not
+    change the file even if one were added. An alias assertion would pin
+    something that cannot break the store.
+    """
+
+    def test_the_two_types_carry_the_same_field_names(self) -> None:
+        placement = {field.name for field in dataclasses.fields(PendingPlacement)}
+        record = set(s.PendingRecord.model_fields)
+
+        assert placement == record
 
 
 class TestNoCaller:
