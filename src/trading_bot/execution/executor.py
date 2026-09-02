@@ -46,7 +46,7 @@ from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Callable
+    from collections.abc import Callable, Sequence
     from datetime import datetime
 
     from trading_bot.core.assessment import RiskAssessment
@@ -190,7 +190,46 @@ class OrderExecutor:
         portfolio: Portfolio,
         budget: DispatchBudget,
         persist_pending: PendingWriter | None = None,
+        restored_pending: Sequence[PendingPlacement] = (),
     ) -> None:
+        """Build the executor, optionally seeded with records from a prior process.
+
+        **A RESTORED RECORD IS A QUESTION, NOT AN ANSWER.** It says only that
+        some earlier process sent a placement and never learned the outcome --
+        exactly what ``PendingPlacement`` means in the running process. It is
+        **not** evidence that a list rests at the venue, and it must never be
+        read as one: ``NOT_PLACED`` is a real and expected verdict for a
+        restored record, because the request may never have reached the venue
+        at all.
+
+        **The answer comes from the existing first-candle path.** :meth:`__call__`
+        runs ``resolve_placement`` over each record out of that bar's fresh
+        dispatch budget and acts on the verdict -- ``PLACED_LIVE`` opens the
+        position, ``NOT_PLACED`` deletes the record and reports a missed trade,
+        ``UNRESOLVED`` keeps it for the next bar and re-places nothing. Nothing
+        resolves at construction, and nothing here performs I/O.
+
+        **What restoring buys, stated as the failure it removes.** Without it a
+        process that died between an ambiguous write and its resolution lost the
+        only record that a list might be resting -- in-process state, gone with
+        the process, and ``reconcile_open_positions`` structurally silent
+        because it iterates positions and there was none. That is named in
+        ``CLAUDE.md`` as the whole of what fail-closed could not bound: *"a
+        crash between the ambiguous write and the next bar loses the only record
+        that a list may be resting."* The bound is now a restart rather than
+        nothing.
+
+        **``dispatch`` refuses a symbol carrying a restored record**, by the
+        same pending guard that refuses one placed this session -- the guard
+        reads ``_pending`` and does not care where an entry came from. So a
+        restored record cannot be pyramided onto while it is unresolved.
+
+        ``restored_pending`` defaults to empty, so every caller and test that
+        predates it is unchanged. **Records are keyed by symbol**, matching the
+        dict this executor has always kept; the store is written from that same
+        dict and so cannot produce two records for one symbol, but a
+        hand-edited file could, and the later one would win silently.
+        """
         self._client = client
         self._portfolio = portfolio
         self._budget = budget
@@ -198,7 +237,9 @@ class OrderExecutor:
         #: existing test and any caller not yet updated byte-for-byte
         #: unchanged. The composition root supplies the real writer.
         self._persist_pending = persist_pending
-        self._pending: dict[str, PendingPlacement] = {}
+        self._pending: dict[str, PendingPlacement] = {
+            record.symbol: record for record in restored_pending
+        }
 
     # -- Option 4 resolution, on the candle subscription --------------------
     async def __call__(self, candle: Candle) -> None:

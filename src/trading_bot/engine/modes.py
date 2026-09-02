@@ -40,6 +40,11 @@ error code that says nothing about the real cause.
 Boot order: all I/O before any socket exists
 --------------------------------------------
 0. Mode check -- pure, and before the client exists at all.
+0a. The durable store, read before the instance lock and before every venue
+   call. A missing store is a normal first boot; a corrupt one REFUSES, because
+   a state file we cannot parse cannot say whether an order list is resting at
+   the venue. Numbered ``0a`` rather than renumbering 1 to 12, following the
+   ``3a`` already below.
 1. REST client (injected, or built from settings).
 2. Pair contexts -- the *pure* duplicate-symbol check first, so a config
    mistake costs no network round trip, then one ``get_symbol_info`` per
@@ -70,14 +75,22 @@ first socket at step 5, so a refusal has exactly one REST client to unwind and
 never a half-open feed. Step 4 is the exception that proves the shape -- it is
 I/O on the same side of the socket, and it only warns.
 
-**There are FIVE boot refusals, and they are not homogeneous** -- which is why
-they were documented as four until M5b's rotation. Four raise ``ConfigError``
-here: a mode with no composition root, an empty enabled-pair set, a duplicate
-symbol on two timeframes, and a quote asset the account does not hold. The fifth
-is a symbol the exchange does not know, which **propagates** out of
-``get_symbol_info`` inside :func:`_prime_pairs` rather than being raised by this
-module. Counting the ``raise ConfigError`` sites therefore finds four and misses
-the one that is a refusal this file does not write.
+**There are SEVEN boot refusals, and they are not homogeneous** -- which is why
+they were documented as four until M5b's rotation and as five until the store
+gained a reader. Five raise ``ConfigError`` here: a mode with no composition
+root, an empty enabled-pair set, a duplicate symbol on two timeframes, a quote
+asset the account does not hold, and every enabled pair blocked
+(:func:`_require_something_tradeable`). The sixth is a symbol the exchange does
+not know, which **propagates** out of ``get_symbol_info`` inside
+:func:`_prime_pairs`. The seventh is a corrupt store, which propagates out of
+``store.load`` at step 0a as
+:class:`~trading_bot.persistence.store.StoreCorruptError`.
+
+Counting ``raise ConfigError`` sites therefore finds five and misses two, and
+the two it misses are of DIFFERENT kinds: one is a refusal this file does not
+write, the other is not a ``ConfigError`` at all -- nothing is wrong with the
+configuration, and telling an operator to check ``config.yaml`` would send them
+to the wrong file. Both are refusals; neither is greppable from here.
 
 Ownership: this root closes the client unconditionally
 ------------------------------------------------------
@@ -421,6 +434,40 @@ def _require_live_connection_mode(settings: Settings) -> None:
         f"manager); '{settings.mode.value}' needs a simulator that is still a stub "
         "(paper/simulator.py, backtesting/engine.py). Run with mode 'testnet' to "
         "exercise this path."
+    )
+
+
+def _restore_pending(state: store.PersistedState | None) -> tuple[PendingPlacement, ...]:
+    """Map stored records back into the executor's own type, field for field.
+
+    **The exact reverse of the forward mapping in :func:`live_system`**, and it
+    lives here for the same reason that one does: ``CLAUDE.md`` has outer layers
+    depend inward only, and the composition root is the single layer permitted
+    to know both ``execution/`` and ``persistence/``. ``execution/`` imports no
+    store, and ``persistence/`` imports no executor; the two types meet in this
+    file and nowhere else.
+
+    Pure, and takes the loaded state rather than reading it, so the mapping is
+    exercisable without a file. ``None`` -- a first boot with no store -- maps
+    to an empty tuple, which is the same value the executor defaults to.
+
+    **What a restored record is NOT.** It is not evidence that anything rests
+    at the venue; see :meth:`~trading_bot.execution.executor.OrderExecutor.__init__`.
+    Nothing here queries, and nothing here decides.
+    """
+    if state is None:
+        return ()
+    return tuple(
+        PendingPlacement(
+            symbol=record.symbol,
+            entry_bar_time=record.entry_bar_time,
+            generation=record.generation,
+            quantity=record.quantity,
+            entry_limit=record.entry_limit,
+            stop_loss=record.stop_loss,
+            take_profit=record.take_profit,
+        )
+        for record in state.pending
     )
 
 
@@ -888,6 +935,32 @@ async def live_system(
     """
     _require_live_connection_mode(settings)
 
+    # STEP 0a: THE DURABLE STATE, READ BEFORE ANYTHING ELSE EXISTS.
+    #
+    # `StoreCorruptError` is NOT caught, and that is the ruling rather than an
+    # omission. A store we cannot parse cannot say whether an order list is
+    # RESTING at the venue or was never placed -- and those want opposite
+    # actions. Booting anyway would run with `has_position` false for a symbol
+    # that may hold live protection, and the first `_persist_pending` write
+    # would OVERWRITE the evidence with an empty set. Refusing is the only
+    # answer that preserves the file for an operator to look at.
+    #
+    # AHEAD OF EVERY VENUE CALL, which is three: `BinanceClient.create`
+    # authenticates, `_prime_pairs` reads symbol info, `get_balances` reads the
+    # account. So a corrupt store refuses before a socket, a signature or a
+    # credential is used -- the shape the other boot refusals already have.
+    #
+    # AHEAD OF THE INSTANCE LOCK TOO. Lines below up to the `try` are outside
+    # every teardown scope, so a raise between `enter_context` and that `try`
+    # would leave the ExitStack to garbage collection. Reading first adds no
+    # raise site to that gap. Nothing is lost by reading unlocked: `store.save`
+    # replaces atomically, so a concurrent writer cannot be read half-written,
+    # and a process that loses the lock exits without ever writing.
+    #
+    # A MISSING STORE IS NOT CORRUPTION -- `load` returns None, which is the
+    # ordinary first boot and proceeds normally.
+    restored = store.load()
+
     # Imported lazily, mirroring BufferedMarketDataProvider.create: keeps
     # python-binance and aiohttp off the import path when a fake client is
     # injected, and off it entirely for anything that only imports this module's
@@ -964,9 +1037,15 @@ async def live_system(
                 # `execution/` and `persistence/` -- so `execution/` never
                 # imports the store and gains no outer-to-outer edge.
                 #
-                # NOTHING READS THIS AT BOOT. Restore is a later commit; the
-                # state starts empty and this is a write path with no reader.
-                persisted = store.PersistedState()
+                # SEEDED FROM THE STORE READ AT STEP 0a, WHICH IS WHAT MAKES
+                # THE LEDGER SURVIVE. The closure below rewrites `pending` and
+                # carries `ledger` across verbatim, so whatever was restored is
+                # preserved through every subsequent write. Starting from a
+                # fresh `PersistedState()` when a store existed would silently
+                # ERASE the ledger on the first placement -- the whole-file
+                # clobber this root owns the state to prevent, arriving from
+                # inside the owner.
+                persisted = restored if restored is not None else store.PersistedState()
 
                 def _persist_pending(records: tuple[PendingPlacement, ...]) -> None:
                     """Write the executor's pending set, preserving the ledger."""
@@ -993,6 +1072,16 @@ async def live_system(
                     portfolio=portfolio,
                     budget=DispatchBudget.from_config(settings.config),
                     persist_pending=_persist_pending,
+                    # RESTORED, NOT RESOLVED. These are questions the previous
+                    # process could not answer, handed straight to the existing
+                    # first-candle path: `__call__` runs `resolve_placement` on
+                    # each one out of the next bar's fresh budget. NO BOOT-TIME
+                    # RESOLUTION is added here -- doing it at boot would spend
+                    # an unbudgeted round trip per record ahead of the socket,
+                    # and would duplicate a path that is already written,
+                    # already ordered before the engine's own hook, and already
+                    # fail-closed on an UNRESOLVED verdict.
+                    restored_pending=_restore_pending(restored),
                 )
                 engine.on_signal(
                     _build_signal_handler(

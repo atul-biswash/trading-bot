@@ -19,14 +19,18 @@ turning every unrecognised object into its ``repr``.
 * **Concurrency.** Two processes writing this file at once is not tested and
   is not prevented -- ``os.replace`` makes each write atomic, so a reader sees
   one whole state or the other, but a lost update is possible and unbounded.
-* **The composition.** The store now has exactly one caller -- the composition
-  root, pinned by ``TestOnlyTheCompositionRootMayImportTheStore`` -- but
-  nothing here exercises it THROUGH that root. The executor's own tests fake
-  the writer; these test the store alone. No test in this repository writes a
-  real ``data/state.json`` and reads it back through ``live_system``.
-* **The read path.** Nothing loads the store at boot yet. As of the wiring
-  commit this is a WRITE PATH WITH NO READER, deliberately, and restore is a
-  later change.
+* **The composition, from THIS file.** The store has exactly one caller -- the
+  composition root, pinned by ``TestOnlyTheCompositionRootMayImportTheStore``
+  -- and nothing *here* exercises it through that root. The executor's own
+  tests fake the writer; these test the store alone. That gap is now covered
+  elsewhere: ``test_modes.py::TestTheStoreIsReadAtBoot`` writes a real store
+  and reads it back through ``live_system``. This bullet used to say no such
+  test existed anywhere, which the restore commit made false.
+* **What a restored record MEANS.** The round trip is pinned; the venue is
+  not. Whether a restored placement actually rests at the venue is answered by
+  ``resolve_placement`` on the next candle, and no test here or anywhere drives
+  that against a real venue -- ``resolve_placement`` has still never run in
+  production.
 """
 
 from __future__ import annotations

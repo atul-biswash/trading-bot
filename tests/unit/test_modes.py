@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -91,6 +91,8 @@ from trading_bot.engine.modes import (
     live_system,
 )
 from trading_bot.exchange.ids import list_client_order_id
+from trading_bot.execution.executor import PendingPlacement
+from trading_bot.persistence import store
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
 from trading_bot.utils.logger import surplus_fields
@@ -106,6 +108,36 @@ _KEY = (SYMBOL, TIMEFRAME)
 #: The only logger whose records these tests own. Other collaborators log into
 #: the same caplog buffer, so records are always selected by name.
 _MODES_LOGGER = "trading_bot.engine.modes"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_run_artefacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point every relative run-artefact path at ``tmp_path``, for the whole module.
+
+    **AUTOUSE AND MODULE-WIDE, because it is not a convenience.**
+    ``live_system`` now calls ``store.load()``, whose default
+    ``DEFAULT_STORE_PATH`` is the RELATIVE ``data/state.json``. Without this,
+    every boot test in this file would read the operator's real state file --
+    so the suite's result would depend on an untracked artefact that only a
+    live run produces. A valid one would seed the executor with somebody's
+    pending placements; a corrupt one would fail this entire file with
+    ``StoreCorruptError`` and name a cause that has nothing to do with the
+    tree.
+
+    That is not hypothetical in the ordinary sense: ``data/state.json`` does
+    not exist today precisely because nothing has written it yet, and the
+    commit adding this is the one that gives it a reader.
+
+    ``DEFAULT_LOCK_PATH`` is relative for the same reason and is covered by the
+    same ``chdir``, which is defence rather than a fix -- no test in this file
+    reaches the unparameterised ``acquire_instance_lock()`` today.
+
+    ``chdir`` rather than patching ``DEFAULT_STORE_PATH``: a default argument
+    is bound at function definition, so rebinding the module constant would
+    not change what ``load()`` reads, and a test that patched it would pass
+    while pinning nothing.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 # --------------------------------------------------------------------------
@@ -2129,3 +2161,202 @@ class TestBootRefusalsReachTheCli:
 
         assert code == 1
         assert "Traceback" not in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------------
+# The store's reader
+# --------------------------------------------------------------------------
+#: The seven values a restored record carries, written once so the test that
+#: saves them and the test that reads them back cannot drift apart. Every money
+#: value keeps trailing zeros, so a `str` comparison catches a `Decimal` that
+#: round-tripped through a `float` and came back numerically equal.
+_STORED = store.PendingRecord(
+    symbol=SYMBOL,
+    entry_bar_time=_LIST_BAR,
+    generation=0,
+    quantity=D("0.02310000"),
+    entry_limit=D("60123.45000000"),
+    stop_loss=D("58000.00000000"),
+    take_profit=D("63000.00000000"),
+)
+
+#: The same seven values in the executor's type. Written out rather than mapped
+#: by a helper: a helper here would be the mapping under test, comparing it
+#: against itself.
+_EXPECTED = PendingPlacement(
+    symbol=SYMBOL,
+    entry_bar_time=_LIST_BAR,
+    generation=0,
+    quantity=D("0.02310000"),
+    entry_limit=D("60123.45000000"),
+    stop_loss=D("58000.00000000"),
+    take_profit=D("63000.00000000"),
+)
+
+
+class TestTheStoreIsReadAtBoot:
+    """Piece 1 gains a reader: the root restores what a dead process could not resolve.
+
+    The previous commit made the executor WRITE its pending set through a
+    callable the root injects, and nothing read it -- a write path with no
+    reader, deliberately. These pin the other half.
+
+    **Every test here writes through the store's own ``save``**, at its own
+    default path, which under the module's ``chdir`` fixture lands inside
+    ``tmp_path``. Hand-writing JSON would pin this file's idea of the format
+    rather than the format, and the round trip is the thing being tested.
+    """
+
+    async def test_a_restored_record_reaches_the_executor_field_for_field(
+        self, tmp_path: Path
+    ) -> None:
+        """The whole point: a record survives the process that could not resolve it.
+
+        Equality on a frozen dataclass compares ALL SEVEN fields, so this cannot
+        rot when an eighth is added -- it fails instead, which is the correct
+        response to a field the mapping forgot.
+
+        **It also pins that NOTHING RESOLVES AT BOOT, and does so for free.**
+        ``resolve_placement`` reaches ``get_own_open_orders`` and ``get_order``,
+        which ``FakeRootClient`` raises ``NotImplementedError`` on. Boot-time
+        resolution would therefore not merely change a value here; it would
+        raise out of ``__aenter__``. The fixture is the assertion.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED,)))
+        # The isolation is asserted, not assumed: this is what proves the module
+        # fixture redirected the read away from the repository's own `data/`.
+        assert (tmp_path / "data" / "state.json").exists()
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert list(system.executor._pending) == [SYMBOL]
+            restored = system.executor._pending[SYMBOL]
+            assert restored == _EXPECTED
+            # Exactness, not equality: `Decimal("0.0231") == Decimal("0.02310000")`
+            # is True, so `==` alone would not catch a value that lost its scale
+            # on the way through JSON.
+            assert str(restored.quantity) == "0.02310000"
+            assert str(restored.entry_limit) == "60123.45000000"
+            assert str(restored.stop_loss) == "58000.00000000"
+            assert str(restored.take_profit) == "63000.00000000"
+            assert restored.entry_bar_time.tzinfo is not None
+
+    async def test_a_corrupt_store_refuses_the_boot_before_any_venue_call(
+        self, tmp_path: Path
+    ) -> None:
+        """The ruling: refuse, and refuse before a socket, a signature or a credential.
+
+        **The journal is what makes this a real ordering assertion.** An
+        exception raised after the client had primed symbols and read balances
+        would satisfy ``pytest.raises`` identically, so asserting only that
+        ``StoreCorruptError`` escaped would pin the refusal and not its
+        position. ``FakeRootClient`` records every call it serves; the
+        assertion is that it served none.
+
+        ``close_calls == 0`` is deliberate and is NOT a leak this commit
+        introduces. The refusal happens before ``resolved_client`` is bound, so
+        there is nothing to close -- exactly as the mode-check refusal above it
+        has always behaved. An injected client on this path is the caller's to
+        close, because the root never took it.
+        """
+        settings = write_settings(tmp_path)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "state.json").write_text("{ truncated", encoding="utf-8")
+        journal: list[str] = []
+        client = FakeRootClient(journal=journal)
+
+        with pytest.raises(store.StoreCorruptError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        assert "not valid JSON" in str(excinfo.value)
+        assert journal == []
+        assert client.symbol_info_calls == []
+        assert client.order_list_calls == 0
+        assert client.close_calls == 0
+
+    async def test_a_truncated_record_refuses_the_boot_too(self, tmp_path: Path) -> None:
+        """A parseable file can still be corrupt, and this is the case that motivated it.
+
+        ``stop_loss`` and ``take_profit`` are REQUIRED keys carrying a nullable
+        type. A record missing them is valid JSON and would have parsed as an
+        UNPROTECTED placement had they defaulted -- silently, in the direction
+        that under-states protection. This drives that through the root rather
+        than through ``load`` alone, so the refusal is pinned where an operator
+        meets it.
+        """
+        settings = write_settings(tmp_path)
+        (tmp_path / "data").mkdir()
+        (tmp_path / "data" / "state.json").write_text(
+            '{"schema": 1, "ledger": null, "pending": [{"symbol": "BTCUSDT", '
+            '"entry_bar_time": "2026-08-14T12:00:00+00:00", "generation": 0, '
+            '"quantity": "1", "entry_limit": "2"}]}',
+            encoding="utf-8",
+        )
+        client = FakeRootClient()
+
+        with pytest.raises(store.StoreCorruptError):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        assert client.symbol_info_calls == []
+
+    async def test_no_store_is_a_first_boot_and_not_corruption(self, tmp_path: Path) -> None:
+        """``load`` returns ``None`` for a missing file, and that path must be ordinary.
+
+        Conflating it with corruption would refuse every first boot, which is
+        the failure a store that raises on everything would produce.
+        """
+        settings = write_settings(tmp_path)
+        assert not (tmp_path / "data" / "state.json").exists()
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.executor._pending == {}
+
+    async def test_a_restored_ledger_survives_the_next_pending_write(self, tmp_path: Path) -> None:
+        """The root owns the WHOLE state, and owning it means not erasing half of it.
+
+        ``store.save`` is whole-file. The executor supplies only ``pending``, so
+        a root that started from a fresh ``PersistedState()`` when a store
+        existed would write the first placement and silently DELETE the
+        ledger -- the whole-file clobber this ownership exists to prevent,
+        arriving from inside the owner.
+
+        The ledger value is run 3's real realised loss, so a reader of this test
+        can see what would have been lost.
+        """
+        settings = write_settings(tmp_path)
+        ledger = store.LedgerRecord(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27))
+        store.save(store.PersistedState(ledger=ledger))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        assert after.ledger == ledger
+        assert str(after.ledger.realised_pnl) == "-35.38691640"
+        assert after.pending == (_STORED,)
+
+    async def test_a_restored_record_is_rewritten_not_dropped_by_the_next_write(
+        self, tmp_path: Path
+    ) -> None:
+        """A restored record is in ``_pending``, so it is in what the writer writes.
+
+        Catches a restore that seeds a SEPARATE collection: the executor would
+        resolve the record correctly and then erase it from disk on the next
+        write, reintroducing the crash window the restore exists to close.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED,)))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer(tuple(system.executor._pending.values()))
+
+        after = store.load()
+        assert after is not None
+        assert after.pending == (_STORED,)
