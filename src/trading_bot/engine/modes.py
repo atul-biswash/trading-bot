@@ -51,7 +51,10 @@ Boot order: all I/O before any socket exists
    distinct symbol.
 3. One ``get_balances``, shared by steps 3a and 4 -- two reads could disagree
    if a balance moved between them.
-3a. Portfolio, seeded from that snapshot.
+3a. Portfolio, seeded from that snapshot **and from step 0a's ledger** -- the
+   one fact the account cannot re-supply, since no trade-history method is
+   declared on the port. Restored unconditionally; a stale one reads as zero
+   without being discarded.
 4. Unmanaged base holdings, from the same snapshot, then one ``get_ticker``
    per candidate asset. Warns; never refuses.
 5. Market-data provider (this is the first step that can open a WebSocket).
@@ -147,7 +150,7 @@ from trading_bot.core.interfaces import (
     MarketDataStream,
     SignalHandler,
 )
-from trading_bot.core.portfolio import Portfolio
+from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
@@ -471,6 +474,41 @@ def _restore_pending(state: store.PersistedState | None) -> tuple[PendingPlaceme
     )
 
 
+def _restore_ledger(state: store.PersistedState | None) -> Ledger | None:
+    """Map the stored ledger back into the domain's own type, field for field.
+
+    The sibling of :func:`_restore_pending` and here for the identical reason:
+    ``core/`` may not import ``persistence/``, so ``store.LedgerRecord`` and
+    ``core.portfolio.Ledger`` -- two types carrying the same two fields -- meet
+    in this file and nowhere else.
+
+    **RESTORED UNCONDITIONALLY. No date filtering at boot**, and that is the
+    ruling rather than an omission. A ledger dated yesterday is not stale data
+    to be discarded: :func:`~trading_bot.core.portfolio._ledger_is_stale`
+    already derives ``Decimal(0)`` for a prior day on the READ side, so an old
+    ledger is harmless and self-correcting the moment it is read. Filtering it
+    here would instead lose a SAME-DAY restart's accruals -- the amnesia this
+    piece exists to end -- and would do so silently, because the discarded
+    figure has no other record.
+
+    Boot performs no write. The restored value is handed to
+    :func:`_seed_portfolio` and the store is untouched until the first
+    placement.
+
+    ``None`` -- no store, or a store that has never accrued -- maps to ``None``,
+    which is the same value ``Portfolio.ledger`` defaults to. **Absent, not
+    zero:** a ``Ledger`` carrying ``Decimal(0)`` says accruals netted out on a
+    day that was traded, and that is a different fact this mapping must not
+    flatten.
+    """
+    if state is None or state.ledger is None:
+        return None
+    return Ledger(
+        realised_pnl=state.ledger.realised_pnl,
+        pnl_date=state.ledger.pnl_date,
+    )
+
+
 def _pair_timeframes(settings: Settings) -> dict[str, str]:
     """Map each enabled symbol to its timeframe, refusing a duplicate symbol.
 
@@ -544,8 +582,22 @@ async def _prime_pairs(
     return pairs
 
 
-def _seed_portfolio(balances: Sequence[Balance], *, quote_asset: str) -> Portfolio:
+def _seed_portfolio(
+    balances: Sequence[Balance], *, quote_asset: str, ledger: Ledger | None = None
+) -> Portfolio:
     """Build the boot-snapshot portfolio from the account's quote balance.
+
+    **``ledger`` is the ONE field that does NOT come from the venue**, and that
+    asymmetry is the whole of why it is a parameter. Free balance, positions
+    and unmanaged holdings are all re-derivable from the account at boot;
+    realised P&L is not, because no trade-history method is declared on the
+    port and attributing P&L needs entry prices of positions that no longer
+    exist. It is therefore the only thing a restart genuinely forgets, and the
+    only reason the store holds it.
+
+    Defaulting to ``None`` keeps every caller that predates the restore
+    unchanged, and ``None`` is what ``Portfolio.ledger`` defaults to anyway --
+    absent, meaning nothing has ever been booked.
 
     **Takes a snapshot rather than reading one, and shares it with
     :func:`_snapshot_unmanaged_holdings`.** The boot reads ``get_balances`` once
@@ -591,7 +643,11 @@ def _seed_portfolio(balances: Sequence[Balance], *, quote_asset: str) -> Portfol
     normalised = quote_asset.upper()
     for balance in balances:
         if balance.asset.upper() == normalised:
-            return Portfolio(quote_asset=normalised, free_quote=balance.free)
+            # ONE CONSTRUCTION, not construct-then-assign. `Portfolio` carries
+            # `validate_assignment=True`, so seeding the ledger afterwards
+            # would be a second validated write and would leave the object
+            # briefly existing without the record it is supposed to boot with.
+            return Portfolio(quote_asset=normalised, free_quote=balance.free, ledger=ledger)
     raise ConfigError(
         f"trading.base_currency is {quote_asset!r} but the account reports no "
         f"{normalised} balance entry. get_balances() returns every asset, including "
@@ -999,7 +1055,17 @@ async def live_system(
         # observes exactly what it did before and the holdings snapshot now
         # observes an account state one round trip older.
         balances = await resolved_client.get_balances()
-        portfolio = _seed_portfolio(balances, quote_asset=settings.config.trading.base_currency)
+        # THE LEDGER IS THE ONE FACT THE VENUE CANNOT RE-SUPPLY, so it comes
+        # from the store read at step 0a rather than from `balances`. Until
+        # this line it was written and never read back -- the same
+        # write-path-with-no-reader shape closed for `pending`, still open for
+        # the ledger, and the reason `data/state.json` has read `"ledger":
+        # null` after every run to date.
+        portfolio = _seed_portfolio(
+            balances,
+            quote_asset=settings.config.trading.base_currency,
+            ledger=_restore_ledger(restored),
+        )
         # Still before any socket, with the other four boot refusals.
         await _snapshot_unmanaged_holdings(
             resolved_client, balances=balances, pairs=pairs, portfolio=portfolio

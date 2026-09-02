@@ -80,7 +80,7 @@ from trading_bot.core.models import (
     SymbolInfo,
     Ticker,
 )
-from trading_bot.core.portfolio import Portfolio
+from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.engine.modes import (
     IntentLogger,
@@ -1305,9 +1305,15 @@ class TestTheBootReadsBalancesOnce:
         real_seed = modes._seed_portfolio
         real_snapshot = modes._snapshot_unmanaged_holdings
 
-        def recording_seed(balances: Sequence[Balance], *, quote_asset: str) -> Portfolio:
+        # The signature is MIRRORED here, so it is a second place it lives.
+        # `ledger` is forwarded rather than dropped: swallowing it would make
+        # this wrapper silently disable the restore for every test that
+        # monkeypatches through it.
+        def recording_seed(
+            balances: Sequence[Balance], *, quote_asset: str, ledger: Ledger | None = None
+        ) -> Portfolio:
             seen.append(balances)
-            return real_seed(balances, quote_asset=quote_asset)
+            return real_seed(balances, quote_asset=quote_asset, ledger=ledger)
 
         async def recording_snapshot(
             client: ExchangeClient,
@@ -2207,6 +2213,80 @@ class TestTheStoreIsReadAtBoot:
     rather than the format, and the round trip is the thing being tested.
     """
 
+    async def test_a_ledger_dated_today_reaches_realised_today_through_the_root(
+        self, tmp_path: Path
+    ) -> None:
+        """The restore's whole point: a same-day restart no longer forgets.
+
+        MUTATION: drop the `ledger=` argument from the `_seed_portfolio` call,
+        which is the state every run before this commit was in. `realised_today`
+        then reads `Decimal(0)` and the daily-loss limit's realised term is back
+        to being structurally dead.
+
+        Driven through `live_system` rather than `_restore_ledger` alone,
+        because the mapping being correct and the mapping being CALLED are
+        different claims and only the second was ever missing.
+        """
+        settings = write_settings(tmp_path)
+        today = datetime.now(timezone.utc)
+        stored = store.LedgerRecord(realised_pnl=D("-35.38691640"), pnl_date=today.date())
+        store.save(store.PersistedState(ledger=stored))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.ledger == Ledger(
+                realised_pnl=D("-35.38691640"), pnl_date=today.date()
+            )
+            assert system.portfolio.realised_today(today) == D("-35.38691640")
+            # Exactness, not equality: a value that lost its scale through a
+            # float hop would still compare equal.
+            assert str(system.portfolio.realised_today(today)) == "-35.38691640"
+
+    async def test_a_ledger_dated_yesterday_reads_zero_but_is_still_held(
+        self, tmp_path: Path
+    ) -> None:
+        """Restore is UNCONDITIONAL; staleness is a read-side derivation.
+
+        MUTATION: filter by date in `_restore_ledger` -- return `None` for a
+        ledger not dated today. `realised_today` would still read zero, so a
+        test asserting only the read would PASS. The `ledger ==` assertion is
+        the one that bites, and both are here for exactly that reason.
+
+        Why it matters that the record survives: a boot-time filter cannot tell
+        "yesterday, correctly zero today" from "today, wrongly discarded" when
+        the clock or the file is off by a boundary, and the discarded figure has
+        no other record.
+        """
+        settings = write_settings(tmp_path)
+        now = datetime.now(timezone.utc)
+        yesterday = (now - timedelta(days=1)).date()
+        stored = store.LedgerRecord(realised_pnl=D("-99.5"), pnl_date=yesterday)
+        store.save(store.PersistedState(ledger=stored))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            # HELD, not discarded.
+            assert system.portfolio.ledger == Ledger(realised_pnl=D("-99.5"), pnl_date=yesterday)
+            # And READ as zero, because the day has rolled.
+            assert system.portfolio.realised_today(now) == D("0")
+
+    async def test_a_missing_store_leaves_the_ledger_absent(self, tmp_path: Path) -> None:
+        """ABSENT, not zero, and the boot writes nothing.
+
+        MUTATION: have `_restore_ledger` return `Ledger(realised_pnl=D("0"),
+        ...)` for a missing store. Every reader would behave identically --
+        `realised_today` returns zero either way -- so only the `is None`
+        assertion can catch it, and the distinction is the one `store.py`
+        documents as load-bearing.
+        """
+        settings = write_settings(tmp_path)
+        assert not (tmp_path / "data" / "state.json").exists()
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.ledger is None
+            assert system.portfolio.realised_today(datetime.now(timezone.utc)) == D("0")
+
+        # Boot performs NO write: the store is untouched until a placement.
+        assert not (tmp_path / "data" / "state.json").exists()
+
     async def test_a_restored_record_reaches_the_executor_field_for_field(
         self, tmp_path: Path
     ) -> None:
@@ -2324,12 +2404,20 @@ class TestTheStoreIsReadAtBoot:
 
         The ledger value is run 3's real realised loss, so a reader of this test
         can see what would have been lost.
+
+        **Now also asserts the DOMAIN side.** Until the restore this could only
+        check that the bytes survived a round trip through a store nothing read;
+        the same ledger must now reach ``Portfolio`` as well, so the two halves
+        -- durable and in-memory -- are pinned in one place.
         """
         settings = write_settings(tmp_path)
         ledger = store.LedgerRecord(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27))
         store.save(store.PersistedState(ledger=ledger))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.ledger == Ledger(
+                realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)
+            )
             writer = system.executor._persist_pending
             assert writer is not None
             writer((_EXPECTED,))
