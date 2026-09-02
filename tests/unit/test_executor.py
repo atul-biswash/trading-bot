@@ -201,8 +201,40 @@ class FakeClient:
         return placed_list()
 
 
+class RecordingWriter:
+    """Captures every durable write; can be made to fail.
+
+    Stands in for the composition root's closure. It records the tuple it was
+    handed on every call, so a test can assert what reached DISK independently
+    of what remains in memory -- which is the whole of what U2's Reading A
+    turns on.
+    """
+
+    def __init__(self, *, error: Exception | None = None, fail_from: int = 0) -> None:
+        self.error = error
+        #: Index of the first call that raises. ``0`` fails the durable write
+        #: before the venue call; ``1`` lets that one through and fails the
+        #: rewrite after removal -- which is the only way to reach FORK 3's
+        #: path, since FORK 1 puts the write first.
+        self.fail_from = fail_from
+        self.calls: list[tuple[PendingPlacement, ...]] = []
+
+    def __call__(self, records: tuple[PendingPlacement, ...]) -> None:
+        index = len(self.calls)
+        self.calls.append(records)
+        if self.error is not None and index >= self.fail_from:
+            raise self.error
+
+    def symbols(self, index: int = -1) -> list[str]:
+        return [record.symbol for record in self.calls[index]]
+
+
 def build(
-    *, client: Any = None, deadline_s: float = 9.0, portfolio: Portfolio | None = None
+    *,
+    client: Any = None,
+    deadline_s: float = 9.0,
+    portfolio: Portfolio | None = None,
+    persist: Any = None,
 ) -> tuple[OrderExecutor, FakeClient, Portfolio]:
     resolved_client = client if client is not None else FakeClient()
     resolved_portfolio = portfolio if portfolio is not None else Portfolio(free_quote=D("10000"))
@@ -210,6 +242,7 @@ def build(
         client=resolved_client,  # type: ignore[arg-type]
         portfolio=resolved_portfolio,
         budget=DispatchBudget(deadline_s=deadline_s),
+        persist_pending=persist,
     )
     return executor, resolved_client, resolved_portfolio
 
@@ -716,3 +749,157 @@ class TestOptionFourResolution:
         await executor(candle())
 
         assert calls == []
+
+
+# --------------------------------------------------------------------------
+# The durable pending record
+# --------------------------------------------------------------------------
+class TestDurablePendingRecord:
+    """What reaches DISK, asserted separately from what stays in memory.
+
+    The two are the same at every site but one, and that one is U2's ruling.
+    """
+
+    async def test_the_durable_write_precedes_the_in_process_mark(self) -> None:
+        """FORK 1. The durable write is the FALLIBLE step, so it runs first and
+        a failure leaves ``_pending`` exactly as it was -- no rollback."""
+        executor, client, _ = build(persist=RecordingWriter(error=OSError("disk full")))
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert executor._pending == {}
+        assert client.otoco == []
+        assert client.oto == []
+
+    async def test_a_save_failure_refuses_with_its_own_reason(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Its own reason string: an operator must be sent to the disk, not to
+        ``dispatch_deadline_s``."""
+        executor, _, _ = build(persist=RecordingWriter(error=OSError("disk full")))
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["store_unwritable"]
+        assert len(_records(caplog, "collaborator_failed")) == 1
+
+    async def test_the_record_written_matches_the_in_process_record(self) -> None:
+        writer = RecordingWriter()
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")), persist=writer)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert writer.calls[0] == (executor._pending[SYMBOL],)
+
+    async def test_a_successful_placement_leaves_nothing_durable(self) -> None:
+        writer = RecordingWriter()
+        executor, _, _ = build(persist=writer)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert writer.symbols(0) == [SYMBOL]
+        assert writer.calls[-1] == ()
+        assert executor._pending == {}
+
+    async def test_a_client_refusal_leaves_nothing_durable(self) -> None:
+        """59cf256's ruling, now enforced on disk as well as in memory."""
+        writer = RecordingWriter()
+        executor, _, _ = build(
+            client=FakeClient(place_error=SymbolInfoNotPrimedError("not primed")), persist=writer
+        )
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert writer.calls[-1] == ()
+        assert executor._pending == {}
+
+    async def test_a_venue_exception_drops_the_durable_record_and_keeps_the_in_process_one(
+        self,
+    ) -> None:
+        """U2, READING A -- BOTH halves asserted, because the ruling IS that
+        the two stores disagree here.
+
+        ``TimeoutError`` is the case that makes it matter: the branch catches
+        outcomes where a list MAY be resting, and the in-process record is the
+        only thing that would ever find it.
+        """
+        writer = RecordingWriter()
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")), persist=writer)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert writer.calls[-1] == ()  # disk forgets
+        assert SYMBOL in executor._pending  # memory remembers
+
+    async def test_placed_live_removes_the_durable_record(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        writer = RecordingWriter()
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")), persist=writer)
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert writer.calls[-1] == ()
+
+    async def test_not_placed_removes_the_durable_record(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        writer = RecordingWriter()
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")), persist=writer)
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _gone(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.NOT_PLACED, reason="nothing rests")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _gone)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert writer.calls[-1] == ()
+
+    async def test_unresolved_writes_nothing_further_and_keeps_the_record(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fail-closed: the record stays, so there is nothing to rewrite."""
+        writer = RecordingWriter()
+        executor, _, _ = build(client=FakeClient(place_error=TimeoutError("reset")), persist=writer)
+        await executor.dispatch(buy(), entry_assessment(), candle())
+        writes_after_dispatch = len(writer.calls)
+
+        async def _unresolved(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return PlacementVerdict(outcome=PlacementOutcome.UNRESOLVED, reason="query failed")
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _unresolved)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert len(writer.calls) == writes_after_dispatch
+        assert SYMBOL in executor._pending
+
+    async def test_a_delete_failure_logs_and_continues_without_raising(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """FORK 3, the opposite of FORK 2: the failure falls on the far side of
+        the venue call, the order exists, and a stale record self-corrects."""
+        writer = RecordingWriter(error=OSError("disk full"), fail_from=1)
+        executor, _, portfolio = build(persist=writer)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())  # must not raise
+
+        assert [r.phase for r in _records(caplog, "collaborator_failed")] == ["persist-delete"]
+        assert portfolio.has_position(SYMBOL)  # the placement still landed
+
+    async def test_no_writer_means_no_durable_write_at_all(self) -> None:
+        """The ``None`` default is byte-for-byte the behaviour before this
+        commit, which is what lets every other test in this file stand."""
+        executor, client, _ = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert executor._persist_pending is None
+        assert len(client.otoco) == 1

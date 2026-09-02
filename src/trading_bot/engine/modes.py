@@ -138,11 +138,12 @@ from trading_bot.core.portfolio import Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
-from trading_bot.execution.executor import OrderExecutor
+from trading_bot.execution.executor import OrderExecutor, PendingPlacement
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
 )
+from trading_bot.persistence import store
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
@@ -949,10 +950,49 @@ async def live_system(
                     clock=utc_now,
                 )
                 intent_logger = IntentLogger(pairs=pairs)
+
+                # THE ROOT OWNS THE WHOLE `PersistedState`, and that ownership
+                # is the ruling rather than a convenience. `store.save` is
+                # WHOLE-FILE, so two writers would clobber each other: the
+                # executor owns `pending`, a later accrual will own the ledger,
+                # and only an object holding BOTH can write either without
+                # erasing the other.
+                #
+                # THE MAPPING LIVES HERE for the same reason the callable does.
+                # `CLAUDE.md` has outer layers "depend inward only", and the
+                # composition root is the one layer permitted to know both
+                # `execution/` and `persistence/` -- so `execution/` never
+                # imports the store and gains no outer-to-outer edge.
+                #
+                # NOTHING READS THIS AT BOOT. Restore is a later commit; the
+                # state starts empty and this is a write path with no reader.
+                persisted = store.PersistedState()
+
+                def _persist_pending(records: tuple[PendingPlacement, ...]) -> None:
+                    """Write the executor's pending set, preserving the ledger."""
+                    nonlocal persisted
+                    persisted = store.PersistedState(
+                        pending=tuple(
+                            store.PendingRecord(
+                                symbol=record.symbol,
+                                entry_bar_time=record.entry_bar_time,
+                                generation=record.generation,
+                                quantity=record.quantity,
+                                entry_limit=record.entry_limit,
+                                stop_loss=record.stop_loss,
+                                take_profit=record.take_profit,
+                            )
+                            for record in records
+                        ),
+                        ledger=persisted.ledger,
+                    )
+                    store.save(persisted)
+
                 executor = OrderExecutor(
                     client=resolved_client,
                     portfolio=portfolio,
                     budget=DispatchBudget.from_config(settings.config),
+                    persist_pending=_persist_pending,
                 )
                 engine.on_signal(
                     _build_signal_handler(

@@ -156,8 +156,14 @@ class PendingRecord(_Frozen):
     generation: int
     quantity: Money
     entry_limit: Money
-    stop_loss: Money | None = None
-    take_profit: Money | None = None
+    # REQUIRED, matching ``PendingPlacement``. The type still admits ``None``
+    # -- a both-disabled config is legal and its levels are genuinely absent --
+    # but the KEY must be present, so a truncated store RAISES instead of
+    # silently reading as unprotected. ``load`` converts the resulting
+    # ``ValidationError`` into ``StoreCorruptError``, which is the type this
+    # module documents.
+    stop_loss: Money | None
+    take_profit: Money | None
 
 
 class LedgerRecord(_Frozen):

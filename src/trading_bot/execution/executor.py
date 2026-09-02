@@ -46,6 +46,7 @@ from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from collections.abc import Callable
     from datetime import datetime
 
     from trading_bot.core.assessment import RiskAssessment
@@ -102,6 +103,10 @@ _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
 _REASON_PENDING = "placement_pending"
 _REASON_CLIENT_REFUSAL = "client_refusal"
+#: ITS OWN REASON, never the budget's and never the pending guard's. An
+#: operator reading this must be sent to the DISK; reusing another string here
+#: would send them to `dispatch_deadline_s` for a cause that is not there.
+_REASON_STORE_UNWRITABLE = "store_unwritable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +163,23 @@ class PendingPlacement:
     take_profit: Money | None
 
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    #: Writes the WHOLE pending set durably. **Raising means the write did NOT
+    #: happen**, and the caller must treat the record as non-existent.
+    #:
+    #: A callable rather than an imported module, so ``execution/`` never
+    #: depends on ``persistence/``: `CLAUDE.md` has outer layers "depend inward
+    #: only", and the composition root is the one layer permitted to know both.
+    #: It is also what keeps the whole-file ``store.save`` safe -- the root owns
+    #: the ledger this executor never sees.
+    #:
+    #: Declared HERE rather than in the import block above because it names
+    #: ``PendingPlacement``, which is defined immediately above it. A forward
+    #: reference would need a quoted name, and this project's style forbids
+    #: those in new code.
+    PendingWriter = Callable[[tuple[PendingPlacement, ...]], None]
+
+
 class OrderExecutor:
     """Dispatches approved entries; resolves ambiguous writes on the next bar."""
 
@@ -167,10 +189,15 @@ class OrderExecutor:
         client: ExchangeClient,
         portfolio: Portfolio,
         budget: DispatchBudget,
+        persist_pending: PendingWriter | None = None,
     ) -> None:
         self._client = client
         self._portfolio = portfolio
         self._budget = budget
+        #: ``None`` means DO NOT PERSIST, and that default is what keeps every
+        #: existing test and any caller not yet updated byte-for-byte
+        #: unchanged. The composition root supplies the real writer.
+        self._persist_pending = persist_pending
         self._pending: dict[str, PendingPlacement] = {}
 
     # -- Option 4 resolution, on the candle subscription --------------------
@@ -294,6 +321,7 @@ class OrderExecutor:
                 )
 
             del self._pending[symbol]
+            self._persist_after_removal(symbol)
 
             if verdict.outcome is PlacementOutcome.NOT_PLACED:
                 # THE TRADE IS GONE, NOT DEFERRED, and it now says so.
@@ -421,9 +449,9 @@ class OrderExecutor:
             self._refuse(signal, _REASON_UNPROTECTED, candle)
             return
 
-        # Mark BEFORE the write. A record created after a call that never
+        # Mark BEFORE the venue write. A record created after a call that never
         # returned would not exist, which is the exact state it is for.
-        self._pending[signal.symbol] = PendingPlacement(
+        record = PendingPlacement(
             symbol=signal.symbol,
             entry_bar_time=entry_bar_time,
             generation=0,
@@ -432,6 +460,28 @@ class OrderExecutor:
             stop_loss=intent.levels.stop_loss,
             take_profit=intent.levels.take_profit,
         )
+        # THE DURABLE WRITE GOES FIRST, because it is the FALLIBLE step and the
+        # dict assignment is not. `CLAUDE.md`'s locked ordering -- "The fallible
+        # step precedes the irreversible one ... Everything that can raise runs
+        # first, so a failure leaves the object exactly as it was" -- applied
+        # across two STORES rather than two fields. That is what makes the
+        # refusal below need no rollback.
+        if self._persist_pending is not None:
+            try:
+                self._persist_pending((*self._pending.values(), record))
+            except Exception as exc:
+                # REFUSE, never proceed. Placing without a durable record
+                # recreates the unbounded state the store exists to close: an
+                # order list resting at the venue that nothing knows about.
+                # Nothing is marked and nothing has been sent, so this costs
+                # exactly one trade. A full disk therefore HALTS ENTRIES on
+                # every symbol until it is cleared -- the recoverable
+                # direction, against an unrecorded live order list which has no
+                # bound at all.
+                self._log_failure("persist", signal.symbol, exc)
+                self._refuse(signal, _REASON_STORE_UNWRITABLE, candle)
+                return
+        self._pending[signal.symbol] = record
         try:
             order_list = await self._place(request, bounds.timeout_s, bounds.attempts)
         except ClientRefusalError as exc:
@@ -470,6 +520,7 @@ class OrderExecutor:
             # the venue SENT US. In each the venue answered and the refusal is
             # ours. None of the three is on the placement path.
             self._pending.pop(signal.symbol, None)
+            self._persist_after_removal(signal.symbol)
             _log.warning(
                 "Dispatch refused before any request left the process",
                 extra={
@@ -493,6 +544,31 @@ class OrderExecutor:
             # body will not parse, so for a placement the venue ACCEPTED and we
             # cannot read what it said: it leans toward LANDED and must keep its
             # record.
+            #
+            # U2 IS RULED, AND THIS IS READING A: THE DURABLE RECORD IS
+            # DROPPED, THE IN-PROCESS RECORD IS KEPT. "Never persist
+            # unconfirmed refusals" is satisfied literally -- nothing
+            # unconfirmed reaches disk -- while `__call__` still resolves this
+            # on the next bar. Only a restart forgets, which is exactly the
+            # exposure that existed before this commit.
+            #
+            # THERE IS NO `pop` HERE, DELIBERATELY, and the reason is that this
+            # branch is NOT a refusal branch. MEASURED: it catches three
+            # classes. Venue refusals where nothing rests
+            # (`InsufficientBalanceError`, `FilterRejectedError`,
+            # `MalformedRequestError`, `ContractViolationError`,
+            # `RateLimitError`, `OrderError`); UNKNOWN outcomes where a list
+            # MAY be resting (`ExchangeConnectionError`, and the
+            # `BinanceRequestException` raised only AFTER a 2xx); and
+            # `DuplicateOrderError`, which Q-C section 8 classifies as a
+            # SUCCESS signal -- a duplicate means the FIRST one landed.
+            # Dropping the in-process record would remove the only mechanism
+            # that ever finds such a list, on every occurrence rather than only
+            # on a crash.
+            #
+            # So the two stores deliberately DISAGREE here and nowhere else:
+            # disk forgets, memory remembers.
+            self._persist_dropping(signal.symbol)
             _log.warning(
                 "Placement outcome unknown; resolution deferred to the next bar",
                 extra={
@@ -506,6 +582,7 @@ class OrderExecutor:
             return
 
         self._pending.pop(signal.symbol, None)
+        self._persist_after_removal(signal.symbol)
         self._open_position(
             symbol=intent.symbol,
             quantity=intent.quantity,
@@ -606,6 +683,45 @@ class OrderExecutor:
             take_profit=take_profit,
         )
         self._portfolio.open_position(position, cost=quantity * entry_limit)
+
+    def _persist_after_removal(self, symbol: str) -> None:
+        """Rewrite the durable set after ``symbol``'s record left ``_pending``."""
+        self._persist_quietly(tuple(self._pending.values()), symbol)
+
+    def _persist_dropping(self, symbol: str) -> None:
+        """Rewrite the durable set WITHOUT ``symbol``, which stays in ``_pending``.
+
+        The one site where the two stores disagree on purpose: U2's Reading A
+        drops the durable record for an unconfirmed outcome while the
+        in-process record survives to be resolved on the next bar. A separate
+        method rather than a flag, because the two situations are genuinely
+        different and the name is where that difference is stated.
+        """
+        self._persist_quietly(
+            tuple(record for key, record in self._pending.items() if key != symbol), symbol
+        )
+
+    def _persist_quietly(self, records: tuple[PendingPlacement, ...], symbol: str) -> None:
+        """Write ``records`` durably. **NEVER raises.**
+
+        Deliberately the OPPOSITE of the write path's refusal, and the
+        asymmetry is principled rather than pragmatic: it turns on which side
+        of the venue call the failure falls.
+
+        A failed WRITE happens BEFORE the call -- nothing is at the venue, so
+        refusing costs one trade. A failed DELETE happens AFTER it: the order
+        exists, there is nothing left to refuse, and the only cost of a stale
+        record is one resolver call at the next boot, which queries the venue,
+        gets an answer and removes it. Self-correcting, where a failed write is
+        not. `CLAUDE.md`: a budget may refuse to BEGIN work, and must never
+        abandon a write in flight.
+        """
+        if self._persist_pending is None:
+            return
+        try:
+            self._persist_pending(records)
+        except Exception as exc:  # never raises; see the module docstring
+            self._log_failure("persist-delete", symbol, exc)
 
     def _refuse(self, signal: Signal, reason: str, candle: Candle) -> None:
         _log.warning(

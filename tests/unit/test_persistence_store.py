@@ -19,9 +19,14 @@ turning every unrecognised object into its ``repr``.
 * **Concurrency.** Two processes writing this file at once is not tested and
   is not prevented -- ``os.replace`` makes each write atomic, so a reader sees
   one whole state or the other, but a lost update is possible and unbounded.
-* **The store has no caller.** Nothing in ``src/`` imports it outside its own
-  package, so nothing here exercises it in composition with the executor or
-  the composition root.
+* **The composition.** The store now has exactly one caller -- the composition
+  root, pinned by ``TestOnlyTheCompositionRootMayImportTheStore`` -- but
+  nothing here exercises it THROUGH that root. The executor's own tests fake
+  the writer; these test the store alone. No test in this repository writes a
+  real ``data/state.json`` and reads it back through ``live_system``.
+* **The read path.** Nothing loads the store at boot yet. As of the wiring
+  commit this is a WRITE PATH WITH NO READER, deliberately, and restore is a
+  later change.
 """
 
 from __future__ import annotations
@@ -327,10 +332,10 @@ class TestFieldAgreementWithPendingPlacement:
       ``from __future__ import annotations``, while pydantic yields the
       resolved ``Optional[Annotated[Decimal, BeforeValidator(...)]]``. A type
       check would have to hand-write the very mapping it exists to verify.
-    * **Optionality.** ``PendingRecord``'s ``stop_loss`` and ``take_profit``
-      default to ``None`` where ``PendingPlacement``'s are required
-      arguments. That asymmetry is real, it lets a stored record omit them and
-      parse, and it is declared as a finding rather than fixed here.
+    * **Optionality**, still. Both types now REQUIRE all seven -- the
+      asymmetry this bullet used to record is fixed, and
+      ``TestRequiredProtectiveLevels`` below is what pins it, because a
+      name-set comparison cannot see requiredness in either direction.
     * **Ordering**, because the store dumps by name and order carries nothing.
     * **Semantics.** Two fields agreeing in name and meaning nothing alike
       would pass this.
@@ -352,16 +357,103 @@ class TestFieldAgreementWithPendingPlacement:
         assert placement == record
 
 
-class TestNoCaller:
-    def test_nothing_outside_the_package_imports_the_store(self) -> None:
-        """Pinned because it is a DECISION, not an accident: the store ships
-        with no caller so that wiring it -- which writes fields the risk path
-        reads -- is a separate, reviewable commit."""
-        root = Path(__file__).resolve().parents[2] / "src" / "trading_bot"
+class TestRequiredProtectiveLevels:
+    """``stop_loss`` and ``take_profit`` are REQUIRED, matching
+    ``PendingPlacement``.
+
+    The type still admits ``None`` -- a both-disabled config is legal and its
+    levels are genuinely absent -- so what is required is the KEY, not a value.
+    A truncated store must RAISE rather than read as unprotected, which is the
+    dangerous direction: a record silently missing its stop would describe a
+    position the bot believes has no protection to reconcile against.
+
+    This is invisible to ``TestFieldAgreementWithPendingPlacement``, which
+    compares name sets, and that is why it needs its own class.
+    """
+
+    def test_a_stored_record_omitting_stop_loss_raises_store_corrupt(self, tmp_path: Path) -> None:
+        path = tmp_path / "state.json"
+        path.write_text(
+            '{"schema": 1, "ledger": null, "pending": [{"symbol": "ETHUSDT",'
+            ' "entry_bar_time": "2026-08-28T15:29:59.999000+00:00", "generation": 0,'
+            ' "quantity": "0.72650000", "entry_limit": "2508.41",'
+            ' "take_profit": null}]}',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(s.StoreCorruptError):
+            s.load(path)
+
+    def test_a_stored_record_omitting_take_profit_raises_store_corrupt(
+        self, tmp_path: Path
+    ) -> None:
+        path = tmp_path / "state.json"
+        path.write_text(
+            '{"schema": 1, "ledger": null, "pending": [{"symbol": "ETHUSDT",'
+            ' "entry_bar_time": "2026-08-28T15:29:59.999000+00:00", "generation": 0,'
+            ' "quantity": "0.72650000", "entry_limit": "2508.41",'
+            ' "stop_loss": null}]}',
+            encoding="utf-8",
+        )
+
+        with pytest.raises(s.StoreCorruptError):
+            s.load(path)
+
+    def test_an_explicit_null_still_loads(self, tmp_path: Path) -> None:
+        """The other half, and the one that stops this being over-tightened: a
+        both-disabled placement has no levels, and its record must round-trip."""
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(pending=(_record(stop_loss=None, take_profit=None),)), path)
+
+        restored = s.load(path)
+
+        assert restored is not None
+        assert restored.pending[0].stop_loss is None
+        assert restored.pending[0].take_profit is None
+
+    def test_constructing_without_the_keys_is_refused(self) -> None:
+        with pytest.raises(Exception, match="stop_loss"):
+            s.PendingRecord(
+                symbol="ETHUSDT",
+                entry_bar_time=BAR,
+                generation=0,
+                quantity=D("1"),
+                entry_limit=D("2"),
+            )
+
+
+class TestOnlyTheCompositionRootMayImportTheStore:
+    """The store now HAS a caller, and this pins WHICH.
+
+    It replaces a ``TestNoCaller`` that asserted nobody imported the store at
+    all. That property is false as of the wiring commit -- and worse, the test
+    would have kept PASSING, because it searched for the string
+    ``persistence.store`` while the root imports
+    ``from trading_bot.persistence import store``. A test that survives the
+    falsification of its own premise is not coverage.
+
+    What is pinned instead is the property that still holds and is the one
+    worth holding: ``execution/`` must never import ``persistence/``.
+    `CLAUDE.md` has outer layers "depend inward only", and the composition
+    root is the single layer permitted to know both -- which is exactly why
+    the executor takes an injected callable rather than importing the store.
+    """
+
+    def test_execution_never_imports_persistence(self) -> None:
+        execution = Path(__file__).resolve().parents[2] / "src" / "trading_bot" / "execution"
         offenders = [
+            path.name
+            for path in execution.rglob("*.py")
+            if "trading_bot.persistence" in path.read_text(encoding="utf-8")
+        ]
+        assert offenders == []
+
+    def test_the_composition_root_is_the_only_importer(self) -> None:
+        root = Path(__file__).resolve().parents[2] / "src" / "trading_bot"
+        importers = sorted(
             path.relative_to(root).as_posix()
             for path in root.rglob("*.py")
             if path.parent.name != "persistence"
-            and "persistence.store" in path.read_text(encoding="utf-8")
-        ]
-        assert offenders == []
+            and "trading_bot.persistence" in path.read_text(encoding="utf-8")
+        )
+        assert importers == ["engine/modes.py"]
