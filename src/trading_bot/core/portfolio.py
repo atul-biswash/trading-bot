@@ -298,14 +298,51 @@ class Portfolio(BaseModel):
         discipline :meth:`open_position` states from the other side. The
         arithmetic raises on a ``float`` operand and ``now`` must be
         timezone-aware, so both run while the ledger is still untouched; the
-        credit then goes first, because ``free_quote`` carries ``ge=0`` and is
-        the one commit step that can still raise. Note the two methods look
-        opposite -- one debits first, one credits first -- and are the same
-        rule: in both, the ``free_quote`` assignment is the fallible step, and
-        the fallible step precedes the irreversible one. Reaching any of these
-        raises is a bug rather than a market state, which is exactly why it
-        must not half-apply: a position removed with its proceeds unaccounted
-        for is a ledger that has already stopped matching the account.
+        credit then goes first, because ``free_quote`` carries ``ge=0``. Note
+        the two methods look opposite -- one debits first, one credits first --
+        and are the same rule: in both, the fallible step precedes the
+        irreversible one. Reaching any of these raises is a bug rather than a
+        market state, which is exactly why it must not half-apply: a position
+        removed with its proceeds unaccounted for is a ledger that has already
+        stopped matching the account.
+
+        **THE DELETION IS LAST, AND UNTIL M5h IT WAS NOT.** This paragraph used
+        to call ``free_quote`` *"the one commit step that can still raise"*, and
+        that premise was false: :meth:`record_realised_pnl` can raise too --
+        ``Money`` rejects a non-finite total, and the accrual's own docstring
+        depends on exactly that. It ran AFTER ``del self.positions[symbol]``, so
+        a raise there left the proceeds credited, the position gone and the loss
+        unbooked.
+
+        **What made that unrecoverable is retryability, not the write itself.**
+        ``reconcile_open_positions`` iterates ``portfolio.open_positions``, so a
+        symbol removed from ``positions`` is never visited again -- there is no
+        later pass that could notice the omission and no state from which to
+        retry. A permanent, silent under-report, which is the one direction a
+        risk control may not err in. With the deletion last, the same failure
+        leaves the position PRESENT and the next pass can try again.
+
+        **The credit stays first, deliberately, and the alternative was
+        rejected on its error direction.** Moving the accrual ahead of the
+        credit would protect against a non-finite total, which is barely
+        reachable -- but it would write ``realised_pnl`` before ``free_quote``
+        raises, and ``free_quote`` raising IS reachable: an over-large ``fee``
+        or a negative ``exit_price`` both drive ``proceeds`` below zero, and
+        both are covered rows in
+        ``test_a_failed_close_leaves_the_ledger_untouched``. So accrual-first
+        would touch the ledger on the failures that actually happen in order to
+        guard one that does not.
+
+        **The residual, stated rather than hidden.** If the accrual raises after
+        the credit lands, ``free_quote`` has been credited and the position
+        survives -- so a retry would credit it twice. That is accepted: it needs
+        a non-finite total to reach, the position surviving makes the failure
+        visible and repeating, and the alternative is losing the position
+        outright. ``CLAUDE.md``'s rule is *"the fallible step precedes the
+        irreversible one ... Everything that can raise runs first, so a failure
+        leaves the object exactly as it was"*; with three writes and two of them
+        fallible, no ordering satisfies it completely, and this is the one whose
+        worst case is recoverable.
         """
         position = self.positions.get(symbol)
         if position is None:
@@ -316,8 +353,10 @@ class Portfolio(BaseModel):
         _require_aware("now", now)
 
         self.free_quote = proceeds
-        del self.positions[symbol]
         self.record_realised_pnl(pnl, now=now)
+        # LAST, because it is the only irreversible step: nothing revisits a
+        # symbol that has left `positions`.
+        del self.positions[symbol]
         return pnl
 
     def equity(self, marks: Mapping[str, Decimal]) -> Decimal:

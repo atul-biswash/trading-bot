@@ -241,6 +241,13 @@ async def _query(
             "status": order.status.value,
             "filled_quantity": order.filled_quantity,
             "average_price": order.average_price,
+            # The leg's TRIGGER, closing a documented absence: every prior run
+            # of this probe logged status, quantity and fill price and never
+            # this, so whether a resting TAKE_PROFIT reports its trigger the
+            # way a STOP_LOSS does has never been observed here. `Money | None`
+            # -- both `Decimal` and `None` are in the `extra=` admissible set,
+            # so it crosses unconverted, exactly as `average_price` above does.
+            "stop_price": order.stop_price,
         },
     )
     return LegResult(label, client_order_id, order)

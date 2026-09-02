@@ -22,12 +22,21 @@ assert they were never called.
 * ``_probe``'s composition -- ``get_settings``, ``setup_logging``,
   ``BinanceClient.create`` and the ``finally`` teardown -- is exercised only
   through its parts. Faking the whole boot would pin the fake, not the script.
-* The script has never been run. At the time these were written it had made
-  zero venue calls.
+* The venue's answer to the trigger question. ``stop_price`` now crosses the
+  per-leg line, but no run has yet carried it -- so whether a resting
+  ``TAKE_PROFIT`` reports its trigger the way a ``STOP_LOSS`` does is still
+  unobserved. The field is pinned here; the measurement is not taken.
+
+**The script HAS been run**, three times on 2026-09-02 (pids 16596, 23604 and
+5916), against live BTCUSDT and ETHUSDT legs. This section previously said it
+had never run and had made zero venue calls; that was true when written and
+stopped being true without anything here noticing, which is the drift these
+"not covered" bullets exist to make visible rather than to demonstrate.
 """
 
 from __future__ import annotations
 
+import logging
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -61,6 +70,7 @@ def _order(
     status: OrderStatus = OrderStatus.FILLED,
     filled: str = "0.72650000",
     average_price: str | None = "2506.42000000",
+    stop_price: str | None = None,
 ) -> Order:
     """One filled leg as ``to_order`` would hand it back."""
     return Order(
@@ -73,6 +83,7 @@ def _order(
         filled_quantity=D(filled),
         average_price=None if average_price is None else D(average_price),
         client_order_id=client_order_id,
+        stop_price=None if stop_price is None else D(stop_price),
     )
 
 
@@ -189,6 +200,67 @@ class TestNotional:
 
     def test_an_absent_order_yields_none(self) -> None:
         assert probe.notional(None) is None
+
+
+class TestTheLegLineCarriesTheTrigger:
+    """``stop_price`` joins the per-leg record, closing a documented absence.
+
+    Every previous run of this probe logged ``status``, ``filled_quantity`` and
+    ``average_price`` and never the trigger -- so whether a resting
+    ``TAKE_PROFIT`` reports its trigger the way a ``STOP_LOSS`` does has never
+    been observed in this repository. The field is added; **the probe is not
+    run**, and answering the question needs a venue read the owner has not
+    authorised.
+    """
+
+    @pytest.mark.parametrize(
+        ("stop_price", "expected"),
+        [("2334.58000000", D("2334.58000000")), (None, None)],
+        ids=["a_leg_with_a_trigger", "a_leg_without_one"],
+    )
+    async def test_the_leg_line_reports_the_trigger_either_way(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        stop_price: str | None,
+        expected: Decimal | None,
+    ) -> None:
+        """MUTATION: drop ``"stop_price"`` from the ``extra=`` dict.
+
+        Both rows matter and neither alone is sufficient. Without the ``None``
+        row, an implementation that emitted the key only when it had a value
+        would pass -- and an absent key is exactly what makes a resting leg
+        indistinguishable from an unqueried one, which is the confusion this
+        field exists to remove. Records are selected by LOGGER NAME rather than
+        by position: ``caplog.at_level`` lowers the capture handler globally,
+        so a collaborator logging on its own would otherwise be counted here.
+        """
+        client = _FakeClient({ENTRY_ID: _order(client_order_id=ENTRY_ID, stop_price=stop_price)})
+        failures: list[str] = []
+
+        with caplog.at_level(logging.INFO):
+            await probe._query(client, SYMBOL, "entry leg", ENTRY_ID, failures)
+
+        records = [r for r in caplog.records if getattr(r, "event", None) == probe._EVENT_LEG]
+        assert len(records) == 1
+        assert records[0].stop_price == expected
+        assert failures == []
+
+    def test_the_trigger_crosses_extra_unconverted(self) -> None:
+        """``Money | None`` is ``Decimal | None``, and both are admissible.
+
+        MUTATION: pass ``str(order.stop_price)`` or ``float(...)`` instead.
+
+        ``CLAUDE.md``'s rule is that only ``str``, ``int``, ``float``, ``bool``,
+        ``None`` and ``Decimal`` may cross ``extra=`` unconverted -- so no
+        conversion is needed here, and adding one would make the two log sinks
+        disagree in the way the enum rule describes. This asserts the source
+        passes the attribute itself rather than a rendering of it.
+        """
+        source = Path(probe.__file__).read_text(encoding="utf-8")
+
+        assert '"stop_price": order.stop_price,' in source
+        assert "str(order.stop_price)" not in source
+        assert "float(order.stop_price)" not in source
 
 
 class TestArithmetic:

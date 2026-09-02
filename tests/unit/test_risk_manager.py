@@ -610,6 +610,94 @@ class TestPortfolio:
         assert portfolio.free_quote == D("800")
         assert portfolio.realised_pnl == D("0")
 
+    def test_a_raising_accrual_leaves_the_position_present_to_be_retried(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The sixth way, and the one the five rows above CANNOT express.
+
+        Every one of them raises at or before the ``free_quote`` credit, so
+        each abstains from the ordering question entirely -- they pass under
+        both the old sequence and the new one. This is the row that bites.
+
+        MUTATION: move ``del self.positions[symbol]`` back above the accrual,
+        which is where it sat until M5h. Then the position is gone, the loss is
+        unbooked, and -- because ``reconcile_open_positions`` iterates
+        ``portfolio.open_positions`` -- nothing ever revisits the symbol. This
+        test then fails on its first assertion.
+
+        The accrual is forced rather than driven there by inputs, and that is
+        not a shortcut: it is **not reachable** through this method's own
+        arguments. A non-finite ``exit_price`` makes ``pnl`` and ``proceeds``
+        non-finite together, so the ``free_quote`` credit raises first and the
+        accrual is never reached. That unreachability is exactly why the defect
+        was latent -- no input could surface it -- and why the order has to be
+        pinned directly.
+
+        The substitute raises the REAL mechanism rather than a stand-in
+        exception: it assigns a non-finite ``realised_pnl``, which is what a
+        non-finite total does, and ``Money`` rejects it independently of the
+        float guard. Patched on the CLASS, because ``validate_assignment``
+        routes an instance ``setattr`` through validation and rejects a name
+        that is not a field.
+        """
+        portfolio = Portfolio(free_quote=D("800"), positions={SYMBOL: long_position(quantity="2")})
+
+        def _boom(self: Portfolio, amount: Decimal, *, now: datetime) -> None:
+            self.realised_pnl = Decimal("Infinity")
+
+        monkeypatch.setattr(Portfolio, "record_realised_pnl", _boom)
+
+        with pytest.raises(ValidationError):
+            portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+
+        # THE POINT: the position survives, so the next reconciliation pass
+        # sees it and can try again. Losing it is the unrecoverable failure.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.realised_pnl == D("0")  # the accrual did not land
+        # The credit DID land, and that is the accepted residual -- documented
+        # on the method rather than silently tolerated.
+        assert portfolio.free_quote == D("1020")
+
+    def test_a_successful_close_still_writes_every_field_with_the_same_values(self) -> None:
+        """The reorder must be invisible on the success path.
+
+        MUTATION: drop any one of the three writes, or return before the
+        deletion. Asserted as a set rather than one at a time, so a reorder
+        that loses a write fails here rather than in whichever downstream test
+        happens to read that field first.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
+
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+
+        assert pnl == D("20")  # unchanged: (110 - 100) * 2
+        assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
+        assert portfolio.realised_today(NOW) == D("20")
+        assert portfolio.realised_pnl == D("20")
+        assert portfolio.pnl_date == NOW.date()
+        assert SYMBOL not in portfolio.positions
+        assert not portfolio.has_position(SYMBOL)
+
+    def test_an_absent_symbol_returns_zero_and_writes_nothing_at_all(self) -> None:
+        """The early return precedes every write and must stay there.
+
+        MUTATION: move the ``position is None`` guard below the arithmetic, or
+        credit before checking. Distinct from the existing absent-symbol test,
+        which asserts the return value and ``free_quote``; this also pins
+        ``positions`` and ``pnl_date``, so a guard that ran late and rolled the
+        day on a no-op close would fail.
+        """
+        portfolio = Portfolio(free_quote=D("1000"), positions={"ETHUSDT": long_position()})
+        before_date = portfolio.pnl_date
+
+        assert portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW) == D("0")
+
+        assert portfolio.free_quote == D("1000")
+        assert portfolio.realised_pnl == D("0")
+        assert portfolio.pnl_date == before_date
+        assert set(portfolio.positions) == {"ETHUSDT"}
+
     def test_free_quote_cannot_go_negative(self) -> None:
         portfolio = Portfolio(free_quote=D("100"))
         with pytest.raises(ValidationError):
