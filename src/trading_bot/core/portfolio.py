@@ -112,8 +112,59 @@ def _utc_day(name: str, moment: datetime) -> date:
     return _require_aware(name, moment).astimezone(timezone.utc).date()
 
 
-def _ledger_is_stale(covered: date | None, now_day: date) -> bool:
-    """Whether a ledger covering ``covered`` is out of date at ``now_day``.
+class Ledger(BaseModel):
+    """Realised P&L and the UTC day it covers, as ONE assignable value.
+
+    **FROZEN, and that is the whole point.** These were two fields on
+    :class:`Portfolio` -- ``realised_pnl: Money`` and ``pnl_date: date | None``
+    -- written by two separate assignments with no ``await`` between them. A
+    signal delivered between the bytecodes left a NEW TOTAL UNDER A STALE DATE,
+    which :meth:`Portfolio.realised_today` reads as ``Decimal(0)``: a booked
+    loss reading as zero, the daily-loss halt releasing, an entry permitted on
+    an account that is halted. Under-reporting -- the one direction a risk
+    control may not err in.
+
+    **The interleaved state is now unrepresentable BY CONSTRUCTION, not by
+    assertion.** One field means one assignment, so there is no intermediate to
+    observe. No test can demonstrate that -- a test shows the presence of a
+    state, never its absence -- and the two instruments that can are this type
+    and a mutation proof that the two-write form fails a test this one passes.
+
+    **The window opened only on a day roll**, since the second write was guarded
+    by ``if rolled``; and a killed process cannot run a ``finally``, so no
+    graceful path existed to rely on. M5h measured the first non-SIGINT death
+    in this project's record.
+
+    **Construction is the fallible step and it precedes the write.** ``Money``
+    runs ``_reject_float`` and pydantic's ``allow_inf_nan=False`` here, at
+    ``Ledger(...)``, so a bad total raises before ``Portfolio.ledger`` is
+    touched -- which strengthens the ordering rule rather than merely
+    preserving it.
+
+    **``None`` is the field's business, not this type's.** A ``Portfolio``
+    whose ``ledger`` is ``None`` has never accrued, which is a different fact
+    from having accrued to zero -- the distinction
+    ``persistence.store`` states at length and this type keeps
+    representable by refusing to model "no day".
+
+    Deliberately NOT ``store.LedgerRecord``, which carries the same two fields:
+    ``core/`` may not import ``persistence/``, and the mapping between them is
+    the composition root's.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    realised_pnl: Money
+    #: The UTC day :attr:`realised_pnl` belongs to. Required and non-nullable:
+    #: "no day" is spelled by the FIELD being ``None``, never by a ``Ledger``
+    #: with a missing date. A total without a day reads as zero for every
+    #: ``now`` -- see :func:`_ledger_is_stale` -- so the two must not be
+    #: separable.
+    pnl_date: date
+
+
+def _ledger_is_stale(ledger: Ledger | None, now_day: date) -> bool:
+    """Whether ``ledger`` is out of date at ``now_day``.
 
     **Strictly later, not merely different, and that is the whole decision.**
     A ``now`` that moves *backwards* across midnight -- an NTP correction, or an
@@ -125,15 +176,19 @@ def _ledger_is_stale(covered: date | None, now_day: date) -> bool:
     accrues into the day the ledger already covers and reads that day's figure:
     the wrong day, conservatively, rather than no day at all.
 
-    ``covered is None`` is the first accrual of a run, before any day is
+    ``ledger is None`` is the first accrual of a run, before any day is
     recorded, and it is not an edge case to tolerate but the guard that makes
     the comparison legal -- ``date > None`` raises ``TypeError``.
 
     One definition for both paths, for the reason :func:`_utc_day` is one: the
     comparison direction is now the thing that could drift between the read and
     the write of the same field, and it is exactly the thing being fixed here.
+
+    Takes the whole ``Ledger`` rather than a bare date, so the ``None`` case is
+    "there is no ledger" rather than "there is a ledger with no day" -- a state
+    :class:`Ledger` no longer permits.
     """
-    return covered is None or now_day > covered
+    return ledger is None or now_day > ledger.pnl_date
 
 
 class Portfolio(BaseModel):
@@ -156,10 +211,16 @@ class Portfolio(BaseModel):
     #: Open positions by symbol. One position per symbol: this system does not
     #: pyramid, and a second entry would have to merge or overwrite.
     positions: dict[str, Position] = Field(default_factory=dict)
-    #: Realised P&L accrued on :attr:`pnl_date`. Negative is a loss.
-    realised_pnl: Money = Decimal(0)
-    #: UTC date :attr:`realised_pnl` belongs to; ``None`` until the first accrual.
-    pnl_date: date | None = None
+    #: Realised P&L and the day it covers, as ONE value. ``None`` until the
+    #: first accrual -- **absent, not zero**, and the two are different facts:
+    #: absent means nothing has ever been booked, where a ``Ledger`` carrying
+    #: ``Decimal(0)`` means accruals netted out. A reader acting on the second
+    #: when the first is true takes "the ledger says zero" as authority.
+    #:
+    #: **These were two fields until M5h.** One assignment cannot leave a new
+    #: total under a stale date, so the interleaving that made a booked loss
+    #: read as zero is now unrepresentable. See :class:`Ledger`.
+    ledger: Ledger | None = None
     #: Per-symbol instants before which no new entry is allowed.
     cooldown_until: dict[str, datetime] = Field(default_factory=dict)
     #: Material base holdings the account had at boot that this bot did not
@@ -434,9 +495,19 @@ class Portfolio(BaseModel):
         hide a booked loss from the daily-loss check and permit an entry the
         account is halted for.
         """
-        if _ledger_is_stale(self.pnl_date, _utc_day("now", now)):
+        # FIRST, and unconditionally: `_utc_day` is what rejects a naive `now`,
+        # and `or` short-circuits. Inlined into the condition below it would be
+        # skipped whenever the ledger is absent -- so a naive value would pass
+        # silently on exactly the path a fresh process takes. MEASURED: writing
+        # it that way failed `test_naive_datetime_is_rejected`.
+        today = _utc_day("now", now)
+        ledger = self.ledger
+        # The `ledger is None` limb is mypy narrowing, not a second predicate:
+        # `_ledger_is_stale` already answers True for None. A real branch
+        # rather than an `assert`, which vanishes under -O.
+        if ledger is None or _ledger_is_stale(ledger, today):
             return Decimal(0)
-        return self.realised_pnl
+        return ledger.realised_pnl
 
     def record_realised_pnl(self, amount: Decimal, *, now: datetime) -> None:
         """Accrue ``amount`` of realised P&L into the day containing ``now``.
@@ -465,14 +536,25 @@ class Portfolio(BaseModel):
         ``pnl_date`` moves **only** when the ledger is stale. Assigning it
         unconditionally would back-date on a ``now`` that has moved backwards,
         which is the defect :func:`_ledger_is_stale` exists to prevent.
+
+        **ONE ASSIGNMENT, AND THAT IS THE M5h CHANGE.** This wrote
+        ``realised_pnl`` and then, conditionally, ``pnl_date`` -- two
+        ``STORE_ATTR`` bytecodes with no suspension point between them, but
+        interruptible all the same. What that left is stated on :class:`Ledger`;
+        what matters here is that the intermediate state no longer exists to be
+        left. Note the fallible step moved EARLIER rather than merely staying
+        first: ``Ledger(...)`` validates the total before ``self.ledger`` is
+        touched at all.
         """
         today = _utc_day("now", now)
-        rolled = _ledger_is_stale(self.pnl_date, today)
+        ledger = self.ledger
+        rolled = _ledger_is_stale(ledger, today)
         total = self.realised_today(now) + amount
+        # Not stale => keep the day the ledger already covers. `ledger is not
+        # None` is mypy narrowing: `rolled` is True whenever it is None.
+        covered = ledger.pnl_date if ledger is not None and not rolled else today
 
-        self.realised_pnl = total
-        if rolled:
-            self.pnl_date = today
+        self.ledger = Ledger(realised_pnl=total, pnl_date=covered)
 
     @staticmethod
     def _binding_stop(position: Position) -> Decimal | None:
@@ -589,7 +671,7 @@ class Portfolio(BaseModel):
         require the ledger to be handed mark prices at the day roll, which can
         fall when no signal is in flight.
 
-        ``realised_pnl`` is untouched by any of this. The committed term lives
+        The :attr:`ledger` is untouched by any of this. The committed term lives
         in the check, never in the ledger -- which is what keeps the ledger
         matching an exchange statement.
         """

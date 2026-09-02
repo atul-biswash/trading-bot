@@ -50,7 +50,7 @@ from trading_bot.core.models import (
     Signal,
     SymbolInfo,
 )
-from trading_bot.core.portfolio import Portfolio
+from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.risk.manager import (
     EntryIntent,
     ExitIntent,
@@ -371,8 +371,7 @@ class TestPortfolio:
 
         assert portfolio.realised_today(NOW + timedelta(hours=13)) == D("0")
 
-        assert portfolio.realised_pnl == D("-450")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("-450"), pnl_date=NOW.date())
 
     def test_the_daily_loss_halt_releases_at_the_next_utc_day_without_a_write(self) -> None:
         """The release used to be produced by the mutation above. It is now
@@ -390,8 +389,7 @@ class TestPortfolio:
             limit_percent=limit, equity=D("10000"), now=NOW + timedelta(hours=13), committed=D("0")
         )
 
-        assert portfolio.realised_pnl == D("-500")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("-500"), pnl_date=NOW.date())
 
     def test_a_backwards_now_does_not_destroy_or_back_date_the_ledger(self) -> None:
         """The write half. ``now`` can move backwards -- an NTP correction, or an
@@ -409,8 +407,7 @@ class TestPortfolio:
 
         portfolio.record_realised_pnl(D("-10"), now=NOW - timedelta(hours=13))
 
-        assert portfolio.realised_pnl == D("-460")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("-460"), pnl_date=NOW.date())
 
     def test_a_backwards_now_does_not_hide_the_days_realised_loss(self) -> None:
         """The read half, and the same defect pointing the other way.
@@ -432,18 +429,21 @@ class TestPortfolio:
         )
 
     def test_the_first_accrual_of_a_run_does_not_compare_against_a_missing_day(self) -> None:
-        """``pnl_date`` is ``None`` until something is booked, and ``date > None``
+        """The ledger is ``None`` until something is booked, and ``date > None``
         raises ``TypeError`` -- so the null guard in ``_ledger_is_stale`` is what
         makes the comparison legal, not a defensive extra. Without it every run
         would fail on its first realised P&L.
+
+        ABSENT, not zero: ``ledger is None`` says nothing has ever been booked,
+        where a ``Ledger`` carrying ``Decimal(0)`` would say accruals netted
+        out. The collapse is what makes those two spellable apart.
         """
         portfolio = Portfolio(free_quote=D("10000"))
-        assert portfolio.pnl_date is None
+        assert portfolio.ledger is None
 
         portfolio.record_realised_pnl(D("-5"), now=NOW)
 
-        assert portfolio.realised_pnl == D("-5")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("-5"), pnl_date=NOW.date())
 
     @pytest.mark.parametrize(
         ("amount", "now", "expected", "match"),
@@ -476,9 +476,15 @@ class TestPortfolio:
         Both branches of the roll are covered deliberately: only the rolling one
         could half-apply, and a fix that closed it by moving the roll would
         silently change the other. The non-finite row is the discriminating
-        case -- ``Money`` rejects it at the *assignment*, independently of the
-        float guard on the arithmetic, so a fix that ordered only the
-        arithmetic first would still half-apply here.
+        case -- ``Money`` rejects it independently of the float guard on the
+        arithmetic, so a fix that ordered only the arithmetic first would still
+        half-apply.
+
+        **Since M5h it is rejected at ``Ledger(...)`` CONSTRUCTION rather than
+        at the assignment**, which is strictly earlier: the guard now runs
+        before ``self.ledger`` is touched at all, where it used to run as the
+        write itself. This sentence read "at the *assignment*" and was true of
+        the two-field form.
         """
         portfolio = Portfolio(free_quote=D("10000"))
         portfolio.record_realised_pnl(D("-450"), now=NOW)
@@ -487,8 +493,7 @@ class TestPortfolio:
             # non-Decimal amounts are deliberate: four of the six triggers.
             portfolio.record_realised_pnl(amount, now=now)  # type: ignore[arg-type]
 
-        assert portfolio.realised_pnl == D("-450")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("-450"), pnl_date=NOW.date())
 
     def test_daily_loss_threshold_is_a_percent_of_equity(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
@@ -608,7 +613,86 @@ class TestPortfolio:
 
         assert SYMBOL in portfolio.positions
         assert portfolio.free_quote == D("800")
-        assert portfolio.realised_pnl == D("0")
+        assert portfolio.ledger is None  # ABSENT: nothing was ever booked
+
+    # -- the ledger collapse ------------------------------------------------
+    # WHAT THESE CANNOT DO. The collapse's claim is that a new total under a
+    # stale date is UNREPRESENTABLE, and no test can demonstrate that: a test
+    # shows the presence of a state, never its absence. Stated here rather than
+    # papered over with a test that appears to. The two instruments that CAN
+    # are the type -- one field, one assignment, so no intermediate exists to
+    # observe -- and the mutation proof recorded in this commit's message,
+    # which restores the two-write form and watches a named test fail.
+
+    def test_the_ledger_is_one_value_so_a_total_cannot_outrun_its_day(self) -> None:
+        """MUTATION: split `Ledger` back into two `Portfolio` fields.
+
+        The nearest a test can get to the absence: assert that what the accrual
+        writes is ONE object carrying both halves, so there is no assignment
+        that could set either alone. It fails to compile the mutation rather
+        than observing an interleaved state.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-7.5"), now=NOW)
+
+        assert isinstance(portfolio.ledger, Ledger)
+        assert portfolio.ledger.realised_pnl == D("-7.5")
+        assert portfolio.ledger.pnl_date == NOW.date()
+        # Frozen: the halves cannot drift apart after the fact either.
+        with pytest.raises(ValidationError):
+            portfolio.ledger.realised_pnl = D("0")  # type: ignore[misc]
+
+    def test_the_ledger_rejects_a_float_elementwise(self) -> None:
+        """MUTATION: type `realised_pnl` as a bare `Decimal` on `Ledger`.
+
+        The money rule is enforced, not documented: `Money` carries
+        `_reject_float`, and nesting the field must not smuggle it past the
+        guard. The swapped-argument row is what stops the two annotations being
+        exchanged: a `date` is not a `Decimal` and a `Decimal` is not a `date`.
+
+        NOT asserted: that an ISO string is refused for `pnl_date`. Pydantic
+        parses `"2026-07-25"` into a `date` in lax mode, so such a row would
+        fail -- measured while writing this, and recorded rather than dropped
+        silently.
+        """
+        with pytest.raises(ValidationError):
+            Ledger(realised_pnl=-7.5, pnl_date=NOW.date())  # type: ignore[arg-type]
+        with pytest.raises(ValidationError):
+            Ledger(realised_pnl=NOW.date(), pnl_date=D("-7.5"))  # type: ignore[arg-type]
+
+    def test_a_non_finite_total_raises_at_construction_not_at_assignment(self) -> None:
+        """MUTATION: build the `Ledger` after assigning, or bypass it entirely.
+
+        The collapse moved the guard EARLIER. `Money` rejects a non-finite
+        total when the `Ledger` is built, so `self.ledger` is never touched --
+        where the two-field form rejected it as the write itself. Asserted by
+        the ledger being untouched after the raise, which is what "before the
+        write" means operationally.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+        booked = portfolio.ledger
+
+        with pytest.raises(ValidationError):
+            Ledger(realised_pnl=Decimal("Infinity"), pnl_date=NOW.date())
+
+        assert portfolio.ledger is booked  # identity: not rebuilt, not replaced
+
+    def test_a_ledger_of_zero_is_not_an_absent_ledger(self) -> None:
+        """MUTATION: make `record_realised_pnl` leave `ledger` as `None` when
+        the total is zero, or make `realised_today` return `None`.
+
+        `store.py` states the distinction at length: absent means nothing has
+        ever been booked, zero means accruals netted out. Booking two amounts
+        that cancel must leave a REAL ledger, not the never-accrued one.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-25"), now=NOW)
+        portfolio.record_realised_pnl(D("25"), now=NOW)
+
+        assert portfolio.ledger == Ledger(realised_pnl=D("0"), pnl_date=NOW.date())
+        assert portfolio.ledger is not None
+        assert portfolio.realised_today(NOW) == D("0")
 
     def test_a_raising_accrual_leaves_the_position_present_to_be_retried(
         self, monkeypatch: pytest.MonkeyPatch
@@ -634,16 +718,20 @@ class TestPortfolio:
         pinned directly.
 
         The substitute raises the REAL mechanism rather than a stand-in
-        exception: it assigns a non-finite ``realised_pnl``, which is what a
-        non-finite total does, and ``Money`` rejects it independently of the
+        exception: it builds a ``Ledger`` with a non-finite total, which is what
+        a non-finite accrual does, and ``Money`` rejects it independently of the
         float guard. Patched on the CLASS, because ``validate_assignment``
         routes an instance ``setattr`` through validation and rejects a name
         that is not a field.
+
+        Since the ledger collapse the raise comes from ``Ledger(...)`` rather
+        than from the assignment -- earlier, and before ``self.ledger`` is
+        touched -- so the substitute never reaches its own assignment either.
         """
         portfolio = Portfolio(free_quote=D("800"), positions={SYMBOL: long_position(quantity="2")})
 
         def _boom(self: Portfolio, amount: Decimal, *, now: datetime) -> None:
-            self.realised_pnl = Decimal("Infinity")
+            self.ledger = Ledger(realised_pnl=Decimal("Infinity"), pnl_date=now.date())
 
         monkeypatch.setattr(Portfolio, "record_realised_pnl", _boom)
 
@@ -653,7 +741,7 @@ class TestPortfolio:
         # THE POINT: the position survives, so the next reconciliation pass
         # sees it and can try again. Losing it is the unrecoverable failure.
         assert SYMBOL in portfolio.positions
-        assert portfolio.realised_pnl == D("0")  # the accrual did not land
+        assert portfolio.ledger is None  # the accrual did not land: ABSENT, not zero
         # The credit DID land, and that is the accepted residual -- documented
         # on the method rather than silently tolerated.
         assert portfolio.free_quote == D("1020")
@@ -674,8 +762,7 @@ class TestPortfolio:
         assert pnl == D("20")  # unchanged: (110 - 100) * 2
         assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
         assert portfolio.realised_today(NOW) == D("20")
-        assert portfolio.realised_pnl == D("20")
-        assert portfolio.pnl_date == NOW.date()
+        assert portfolio.ledger == Ledger(realised_pnl=D("20"), pnl_date=NOW.date())
         assert SYMBOL not in portfolio.positions
         assert not portfolio.has_position(SYMBOL)
 
@@ -685,17 +772,17 @@ class TestPortfolio:
         MUTATION: move the ``position is None`` guard below the arithmetic, or
         credit before checking. Distinct from the existing absent-symbol test,
         which asserts the return value and ``free_quote``; this also pins
-        ``positions`` and ``pnl_date``, so a guard that ran late and rolled the
+        ``positions`` and the ledger, so a guard that ran late and rolled the
         day on a no-op close would fail.
         """
         portfolio = Portfolio(free_quote=D("1000"), positions={"ETHUSDT": long_position()})
-        before_date = portfolio.pnl_date
+        before = portfolio.ledger
 
         assert portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW) == D("0")
 
         assert portfolio.free_quote == D("1000")
-        assert portfolio.realised_pnl == D("0")
-        assert portfolio.pnl_date == before_date
+        assert portfolio.ledger is before  # identity: not even rebuilt
+        assert portfolio.ledger is None
         assert set(portfolio.positions) == {"ETHUSDT"}
 
     def test_free_quote_cannot_go_negative(self) -> None:
@@ -1035,7 +1122,7 @@ class TestPortfolio:
         portfolio.daily_loss_exceeded(
             limit_percent=D("5.0"), equity=D("2000"), now=NOW, committed=committed
         )
-        assert portfolio.realised_pnl == D("0")
+        assert portfolio.ledger is None  # the committed term never touches it
         assert portfolio.realised_today(NOW) == D("0")
 
     def test_cooldown_expires_by_comparison_not_by_sweep(self) -> None:
