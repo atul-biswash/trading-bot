@@ -389,6 +389,30 @@ def to_order(raw: dict[str, Any]) -> Order:
     ``stopPrice`` follows the same convention, for the same reason: an order
     with no trigger reports zero, and a zero trigger price is not a price.
 
+    **BOTH THE TOTAL AND THE QUOTIENT ARE CARRIED, and the derivation above is
+    unchanged.** ``filled_quote_quantity`` is the wire's
+    ``cummulativeQuoteQty`` verbatim; ``average_price`` stays the quotient it
+    has always been. That is not redundancy: the division runs in the ambient
+    ``decimal`` context, so a quotient that does not terminate is rounded to 28
+    significant digits, and booking realised P&L needs the total the venue
+    itself added up rather than a figure re-derived from a rounded one.
+
+    **THE MISSPELLING STOPS AT THE WIRE.** The venue spells it
+    ``cummulativeQuoteQty``, with one ``m`` too many; the domain field is
+    ``filled_quote_quantity``, named for what it is and parallel to
+    ``filled_quantity`` -- the same fill, in the other currency. This is the
+    convention every other field here already follows: ``executedQty`` became
+    ``filled_quantity``, ``origQty`` became ``quantity``.
+
+    **AND THE TOTAL DISTINGUISHES TWO STATES THE QUOTIENT CANNOT.** The guard
+    below is ``executed > 0 and cummulative > 0``, so a payload reporting a
+    non-zero ``executedQty`` with a zero quote total yields ``average_price is
+    None`` -- the same value as "nothing filled". ``filled_quote_quantity``
+    tells them apart: ``Decimal(0)`` beside a non-zero ``filled_quantity`` is
+    visible, where ``None`` from the quotient is not. It uses ``_opt_dec``
+    rather than ``_dec(..., "0")`` precisely so an ABSENT key stays ``None``
+    instead of becoming a reported zero.
+
     ``orderListId`` is ``-1`` for an order that belongs to no list. That is a
     sentinel rather than an identity, so it maps to ``None`` -- otherwise every
     ordinary order would appear to belong to list "-1", and a reconciler keyed
@@ -406,6 +430,11 @@ def to_order(raw: dict[str, Any]) -> Order:
     executed = _dec(raw.get("executedQty", "0"))
     cummulative = _dec(raw.get("cummulativeQuoteQty", "0"))  # Binance's spelling
     average_price = cummulative / executed if executed > 0 and cummulative > 0 else None
+    # The TOTAL, carried whole and separately from the quotient above. `_opt_dec`
+    # rather than the defaulted `_dec` on purpose: an absent key must stay
+    # `None` -- "the venue did not report it" -- and never become a zero the
+    # venue never sent.
+    filled_quote_quantity = _opt_dec(raw.get("cummulativeQuoteQty"))
 
     price = _opt_dec(raw.get("price"))
     if price is not None and price == 0:
@@ -443,6 +472,7 @@ def to_order(raw: dict[str, Any]) -> Order:
         filled_quantity=executed,
         price=price,
         average_price=average_price,
+        filled_quote_quantity=filled_quote_quantity,
         created_at=_first_ms(raw, "transactTime", "time", "updateTime"),
         client_order_id=client_order_id,
         stop_price=stop_price,

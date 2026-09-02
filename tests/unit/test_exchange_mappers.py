@@ -38,6 +38,7 @@ from trading_bot.core.exceptions import (
     SymbolInfoNotPrimedError,
 )
 from trading_bot.core.models import (
+    Order,
     OrderList,
     OrderListEntry,
     OrderRequest,
@@ -2227,3 +2228,158 @@ def test_a_stop_price_normalises_numerically_not_as_a_string() -> None:
     assert order.stop_price == Decimal("40917.83")
     assert order.stop_price == Decimal("40917.83000000")
     assert str(order.stop_price) == "40917.83000000"  # exponent preserved, no float hop
+
+
+# --------------------------------------------------------------------------
+# The venue's own quote total
+# --------------------------------------------------------------------------
+class TestFilledQuoteQuantity:
+    """The TOTAL, carried whole, beside the quotient it is divided into.
+
+    Booking realised P&L needs the amount the venue itself added up. The
+    quotient is computed in the ambient ``decimal`` context, so a division that
+    does not terminate is rounded to 28 significant digits before anything sees
+    it -- MEASURED, leg ``tb1-BTCUSDT-1787982059999-0-SL`` returned
+    ``75872.09601025202904741563434``.
+
+    **NOTHING READS THE FIELD YET.** These pin the mapper only.
+    """
+
+    def test_a_captured_payload_carries_the_total_exactly(self) -> None:
+        """MUTATION: drop the assignment in `to_order`, or source it from
+        `average_price * filled_quantity` instead of the raw key.
+
+        `str()` rather than `==`, because `Decimal("65.05") == Decimal(
+        "65.05000000")` is True -- equality alone would pass on a value that
+        lost its scale crossing a float.
+        """
+        order = m.to_order(ORDER_MARKET_FILLED)
+
+        assert order.filled_quote_quantity == Decimal("65.05000000")
+        assert str(order.filled_quote_quantity) == "65.05000000"
+
+    def test_an_omitted_key_is_absent_and_not_zero(self) -> None:
+        """MUTATION: use `_dec(raw.get("cummulativeQuoteQty", "0"))`, mirroring
+        the line two above it, instead of `_opt_dec`.
+
+        That mutation is the tempting one -- it makes the field look like
+        `executedQty`'s neighbour -- and it silently converts "the venue did not
+        report it" into "the venue reported nothing filled". Only this test
+        separates them.
+        """
+        raw = {
+            key: value for key, value in ORDER_MARKET_FILLED.items() if key != "cummulativeQuoteQty"
+        }
+
+        order = m.to_order(raw)
+
+        assert order.filled_quote_quantity is None
+        assert order.filled_quote_quantity != Decimal(0)
+
+    def test_a_reported_zero_is_zero_and_not_absent(self) -> None:
+        """MUTATION: map a reported "0.00000000" to `None`, following `price`
+        and `stop_price`'s convention.
+
+        Those two map zero to `None` because a zero PRICE is not a price. A
+        zero quote TOTAL is a real quantity -- it is what a resting leg
+        reports -- so the same convention would be wrong here, and this is the
+        assertion that says so.
+        """
+        order = m.to_order(ORDER_LIMIT_NEW)  # a resting order: nothing filled
+
+        assert order.filled_quote_quantity == Decimal(0)
+        assert order.filled_quote_quantity is not None
+
+    @pytest.mark.parametrize(
+        ("payload", "expected_average"),
+        [
+            (ORDER_LIMIT_NEW, None),
+            (ORDER_MARKET_FILLED, Decimal("65050")),
+            (OPEN_ORDER, Decimal("64000")),
+        ],
+    )
+    def test_average_price_is_unchanged_on_every_existing_case(
+        self, payload: dict[str, object], expected_average: Decimal | None
+    ) -> None:
+        """MUTATION: alter the guard, or derive `average_price` from the new field.
+
+        The old and the new are asserted SIDE BY SIDE on one payload, so a
+        change that "fixes" the quotient by routing it through the total fails
+        here rather than silently altering a value six other tests read.
+        """
+        order = m.to_order(payload)
+
+        assert order.average_price == expected_average
+        # Both present, independently sourced: the quotient from the division,
+        # the total from the raw key.
+        if payload is not ORDER_LIMIT_NEW:
+            assert order.filled_quote_quantity == Decimal(str(payload["cummulativeQuoteQty"]))
+
+    def test_a_partial_fill_carries_the_total_for_what_actually_filled(self) -> None:
+        """MUTATION: source the total from `origQty` rather than the raw key.
+
+        `OPEN_ORDER` is `PARTIALLY_FILLED`: 0.00050000 of 0.00200000. The quote
+        total is the venue's figure for the part that FILLED, so multiplying
+        `average_price` by `quantity` would over-state it four-fold.
+        """
+        order = m.to_order(OPEN_ORDER)
+
+        assert order.filled_quantity == Decimal("0.00050000")
+        assert order.quantity == Decimal("0.00200000")
+        assert order.filled_quote_quantity == Decimal("32.00000000")
+        # The trap, stated as an assertion: quantity is the WRONG multiplicand.
+        assert order.average_price * order.quantity != order.filled_quote_quantity
+
+    def test_a_non_terminating_quotient_rounds_while_the_total_stays_exact(self) -> None:
+        """The case the field exists for. CONSTRUCTED, and said so.
+
+        MUTATION: drop the field, or round the total on the way in.
+
+        The measured instance's RAW OPERANDS are not in this repository -- only
+        its quotient survives, in a commit message -- so this reconstructs the
+        shape from run 6's real ``executedQty`` of ``0.02341000``. 2341 is
+        prime and does not divide the numerator, so the quotient does not
+        terminate and lands at the context's 28 significant digits, from
+        operands of six and seven.
+
+        **Re-multiplying happens to recover the total HERE**, and that is
+        asserted rather than hidden: at this magnitude the round trip is exact.
+        It is not exact in general -- a sweep found eleven failing pairs -- but
+        none within the realistic range for this project's position sizes, so
+        the honest claim is that the quotient LOSES PRECISION, not that it
+        loses the value.
+        """
+        raw = {
+            **ORDER_MARKET_FILLED,
+            "origQty": "0.02341000",
+            "executedQty": "0.02341000",
+            "cummulativeQuoteQty": "1776.16",
+        }
+
+        order = m.to_order(raw)
+
+        assert str(order.filled_quote_quantity) == "1776.16"  # exact, six digits
+        assert order.average_price is not None
+        quotient = str(order.average_price)
+        assert quotient == "75871.84963690730457069628364"
+        assert len(order.average_price.as_tuple().digits) == 28  # invented precision
+        assert order.average_price * order.filled_quantity == Decimal("1776.16")
+
+    def test_the_total_never_touches_a_float(self) -> None:
+        """MUTATION: parse via `float(raw[...])` anywhere on the path.
+
+        `Money` carries `_reject_float`, so a float operand raises at
+        construction rather than arriving rounded -- this asserts the guard is
+        actually on the new field, which a plain `Decimal` annotation would not
+        have.
+        """
+        with pytest.raises(ValidationError):
+            Order(
+                order_id="1",
+                symbol="BTCUSDT",
+                side=OrderSide.BUY,
+                type=OrderType.LIMIT,
+                status=OrderStatus.FILLED,
+                quantity=Decimal("1"),
+                filled_quote_quantity=65.05,  # type: ignore[arg-type]
+            )

@@ -306,6 +306,42 @@ class Order(_Frozen):
     filled_quantity: Money = Decimal(0)
     price: Money | None = None
     average_price: Money | None = None
+    #: The venue's own quote-currency total for the fill -- the wire's
+    #: ``cummulativeQuoteQty``, carried whole rather than only as the quotient
+    #: :attr:`average_price` derives from it.
+    #:
+    #: **THE QUOTIENT IS NOT A LOSSLESS STAND-IN, WHICH IS THE WHOLE REASON
+    #: THIS FIELD EXISTS.** ``average_price`` is ``cummulativeQuoteQty /
+    #: executedQty``, computed in the ambient ``decimal`` context, so a division
+    #: that does not terminate is silently rounded to 28 significant digits
+    #: before anything sees it. MEASURED: leg
+    #: ``tb1-BTCUSDT-1787982059999-0-SL`` returned
+    #: ``75872.09601025202904741563434`` -- **28** significant digits, which is
+    #: the context precision exactly, from wire operands of eight or fewer. (An
+    #: earlier finding recorded that value as twenty-nine. It is 28, and 29 was
+    #: never possible: the default context precision IS 28, so a quotient
+    #: cannot exceed it. The wrong number contradicted the mechanism it was
+    #: offered as evidence for.) Booking realised P&L needs the TOTAL: proceeds
+    #: are a
+    #: quote amount the venue has already added up, and re-deriving them by
+    #: multiplying a rounded quotient reintroduces the error the exchange's own
+    #: accounting does not have.
+    #:
+    #: **``None`` means THE VENUE DID NOT REPORT IT; zero means it reported
+    #: nothing filled.** The two are kept apart deliberately, and this field is
+    #: the first in this model to keep them apart: :attr:`filled_quantity`
+    #: defaults to ``Decimal(0)`` and so reads identically for an absent key and
+    #: a genuine zero.
+    #:
+    #: **A RESTING PROTECTIVE LEG REPORTS status=NEW, filled_quantity=0 AND
+    #: average_price=None** -- MEASURED on 2026-09-02 across two symbols and
+    #: both leg types: ``tb1-BTCUSDT-1788347519999-0-SL``,
+    #: ``tb1-BTCUSDT-1788347519999-0-TP`` and
+    #: ``tb1-ETHUSDT-1788353399999-0-SL``. So **a consumer must branch on
+    #: ``status``, never on ``average_price is None``**: absent-because-resting
+    #: and absent-because-unreported are the same value, and only ``status``
+    #: separates them.
+    filled_quote_quantity: Money | None = None
     created_at: datetime | None = None
     client_order_id: str | None = None
     #: The trigger price on a stop-type order. ``None`` on an order that has
