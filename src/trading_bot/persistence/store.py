@@ -1,9 +1,20 @@
 """A crash-survivable store for the facts the venue cannot answer.
 
-**NOTHING IMPORTS THIS FROM OUTSIDE THIS PACKAGE, and that is deliberate at
-this commit.** The store exists, is tested, and has no caller. Wiring it to
-``OrderExecutor`` and to the composition root writes fields the risk path
-reads, which is a separate decision and a separate commit.
+**THE COMPOSITION ROOT IS THE ONLY CALLER, and a test enforces that rather
+than this sentence.** ``engine/modes.py`` reads the store at boot and writes it
+through a callable it injects into ``OrderExecutor``; ``execution/`` imports
+nothing from here, so the executor gains no outer-to-outer edge.
+``TestOnlyTheCompositionRootMayImportTheStore`` pins both halves.
+
+**This paragraph asserted the OPPOSITE until M5h's maintenance commit.** It
+read *"NOTHING IMPORTS THIS FROM OUTSIDE THIS PACKAGE ... The store exists, is
+tested, and has no caller"*, and survived on disk through both commits that
+falsified it, because each was authorised to change the wiring and not this
+file. That is worth recording rather than quietly correcting: a docstring
+outliving its fact is this project's recorded recurring defect, and here the
+mechanism was an AUTHORISATION BOUNDARY running between a fact and the prose
+describing it -- which is a mechanism no gate, grep or review can see, since
+both halves were individually correct at the moment they were written.
 
 **NO PORT IS DECLARED, and finding GG is why.** A persistence port would have
 exactly one implementation and one caller -- the composition root -- for the
@@ -14,8 +25,13 @@ promotable to a port the day a second implementation is real; an unearned
 declaration is debt from the day it lands. :func:`load` and :func:`save` take
 a ``path`` with a default, exactly as ``instance_lock.acquire`` takes
 ``DEFAULT_LOCK_PATH`` -- this project's worked example of a concrete module
-that is testable without an abstraction, since every test passes a
-``tmp_path`` and no fake is needed.
+that is testable without an abstraction, and no fake is needed either way.
+
+This module's own tests pass a ``tmp_path``. The COMPOSITION tests in
+``test_modes.py`` do not, deliberately: they exercise the DEFAULT path under an
+autouse ``chdir``, because the default is what production uses and a test that
+passed an explicit path would leave the default itself unexercised. This
+paragraph read *"every test passes a ``tmp_path``"* until those tests existed.
 
 **WHAT IT HOLDS: exactly what the venue cannot answer, and nothing
 derivable.** The inclusion test is ``PendingPlacement``'s own line -- *"Every
@@ -88,6 +104,26 @@ manifest as the bot quietly forgetting a pending placement rather than as an
 error anyone sees. A MISSING file is a different answer and returns ``None``:
 no store yet is a normal first-boot state, and conflating the two would make a
 first boot look like corruption.
+
+**TWO RECORDS FOR ONE SYMBOL IS CORRUPTION, NOT A LATER-WINS OVERWRITE.** The
+executor keys ``_pending`` by symbol, so a restored duplicate would COLLAPSE on
+the way in and one record would vanish silently -- and the vanished one may be
+the placement that actually landed, leaving an order list resting at the venue
+with nothing tracking it. That is precisely the unbounded state this store
+exists to close, reached through the restore path. So :class:`PersistedState`
+refuses it and :func:`load` reports :class:`StoreCorruptError`, which stops the
+boot with the file preserved for an operator to read.
+
+**THE TRIGGER IS UNREACHABLE FROM OUR OWN WRITER, and that is recorded here so
+a later reader does not delete the guard as dead.** Three of the four write
+sites pass ``tuple(self._pending.values())`` -- a symbol-keyed dict, so a
+duplicate is structurally impossible. The fourth, in ``OrderExecutor.dispatch``,
+passes ``(*self._pending.values(), record)`` and appends a record the dict did
+not supply; what prevents a duplicate THERE is the pending guard that refuses a
+signal whose symbol is already in ``_pending``, forty-odd lines earlier. So one
+route is barred structurally and one behaviourally, and only the second could
+be reopened by an edit that looks unrelated. A hand-edited file is the only
+route that reaches this today.
 """
 
 from __future__ import annotations
@@ -100,7 +136,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from trading_bot.core.exceptions import TradingBotError
 from trading_bot.core.models import Money
@@ -185,6 +221,45 @@ class PersistedState(_Frozen):
     schema_version: int = Field(default=SCHEMA_VERSION, ge=1)
     pending: tuple[PendingRecord, ...] = ()
     ledger: LedgerRecord | None = None
+
+    @model_validator(mode="after")
+    def _reject_duplicate_symbols(self) -> PersistedState:
+        """A symbol may carry at most one unresolved placement.
+
+        **ON THE MODEL RATHER THAN IN :func:`load`, and the reason is which
+        constructions get checked.** The composition root builds a
+        ``PersistedState`` directly on every write, so a check living only in
+        the read path would let a writer-side defect put an invalid state on
+        disk and surface it one boot later, at the wrong component. Here, both
+        directions are refused at the moment the invalid object is built.
+
+        **It reaches the documented error type for free.** Raising
+        ``ValueError`` makes pydantic wrap this in a ``ValidationError``, and
+        :func:`load` already converts that to :class:`StoreCorruptError` --
+        VERIFIED by driving a duplicate file through ``load``, not inferred
+        from reading the ``except`` clause. A direct construction still raises
+        ``ValidationError``, which is correct: ``StoreCorruptError`` says *the
+        file cannot be trusted*, and there is no file in that case.
+
+        The trigger is unreachable from our own writer; see the module
+        docstring for why the guard is kept anyway.
+        """
+        seen: set[str] = set()
+        duplicated: set[str] = set()
+        for record in self.pending:
+            if record.symbol in seen:
+                duplicated.add(record.symbol)
+            seen.add(record.symbol)
+        if duplicated:
+            raise ValueError(
+                f"{len(self.pending)} pending record(s) carry a duplicated symbol "
+                f"({', '.join(sorted(duplicated))}). A symbol may have at most one "
+                "unresolved placement: the executor keys them by symbol, so a duplicate "
+                "would collapse on restore and silently discard one record -- possibly "
+                "the placement that landed, leaving an order list resting at the venue "
+                "with nothing tracking it."
+            )
+        return self
 
 
 def _dump_money(value: Decimal) -> str:

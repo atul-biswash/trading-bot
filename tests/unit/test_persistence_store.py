@@ -36,11 +36,13 @@ turning every unrecognised object into its ``repr``.
 from __future__ import annotations
 
 import dataclasses
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 # The one test below reaches into `execution/` on purpose; see its docstring.
 from trading_bot.execution.executor import PendingPlacement
@@ -221,6 +223,131 @@ class TestCorruptRaises:
 
         with pytest.raises(s.StoreCorruptError, match=r"state\.json"):
             s.load(path)
+
+
+def _duplicate_on_disk(path: Path, *records: s.PendingRecord) -> None:
+    """Write a valid store through :func:`save`, then duplicate its first record.
+
+    **The corruption is applied AFTER the real writer, never instead of it.**
+    ``save`` takes a ``PersistedState``, which now refuses a duplicate symbol
+    at construction, so the invalid file cannot be produced through the write
+    path at all -- which is the property under test. Hand-writing the JSON
+    would pin this file's idea of the format rather than the format, and would
+    keep passing through a dumper change that broke every real store; going
+    through ``save`` first means the bytes are exactly what production emits,
+    with one entry copied. That is also the only route a duplicate has in
+    reality: a hand-edited file.
+    """
+    s.save(s.PersistedState(pending=records), path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["pending"].append(dict(payload["pending"][0]))
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+class TestDuplicateSymbolsAreCorruption:
+    """Two records for one symbol is an invalid state, never a later-wins overwrite.
+
+    **Why it is corruption rather than a merge.** ``OrderExecutor`` keys
+    ``_pending`` by symbol, so a restored duplicate collapses on the way in and
+    one record disappears with nothing reporting it -- and the one that
+    disappears may be the placement that actually landed, leaving an order list
+    resting at the venue that nothing tracks. That is the unbounded state the
+    store exists to close, reached through the restore path.
+
+    **Every test here declares the mutation it would catch**, because a test
+    that cannot fail is a defect this project has recorded four times.
+    """
+
+    def test_two_records_for_one_symbol_raise_through_load(self, tmp_path: Path) -> None:
+        """MUTATION: delete the validator, or make it `return self` unconditionally.
+
+        Also caught: moving `seen.add(...)` above the membership test, which
+        makes every record look already-seen -- that fails this AND the two
+        negative controls below, which is how the two mutations are told apart.
+        """
+        path = tmp_path / "state.json"
+        _duplicate_on_disk(path, _record(symbol="BTCUSDT"))
+
+        with pytest.raises(s.StoreCorruptError) as excinfo:
+            s.load(path)
+
+        # The symbol, so an operator can find the offending record without
+        # reading the file, and the path, so they know which file.
+        assert "BTCUSDT" in str(excinfo.value)
+        assert "state.json" in str(excinfo.value)
+
+    def test_a_direct_construction_is_refused_too(self) -> None:
+        """MUTATION: move the check from `PersistedState` into `load`.
+
+        That mutation leaves the load-path test above PASSING -- it is the one
+        assertion that distinguishes where the check lives. The composition
+        root builds a `PersistedState` on every write, so a check only in the
+        read path would let a writer-side defect reach disk and surface one
+        boot later, at the wrong component.
+
+        `ValidationError` and not `StoreCorruptError`, deliberately: the latter
+        says *the file cannot be trusted*, and here there is no file.
+        """
+        with pytest.raises(ValidationError):
+            s.PersistedState(pending=(_record(symbol="BTCUSDT"), _record(symbol="BTCUSDT")))
+
+    def test_two_records_for_different_symbols_load_fine(self, tmp_path: Path) -> None:
+        """MUTATION: reject any `pending` longer than one, or compare by identity.
+
+        Two symbols pending at once is the ORDINARY multi-pair state -- the
+        shipped `config.yaml` enables two -- so a guard that refused it would
+        stop the bot booting after an ordinary ambiguous write on each pair.
+        """
+        path = tmp_path / "state.json"
+        s.save(
+            s.PersistedState(pending=(_record(symbol="BTCUSDT"), _record(symbol="ETHUSDT"))), path
+        )
+
+        restored = s.load(path)
+
+        assert restored is not None
+        assert [record.symbol for record in restored.pending] == ["BTCUSDT", "ETHUSDT"]
+
+    def test_a_single_record_still_loads(self, tmp_path: Path) -> None:
+        """MUTATION: a guard keyed on `pending` being non-empty rather than on repeats.
+
+        The single record is the case run 5 actually produced, so this is the
+        one that would have broken the bot in production.
+        """
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(pending=(_record(symbol="ETHUSDT"),)), path)
+
+        restored = s.load(path)
+
+        assert restored is not None
+        assert len(restored.pending) == 1
+        assert restored.pending[0].symbol == "ETHUSDT"
+
+    def test_the_message_names_only_the_duplicated_symbol(self, tmp_path: Path) -> None:
+        """MUTATION: report every symbol, or report a count with no name.
+
+        Three records, one symbol repeated. An operator meeting this at boot
+        has to find the bad record by hand, and a message naming all three
+        sends them through two innocent ones first.
+        """
+        path = tmp_path / "state.json"
+        # `_duplicate_on_disk` copies the FIRST entry, so BTCUSDT is the repeat
+        # and ETHUSDT is the innocent bystander this asserts is not named.
+        _duplicate_on_disk(path, _record(symbol="BTCUSDT"), _record(symbol="ETHUSDT"))
+
+        with pytest.raises(s.StoreCorruptError) as excinfo:
+            s.load(path)
+
+        assert "BTCUSDT" in str(excinfo.value)
+        assert "ETHUSDT" not in str(excinfo.value)
+
+    def test_an_empty_state_is_not_a_duplicate(self) -> None:
+        """MUTATION: a validator that raises whenever `duplicated` is falsy-checked wrong.
+
+        The zero case, which is what every existing test in this file
+        constructs implicitly and what a first boot produces.
+        """
+        assert s.PersistedState().pending == ()
 
 
 class TestAtomicWrite:
