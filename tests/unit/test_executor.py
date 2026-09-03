@@ -176,14 +176,22 @@ class FakeClient:
     reasoning ``FakeRootClient.get_all_order_lists`` records for the boot scan.
     ``venue_calls`` counts EVERY method that stands for a venue round trip, so
     the call-count guard has one number to assert against.
+
+    **The fill price is BELOW the intent's limit of 100 and COHERENT with it,
+    which it was not until the debit used it.** It was a real measured figure,
+    ``76649.80``, against an ``entry_limit`` of 100 -- fine while the fill only
+    landed on a field, and a 38,324.90 debit against a 10,000 balance once it
+    drove the money. Realism about the VALUE mattered less than realism about
+    the RELATIONSHIP: request above fill, which is what all five measured
+    instances show.
     """
 
     def __init__(
         self,
         *,
         place_error: Exception | None = None,
-        fill_price: str | None = "76649.80000000",
-        filled_quantity: str = "0.02368000",
+        fill_price: str | None = "98.00000000",
+        filled_quantity: str = "0.5",
         order_error: Exception | None = None,
     ) -> None:
         self.place_error = place_error
@@ -615,7 +623,7 @@ class TestOptionFourResolution:
         # MUTATION: drop the query from the `PLACED_LIVE` branch. The position
         # is still recorded, so every assertion above still passes -- only
         # this one bites.
-        assert position.entry_fill_price == D("76649.80000000")
+        assert position.entry_fill_price == D("98.00000000")
 
     async def test_a_live_resolution_debits_the_portfolio(
         self, monkeypatch: pytest.MonkeyPatch
@@ -640,7 +648,12 @@ class TestOptionFourResolution:
         monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
         await executor(candle(close_time=BAR + timedelta(minutes=1)))
 
-        assert portfolio.free_quote == D("10000") - D("0.5") * D("100")
+        # THE FILL, not the request -- 98 against a limit of 100. This test
+        # caught the debit change on the RECOVERY path, which is the half a
+        # dispatch-only test cannot reach, so the value is asserted against the
+        # fill explicitly rather than merely updated.
+        assert portfolio.free_quote == D("10000") - D("0.5") * D("98")
+        assert portfolio.free_quote != D("10000") - D("0.5") * D("100")
 
     async def test_a_terminal_resolution_records_no_position(
         self, monkeypatch: pytest.MonkeyPatch
@@ -1010,7 +1023,7 @@ class TestTheEntryFillPrice:
         await executor.dispatch(buy(), entry_assessment(), candle())
 
         position = portfolio.positions[SYMBOL]
-        assert position.entry_fill_price == D("76649.80000000")
+        assert position.entry_fill_price == D("98.00000000")
         assert position.entry_price != position.entry_fill_price  # request vs fill
         # Queried by OUR id for the WORKING leg, not the list's and not a stop's.
         assert client.order_queries[0].endswith("-0-W")
@@ -1030,6 +1043,59 @@ class TestTheEntryFillPrice:
 
         assert portfolio.has_position(SYMBOL)
         assert portfolio.positions[SYMBOL].entry_fill_price is None
+
+    async def test_the_debit_uses_the_fill_and_not_the_requested_limit(self) -> None:
+        """MUTATION: revert to `cost=quantity * entry_limit`.
+
+        The request (100) and the fill (98) are set APART, so the two debits
+        differ: 50 against 49. A fixture where they agreed could not express
+        this at all -- which is the state `long_position(entry_fill=None)`
+        leaves `test_risk_manager.py`'s helper in, deliberately, and the reason
+        this test lives here instead.
+
+        `free_quote` after the open must equal the VENUE-CHARGED amount.
+        """
+        executor, _, portfolio = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        # 10000 - (0.5 * 98) = 9951, not 10000 - (0.5 * 100) = 9950.
+        assert portfolio.free_quote == D("9951.00")
+        assert portfolio.positions[SYMBOL].entry_fill_price == D("98.00000000")
+        assert portfolio.positions[SYMBOL].entry_price == D("100")  # request, unchanged
+
+    async def test_an_absent_fill_debits_the_request_and_says_so(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        """R1(c) option 1, and the alternative was rejected on error direction.
+
+        MUTATION: refuse to open the position when the fill is unknown, or
+        fall back silently.
+
+        Refusing would leave a filled entry and two resting protective legs at
+        the venue with nothing tracking them -- an orphan of our own making.
+        Falling back is wrong by a measured amount in the CONSERVATIVE
+        direction (request above fill on all five measured instances, so the
+        over-debit under-states `free_quote`), and the position is unbookable
+        anyway because `unrealized_pnl` raises -- so the error cannot reach the
+        ledger.
+
+        Its own event, because `entry_fill_absent` reports what the VENUE said
+        and this reports the MONEY CONSEQUENCE. It also fires on the
+        query-FAILURE path, which the other does not -- asserted here by
+        failing the query rather than expiring the leg.
+        """
+        executor, _, portfolio = build()
+        executor._client.order_error = ExchangeConnectionError("boom")  # type: ignore[attr-defined]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert portfolio.has_position(SYMBOL)  # NEVER an orphan of our own making
+        assert portfolio.free_quote == D("9950.00")  # the request: 0.5 * 100
+        records = _records(caplog, "debit_from_requested_limit")
+        assert [r.entry_limit for r in records] == [D("100")]
+        # And the ledger is protected regardless: this position cannot book.
+        with pytest.raises(ValueError, match="cost basis is unknown"):
+            portfolio.positions[SYMBOL].unrealized_pnl(D("110"))
 
     async def test_an_expired_fok_leaves_the_price_absent(self, caplog) -> None:  # type: ignore[no-untyped-def]
         """The SECOND of the three `None` meanings, and a different fact.

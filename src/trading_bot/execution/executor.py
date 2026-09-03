@@ -104,6 +104,13 @@ _EVENT_MISSED = "dispatch_missed"
 #: `entry_fill_price`'s three `None` meanings. A reader who cannot separate
 #: them cannot tell an expired FOK from a network fault.
 _EVENT_NO_ENTRY_FILL = "entry_fill_absent"
+#: `free_quote` was debited from the REQUESTED limit because no fill price was
+#: obtained. Its own name rather than a field on `entry_fill_absent`: that one
+#: reports what the venue said, this one reports the MONEY CONSEQUENCE, and an
+#: operator reconciling a balance needs the second without having to infer it
+#: from the first. It also fires on the query-failure path, which
+#: `entry_fill_absent` does not.
+_EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
 
 _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
@@ -848,11 +855,48 @@ class OrderExecutor:
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
-        # THE DEBIT STILL USES THE REQUESTED LIMIT, and that is not an
-        # oversight. `cost` is what left the balance as far as this process
-        # knows at open; correcting it to the fill is a `free_quote` change,
-        # which is a risk-path write and is not this commit's.
-        self._portfolio.open_position(position, cost=quantity * entry_limit)
+        # THE DEBIT USES WHAT THE VENUE ACTUALLY CHARGED. `Portfolio.
+        # open_position` has always said `cost` must be "what actually left
+        # the balance" and takes it as an argument for exactly that reason;
+        # this caller was the one passing the wrong number. MEASURED apart by
+        # 76.65 and 2.09 per unit -- 1.81 and 1.59 USDT on 2026-09-02's two
+        # positions.
+        #
+        # WHERE THE ERROR WENT, and it is NOT the ledger. `close_position`
+        # derives realised P&L from `unrealized_pnl`, which reads
+        # `entry_fill_price` and never this debit -- so `realised_pnl` was
+        # already correct once 6a landed. The debit's error lands in
+        # `free_quote`, and closing credits back `quantity * exit_price`, so
+        # it NEVER UNWINDS: a permanent per-trade drift for the life of the
+        # process, bounded only by the next boot re-seeding from the venue.
+        # `free_quote` feeds `equity`, which feeds sizing and the daily-loss
+        # threshold.
+        #
+        # THE FALLBACK IS THE REQUEST, and the alternative was rejected.
+        # `entry_fill_price` can be `None` -- a failed query, or an FOK that
+        # expired -- so a debit must still be chosen. Refusing to record the
+        # position instead would leave a filled entry and two resting
+        # protective legs at the venue with nothing tracking them: an orphan
+        # of our own making, which `M5h-097` records as the state persistence
+        # exists to close. Falling back is wrong by a measured amount in the
+        # CONSERVATIVE direction -- the request exceeded the fill on all five
+        # measured instances, so the over-debit under-states `free_quote` --
+        # and the position is UNBOOKABLE anyway, because `unrealized_pnl`
+        # raises on an absent fill price. So the fallback's error cannot reach
+        # the ledger.
+        cost_basis = entry_fill_price
+        if cost_basis is None:
+            cost_basis = entry_limit
+            _log.warning(
+                "Debited at the REQUESTED limit; the fill price is unknown",
+                extra={
+                    "event": _EVENT_DEBIT_ESTIMATED,
+                    "symbol": symbol,
+                    "entry_limit": entry_limit,
+                    "quantity": quantity,
+                },
+            )
+        self._portfolio.open_position(position, cost=quantity * cost_basis)
 
     def _persist_after_removal(self, symbol: str) -> None:
         """Rewrite the durable set after ``symbol``'s record left ``_pending``."""
