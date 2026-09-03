@@ -112,6 +112,12 @@ _EVENT_NO_ENTRY_FILL = "entry_fill_absent"
 #: `entry_fill_absent` does not.
 _EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
 
+#: The working leg expired: the venue ANSWERED and said nothing filled, so no
+#: trade happened. Its own reason rather than reusing an existing one, because
+#: an operator meeting it must not go looking for a rejected order -- the
+#: placement was accepted and the FOK simply found no counterparty.
+_REASON_ENTRY_EXPIRED = "entry_leg_expired"
+
 _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
@@ -192,6 +198,34 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     #: reference would need a quoted name, and this project's style forbids
     #: those in new code.
     PendingWriter = Callable[[tuple[PendingPlacement, ...]], None]
+
+
+@dataclass(frozen=True, slots=True)
+class _EntryFill:
+    """What the working-leg query established -- THREE states, not two.
+
+    **A bare ``Money | None`` collapsed two facts that want opposite actions**,
+    which is why this type exists. ``None`` meant both "the venue answered and
+    the leg did not fill" and "we could not ask", and the guard below must
+    refuse on the first and proceed on the second. This is the project's
+    ordinary idiom for the same reason ``SizingDecision`` and
+    ``ProtectionAssessment`` are values carrying their reason: a verdict is
+    never a bare ``None``.
+
+    * ``price`` set                     -- FILLED. Open the position.
+    * ``price`` ``None``, answered      -- EXPIRED. No trade happened.
+    * ``price`` ``None``, not answered  -- UNKNOWN. The venue did not say.
+    """
+
+    price: Money | None
+    #: Whether the venue answered at all. ``False`` means the query failed, so
+    #: nothing about the leg is known -- NOT that the leg did not fill.
+    answered: bool
+
+    @property
+    def expired(self) -> bool:
+        """The venue answered and the leg did not fill. The only refusable state."""
+        return self.answered and self.price is None
 
 
 class OrderExecutor:
@@ -374,18 +408,28 @@ class OrderExecutor:
                 # Charged to this bar's budget, unlike the dispatch path's:
                 # the loop above re-reads the clock, so this call really is
                 # bounded by what remains.
-                entry_fill_price = await self._entry_fill_price(
+                fill = await self._entry_fill_price(
                     symbol=symbol,
                     entry_bar_time=record.entry_bar_time,
                     generation=record.generation,
                     timeout_s=bounds.timeout_s,
                     attempts=bounds.attempts,
                 )
+                # NO EXPIRY GUARD HERE, DELIBERATELY, and it is not an
+                # oversight. The verdict already IS the guard: `PLACED_LIVE`
+                # means the list is live at the venue, and a live list "has
+                # passed its working leg and its pendings are live: capital is
+                # committed" -- an expired FOK yields `PLACED_TERMINAL`, whose
+                # branch constructs nothing. Refusing here on a leg query that
+                # disagreed with the verdict would discard a position
+                # `resolve_placement` proved exists, which is the orphan
+                # direction. The purpose-built instrument wins over the
+                # follow-up read.
                 self._open_position(
                     symbol=symbol,
                     quantity=record.quantity,
                     entry_limit=record.entry_limit,
-                    entry_fill_price=entry_fill_price,
+                    entry_fill_price=fill.price,
                     stop_loss=record.stop_loss,
                     take_profit=record.take_profit,
                     entry_bar_time=record.entry_bar_time,
@@ -666,18 +710,45 @@ class OrderExecutor:
         # consulted once on this path, with `now == started_at`, so nothing
         # re-measures and a second consultation would return the same numbers
         # while implying otherwise.
-        entry_fill_price = await self._entry_fill_price(
+        fill = await self._entry_fill_price(
             symbol=intent.symbol,
             entry_bar_time=entry_bar_time,
             generation=0,
             timeout_s=bounds.timeout_s,
             attempts=bounds.attempts,
         )
+        # P6, CLOSED HERE. Until this guard, a `Position` was constructed
+        # unconditionally after a successful placement -- so an FOK that
+        # EXPIRED produced a holding the account does not have.
+        #
+        # NOTHING RESTS, SO THERE IS NOTHING TO UNWIND. MEASURED, and the
+        # resolution path above already says it: "six probe lists with a FOK
+        # working leg read ALL_DONE/ALL_DONE, every leg EXPIRED, `executedQty`
+        # 0." The pending record was popped and the durable set rewritten
+        # before the query, which is already correct for this outcome: there
+        # is no list to resolve on a later bar.
+        #
+        # THE SAME REASONING ALREADY RAN ON THE OTHER PATH. `PLACED_TERMINAL`
+        # refuses to construct for exactly this, in those words -- "Constructing
+        # a position there would INVENT one and debit `free_quote` for money
+        # never spent". Dispatch simply never asked the question.
+        #
+        # ONLY A POSITIVE "DID NOT FILL" REFUSES. A failed query is NOT an
+        # expiry: `fill.expired` requires the venue to have ANSWERED. Treating
+        # silence as an expiry would refuse to record a position that may be
+        # filled and protected at the venue -- an orphan of our own making,
+        # which `M5h-097` names as the worst state this milestone recorded.
+        # The opposite error, a phantom, is bounded: it is unbookable because
+        # `unrealized_pnl` raises on an absent fill price, and the next boot
+        # re-seeds `free_quote` from the venue.
+        if fill.expired:
+            self._refuse(signal, _REASON_ENTRY_EXPIRED, candle)
+            return
         self._open_position(
             symbol=intent.symbol,
             quantity=intent.quantity,
             entry_limit=intent.entry_limit,
-            entry_fill_price=entry_fill_price,
+            entry_fill_price=fill.price,
             stop_loss=intent.levels.stop_loss,
             take_profit=intent.levels.take_profit,
             entry_bar_time=entry_bar_time,
@@ -730,8 +801,8 @@ class OrderExecutor:
         generation: int,
         timeout_s: float,
         attempts: int,
-    ) -> Money | None:
-        """What the working leg actually filled at, or ``None``.
+    ) -> _EntryFill:
+        """What the working leg actually filled at, and whether the venue said.
 
         **The working leg is TERMINAL by the time the placement returns, and
         that is why this belongs here rather than on a later bar.** Q-C
@@ -768,8 +839,11 @@ class OrderExecutor:
                 attempts=attempts,
             )
         except Exception as exc:  # never raises; see the docstring
+            # NOT ANSWERED. Nothing is known about the leg -- which is a
+            # different fact from "it did not fill", and the caller acts on the
+            # difference.
             self._log_failure("entry-fill-query", symbol, exc)
-            return None
+            return _EntryFill(price=None, answered=False)
 
         # A fill total with no quantity cannot yield a price, and an FOK that
         # expired reports exactly that. `average_price` is the venue's own
@@ -787,8 +861,10 @@ class OrderExecutor:
                     "filled_quantity": order.filled_quantity,
                 },
             )
-            return None
-        return order.average_price
+            # ANSWERED, and the answer was no. An FOK that found no
+            # counterparty: no trade happened, and the caller refuses.
+            return _EntryFill(price=None, answered=True)
+        return _EntryFill(price=order.average_price, answered=True)
 
     def _open_position(
         self,
@@ -831,18 +907,21 @@ class OrderExecutor:
         is why the reconciler shipped before the first order rather than after
         it, and why ``ACTIVE`` was admitted to ``_TRUSTED_PROTECTION``.
         """
-        # **P6, RECORDED AND DELIBERATELY NOT FIXED.** Nothing here inspects
-        # the placement response's list status, so an FOK working leg that
-        # EXPIRED still constructs a `Position` -- a holding the account does
-        # not have. That is a pre-existing defect with its own fix and its own
-        # commit; it is named here because M5h's query is what makes it
-        # visible for the first time.
+        # **P6 IS CLOSED, AND NOT HERE.** This method still constructs
+        # whatever it is asked to; the guard lives at the DISPATCH call site,
+        # which is the only one that can reach an expired FOK. The other
+        # caller, the `PLACED_LIVE` branch, is guarded by its verdict.
         #
-        # Its consequence under this commit, stated so it is not mistaken for
-        # a new defect: such a position carries `entry_fill_price=None`, is
-        # therefore UNBOOKABLE, and `unrealized_pnl` RAISES if anything prices
-        # it. That is the fail-closed direction -- the phantom cannot quietly
-        # contribute a number -- but it is a symptom, not the cure.
+        # It is deliberately NOT a guard on this method. `_open_position` takes
+        # values rather than an outcome, and giving it one would move a
+        # dispatch decision into a recorder -- the same reason
+        # `Portfolio.open_position` takes a `cost` it does not compute.
+        #
+        # What survives from the pre-fix note: a position carrying
+        # `entry_fill_price=None` is UNBOOKABLE, because `unrealized_pnl`
+        # raises. That is now the fail-closed floor under the ambiguous case
+        # rather than under the phantom, since the phantom no longer reaches
+        # here.
         position = Position(
             symbol=symbol,
             side=PositionSide.LONG,

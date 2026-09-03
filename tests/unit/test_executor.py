@@ -1097,20 +1097,25 @@ class TestTheEntryFillPrice:
         with pytest.raises(ValueError, match="cost basis is unknown"):
             portfolio.positions[SYMBOL].unrealized_pnl(D("110"))
 
-    async def test_an_expired_fok_leaves_the_price_absent(self, caplog) -> None:  # type: ignore[no-untyped-def]
-        """The SECOND of the three `None` meanings, and a different fact.
+    async def test_an_expired_fok_constructs_no_position_and_debits_nothing(
+        self,
+        caplog,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """P6, CLOSED. This test asserted the DEFECT until this commit.
 
-        MUTATION: treat `filled_quantity == 0` as a fill, or drop the warning.
+        MUTATION: remove the `if fill.expired` guard from `dispatch`.
 
-        The query SUCCEEDED and the venue said nothing filled. Its own event
-        name, because "we could not ask" and "the answer was no" send an
-        operator to different places.
+        The query SUCCEEDED and the venue said nothing filled -- an FOK that
+        found no counterparty, so no trade happened. Until the guard a
+        `Position` was constructed anyway: a holding the account does not
+        have, and since `31fc12d` a DEBIT of real capital against it.
 
-        **P6's consequence, recorded not fixed:** a position is STILL
-        constructed here, for an FOK that expired -- a holding the account
-        does not have. It now carries `entry_fill_price=None`, so it is
-        unbookable and raises if priced. That is fail-closed, and it is a
-        symptom rather than the cure.
+        **`free_quote` is asserted, not merely `positions`.** A guard that
+        skipped the construction but still debited would leave `positions`
+        empty and the balance wrong, and only the money assertion sees that.
+
+        Nothing rests to unwind: MEASURED, six probe lists with a FOK working
+        leg read ALL_DONE/ALL_DONE, every leg EXPIRED, `executedQty` 0.
         """
         executor, _, portfolio = build()
         executor._client.fill_price = None  # type: ignore[attr-defined]
@@ -1118,8 +1123,37 @@ class TestTheEntryFillPrice:
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(buy(), entry_assessment(), candle())
 
-        assert portfolio.positions[SYMBOL].entry_fill_price is None
+        assert SYMBOL not in portfolio.positions  # no phantom
+        assert portfolio.free_quote == D("10000")  # and no money moved
         assert [r.status for r in _records(caplog, "entry_fill_absent")] == ["EXPIRED"]
-        # P6: the phantom exists, and pricing it raises rather than inventing.
+        assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["entry_leg_expired"]
+        # The pending record is gone: it was popped before the query, which is
+        # already right for this outcome -- there is no list to resolve later.
+        assert executor._pending == {}
+
+    async def test_a_failed_query_is_not_an_expiry(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        """THE AMBIGUOUS CASE, and the two errors are opposite.
+
+        MUTATION: guard on `fill.price is None` instead of `fill.expired`.
+
+        That mutation reads as a simplification and inverts the decision:
+        silence from the venue would refuse a position that may be filled and
+        protected, stranding an order list nothing tracks -- an orphan of our
+        own making, which `M5h-097` names as the worst state this milestone
+        recorded. Only a POSITIVE "did not fill" may refuse.
+
+        The opposite error is bounded: a phantom is unbookable, because
+        `unrealized_pnl` raises, and the next boot re-seeds `free_quote`.
+        """
+        executor, _, portfolio = build()
+        executor._client.order_error = ExchangeConnectionError("boom")  # type: ignore[attr-defined]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert portfolio.has_position(SYMBOL)  # RECORDED, never an orphan
+        assert _records(caplog, "dispatch_refused") == []  # and not refused
+        assert portfolio.positions[SYMBOL].entry_fill_price is None
+        # Fail-closed regardless: this position cannot reach the ledger.
         with pytest.raises(ValueError, match="cost basis is unknown"):
-            portfolio.positions[SYMBOL].unrealized_pnl(D("77000"))
+            portfolio.positions[SYMBOL].unrealized_pnl(D("110"))
