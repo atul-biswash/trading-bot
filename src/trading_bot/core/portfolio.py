@@ -88,6 +88,15 @@ _PERCENT = Decimal(100)
 #: **it has no reader**; see ``docs/NEXT_MILESTONE.md`` item 14.
 _TRUSTED_PROTECTION = frozenset({ProtectionState.ABSENT_BY_DESIGN, ProtectionState.ACTIVE})
 
+#: Refusal text for a :meth:`Portfolio.close_position` given no exit value at
+#: all. One constant because two sites raise it -- the guard, and the
+#: unreachable backstop that keeps a future reordering loud -- and two spellings
+#: of one refusal drift apart.
+_NO_EXIT_VALUE = (
+    "close_position needs exit_quote_total (the venue's own quote total, preferred) or "
+    "exit_price (a unit price, which is a lossy quotient of that total); neither was given"
+)
+
 
 def _require_aware(name: str, moment: datetime) -> datetime:
     """Reject a naive ``datetime``.
@@ -335,7 +344,8 @@ class Portfolio(BaseModel):
         self,
         symbol: str,
         *,
-        exit_price: Decimal,
+        exit_price: Decimal | None = None,
+        exit_quote_total: Decimal | None = None,
         now: datetime,
         fee: Decimal = Decimal(0),
     ) -> Decimal:
@@ -344,6 +354,49 @@ class Portfolio(BaseModel):
         Returns the realised P&L (negative for a loss), or ``Decimal(0)`` when
         there was no position to close -- which is a normal outcome, not an
         error, since a `CLOSE` can arrive for a symbol the bot does not hold.
+
+        **TWO WAYS TO SAY WHAT THE EXIT WAS WORTH, AND THE TOTAL IS THE
+        ACCURATE ONE.** Exactly one of ``exit_quote_total`` and ``exit_price``
+        is given.
+
+        ``exit_quote_total`` is the venue's own wire report -- Binance's
+        ``cummulativeQuoteQty``, the quote currency the account actually
+        received. ``exit_price`` is a UNIT PRICE, and a later reader will
+        assume it is the precise one, because a price looks more primitive
+        than a total and a total looks like something derived from it. **It is
+        the other way round: the price is the approximate one.** A price is
+        recovered from a total by dividing, and MEASURED, that division does
+        not round-trip: 5 of 10 realistic Binance shapes fail, including run
+        3's own -- ``0.02257000`` against ``35.38691640`` returns a delta of
+        ``-1E-26``. No precision setting fixes it, because ``T/Q`` is
+        non-terminating in base 10 for general inputs. And
+        ``persistence.store._dump_money`` writes a ``Decimal``'s exact
+        ``str``, so such a residual persists into ``data/state.json`` verbatim
+        and compounds across trades.
+
+        So the two parameters are **not redundant and neither may be deleted**:
+        the total is ground truth, the price is a lossy quotient of it, and the
+        price path stays because every historical caller expresses an exit that
+        way.
+
+        **What becomes exact, stated narrowly.** With ``exit_quote_total`` the
+        credit to :attr:`free_quote` is exactly the venue's figure -- no
+        division and no multiplication, ours or anyone's. The realised P&L is
+        **not** exact, because its entry term is ``entry_fill_price x
+        quantity`` and ``entry_fill_price`` is itself a quotient this codebase
+        computed. See :meth:`_realised_from_total`, which says what closing
+        that would take.
+
+        **Illegal combinations are refused, never resolved**, and refused
+        *before* the absent-symbol return -- an illegal call is a programming
+        error whether or not the symbol is held, and checking later would hide
+        it on exactly the calls that hold no position. Both given raises: they
+        are one fact at two precisions, and preferring either would let a
+        caller believe the other was used. Neither given raises: there is no
+        default here that is not a guess. Static ``@overload`` pairs were
+        considered and declined -- the runtime check must exist regardless,
+        since a caller can supply both dynamically, and a second expression of
+        one rule is the drift this project guards hardest against.
 
         **``fee`` is subtracted from the realised P&L**, because the reason the
         ledger holds realised facts only is that it must match an exchange
@@ -405,12 +458,39 @@ class Portfolio(BaseModel):
         fallible, no ordering satisfies it completely, and this is the one whose
         worst case is recoverable.
         """
+        # BEFORE the absent-symbol return; see the docstring for why.
+        if exit_price is not None and exit_quote_total is not None:
+            raise ValueError(
+                "close_position takes exit_quote_total or exit_price, never both: they are one "
+                f"fact at two precisions, and given total={exit_quote_total} with "
+                f"price={exit_price} there is no answer to which the caller meant"
+            )
+        if exit_price is None and exit_quote_total is None:
+            raise ValueError(_NO_EXIT_VALUE)
+
         position = self.positions.get(symbol)
         if position is None:
             return Decimal(0)
 
-        pnl = position.unrealized_pnl(exit_price) - fee
-        proceeds = self.free_quote + position.quantity * exit_price - fee
+        if exit_quote_total is not None:
+            pnl = self._realised_from_total(position, exit_quote_total) - fee
+            proceeds = self.free_quote + exit_quote_total - fee
+        elif exit_price is not None:
+            # UNCHANGED, and not rewritten in the other limb's shape.
+            # ``unrealized_pnl`` computes ``(exit_price - entry_fill_price) x
+            # quantity``; the exact limb computes ``total - entry_fill_price x
+            # quantity``. Those are not the same expression under a finite
+            # context -- Decimal distributivity fails -- so expressing this one
+            # as the other would move figures the eight close tests in
+            # ``test_risk_manager.py`` pin.
+            pnl = position.unrealized_pnl(exit_price) - fee
+            proceeds = self.free_quote + position.quantity * exit_price - fee
+        else:  # pragma: no cover - refused above
+            # A REAL BRANCH, not an ``assert``, which vanishes under -O. It is
+            # unreachable today and deliberately kept: it is what makes a future
+            # reordering of the guards fail loudly here instead of raising
+            # ``UnboundLocalError`` two lines down.
+            raise ValueError(_NO_EXIT_VALUE)
         _require_aware("now", now)
 
         self.free_quote = proceeds
@@ -418,7 +498,57 @@ class Portfolio(BaseModel):
         # LAST, because it is the only irreversible step: nothing revisits a
         # symbol that has left `positions`.
         del self.positions[symbol]
+
         return pnl
+
+    @staticmethod
+    def _realised_from_total(position: Position, gross: Decimal) -> Decimal:
+        """Realised P&L from the venue's own exit quote total.
+
+        **The mirror of :meth:`~trading_bot.core.models.Position.unrealized_pnl`
+        with the exit-side multiplication removed.** That method computes
+        ``(price - entry_fill_price) x quantity`` and therefore needs a unit
+        price; this takes the quote total directly, so the exit side
+        contributes no arithmetic of ours at all -- ``gross`` is the number the
+        venue reported, used as it arrived.
+
+        **The side convention is DUPLICATED from ``unrealized_pnl`` and is
+        pinned by a test rather than by structure.** It cannot be shared:
+        ``unrealized_pnl`` lives on ``Position``, takes a price, and is the
+        fallback path's own expression, so calling it here would reintroduce
+        the very division this method exists to avoid.
+        ``test_both_paths_agree_when_the_division_is_exact`` is what reports a
+        drift between the two conventions, and it is the reason the duplication
+        is recorded here rather than left for a reader to find.
+
+        **THE ENTRY TERM IS NOT EXACT, AND THIS DOES NOT MAKE IT SO.**
+        ``entry_fill_price`` is ``Order.average_price``, which
+        ``exchange/models.py`` computes as ``cummulativeQuoteQty /
+        executedQty`` -- our own division, with exactly the failure the exit
+        side had. MEASURED: ``Q=0.01234000`` against ``T=945.85721234``
+        round-trips to a delta of ``-1E-25``. So this path makes the EXIT term
+        exact and the realised figure strictly less wrong; it does **not** make
+        the realised figure exact. Closing that needs :class:`Position` to
+        carry the entry's quote TOTAL rather than its price, which is a field
+        change and an open ruling for the project owner.
+
+        :raises ValueError: :attr:`entry_fill_price` is ``None`` -- the same
+            refusal ``unrealized_pnl`` makes, on the same three states it
+            conflates, for the same reason: the cost basis is unknown and the
+            requested ``entry_price`` is not a substitute.
+        """
+        if position.entry_fill_price is None:
+            raise ValueError(
+                f"{position.symbol} has no entry_fill_price, so its cost basis is unknown and "
+                "realised P&L cannot be booked. The requested entry_price is NOT a substitute; "
+                "see Position.unrealized_pnl for the three states this value conflates"
+            )
+        entry_cost = position.entry_fill_price * position.quantity
+        if position.side is PositionSide.LONG:
+            return gross - entry_cost
+        if position.side is PositionSide.SHORT:
+            return entry_cost - gross
+        return Decimal(0)
 
     def equity(self, marks: Mapping[str, Decimal]) -> Decimal:
         """Total portfolio value in the quote currency.
