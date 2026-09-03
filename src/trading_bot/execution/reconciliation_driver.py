@@ -16,9 +16,15 @@ subscriber that raises is caught and logged by ``_notify`` with no structured
 fields, once per bar, forever, and no counter anywhere quarantines it. So each
 phase gets its own ``try`` and its own name in the log line.
 
-**Inert until something opens a position.** ``Position`` is constructed nowhere
-in ``src/`` today, so ``open_positions`` is empty and every pass is a no-op.
-The reconciler ships before the first order by design, not by accident.
+**IT ALSO BOOKS THE EXITS IT OBSERVES**, and that is a third phase rather than
+a detail of the second. Seven trades closed at the venue before this existed and
+none was booked: ``Portfolio.close_position`` had ZERO callers in ``src/``, so
+``record_realised_pnl`` -- whose only call site is inside it -- never ran, and
+``realised_today`` returned ``Decimal(0)`` forever while the daily-loss limit
+wore its name and measured nothing but committed risk. The driver is where
+booking belongs because it is the object that already holds the ``Portfolio``,
+already receives every assessment and already owns the durable write; the two
+classifiers stay pure. See :meth:`ReconciliationDriver._book_exits`.
 """
 
 from __future__ import annotations
@@ -72,14 +78,18 @@ __all__ = ["ReconciliationBudget", "ReconciliationDriver"]
 
 _log = get_logger(__name__)
 
-#: The three ``event`` values, one constant each so a rename cannot leave the
+#: The ``event`` values, one constant each so a rename cannot leave the
 #: emitter and its test disagreeing silently. Mirrors ``engine/modes.py``.
 _EVENT_PASS = "reconciliation_pass"
 _EVENT_UNTRUSTED = "reconciliation_untrusted"
 _EVENT_PHASE_FAILED = "reconciliation_phase_failed"
+_EVENT_BOOKED = "exit_booked"
+_EVENT_BOOK_REFUSED = "exit_book_refused"
+_EVENT_LEDGER_UNWRITABLE = "ledger_unwritable"
 
 _PHASE_PASS = "reconciliation_pass"
 _PHASE_RESOLUTION = "leg_resolution"
+_PHASE_BOOKING = "exit_booking"
 
 #: A clock, injected. Shaped exactly like ``risk.manager.Clock`` and
 #: deliberately NOT imported from there: ``execution/`` taking a dependency on
@@ -204,9 +214,10 @@ class ReconciliationDriver:
         #: byte-for-byte unchanged. The composition root supplies the real
         #: writer.
         #:
-        #: **NOTHING CALLS IT YET.** Booking is a later commit; this is the
-        #: mechanism arriving before its caller, which is the same shape
-        #: `OrderExecutor.persist_pending` had at C8.
+        #: **`_book_exits` CALLS IT**, once per pass that booked anything. It
+        #: was a mechanism with no caller for exactly one commit -- the same
+        #: shape `OrderExecutor.persist_pending` had at C8 -- and this is the
+        #: caller arriving.
         self._persist_ledger = persist_ledger
 
     async def __call__(self, candle: Candle) -> None:
@@ -271,6 +282,25 @@ class ReconciliationDriver:
 
         self._report(reported, queries=remainder)
 
+        # BOOKING RUNS AFTER RESOLUTION, and the ordering is forced by where an
+        # `ExitFill` can come from. There are two fill sites: one inside
+        # `classify_protection`, for a protective leg the enumeration still
+        # shows, and one inside the resolver's `_refine`, for a leg ABSENT from
+        # the enumeration that a point query finds `FILLED`. A stop that
+        # triggered and left the book is the second -- run 3's own shape -- so
+        # booking ahead of the resolver would miss the commonest real exit.
+        # `reported` is the resolver's output on the success path and the
+        # pass's on the resolver-failure path, so one call covers both.
+        #
+        # AFTER `_report`, not before, because `_report` describes what
+        # RECONCILIATION observed and booking is the response to it. A pass that
+        # saw a filled stop genuinely did see untrusted protection; the warning
+        # is true, and the booking line that follows says what was done about it.
+        try:
+            self._book_exits(reported, now=now)
+        except Exception as exc:  # the driver must never raise; see the docstring
+            self._log_phase_failure(_PHASE_BOOKING, candle, exc)
+
     def _report(
         self,
         results: Sequence[tuple[Position, ProtectionAssessment]],
@@ -330,6 +360,219 @@ class ReconciliationDriver:
                 "count": len(untrusted),
                 "symbols": ",".join(position.symbol for position, _a in untrusted),
                 "detail": "; ".join(assessment.reason for _p, assessment in untrusted),
+            },
+        )
+
+    def _book_exits(
+        self,
+        results: Sequence[tuple[Position, ProtectionAssessment]],
+        *,
+        now: datetime,
+    ) -> None:
+        """Book every COMPLETE protective fill this pass saw, then save once.
+
+        **THE DRIVER BOOKS, AND NEITHER CLASSIFIER DOES.** ``classify_protection``
+        and ``_refine`` are pure functions over what the venue reported: they
+        take no ``Portfolio``, hold no clock and write nothing, which is what
+        lets them be tested over fabricated payloads with no state at all.
+        Booking mutates the ledger, credits ``free_quote`` and deletes a
+        position -- so it belongs to the object that already holds the
+        ``Portfolio``, already receives every assessment, and already owns the
+        durable write. Moving it into a classifier would give a pure function a
+        portfolio argument and a persistence side effect, which is two seams
+        broken to save one loop.
+
+        **IDEMPOTENCY IS BY DELETION -- no flag and no memo.**
+        ``reconcile_open_positions`` builds its work list from
+        ``portfolio.open_positions``, which reads ``self.positions.values()``
+        afresh on every call. ``close_position`` removes the symbol from
+        ``positions``, so the next pass cannot enumerate it, cannot assess it
+        and cannot hand it back here. A "already booked" flag would be a second
+        source of truth for a fact the portfolio already expresses by the
+        position's absence, and it would go stale the moment anything else
+        closed a position.
+
+        **THE FIVE STATES, all decided here.** A fill with a quote total, a
+        complete quantity and a known cost basis is BOOKED. A fill whose
+        ``filled_quote_quantity`` is ``None`` is REFUSED and escalated -- that
+        absence means *a leg filled and cannot be priced*, which is a different
+        fact from ``exit_fill is None`` and must not pass silently. A PARTIAL
+        fill is not booked: it keeps ``UNKNOWN``, which is today's behaviour,
+        and the existing ``COMMITTED_RISK_UNKNOWN`` interlock refuses
+        portfolio-wide. No ``exit_fill`` at all is the ordinary healthy pass and
+        says nothing. And a position with no ``entry_fill_price`` is REFUSED --
+        checked HERE rather than caught from ``close_position``, so
+        ``unrealized_pnl``'s raise is never used as control flow.
+
+        **THE COMPLETENESS TEST IS ``!=``, NOT ``<``.** They differ only on an
+        over-fill, which the venue cannot produce: a leg's ``executedQty``
+        cannot exceed its ``origQty``, and that is the position's quantity.
+        ``<`` would BOOK such a fill; ``!=`` refuses it. The unreachable state
+        gets the conservative answer without inventing a row for it. Exponent
+        does not enter into it -- ``Decimal`` compares numerically, so
+        ``0.02257`` and ``0.02257000`` are equal here and differ only where a
+        division is involved.
+
+        **THE ORPHAN CHECK GUARDS A CURRENTLY-UNREACHABLE STATE.** An orphan is
+        an order list resting at the venue with no ``Position`` tracking it, so
+        it has nothing to pair with an assessment: every entry in ``results``
+        came from ``portfolio.open_positions``, and orphans bypass this
+        structurally rather than by a test. The check exists for the future edit
+        that routes one here anyway -- it refuses loudly instead of calling
+        ``close_position`` for a symbol the portfolio does not hold, which would
+        return ``Decimal(0)`` and look like a clean no-op. A ``raise`` and not an
+        ``assert``, which vanishes under ``-O``; the caller's ``try`` turns it
+        into a logged phase failure, so the driver's never-raise contract holds.
+
+        **ONE SAVE PER PASS, AFTER ALL BOOKINGS.** ``store.save`` is whole-file
+        and fsync'd -- ~41.6 ms median on this volume -- and a pass can close
+        more than one position, so a save per booking pays that cost per
+        position for a file whose final content is identical.
+
+        **APPLY, THEN SAVE, and the residual is named rather than implied.**
+        Memory is authoritative and the disk write follows it. On a crash
+        BETWEEN the two, disk is one pass stale -- and nothing revisits it,
+        because the position is already gone from ``positions`` and no later
+        pass can enumerate it. The realised figure for that trade is lost. The
+        alternative, saving before applying, writes a ledger the portfolio does
+        not hold and is stale in the direction that UNDER-reports nothing but
+        over-reports a booking that then failed; neither ordering is free, and
+        this one keeps the durable file a subset of what actually happened.
+
+        **THE C12 RESIDUAL, AND THIS COMMIT IS WHAT ARMS IT.**
+        ``close_position`` credits ``free_quote`` before it accrues, so an
+        accrual that raises leaves the proceeds credited and the position alive
+        -- and the next pass would credit them again. That was recorded as
+        acceptable partly because NOTHING CALLED ``close_position``. This method
+        is that caller. It is documented rather than closed: reaching it needs a
+        non-finite total, which ``Money`` is what rejects, and the surviving
+        position makes the failure visible and repeating rather than silent.
+        """
+        booked = 0
+        for position, assessment in results:
+            fill = assessment.exit_fill
+            if fill is None:
+                # Row 4: the ordinary healthy pass. Silent, like a pass with
+                # nothing due -- this is most bars on most positions.
+                continue
+
+            if self._portfolio.positions.get(position.symbol) is not position:
+                raise ValueError(
+                    f"{position.symbol} reached exit booking without being the portfolio's own "
+                    "position for that symbol. An orphan has no Position and cannot arrive here; "
+                    "reaching this means a caller now pairs assessments with something other than "
+                    "portfolio.open_positions, and booking it would silently no-op"
+                )
+
+            if fill.filled_quote_quantity is None:
+                # Row 2. Distinct from row 4 by construction: a leg DID fill and
+                # the venue gave no quote total for it, so a position has closed
+                # and cannot be priced. Escalated rather than skipped.
+                self._refuse_booking(
+                    position.symbol,
+                    fill.order_id,
+                    "the venue reported a fill with no quote total, so the exit cannot be priced "
+                    "and the position is closed at the venue with nothing booked",
+                )
+                continue
+
+            if fill.filled_quantity != position.quantity:
+                # Row 3. Not booked, and NOT a new refusal state: the position
+                # keeps `UNKNOWN` from the assessment, and the existing
+                # committed-risk interlock refuses entries portfolio-wide. This
+                # commit narrows booking to complete fills; it adds no path.
+                self._refuse_booking(
+                    position.symbol,
+                    fill.order_id,
+                    f"the fill is partial -- {fill.filled_quantity} executed against a position "
+                    f"of {position.quantity} -- so it is not booked and the position keeps its "
+                    "untrusted protection",
+                )
+                continue
+
+            if position.entry_fill_price is None:
+                # Row 5, checked BEFORE the call. `entry_price` is NOT a
+                # substitute -- it is the requested limit, measured wrong by up
+                # to 76.65 per unit, and a ledger is permanent.
+                self._refuse_booking(
+                    position.symbol,
+                    fill.order_id,
+                    "the position has no entry_fill_price, so its cost basis is unknown; the "
+                    "requested entry_price is not a substitute and would write a permanent "
+                    "distortion into the ledger",
+                )
+                continue
+
+            # Row 1. THE TOTAL PASSES STRAIGHT THROUGH -- no division into a
+            # unit price and no re-multiplication. MEASURED, that round trip is
+            # lossy: run 3's own shape, 0.02257000 against 35.38691640, returns
+            # a delta of -1E-26, and `_dump_money` writes such a residual into
+            # `data/state.json` verbatim.
+            realised = self._portfolio.close_position(
+                position.symbol,
+                exit_quote_total=fill.filled_quote_quantity,
+                now=now,
+            )
+            booked += 1
+            _log.info(
+                "Booked exit for %s",
+                position.symbol,
+                extra={
+                    "event": _EVENT_BOOKED,
+                    "symbol": position.symbol,
+                    "order_id": fill.order_id,
+                    "quantity": fill.filled_quantity,
+                    "quote_total": fill.filled_quote_quantity,
+                    "realised": realised,
+                    "venue_time": (
+                        fill.venue_time.isoformat() if fill.venue_time is not None else None
+                    ),
+                },
+            )
+
+        ledger = self._portfolio.ledger
+        if booked == 0 or self._persist_ledger is None or ledger is None:
+            # `ledger is None` is mypy narrowing, not a branch: `booked > 0`
+            # means `record_realised_pnl` ran, and it assigns `self.ledger`
+            # unconditionally. The same shape that method's own body uses.
+            return
+        try:
+            self._persist_ledger(ledger)
+        except Exception as exc:
+            # CRITICAL, and a level above the executor's persist failures
+            # deliberately. Those refuse before the venue call and cost one
+            # trade; this one happens AFTER the position is gone from memory,
+            # so there is nothing left to refuse and no pass that can retry --
+            # the apply-then-save residual, arriving.
+            _log.critical(
+                "Booked exits could not be persisted; the ledger on disk is one pass stale",
+                extra={
+                    "event": _EVENT_LEDGER_UNWRITABLE,
+                    "booked": booked,
+                    "realised_pnl": ledger.realised_pnl,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+
+    @staticmethod
+    def _refuse_booking(symbol: str, order_id: str, reason: str) -> None:
+        """One line for a fill that was seen and not booked.
+
+        ``WARNING`` rather than ``CRITICAL``: every refusal here leaves the
+        position PRESENT and untrusted, so the committed-risk interlock is
+        already refusing entries portfolio-wide and the condition is both
+        visible and self-announcing on the next pass. Q-B reserves ``CRITICAL``
+        for a log line AND a halt, and a halt flag does not exist.
+        """
+        _log.warning(
+            "Exit fill for %s was not booked",
+            symbol,
+            extra={
+                "event": _EVENT_BOOK_REFUSED,
+                "symbol": symbol,
+                "order_id": order_id,
+                "reason": reason,
             },
         )
 

@@ -48,6 +48,8 @@ from trading_bot.config.models import StopLossConfig, TakeProfitConfig
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import (
     OrderSide,
+    OrderStatus,
+    OrderType,
     PositionSide,
     PositionSizingMethod,
     ProtectionState,
@@ -90,7 +92,7 @@ from trading_bot.engine.modes import (
     _seed_portfolio,
     live_system,
 )
-from trading_bot.exchange.ids import list_client_order_id
+from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
 from trading_bot.execution.executor import PendingPlacement
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
@@ -108,6 +110,22 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 D = Decimal
 
 _KEY = (SYMBOL, TIMEFRAME)
+
+#: RUN 3's SHAPE, mirrored from ``test_reconciliation_driver`` rather than
+#: imported: this file already imports fixtures from ``test_risk_manager`` and
+#: that is the one cross-module test coupling in the tree, deliberately kept
+#: singular. Four constants are cheaper than a second such edge.
+#:
+#: The EXPONENT is what makes them expressive -- ``0.02257000`` does not divide
+#: exactly into the total, so the exact route and the divide-then-multiply
+#: route give different figures and the assertion tells them apart.
+_BOOK_QTY = D("0.02257000")
+_BOOK_ENTRY_FILL = D("80756.69")
+_BOOK_TOTAL = D("1786.22691640")
+_BOOK_EXACT = D("-36.4515769000")
+#: The bar the position was entered on, and therefore the bar its leg ids
+#: encode. The leg and the position must agree or the compare set is empty.
+_BOOK_BAR = datetime(2026, 8, 15, 11, 0, tzinfo=timezone.utc)
 
 #: The only logger whose records these tests own. Other collaborators log into
 #: the same caplog buffer, so records are always selected by name.
@@ -199,6 +217,7 @@ class FakeRootClient(ExchangeClient):
         ticker_last: Decimal = _DEFAULT_TICKER_LAST,
         order_lists: list[OrderList] | None = None,
         order_lists_error: Exception | None = None,
+        own_open_orders: list[Order] | None = None,
     ) -> None:
         self._balances = (
             balances
@@ -211,6 +230,11 @@ class FakeRootClient(ExchangeClient):
         self._ticker_last = ticker_last
         self._order_lists = order_lists if order_lists is not None else []
         self._order_lists_error = order_lists_error
+        #: ``None`` KEEPS THE RAISE, which is what leaves every existing test
+        #: in this file byte-for-byte unchanged: no boot path calls this, so a
+        #: default answer here would let the fixture decide a result nobody
+        #: chose. Only the end-to-end booking test supplies one.
+        self._own_open_orders = own_open_orders
         self.symbol_info_calls: list[str] = []
         self.order_list_calls = 0
         self.close_calls = 0
@@ -255,14 +279,23 @@ class FakeRootClient(ExchangeClient):
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]:  # pragma: no cover
         raise NotImplementedError
 
-    async def get_own_open_orders(  # pragma: no cover
+    async def get_own_open_orders(
         self,
         symbol: str,
         *,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Order]:
-        raise NotImplementedError
+        """The reconciliation enumeration. Raises unless a book was supplied.
+
+        See ``_own_open_orders``: the raise is the default because no boot path
+        reaches here, and an unconfigured answer from a venue call is a real
+        classification that no test should get by accident.
+        """
+        if self._own_open_orders is None:
+            raise NotImplementedError
+        self._journal.append(f"own_open_orders:{symbol}")
+        return list(self._own_open_orders)
 
     async def get_order(  # pragma: no cover
         self,
@@ -2497,14 +2530,17 @@ class TestTheStoreIsReadAtBoot:
             realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3)
         )
 
-    async def test_the_ledger_writer_is_injected_and_nothing_calls_it(self, tmp_path: Path) -> None:
-        """The mechanism arrives before its caller, exactly as `persist_pending` did.
+    async def test_the_ledger_writer_is_injected(self, tmp_path: Path) -> None:
+        """The root wires it, and a driver without one keeps the old behaviour.
 
         MUTATION: drop `persist_ledger=` from the root's driver construction.
 
-        A driver built without one keeps `None`, which is byte-for-byte the
-        behaviour before this commit -- so every existing construction and test
-        is unchanged, and that is asserted here rather than assumed.
+        **THIS TEST READ `..._and_nothing_calls_it` UNTIL THIS COMMIT**, and
+        the clause was true for exactly one commit: `_book_exits` is the caller
+        that has now arrived. The name is corrected rather than annotated,
+        because a test name describes the tree rather than recording an
+        observation of it. What it pins is unchanged -- the wiring, and that
+        `None` is still the default.
         """
         settings = write_settings(tmp_path)
 
@@ -2520,6 +2556,64 @@ class TestTheStoreIsReadAtBoot:
             ),
         )
         assert bare._persist_ledger is None
+
+    async def test_a_booked_exit_reaches_state_json_through_the_root(self, tmp_path: Path) -> None:
+        """END TO END: a venue fill becomes a non-null ledger on disk.
+
+        MUTATION: drop the `self._book_exits(...)` call from
+        `ReconciliationDriver.__call__`.
+
+        **THE CLAIM THIS COMMIT MAKES, AND THE ONLY TEST THAT MAKES IT
+        WHOLE.** Every other test here drives one closure or one method; this
+        one runs the real chain -- enumeration, `classify_protection`, the
+        booking, `close_position`, `record_realised_pnl`, the ledger closure
+        and `store.save` -- and reads the file afterwards. `data/state.json`
+        has read `"ledger": null` after every run this project has ever made,
+        and this is what changes that.
+
+        The path is TEMPORARY: the module's autouse `_isolate_run_artefacts`
+        chdirs to `tmp_path`, so the relative `DEFAULT_STORE_PATH` resolves
+        under it and the operator's real state file is never touched.
+        """
+        settings = write_settings(tmp_path)
+        leg = Order(
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.STOP_LOSS,
+            status=OrderStatus.FILLED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY,
+            filled_quote_quantity=_BOOK_TOTAL,
+            stop_price=D("79141.56"),
+            order_list_id="371839",
+            client_order_id=client_order_id(
+                SYMBOL, _BOOK_BAR, OrderListLeg.STOP_LOSS, generation=0
+            ),
+            created_at=NOW,
+        )
+        client = FakeRootClient(own_open_orders=[leg])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=_BOOK_QTY,
+                entry_price=D("80700.00"),
+                entry_fill_price=_BOOK_ENTRY_FILL,
+                entry_bar_time=_BOOK_BAR,
+                protection=ProtectionState.UNKNOWN,
+                stop_loss=D("79141.56"),
+            )
+            # The candle is a TRIGGER, not a subject: the reconciler ignores
+            # its symbol and visits every open position.
+            await system.reconciler(engine_candle())
+
+        after = store.load()
+        assert after is not None
+        assert after.ledger is not None  # NOT null, for the first time
+        assert after.ledger.realised_pnl == _BOOK_EXACT
+        assert SYMBOL not in system.portfolio.positions
 
     async def test_a_restored_record_is_rewritten_not_dropped_by_the_next_write(
         self, tmp_path: Path

@@ -24,9 +24,10 @@ from trading_bot.core.enums import (
 )
 from trading_bot.core.exceptions import ExchangeConnectionError, OrderNotFoundError
 from trading_bot.core.models import Candle, Order, Position
-from trading_bot.core.portfolio import Portfolio
+from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.exchange.ids import OrderListLeg, client_order_id
 from trading_bot.execution import reconciliation_driver as driver_module
+from trading_bot.execution.reconciliation import ExitFill, ProtectionAssessment
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
@@ -161,6 +162,7 @@ def _driver(portfolio: Portfolio, client: _StubClient, **kwargs: object) -> Reco
         client=client,  # type: ignore[arg-type]  # a scripted fake, deliberately partial
         budget=kwargs.pop("budget", BUDGET),  # type: ignore[arg-type]
         clock=kwargs.pop("clock", lambda: NOW),  # type: ignore[arg-type]
+        persist_ledger=kwargs.pop("persist_ledger", None),  # type: ignore[arg-type]
     )
 
 
@@ -474,3 +476,393 @@ async def test_a_fully_trusted_pass_does_not_warn(caplog: pytest.LogCaptureFixtu
         await _driver(_portfolio(_position("BTCUSDT", stop_loss=None)), client)(_candle())
 
     assert [r for r in caplog.records if r.levelno == logging.WARNING] == []
+
+
+# --------------------------------------------------------------------------
+# Booking the exit
+# --------------------------------------------------------------------------
+#: RUN 3's OWN SHAPE, and the choice is a fixture-expressiveness decision
+#: rather than flavour. The module's `QTY` of `0.00100000` divides EXACTLY into
+#: any 8-dp total -- MEASURED -- so a test built on it computes the same answer
+#: whether booking passes the venue's total through or derives a unit price
+#: from it, and could not fail a mutation that swapped one for the other. This
+#: quantity does not divide exactly, so the two routes give different figures
+#: and the assertion below distinguishes them.
+#:
+#: The EXPONENT is load-bearing: `Decimal("0.02257")` is numerically equal to
+#: this and does NOT reproduce the inexactness.
+BOOK_QTY = Decimal("0.02257000")
+#: What the entry actually cost, per unit. DELIBERATELY APART from the implied
+#: exit price of ~79141.64, so a mutation that drops the entry term or books a
+#: gross figure moves the answer instead of cancelling.
+BOOK_ENTRY_FILL = Decimal("80756.69")
+#: The REQUESTED limit, different again -- so a mutation reading `entry_price`
+#: in place of `entry_fill_price` is visible rather than silently equal.
+BOOK_ENTRY_LIMIT = Decimal("80700.00")
+#: The venue's own `cummulativeQuoteQty` for the exit.
+BOOK_TOTAL = Decimal("1786.22691640")
+#: `total - entry_fill_price * quantity`, the exact route.
+BOOK_EXACT = Decimal("-36.4515769000")
+#: `((total / quantity) - entry_fill_price) * quantity`, the lossy route. It is
+#: asserted NOT to be the answer, which is what makes the pass-through a
+#: property of the code rather than of the numbers.
+BOOK_VIA_DIVISION = Decimal("-36.45157689999999999999999998")
+
+
+def _filled_leg(
+    symbol: str,
+    *,
+    filled_quantity: Decimal = BOOK_QTY,
+    filled_quote_quantity: Decimal | None = BOOK_TOTAL,
+    leg: OrderListLeg = OrderListLeg.STOP_LOSS,
+) -> Order:
+    """A protective leg the venue reports as FILLED.
+
+    Routed through the REAL `classify_protection`, not a fabricated assessment:
+    the driver calls the pass for real, so a fixture that hand-built an
+    `ExitFill` would test the booking against a shape the classifier might
+    never produce.
+    """
+    return Order(
+        order_id="777",
+        symbol=symbol,
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        status=OrderStatus.FILLED,
+        quantity=BOOK_QTY,
+        filled_quantity=filled_quantity,
+        filled_quote_quantity=filled_quote_quantity,
+        stop_price=STOP,
+        order_list_id=VENUE_LIST_ID,
+        client_order_id=client_order_id(symbol, BAR, leg, generation=0),
+        created_at=NOW,
+    )
+
+
+def _booking_position(
+    symbol: str = "BTCUSDT", *, entry_fill_price: Decimal | None = BOOK_ENTRY_FILL
+) -> Position:
+    """A position that can be booked: sized like run 3's, with a cost basis."""
+    return Position(
+        symbol=symbol,
+        side=PositionSide.LONG,
+        quantity=BOOK_QTY,
+        entry_price=BOOK_ENTRY_LIMIT,
+        entry_fill_price=entry_fill_price,
+        entry_bar_time=BAR,
+        protection=ProtectionState.UNKNOWN,
+        order_list_id=CLIENT_LIST_ID,
+        last_reconciled_at=None,
+        stop_loss=STOP,
+    )
+
+
+class _RecordingWriter:
+    """Counts ledger writes and keeps what each one carried."""
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.calls: list[Ledger] = []
+        self._error = error
+
+    def __call__(self, ledger: Ledger) -> None:
+        self.calls.append(ledger)
+        if self._error is not None:
+            raise self._error
+
+
+async def test_a_complete_fill_books_the_venues_own_total_not_a_derived_price() -> None:
+    """Row 1, and the assertion that makes the pass-through a code property.
+
+    MUTATION: in `_book_exits`, replace
+    `exit_quote_total=fill.filled_quote_quantity` with
+    `exit_price=fill.filled_quote_quantity / fill.filled_quantity`.
+
+    Both routes are asserted -- the exact one holds, the division one is
+    asserted ABSENT -- so the test cannot be satisfied by a shape where they
+    happen to agree. That is why `BOOK_QTY` is not the module's `QTY`.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+    writer = _RecordingWriter()
+
+    await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    assert portfolio.ledger.realised_pnl != BOOK_VIA_DIVISION
+
+
+async def test_a_booking_credits_the_total_verbatim_and_the_position_leaves() -> None:
+    """The other two writes `close_position` makes, both asserted exactly.
+
+    MUTATION: credit `fill.filled_quantity * (total / filled_quantity)` instead
+    of the total, or drop the `del self.positions[symbol]`.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert portfolio.free_quote == Decimal("10000") + BOOK_TOTAL
+    assert "BTCUSDT" not in portfolio.positions
+    assert portfolio.open_positions == []
+
+
+async def test_a_second_pass_over_the_same_fill_books_nothing() -> None:
+    """Idempotency BY DELETION -- no flag and no memo.
+
+    MUTATION: make `close_position` leave the symbol in `positions`.
+
+    The venue still reports the same filled leg on the second pass, which is
+    exactly what a real one would do until the order ages out. Nothing else
+    stops a double booking: `reconcile_open_positions` builds its work list
+    from `portfolio.open_positions`, so the deleted symbol is never enumerated
+    again.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+    writer = _RecordingWriter()
+    driver = _driver(portfolio, client, persist_ledger=writer)
+
+    await driver(_candle())
+    booked_once = portfolio.ledger
+    credited_once = portfolio.free_quote
+
+    await driver(_candle())
+
+    assert portfolio.ledger == booked_once
+    assert portfolio.free_quote == credited_once
+    assert len(writer.calls) == 1  # the second pass had nothing to save
+    assert client.asked == ["BTCUSDT"]  # and nothing to enumerate
+
+
+async def test_a_fill_with_no_quote_total_refuses_and_does_not_book(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Row 2 -- a leg filled and CANNOT BE PRICED.
+
+    MUTATION: fall through to booking with `exit_price=None`, or collapse this
+    branch into the `exit_fill is None` skip.
+
+    Distinct from row 4 by construction: the position closed at the venue and
+    nothing can be booked for it, which is the state an operator most needs
+    told. Asserted on the reason text, because collapsing the two absences
+    would still produce a refusal -- just a silent one.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    refusals = [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"]
+    assert len(refusals) == 1
+    assert "no quote total" in refusals[0].reason  # type: ignore[attr-defined]
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions  # nothing was closed
+
+
+async def test_a_partial_fill_is_not_booked(caplog: pytest.LogCaptureFixture) -> None:
+    """Row 3 -- today's behaviour, preserved rather than extended.
+
+    MUTATION: change the completeness test from `!=` to `<`, or delete it.
+
+    The position keeps `UNKNOWN`, so the existing `COMMITTED_RISK_UNKNOWN`
+    interlock refuses entries portfolio-wide. This commit adds no
+    `RefusalStage`; it NARROWS booking to complete fills.
+    """
+    portfolio = _portfolio(_booking_position())
+    partial = Decimal("0.01000000")
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quantity=partial)]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    refusals = [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"]
+    assert len(refusals) == 1
+    assert "partial" in refusals[0].reason  # type: ignore[attr-defined]
+    assert portfolio.ledger is None
+    assert portfolio.positions["BTCUSDT"].protection is ProtectionState.UNKNOWN
+
+
+async def test_an_over_fill_is_refused_by_the_same_test() -> None:
+    """The `!=` half a `<` test would BOOK, on a state the venue cannot produce.
+
+    MUTATION: `filled_quantity < position.quantity`.
+
+    DECLARED: this asserts the conservative answer on an UNREACHABLE state --
+    a leg's `executedQty` cannot exceed its `origQty`. It exists so the choice
+    of `!=` over `<` is pinned rather than incidental, and it is the only test
+    that distinguishes them.
+    """
+    portfolio = _portfolio(_booking_position())
+    over = BOOK_QTY + Decimal("0.00000001")
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quantity=over)]})
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+
+
+async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Row 5 -- checked HERE, so `unrealized_pnl`'s raise is never control flow.
+
+    MUTATION: delete the `entry_fill_price is None` guard.
+
+    Under it the call still refuses, because `_realised_from_total` raises --
+    but it raises INTO the driver's phase `try`, which logs a phase failure and
+    abandons every later booking in the pass. Asserted on the event name, which
+    is what separates a decision from a caught exception.
+    """
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    events = [getattr(r, "event", None) for r in caplog.records]
+    assert "exit_book_refused" in events
+    assert "reconciliation_phase_failed" not in events
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+
+
+async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
+    """Row 4 -- the ordinary healthy pass, and the commonest bar there is.
+
+    MUTATION: book unconditionally, or save once per pass regardless of
+    `booked`. The second is the one worth catching: an unconditional save
+    fsyncs the file every bar on a bot that is doing nothing.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+    writer = _RecordingWriter()
+
+    await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+    assert writer.calls == []
+
+
+async def test_the_ledger_is_saved_once_per_pass_not_once_per_booking() -> None:
+    """Ruling 7, and it needs TWO closing positions to express.
+
+    MUTATION: move the `self._persist_ledger(ledger)` call inside the loop.
+
+    `store.save` is whole-file and fsync'd at ~41.6 ms median on this volume,
+    and a save per booking writes a file whose final content is identical. A
+    one-position fixture cannot tell the two apart -- which is why this test
+    carries two and asserts the COUNT, not merely that a save happened.
+    """
+    portfolio = _portfolio(_booking_position("BTCUSDT"), _booking_position("ETHUSDT"))
+    client = _StubClient(
+        {
+            "BTCUSDT": [_filled_leg("BTCUSDT")],
+            "ETHUSDT": [_filled_leg("ETHUSDT")],
+        }
+    )
+    writer = _RecordingWriter()
+
+    await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert portfolio.positions == {}
+    # BOTH booked into one day, so the ledger carries their sum...
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT * 2
+    # ...and reached disk exactly once.
+    assert len(writer.calls) == 1
+    assert writer.calls[0].realised_pnl == BOOK_EXACT * 2
+
+
+async def test_a_raising_save_logs_critical_and_leaves_memory_booked(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Ruling 6, and the residual it names rather than hides.
+
+    MUTATION: let the save exception escape, or log it at ERROR.
+
+    APPLY, THEN SAVE: the booking is already in memory when the write fails, so
+    the position is gone and no later pass can enumerate it. Disk is one pass
+    stale and nothing revisits it. CRITICAL is a level above the executor's
+    persist failures deliberately -- those refuse BEFORE the venue call and
+    cost one trade, this one has nothing left to refuse.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+    writer = _RecordingWriter(error=OSError("no space left on device"))
+
+    with caplog.at_level(logging.CRITICAL):
+        await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    critical = [r for r in caplog.records if r.levelno == logging.CRITICAL]
+    assert len(critical) == 1
+    assert getattr(critical[0], "event", None) == "ledger_unwritable"
+    assert getattr(critical[0], "error_type", None) == "OSError"
+    # Memory is booked; only the durable copy is behind.
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    assert "BTCUSDT" not in portfolio.positions
+
+
+async def test_booking_without_a_writer_is_the_pre_commit_behaviour() -> None:
+    """A driver with no `persist_ledger` still books; it just persists nothing.
+
+    MUTATION: raise or skip the booking when `_persist_ledger is None`.
+
+    The default is `None`, so every existing construction in this file goes
+    through this path -- and booking is a portfolio concern, not a persistence
+    one. Getting this backwards would make the ledger depend on whether a
+    writer happened to be wired.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    await _driver(portfolio, client)(_candle())
+
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+
+
+async def test_a_position_that_is_not_the_portfolios_own_refuses_loudly(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The orphan guard, on a state that is CURRENTLY UNREACHABLE.
+
+    MUTATION: delete the identity check.
+
+    An orphan is an order list resting at the venue with no `Position`, so it
+    cannot pair with an assessment -- every entry in `results` came from
+    `portfolio.open_positions`. Orphans bypass booking STRUCTURALLY. This
+    forces the state a future edit could create, by swapping the portfolio's
+    object for an equal-but-distinct one after the pass has run, and asserts it
+    is refused rather than silently no-ops through `close_position`'s
+    absent-symbol return.
+
+    DECLARED: it drives `_book_exits` directly. The pass cannot produce this
+    input, so a test going through `__call__` would be asserting against a
+    fixture the code path forbids.
+    """
+    portfolio = _portfolio(_booking_position())
+    assessment = ProtectionAssessment(
+        state=ProtectionState.UNKNOWN,
+        reason="forced",
+        exit_fill=ExitFill(
+            order_id="777",
+            filled_quantity=BOOK_QTY,
+            filled_quote_quantity=BOOK_TOTAL,
+        ),
+    )
+    stranger = _booking_position()  # equal in value, not the portfolio's object
+    driver = _driver(portfolio, _StubClient({"BTCUSDT": []}))
+
+    with pytest.raises(ValueError, match="orphan"):
+        driver._book_exits([(stranger, assessment)], now=NOW)
+
+    # And through `__call__` the same failure is contained, not raised.
+    with caplog.at_level(logging.ERROR):
+        await driver(_candle())
+    assert portfolio.ledger is None
