@@ -92,6 +92,10 @@ from trading_bot.engine.modes import (
 )
 from trading_bot.exchange.ids import list_client_order_id
 from trading_bot.execution.executor import PendingPlacement
+from trading_bot.execution.reconciliation_driver import (
+    ReconciliationBudget,
+    ReconciliationDriver,
+)
 from trading_bot.persistence import store
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
@@ -2427,6 +2431,95 @@ class TestTheStoreIsReadAtBoot:
         assert after.ledger == ledger
         assert str(after.ledger.realised_pnl) == "-35.38691640"
         assert after.pending == (_STORED,)
+
+    async def test_a_ledger_write_preserves_the_pending_set(self, tmp_path: Path) -> None:
+        """THE CLOBBER GUARD, in the direction the pending writer cannot test.
+
+        MUTATION: drop `pending=persisted.pending` from `_persist_ledger`.
+
+        `store.save` is WHOLE-FILE, so two writers each owning one slice must
+        each carry the other across. The pending closure passes
+        `ledger=persisted.ledger`; this one passes `pending=persisted.pending`.
+        Drop either and the next write of one slice ERASES the other -- and it
+        erases silently, because a whole-file write of a valid state is
+        indistinguishable afterwards from a correct one.
+
+        Driven in the order that bites: pending FIRST, then a ledger write.
+        The reverse order would pass under the mutation, since there would be
+        no pending set to lose.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            pending_writer = system.executor._persist_pending
+            assert pending_writer is not None
+            pending_writer((_EXPECTED,))  # a placement lands first
+
+            ledger_writer = system.reconciler._persist_ledger
+            assert ledger_writer is not None
+            ledger_writer(Ledger(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)))
+
+        after = store.load()
+        assert after is not None
+        # BOTH slices survive. The ledger is what was just written...
+        assert after.ledger == store.LedgerRecord(
+            realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)
+        )
+        # ...and the pending set was NOT erased by writing it.
+        assert after.pending == (_STORED,)
+
+    async def test_a_pending_write_after_a_ledger_write_preserves_the_ledger(
+        self, tmp_path: Path
+    ) -> None:
+        """The same guard from the other side, so neither writer is trusted alone.
+
+        MUTATION: drop `ledger=persisted.ledger` from `_persist_pending`.
+
+        That direction was already covered for a RESTORED ledger; this covers
+        one this process wrote, which is the case booking will actually
+        produce.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            ledger_writer = system.reconciler._persist_ledger
+            assert ledger_writer is not None
+            ledger_writer(Ledger(realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3)))
+
+            pending_writer = system.executor._persist_pending
+            assert pending_writer is not None
+            pending_writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        assert after.pending == (_STORED,)
+        assert after.ledger == store.LedgerRecord(
+            realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3)
+        )
+
+    async def test_the_ledger_writer_is_injected_and_nothing_calls_it(self, tmp_path: Path) -> None:
+        """The mechanism arrives before its caller, exactly as `persist_pending` did.
+
+        MUTATION: drop `persist_ledger=` from the root's driver construction.
+
+        A driver built without one keeps `None`, which is byte-for-byte the
+        behaviour before this commit -- so every existing construction and test
+        is unchanged, and that is asserted here rather than assumed.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.reconciler._persist_ledger is not None  # the root wires it
+
+        # And a driver built without one is the old behaviour.
+        bare = ReconciliationDriver(
+            portfolio=Portfolio(free_quote=D("100")),
+            client=FakeRootClient(),
+            budget=ReconciliationBudget.from_config(
+                settings.config, timeframes={SYMBOL: TIMEFRAME}
+            ),
+        )
+        assert bare._persist_ledger is None
 
     async def test_a_restored_record_is_rewritten_not_dropped_by_the_next_write(
         self, tmp_path: Path

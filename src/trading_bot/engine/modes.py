@@ -1133,6 +1133,38 @@ async def live_system(
                     )
                     store.save(persisted)
 
+                def _persist_ledger(ledger: Ledger) -> None:
+                    """Write the accrued ledger, preserving the pending set.
+
+                    **THE EXACT MIRROR of the closure above, and the mirroring
+                    is what avoids the clobber.** ``store.save`` is WHOLE-FILE,
+                    so two writers each owning one slice must each carry the
+                    other across: that one passes ``ledger=persisted.ledger``,
+                    and this one passes ``pending=persisted.pending``. Drop
+                    either and the next write of one slice erases the other.
+
+                    **The mapping lives HERE for the same reason the callable
+                    does.** ``CLAUDE.md`` has outer layers "depend inward
+                    only", and the composition root is the one layer permitted
+                    to know both ``core/`` and ``persistence/``. The argument
+                    is a ``core.portfolio.Ledger`` -- an INWARD type the driver
+                    may name -- and ``store.LedgerRecord`` never leaves this
+                    file, exactly as ``store.PendingRecord`` never leaves it.
+
+                    NOTHING CALLS THIS. Booking is a later commit; this is a
+                    write path with no caller, deliberately, so the caller
+                    arrives to a mechanism rather than shipping one.
+                    """
+                    nonlocal persisted
+                    persisted = store.PersistedState(
+                        pending=persisted.pending,
+                        ledger=store.LedgerRecord(
+                            realised_pnl=ledger.realised_pnl,
+                            pnl_date=ledger.pnl_date,
+                        ),
+                    )
+                    store.save(persisted)
+
                 executor = OrderExecutor(
                     client=resolved_client,
                     portfolio=portfolio,
@@ -1170,6 +1202,7 @@ async def live_system(
                     portfolio=portfolio,
                     client=resolved_client,
                     budget=ReconciliationBudget.from_config(settings.config, timeframes=timeframes),
+                    persist_ledger=_persist_ledger,
                 )
                 provider.on_candle(reconciler)
                 # Subscriber ONE: Option 4 resolution, after the reconciler and

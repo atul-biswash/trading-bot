@@ -51,8 +51,22 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.config.models import AppConfig
     from trading_bot.core.interfaces import ExchangeClient
     from trading_bot.core.models import Candle, Position
-    from trading_bot.core.portfolio import Portfolio
+    from trading_bot.core.portfolio import Ledger, Portfolio
     from trading_bot.execution.reconciliation import ProtectionAssessment
+
+    #: Writes the accrued ledger durably. **Raising means the write did NOT
+    #: happen**, and the caller must treat the ledger as unpersisted.
+    #:
+    #: A callable rather than an imported module, so ``execution/`` never
+    #: depends on ``persistence/``: `CLAUDE.md` has outer layers "depend inward
+    #: only", and the composition root is the one layer permitted to know both.
+    #: The argument is ``core.portfolio.Ledger``, an INWARD type this module
+    #: may name; ``store.LedgerRecord`` never crosses this boundary.
+    #:
+    #: It is also what keeps the whole-file ``store.save`` safe -- the root owns
+    #: the pending set this driver never sees, and carries it across every
+    #: ledger write.
+    LedgerWriter = Callable[[Ledger], None]
 
 __all__ = ["ReconciliationBudget", "ReconciliationDriver"]
 
@@ -179,11 +193,21 @@ class ReconciliationDriver:
         client: ExchangeClient,
         budget: ReconciliationBudget,
         clock: _Clock = utc_now,
+        persist_ledger: LedgerWriter | None = None,
     ) -> None:
         self._portfolio = portfolio
         self._client = client
         self._budget = budget
         self._clock = clock
+        #: Writes the accrued ledger durably. ``None`` means DO NOT PERSIST,
+        #: and that default is what keeps every existing construction and test
+        #: byte-for-byte unchanged. The composition root supplies the real
+        #: writer.
+        #:
+        #: **NOTHING CALLS IT YET.** Booking is a later commit; this is the
+        #: mechanism arriving before its caller, which is the same shape
+        #: `OrderExecutor.persist_pending` had at C8.
+        self._persist_ledger = persist_ledger
 
     async def __call__(self, candle: Candle) -> None:
         """One reconciliation phase. A ``CandleHandler``; never raises.
