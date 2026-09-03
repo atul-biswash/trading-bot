@@ -24,6 +24,8 @@ import pytest
 from trading_bot.core.assessment import EntryIntent, ExitIntent, RiskAssessment
 from trading_bot.core.enums import (
     OrderSide,
+    OrderStatus,
+    OrderType,
     PositionSide,
     ProtectionState,
     RefusalStage,
@@ -36,6 +38,7 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.core.models import (
     Candle,
+    Order,
     OrderList,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -166,13 +169,62 @@ def terminal_verdict() -> PlacementVerdict:
 
 
 class FakeClient:
-    """Records placements; can be made to fail, which is what expresses S-ambiguous."""
+    """Records placements; can be made to fail, which is what expresses S-ambiguous.
 
-    def __init__(self, *, place_error: Exception | None = None) -> None:
+    **It serves ``get_order`` because dispatch now calls it**, and a raise here
+    would make the fixture rather than the code decide the result -- the same
+    reasoning ``FakeRootClient.get_all_order_lists`` records for the boot scan.
+    ``venue_calls`` counts EVERY method that stands for a venue round trip, so
+    the call-count guard has one number to assert against.
+    """
+
+    def __init__(
+        self,
+        *,
+        place_error: Exception | None = None,
+        fill_price: str | None = "76649.80000000",
+        filled_quantity: str = "0.02368000",
+        order_error: Exception | None = None,
+    ) -> None:
         self.place_error = place_error
+        #: ``None`` makes the entry leg report no fill -- an expired FOK.
+        self.fill_price = fill_price
+        self.filled_quantity = filled_quantity
+        #: Makes the fill query itself fail, which is a different `None` than
+        #: the one above and must stay separately expressible.
+        self.order_error = order_error
         self.otoco: list[OtocoOrderListRequest] = []
         self.oto: list[OtoOrderListRequest] = []
         self.bounds: list[tuple[float | None, int | None]] = []
+        self.order_queries: list[str] = []
+        #: Every venue round trip this fake served, in order.
+        self.venue_calls: list[str] = []
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        self.venue_calls.append("get_order")
+        self.order_queries.append(client_order_id or "")
+        if self.order_error is not None:
+            raise self.order_error
+        filled = D(self.filled_quantity) if self.fill_price is not None else D("0")
+        return Order(
+            order_id="1",
+            symbol=symbol,
+            side=OrderSide.BUY,
+            type=OrderType.LIMIT,
+            status=OrderStatus.FILLED if self.fill_price is not None else OrderStatus.EXPIRED,
+            quantity=D(self.filled_quantity),
+            filled_quantity=filled,
+            average_price=None if self.fill_price is None else D(self.fill_price),
+            client_order_id=client_order_id,
+        )
 
     async def create_otoco_order_list(
         self,
@@ -181,6 +233,7 @@ class FakeClient:
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> OrderList:
+        self.venue_calls.append("place")
         self.bounds.append((timeout_s, attempts))
         if self.place_error is not None:
             raise self.place_error
@@ -194,6 +247,7 @@ class FakeClient:
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> OrderList:
+        self.venue_calls.append("place")
         self.bounds.append((timeout_s, attempts))
         if self.place_error is not None:
             raise self.place_error
@@ -553,6 +607,15 @@ class TestOptionFourResolution:
         assert position.entry_bar_time == BAR
         assert position.order_list_id == "tb1-BTCUSDT-1714564800000-0-L"
         assert executor._pending == {}
+        # THE RECOVERY PATH QUERIES TOO, per the owner's ruling 2. Without it
+        # every restored position would be permanently unbookable:
+        # `PendingPlacement` carries only what was REQUESTED, so a fill price
+        # can never come from the record.
+        #
+        # MUTATION: drop the query from the `PLACED_LIVE` branch. The position
+        # is still recorded, so every assertion above still passes -- only
+        # this one bites.
+        assert position.entry_fill_price == D("76649.80000000")
 
     async def test_a_live_resolution_debits_the_portfolio(
         self, monkeypatch: pytest.MonkeyPatch
@@ -903,3 +966,94 @@ class TestDurablePendingRecord:
 
         assert executor._persist_pending is None
         assert len(client.otoco) == 1
+
+
+class TestTheEntryFillPrice:
+    """The entry's true cost, queried at open because ``FOK`` is terminal there.
+
+    Q-C section 3 fixes the working leg as ``LIMIT``+``FOK``: fill-or-kill
+    cannot rest, so by the time the placement returns it has filled completely
+    or expired. That is REASONED from the leg type -- no entry leg has ever
+    been point-queried in this project -- and it is what makes a dispatch-time
+    query answerable at all. A resting ``LIMIT`` would make it useless.
+    """
+
+    async def test_the_entry_dispatch_makes_exactly_two_venue_calls(self) -> None:
+        """THE CALL-COUNT GUARD, per the owner's ruling.
+
+        MUTATION: add any venue call to the entry path -- a retry, a read-back,
+        a second query. All of them break this and nothing else would catch
+        them: the coherence validator contains NO call count and cannot guard
+        one, and `dispatch_budget.py`'s own docstring records this count as
+        having been MEASURED WRONG TWICE.
+
+        It counts calls on the FAKE, not timing, so it is deterministic and
+        says which calls in which order rather than only how many.
+        """
+        executor, client, _ = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert client.venue_calls == ["place", "get_order"]
+        assert len(client.venue_calls) == 2
+
+    async def test_a_filled_entry_records_what_it_actually_cost(self) -> None:
+        """MUTATION: pass `entry_limit` as the fill price, or drop the argument.
+
+        The fill and the request DIFFER here, so a fallback to the request
+        fails rather than passing on a fixture where they agree. `entry_price`
+        must still hold the request -- the protective geometry was derived
+        from it.
+        """
+        executor, client, portfolio = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_fill_price == D("76649.80000000")
+        assert position.entry_price != position.entry_fill_price  # request vs fill
+        # Queried by OUR id for the WORKING leg, not the list's and not a stop's.
+        assert client.order_queries[0].endswith("-0-W")
+
+    async def test_a_failed_query_leaves_the_price_absent_and_still_opens(self) -> None:
+        """MUTATION: raise out of the query, or fall back to `entry_limit`.
+
+        A dispatch that PLACED must not be turned into a failure by a
+        follow-up read -- the order list is at the venue either way, and the
+        position has to be recorded. `None` is the honest answer and booking
+        refuses on it later.
+        """
+        executor, _, portfolio = build()
+        executor._client.order_error = ExchangeConnectionError("boom")  # type: ignore[attr-defined]
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert portfolio.has_position(SYMBOL)
+        assert portfolio.positions[SYMBOL].entry_fill_price is None
+
+    async def test_an_expired_fok_leaves_the_price_absent(self, caplog) -> None:  # type: ignore[no-untyped-def]
+        """The SECOND of the three `None` meanings, and a different fact.
+
+        MUTATION: treat `filled_quantity == 0` as a fill, or drop the warning.
+
+        The query SUCCEEDED and the venue said nothing filled. Its own event
+        name, because "we could not ask" and "the answer was no" send an
+        operator to different places.
+
+        **P6's consequence, recorded not fixed:** a position is STILL
+        constructed here, for an FOK that expired -- a holding the account
+        does not have. It now carries `entry_fill_price=None`, so it is
+        unbookable and raises if priced. That is fail-closed, and it is a
+        symptom rather than the cure.
+        """
+        executor, _, portfolio = build()
+        executor._client.fill_price = None  # type: ignore[attr-defined]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert portfolio.positions[SYMBOL].entry_fill_price is None
+        assert [r.status for r in _records(caplog, "entry_fill_absent")] == ["EXPIRED"]
+        # P6: the phantom exists, and pricing it raises rather than inventing.
+        with pytest.raises(ValueError, match="cost basis is unknown"):
+            portfolio.positions[SYMBOL].unrealized_pnl(D("77000"))

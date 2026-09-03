@@ -32,6 +32,7 @@ from trading_bot.core.models import (
     OtoOrderListRequest,
     Position,
 )
+from trading_bot.exchange.ids import OrderListLeg, client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
 from trading_bot.execution.placement import build_placement
 from trading_bot.execution.resolution import (
@@ -97,6 +98,12 @@ _EVENT_UNRESOLVED = "placement_unresolved"
 #: level. Not CRITICAL: Q-B reserves that for a log line AND A HALT, and this
 #: halts nothing.
 _EVENT_MISSED = "dispatch_missed"
+#: The entry leg reported no fill. Its own name rather than a failure event:
+#: the query SUCCEEDED and the venue's answer was "nothing filled", which is a
+#: different fact from "we could not ask" -- and the two are the first two of
+#: `entry_fill_price`'s three `None` meanings. A reader who cannot separate
+#: them cannot tell an expired FOK from a network fault.
+_EVENT_NO_ENTRY_FILL = "entry_fill_absent"
 
 _REASON_CLOSE = "close_not_implemented"
 _REASON_UNPROTECTED = "unprotected_branch"
@@ -351,10 +358,27 @@ class OrderExecutor:
             # shipped the classifier: "a falsification of the live half lands on
             # the RISK PATH." This is that path.
             if verdict.outcome is PlacementOutcome.PLACED_LIVE:
+                # THE RECOVERY PATH QUERIES TOO, and without it every restored
+                # position would be permanently unbookable. `PendingPlacement`
+                # carries only what we REQUESTED -- that is the line the type
+                # is drawn along -- so a fill price can never come from the
+                # record and must come from the venue.
+                #
+                # Charged to this bar's budget, unlike the dispatch path's:
+                # the loop above re-reads the clock, so this call really is
+                # bounded by what remains.
+                entry_fill_price = await self._entry_fill_price(
+                    symbol=symbol,
+                    entry_bar_time=record.entry_bar_time,
+                    generation=record.generation,
+                    timeout_s=bounds.timeout_s,
+                    attempts=bounds.attempts,
+                )
                 self._open_position(
                     symbol=symbol,
                     quantity=record.quantity,
                     entry_limit=record.entry_limit,
+                    entry_fill_price=entry_fill_price,
                     stop_loss=record.stop_loss,
                     take_profit=record.take_profit,
                     entry_bar_time=record.entry_bar_time,
@@ -624,10 +648,29 @@ class OrderExecutor:
 
         self._pending.pop(signal.symbol, None)
         self._persist_after_removal(signal.symbol)
+        # THE SECOND AND LAST VENUE CALL OF AN ENTRY DISPATCH. The count is
+        # pinned by a test on the fake client, because the coherence validator
+        # contains no call count and cannot guard one -- and because this
+        # project's own `dispatch_budget.py` records the dispatch call count as
+        # having been MEASURED WRONG TWICE.
+        #
+        # It reuses `bounds` rather than asking for fresh ones, which is
+        # honest about what the budget currently is: `bounds_for_next_call` is
+        # consulted once on this path, with `now == started_at`, so nothing
+        # re-measures and a second consultation would return the same numbers
+        # while implying otherwise.
+        entry_fill_price = await self._entry_fill_price(
+            symbol=intent.symbol,
+            entry_bar_time=entry_bar_time,
+            generation=0,
+            timeout_s=bounds.timeout_s,
+            attempts=bounds.attempts,
+        )
         self._open_position(
             symbol=intent.symbol,
             quantity=intent.quantity,
             entry_limit=intent.entry_limit,
+            entry_fill_price=entry_fill_price,
             stop_loss=intent.levels.stop_loss,
             take_profit=intent.levels.take_profit,
             entry_bar_time=entry_bar_time,
@@ -672,12 +715,81 @@ class OrderExecutor:
             request, timeout_s=timeout_s, attempts=attempts
         )
 
+    async def _entry_fill_price(
+        self,
+        *,
+        symbol: str,
+        entry_bar_time: datetime,
+        generation: int,
+        timeout_s: float,
+        attempts: int,
+    ) -> Money | None:
+        """What the working leg actually filled at, or ``None``.
+
+        **The working leg is TERMINAL by the time the placement returns, and
+        that is why this belongs here rather than on a later bar.** Q-C
+        section 3 fixes it as ``LIMIT``+``FOK``: fill-or-kill cannot rest, so
+        it has filled completely or expired before the venue answers. A
+        resting ``LIMIT`` would make a query at this moment useless.
+
+        **REASONED, NOT MEASURED.** No entry leg has ever been point-queried
+        in this project. The measured resting-leg shape -- ``status=NEW``,
+        ``filled_quantity=0``, ``average_price=None``, observed on a
+        ``STOP_LOSS`` and a ``TAKE_PROFIT`` across two symbols on 2026-09-02
+        -- describes PROTECTIVE legs, which do rest, and must not be read as
+        describing this one. What is measured is the leg TYPE; that FOK is
+        terminal at return follows from it.
+
+        **NEVER FALLS BACK TO THE REQUESTED LIMIT.** ``None`` on any failure,
+        any timeout, and any leg reporting no fill. The limit is measured
+        wrong by 76.65 and 2.09 per unit, and commit 4 made the ledger
+        durable, so a fallback would write a permanent distortion that is
+        afterwards indistinguishable from a correct figure. A refused booking
+        is visible and recoverable; a corrupt one is neither.
+
+        **Never raises.** A dispatch that placed successfully must not be
+        turned into a failure by a follow-up read: the order list is already
+        at the venue, and the position must be recorded whatever this returns.
+        """
+        try:
+            order = await self._client.get_order(
+                symbol,
+                client_order_id=client_order_id(
+                    symbol, entry_bar_time, OrderListLeg.WORKING, generation=generation
+                ),
+                timeout_s=timeout_s,
+                attempts=attempts,
+            )
+        except Exception as exc:  # never raises; see the docstring
+            self._log_failure("entry-fill-query", symbol, exc)
+            return None
+
+        # A fill total with no quantity cannot yield a price, and an FOK that
+        # expired reports exactly that. `average_price` is the venue's own
+        # quotient; `filled_quote_quantity` is the total it came from. The
+        # total is preferred nowhere here because a PRICE is what a position
+        # stores -- the total's exactness matters at BOOKING, which divides
+        # nothing.
+        if order.filled_quantity <= 0 or order.average_price is None:
+            _log.warning(
+                "Entry leg reports no fill; the position's cost basis is unknown",
+                extra={
+                    "event": _EVENT_NO_ENTRY_FILL,
+                    "symbol": symbol,
+                    "status": order.status.value,
+                    "filled_quantity": order.filled_quantity,
+                },
+            )
+            return None
+        return order.average_price
+
     def _open_position(
         self,
         *,
         symbol: str,
         quantity: Money,
         entry_limit: Money,
+        entry_fill_price: Money | None,
         stop_loss: Money | None,
         take_profit: Money | None,
         entry_bar_time: datetime,
@@ -712,17 +824,34 @@ class OrderExecutor:
         is why the reconciler shipped before the first order rather than after
         it, and why ``ACTIVE`` was admitted to ``_TRUSTED_PROTECTION``.
         """
+        # **P6, RECORDED AND DELIBERATELY NOT FIXED.** Nothing here inspects
+        # the placement response's list status, so an FOK working leg that
+        # EXPIRED still constructs a `Position` -- a holding the account does
+        # not have. That is a pre-existing defect with its own fix and its own
+        # commit; it is named here because M5h's query is what makes it
+        # visible for the first time.
+        #
+        # Its consequence under this commit, stated so it is not mistaken for
+        # a new defect: such a position carries `entry_fill_price=None`, is
+        # therefore UNBOOKABLE, and `unrealized_pnl` RAISES if anything prices
+        # it. That is the fail-closed direction -- the phantom cannot quietly
+        # contribute a number -- but it is a symptom, not the cure.
         position = Position(
             symbol=symbol,
             side=PositionSide.LONG,
             quantity=quantity,
             entry_price=entry_limit,
+            entry_fill_price=entry_fill_price,
             entry_bar_time=entry_bar_time,
             protection=ProtectionState.UNKNOWN,
             order_list_id=order_list_id,
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
+        # THE DEBIT STILL USES THE REQUESTED LIMIT, and that is not an
+        # oversight. `cost` is what left the balance as far as this process
+        # knows at open; correcting it to the fill is a `free_quote` change,
+        # which is a risk-path write and is not this commit's.
         self._portfolio.open_position(position, cost=quantity * entry_limit)
 
     def _persist_after_removal(self, symbol: str) -> None:
