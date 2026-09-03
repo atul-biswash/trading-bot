@@ -617,6 +617,13 @@ class RiskManager(RiskManagerPort):
         long = position.side is PositionSide.LONG
         update = update_trailing_stop(
             side=position.side,
+            # THE REQUESTED LIMIT, AND ARGUABLY THE WRONG ONE. This measures a
+            # favourable move from cost, so it wants `entry_fill_price` -- the
+            # field M5h added and this site does NOT read. Left deliberately:
+            # `advance_trailing_stop` has ZERO call sites in `src/`, so
+            # switching it would change a number nothing computes, and the
+            # trailing milestone that gives it a caller is where the choice
+            # belongs. Flagged rather than fixed.
             entry_price=position.entry_price,
             price=candle.close,
             high_water=position.highest_price if long else position.lowest_price,

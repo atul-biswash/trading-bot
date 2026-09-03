@@ -609,7 +609,41 @@ class Position(BaseModel):
     symbol: str
     side: PositionSide
     quantity: Money
+    #: What was REQUESTED: the marketable limit sent to the venue. **Not what
+    #: the entry filled at** -- see :attr:`entry_fill_price`. Kept unchanged
+    #: because the protective geometry was derived from it: a stop is below
+    #: THIS number and a target above it, and the validators on
+    #: :class:`ProtectiveLevels` check exactly that.
     entry_price: Money
+    #: What the entry ACTUALLY filled at, or ``None``.
+    #:
+    #: **P&L is computed against this and never against
+    #: :attr:`entry_price`.** MEASURED: the requested limit over-stated the
+    #: true fill by 76.65 and 2.09 per unit on the two positions of
+    #: 2026-09-02 -- 1.81 and 1.59 USDT of cost the account never paid.
+    #: Booking against the request would write that distortion into a durable
+    #: ledger, where it is afterwards indistinguishable from a correct figure.
+    #:
+    #: **``None`` IS THREE DIFFERENT FACTS SHARING ONE VALUE, and a reader
+    #: must not collapse them:**
+    #:
+    #: 1. **The query failed** -- a timeout, a transport error, or the venue
+    #:    not answering. The entry may well have filled; we do not know at
+    #:    what.
+    #: 2. **The leg reported no fill** -- the working leg is ``LIMIT``+``FOK``,
+    #:    so it either filled at once or expired. An expired one leaves a
+    #:    position that should not exist; see the note at
+    #:    ``OrderExecutor._open_position``.
+    #: 3. **Nothing ever queried** -- a construction site that takes the
+    #:    default. Every fixture, and every position built before the query
+    #:    existed.
+    #:
+    #: They are not distinguished here and this field cannot distinguish
+    #: them. What they share is the only thing a consumer may act on: **the
+    #: cost basis is unknown**, so :meth:`unrealized_pnl` raises rather than
+    #: substituting a number. Telling them apart needs the log line at the
+    #: site that failed.
+    entry_fill_price: Money | None = None
     #: Close time of the bar this entry was decided on. Deterministic across a
     #: restart, unlike :attr:`opened_at`, which is why it -- not ``opened_at``
     #: -- seeds a derivable client order ID.
@@ -640,11 +674,43 @@ class Position(BaseModel):
         return self.side is not PositionSide.FLAT and self.quantity > 0
 
     def unrealized_pnl(self, price: Decimal) -> Decimal:
-        """Mark-to-market P&L at ``price`` (quote currency)."""
+        """Mark-to-market P&L at ``price`` (quote currency).
+
+        **Computed against :attr:`entry_fill_price`, never
+        :attr:`entry_price`.** The requested limit is not what the account
+        paid, and this figure reaches a durable ledger through
+        ``Portfolio.close_position``.
+
+        :raises ValueError: :attr:`entry_fill_price` is ``None``.
+
+        **FAIL CLOSED, and the alternative was rejected on its error
+        direction.** Falling back to ``entry_price`` would always produce a
+        number, and that number is wrong by a MEASURED amount in a direction
+        that over-states a loss -- conservative for the daily-loss limit, and
+        permanent once written. A raise costs a refused booking, which is
+        visible and recoverable; a silent fallback corrupts a file that
+        survives every restart and cannot be told apart from a correct one
+        afterwards.
+
+        ``ValueError`` rather than a ``TradingBotError``, following
+        ``_require_positive`` in ``risk/rules.py`` and the twenty-five sites
+        in this module: those types are venue and config conditions a caller
+        catches and acts on, where this is an invariant violation -- an
+        unpriceable position reached a pricing call, which is a defect in the
+        caller, not a market state.
+        """
+        if self.entry_fill_price is None:
+            raise ValueError(
+                f"{self.symbol} has no entry_fill_price, so its cost basis is unknown and "
+                "P&L cannot be computed. This is one of three states -- the fill query "
+                "failed, the working leg reported no fill, or nothing ever queried -- and "
+                "the requested entry_price is NOT a substitute: it is measured wrong by up "
+                "to 76.65 per unit and would write a permanent distortion into the ledger"
+            )
         if self.side is PositionSide.LONG:
-            return (price - self.entry_price) * self.quantity
+            return (price - self.entry_fill_price) * self.quantity
         if self.side is PositionSide.SHORT:
-            return (self.entry_price - price) * self.quantity
+            return (self.entry_fill_price - price) * self.quantity
         return Decimal(0)
 
     def record_reconciliation(self, *, protection: ProtectionState, at: datetime) -> None:
@@ -786,7 +852,16 @@ class ProtectiveLevels(_Frozen):
 
     @model_validator(mode="after")
     def _check_sides(self) -> ProtectiveLevels:
-        """Make "levels sit on the correct side of entry" a property of the type."""
+        """Make "levels sit on the correct side of entry" a property of the type.
+
+        **``entry_price`` HERE IS THE REQUESTED LIMIT AND MUST STAY THAT WAY.**
+        This type carries its own ``entry_price`` and has no fill price; the
+        one :class:`Position` gained at M5h is a different field on a
+        different type. Substituting a fill price would be wrong even if one
+        were available: these levels were DERIVED from the request, so a stop
+        placed correctly below the requested limit could fail this check
+        merely because the entry filled lower than it.
+        """
         if self.side is PositionSide.LONG:
             if self.stop_loss is not None and not self.stop_loss < self.entry_price:
                 raise ValueError(

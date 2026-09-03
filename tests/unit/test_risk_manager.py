@@ -269,6 +269,7 @@ def long_position(
     symbol: str = SYMBOL,
     quantity: str = "1",
     entry: str = "100",
+    entry_fill: str | None = None,
     stop_loss: Decimal | None = None,
     take_profit: Decimal | None = None,
     trailing_stop: Decimal | None = None,
@@ -295,6 +296,17 @@ def long_position(
         side=PositionSide.LONG,
         quantity=D(quantity),
         entry_price=D(entry),
+        # FILLED AT THE REQUEST unless a test says otherwise, and the default is
+        # the same decision `last_reconciled_at` above records. `unrealized_pnl`
+        # RAISES on an absent fill price, so an unfilled default would make every
+        # `close_position` test in this file die on a guard rather than on what
+        # it was written to exercise.
+        #
+        # The two prices being EQUAL here is deliberate and has a cost: no test
+        # using this helper can catch a revert of `unrealized_pnl` to
+        # `entry_price`. That is pinned in `test_models.py`, where the fixtures
+        # set them apart on purpose.
+        entry_fill_price=D(entry_fill) if entry_fill is not None else D(entry),
         entry_bar_time=NOW,
         protection=protection,
         opened_at=NOW,

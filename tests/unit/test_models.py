@@ -14,6 +14,7 @@ from trading_bot.core.models import (
     OtocoOrderListRequest,
     OtoOrderListRequest,
     Position,
+    ProtectiveLevels,
     Signal,
     Ticker,
 )
@@ -51,6 +52,50 @@ def test_ticker_is_frozen() -> None:
 
 
 def test_position_unrealized_pnl_long() -> None:
+    """MUTATION: compute against `entry_price` instead of `entry_fill_price`.
+
+    The two prices DIFFER on purpose. Under the old field the answers would be
+    20 and -20; against the fill they are 24 and -16, so a revert fails here
+    rather than passing on a fixture where the two happened to agree.
+    """
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),  # requested
+        entry_fill_price=Decimal("98"),  # what it actually cost
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
+    )
+    assert pos.unrealized_pnl(Decimal("110")) == Decimal("24")
+    assert pos.unrealized_pnl(Decimal("90")) == Decimal("-16")
+
+
+def test_position_unrealized_pnl_short() -> None:
+    """MUTATION: as above, on the short branch, which is a separate return."""
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.SHORT,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),
+        entry_fill_price=Decimal("102"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
+    )
+    assert pos.unrealized_pnl(Decimal("90")) == Decimal("24")
+
+
+def test_unrealized_pnl_raises_without_a_fill_price() -> None:
+    """FAIL CLOSED. MUTATION: fall back to `entry_price` when the fill is None.
+
+    That mutation always produces a number, and the number is wrong by a
+    MEASURED amount -- so it would pass every test that only checks a value.
+    Only asserting the RAISE catches it.
+
+    The message must name the cost basis rather than the field, because the
+    operator reading it needs to know what cannot be computed, not which
+    attribute is null.
+    """
     pos = Position(
         symbol="BTCUSDT",
         side=PositionSide.LONG,
@@ -59,20 +104,53 @@ def test_position_unrealized_pnl_long() -> None:
         entry_bar_time=BAR_TIME,
         protection=ProtectionState.UNKNOWN,
     )
-    assert pos.unrealized_pnl(Decimal("110")) == Decimal("20")
-    assert pos.unrealized_pnl(Decimal("90")) == Decimal("-20")
+
+    assert pos.entry_fill_price is None  # the default, and the ordinary case
+    with pytest.raises(ValueError, match="cost basis is unknown"):
+        pos.unrealized_pnl(Decimal("110"))
 
 
-def test_position_unrealized_pnl_short() -> None:
+def test_a_position_still_constructs_without_the_fill_price() -> None:
+    """MUTATION: make `entry_fill_price` required.
+
+    157 construction sites in `tests/` and six in `src/` pass no fill price.
+    The default is what keeps this commit behaviour-free, and a required field
+    would turn it into the largest fixture edit in the project's history.
+    """
     pos = Position(
         symbol="BTCUSDT",
-        side=PositionSide.SHORT,
+        side=PositionSide.LONG,
         quantity=Decimal("2"),
         entry_price=Decimal("100"),
         entry_bar_time=BAR_TIME,
         protection=ProtectionState.UNKNOWN,
     )
-    assert pos.unrealized_pnl(Decimal("90")) == Decimal("20")
+
+    assert pos.entry_fill_price is None
+    assert pos.entry_price == Decimal("100")  # untouched, still the request
+
+
+def test_protective_levels_still_validate_against_the_requested_entry() -> None:
+    """MUTATION: point `ProtectiveLevels._check_sides` at a fill price.
+
+    `ProtectiveLevels` is a SEPARATE type with its own `entry_price` and no
+    fill price at all, so the substitution is not even expressible today --
+    this pins that it stays that way. The levels were DERIVED from the
+    request, so a stop correctly below the requested limit must not fail
+    validation merely because the entry filled lower than it.
+    """
+    levels = ProtectiveLevels(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        entry_price=Decimal("100"),
+        stop_loss=Decimal("99"),  # below the REQUEST, above a 98 fill
+        take_profit=Decimal("110"),
+        stop_distance=Decimal("1"),
+        basis="test",
+    )
+
+    assert levels.entry_price == Decimal("100")
+    assert not hasattr(levels, "entry_fill_price")
 
 
 def test_record_partial_reconciliation_writes_the_verdict_and_not_the_stamp() -> None:
@@ -266,6 +344,7 @@ def test_money_guard_survives_assignment_on_position() -> None:
 _POSITION_MONEY_FIELDS = [
     "quantity",
     "entry_price",
+    "entry_fill_price",
     "stop_loss",
     "take_profit",
     "trailing_stop",
