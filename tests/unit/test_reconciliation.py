@@ -59,6 +59,7 @@ def _leg(
     generation: int = GEN,
     symbol: str = SYMBOL,
     cid: str | None = None,
+    quote_total: str | None = None,
 ) -> tuple[ClientOrderIdParts, Order]:
     """One entry of the compare set, as `get_own_open_orders` returns it.
 
@@ -76,6 +77,7 @@ def _leg(
         status=status,
         quantity=quantity,
         filled_quantity=filled,
+        filled_quote_quantity=Decimal(quote_total) if quote_total is not None else None,
         stop_price=Decimal(stop_price) if stop_price is not None else None,
         order_list_id=list_id,
         client_order_id=cid
@@ -169,6 +171,119 @@ def test_a_filled_leg_is_refused_rather_than_interpreted() -> None:
 
     assert result.state is ProtectionState.UNKNOWN
     assert "unmeasured" in result.reason
+
+
+class TestTheFillIsCarried:
+    """The fact behind the verdict, carried without moving the verdict.
+
+    Both fill sites discarded the fill until this commit, so the driver --
+    which holds the `Portfolio` -- had nothing to act on. **Nothing reads
+    `exit_fill` yet**; booking is a later commit.
+    """
+
+    def test_a_filled_leg_carries_its_total_exactly(self) -> None:
+        """MUTATION: drop `exit_fill=` from the branch, or source the total
+        from `average_price * filled_quantity` rather than the raw field.
+
+        `str()` as well as `==`, because `Decimal("1975.5") ==
+        Decimal("1975.50000000")` is True and equality alone would pass on a
+        value that lost its scale.
+        """
+        resting = [
+            _leg(
+                OrderListLeg.STOP_LOSS,
+                stop_price="44117.09000000",
+                status=OrderStatus.FILLED,
+                filled=Decimal("0.02331000"),
+                quote_total="1975.50000000",
+            ),
+            _leg(OrderListLeg.TAKE_PROFIT, stop_price="50419.53000000"),
+        ]
+
+        result = _classify(resting=resting)
+
+        assert result.exit_fill is not None
+        assert result.exit_fill.filled_quantity == Decimal("0.02331000")
+        assert result.exit_fill.filled_quote_quantity == Decimal("1975.50000000")
+        assert str(result.exit_fill.filled_quote_quantity) == "1975.50000000"
+        assert result.exit_fill.order_id == "1"
+
+    def test_the_verdict_and_reason_do_not_move(self) -> None:
+        """THE POINT OF THIS COMMIT: a fact is added, no verdict changes.
+
+        MUTATION: make the fill's presence promote the state -- say to
+        `DIVERGED`, or trust it because the price is now known.
+
+        Asserted against the values from BEFORE the field existed, byte for
+        byte, so a verdict that shifted would fail here rather than surfacing
+        as a changed refusal in production.
+        """
+        resting = [
+            _leg(
+                OrderListLeg.STOP_LOSS,
+                stop_price="44117.09000000",
+                status=OrderStatus.FILLED,
+                quote_total="1975.50000000",
+            ),
+            _leg(OrderListLeg.TAKE_PROFIT, stop_price="50419.53000000"),
+        ]
+
+        result = _classify(resting=resting)
+
+        assert result.state is ProtectionState.UNKNOWN
+        # `SL`, the enum's VALUE -- not `STOP_LOSS`, its member name. Writing
+        # the name here is the `OrderListLeg` trap `exchange/ids.py` exists to
+        # guard, and this assertion walked into it once.
+        assert result.reason == (
+            f"{SYMBOL} leg {OrderListLeg.STOP_LOSS.value} reports status FILLED with 0 executed; "
+            "the fill PRICE is unmeasured, so this state is refused rather than interpreted"
+        )
+        assert result.unresolved == ()
+
+    def test_a_fill_with_no_quote_total_is_carried_with_a_none_total(self) -> None:
+        """TWO ABSENCES, TWO FACTS, and the distinction is made HERE.
+
+        MUTATION: return `None` for the whole `ExitFill` when the total is
+        absent.
+
+        That mutation collapses "no leg filled" into "a leg filled and cannot
+        be priced". Booking must branch on the difference: the first means
+        nothing happened, the second means a position closed and must refuse
+        and escalate. Same reasoning as the store's absent-versus-zero rule
+        for the ledger.
+        """
+        resting = [
+            _leg(
+                OrderListLeg.STOP_LOSS,
+                stop_price="44117.09000000",
+                status=OrderStatus.FILLED,
+                filled=Decimal("0.02331000"),
+                quote_total=None,
+            ),
+            _leg(OrderListLeg.TAKE_PROFIT, stop_price="50419.53000000"),
+        ]
+
+        result = _classify(resting=resting)
+
+        assert result.exit_fill is not None  # a fill WAS seen
+        assert result.exit_fill.filled_quote_quantity is None  # and cannot be priced
+
+    def test_a_resting_leg_carries_no_fill(self) -> None:
+        """MUTATION: populate `exit_fill` unconditionally rather than in the
+        fill branch.
+
+        The healthy path is the one that must stay empty -- a fill attached to
+        every assessment would make "did anything close" unanswerable.
+        """
+        resting = [
+            _leg(OrderListLeg.STOP_LOSS, stop_price="44117.09000000"),
+            _leg(OrderListLeg.TAKE_PROFIT, stop_price="50419.53000000"),
+        ]
+
+        result = _classify(resting=resting)
+
+        assert result.state is ProtectionState.ACTIVE
+        assert result.exit_fill is None
 
 
 def test_a_partial_fill_is_refused_on_the_same_grounds() -> None:

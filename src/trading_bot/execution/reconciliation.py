@@ -43,7 +43,7 @@ from pydantic import BaseModel, ConfigDict
 from trading_bot.core.enums import OrderStatus, ProtectionState
 from trading_bot.core.exceptions import ContractViolationError, OrderNotFoundError
 from trading_bot.core.interfaces import ExchangeClient
-from trading_bot.core.models import Order, Position
+from trading_bot.core.models import Money, Order, Position
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.exchange.ids import (
     ClientOrderIdParts,
@@ -53,6 +53,7 @@ from trading_bot.exchange.ids import (
 )
 
 __all__ = [
+    "ExitFill",
     "ProtectionAssessment",
     "UnresolvedLeg",
     "classify_protection",
@@ -96,6 +97,52 @@ class UnresolvedLeg(_Frozen):
     client_order_id: str
 
 
+class ExitFill(_Frozen):
+    """A protective leg that reported a fill, as the venue reported it.
+
+    **Every field is something the VENUE REPORTED**, which is the exact mirror
+    of ``PendingPlacement``'s line -- *"Every field is something WE REQUESTED,
+    never something the venue reported."* Between them the two types draw the
+    same boundary from opposite sides, and this one carries only what booking
+    needs to compute a realised figure.
+
+    **NOT the whole ``Order``, and that is the ruling rather than economy.**
+    An assessment carrying a venue object would become a second source of
+    truth for venue state -- the shape ``OrderListEntry`` already refuses when
+    it declines to duplicate what a client order id encodes. Four fields is
+    what booking needs; a fifth invites a reader to consult this instead of
+    the venue.
+
+    **``filled_quote_quantity`` MAY BE ``None`` WHILE THIS OBJECT EXISTS, and
+    the two absences are different facts.** ``ProtectionAssessment.exit_fill``
+    being ``None`` says *no leg reported a fill*. This field being ``None``
+    says *a leg filled and the venue gave no quote total for it*. Booking must
+    branch on that: the first means nothing happened, the second means a
+    position closed and cannot be priced, which has to refuse and escalate
+    rather than pass silently. Collapsing them would lose the only signal that
+    separates "no exit" from "an exit I cannot book" -- the same
+    absent-versus-zero distinction ``persistence.store`` documents as
+    load-bearing for the ledger.
+
+    ``venue_time`` is the exchange's own timestamp for the order, not an
+    observation time. An observation time would be a fact WE synthesised, and
+    this type's line forbids that; booking's ``now`` comes from the driver's
+    clock, which already has one. ``None`` when the payload carried no
+    timestamp.
+    """
+
+    #: The venue's numeric order id for the filled leg.
+    order_id: str
+    #: Base quantity the venue reports as executed. Never ``None``: ``Order``
+    #: defaults it to zero, and this object is built only when it exceeds it.
+    filled_quantity: Money
+    #: The venue's own quote-currency total. ``None`` is a real, distinct
+    #: state -- see the class docstring.
+    filled_quote_quantity: Money | None
+    #: The exchange's timestamp for this order, never ours.
+    venue_time: datetime | None = None
+
+
 class ProtectionAssessment(_Frozen):
     """What is known about one position's protection, and why.
 
@@ -105,11 +152,37 @@ class ProtectionAssessment(_Frozen):
 
     ``unresolved`` is non-empty only for :attr:`ProtectionState.UNKNOWN` reached
     through absence, and it is the caller's work list.
+
+    ``exit_fill`` is the FACT behind one particular ``UNKNOWN``: a protective
+    leg reported a fill. **It adds a fact to a verdict and moves no verdict** --
+    ``state`` and ``reason`` are what they were before it existed, because the
+    fill price being carried does not make the state trustworthy. Nothing reads
+    it yet; booking is a later commit.
     """
 
     state: ProtectionState
     reason: str
     unresolved: tuple[UnresolvedLeg, ...] = ()
+    exit_fill: ExitFill | None = None
+
+
+def _exit_fill(order: Order) -> ExitFill:
+    """Build the fill record from an order the caller has already judged filled.
+
+    **The caller decides WHETHER a leg filled; this only records WHAT.** Both
+    fill sites share one discriminator -- ``status is FILLED or
+    filled_quantity > 0`` -- and duplicating it here would be a second copy of
+    a predicate that must not drift.
+
+    ``filled_quote_quantity`` is copied through including its ``None``, which
+    is a real state and not a gap; see :class:`ExitFill`.
+    """
+    return ExitFill(
+        order_id=order.order_id,
+        filled_quantity=order.filled_quantity,
+        filled_quote_quantity=order.filled_quote_quantity,
+        venue_time=order.created_at,
+    )
 
 
 def _requested(
@@ -238,6 +311,13 @@ def classify_protection(
                     f"{order.filled_quantity} executed; the fill PRICE is unmeasured, so this "
                     "state is refused rather than interpreted"
                 ),
+                # THE FACT, CARRIED. The verdict and the reason are unchanged
+                # -- this adds what booking will need without asserting the
+                # state is trustworthy. **AT MOST ONE PER ASSESSMENT, and the
+                # `return` is why**: this loop stops at the first filled leg,
+                # and OCO semantics mean a triggered stop cancels its target,
+                # so two protective legs cannot report filled at once.
+                exit_fill=_exit_fill(order),
             )
 
     missing = tuple(
@@ -560,7 +640,9 @@ async def reconcile_open_positions(
 _ResolvedState = Literal[ProtectionState.UNKNOWN, ProtectionState.DIVERGED]
 
 
-def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[_ResolvedState, str]:
+def _refine(
+    leg: OrderListLeg, order: Order, *, symbol: str
+) -> tuple[_ResolvedState, str, ExitFill | None]:
     """What one point-query answer means for the leg it was asked about.
 
     **One discriminator rather than a list of statuses**, so a status nobody has
@@ -613,6 +695,8 @@ def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[_ResolvedS
             f"{symbol} leg {leg.value} reports {order.status.value} with "
             f"{order.filled_quantity} executed; the fill PRICE is unmeasured, so this state is "
             "refused rather than interpreted",
+            # The fact, carried. State and reason are unchanged.
+            _exit_fill(order),
         )
     if order.status.is_open:
         return (
@@ -620,11 +704,13 @@ def _refine(leg: OrderListLeg, order: Order, *, symbol: str) -> tuple[_ResolvedS
             f"{symbol} leg {leg.value} is INSTRUMENT DISAGREEMENT: absent from the enumeration "
             f"and {order.status.value} on a point query. Two views of one leg disagree, and "
             "nothing measured says which to believe, so neither is acted on",
+            None,
         )
     return (
         ProtectionState.DIVERGED,
         f"{symbol} leg {leg.value} was requested and does not rest: the point query reports "
         f"{order.status.value}",
+        None,
     )
 
 
@@ -712,6 +798,11 @@ async def resolve_unresolved_legs(
         states: list[_ResolvedState] = []
         reasons: list[str] = []
         carried: list[UnresolvedLeg] = []
+        #: At most one leg can report filled -- OCO cancels the sibling -- so
+        #: this holds the first and only. Kept as a plain binding rather than a
+        #: list because a second would be a state nothing in this design can
+        #: produce, and a list would invite a reader to handle one.
+        fill: ExitFill | None = None
         for item in assessment.unresolved:
             if budget <= 0:
                 states.append(ProtectionState.UNKNOWN)
@@ -743,9 +834,11 @@ async def resolve_unresolved_legs(
                     "placed-and-since-purged; order retention is unmeasured"
                 )
                 continue
-            state, reason = _refine(item.leg, order, symbol=position.symbol)
+            state, reason, leg_fill = _refine(item.leg, order, symbol=position.symbol)
             states.append(state)
             reasons.append(reason)
+            if leg_fill is not None and fill is None:
+                fill = leg_fill
 
         # THE WEAKER ANSWER WINS, and the walk is explicit so a third state
         # cannot slip through it. The previous form -- UNKNOWN if UNKNOWN is
@@ -770,7 +863,7 @@ async def resolve_unresolved_legs(
             else:
                 assert_never(candidate)
         outcome = ProtectionAssessment(
-            state=verdict, reason="; ".join(reasons), unresolved=tuple(carried)
+            state=verdict, reason="; ".join(reasons), unresolved=tuple(carried), exit_fill=fill
         )
         # The completing half of a two-phase reconciliation, and it stamps
         # only when there is nothing left outstanding. A position with legs
