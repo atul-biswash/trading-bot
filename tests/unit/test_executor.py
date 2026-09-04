@@ -14,9 +14,12 @@ Fixture expressiveness, stated because it decides what these can catch:
 
 from __future__ import annotations
 
+import ast
+import inspect
 import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -42,6 +45,7 @@ from trading_bot.core.models import (
     OrderList,
     OtocoOrderListRequest,
     OtoOrderListRequest,
+    Position,
     ProtectiveLevels,
     Signal,
 )
@@ -193,7 +197,22 @@ class FakeClient:
         fill_price: str | None = "98.00000000",
         filled_quantity: str = "0.5",
         order_error: Exception | None = None,
+        leg_answers: dict[str, Order | Exception] | None = None,
     ) -> None:
+        #: PER-LEG answers for the close path's confirming query, keyed by leg
+        #: code (``"SL"`` / ``"TP"``).
+        #:
+        #: **THE FLAT FIELDS BELOW CANNOT EXPRESS THE CLOSE TABLE, and that is
+        #: why this exists.** `fill_price` and `filled_quantity` are shared by
+        #: every `get_order` answer, so a fake carrying only those returns the
+        #: SAME order for both protective legs -- it cannot say "the stop filled
+        #: and the target did not", which is the row that decides
+        #: ALREADY_CLOSED, and it cannot make one leg unreadable while the other
+        #: answers, which is the row that decides HALT.
+        #:
+        #: ``None`` keeps the flat behaviour exactly, so every test written
+        #: before the close path is unchanged.
+        self._leg_answers = leg_answers
         self.place_error = place_error
         #: ``None`` makes the entry leg report no fill -- an expired FOK.
         self.fill_price = fill_price
@@ -219,6 +238,14 @@ class FakeClient:
     ) -> Order:
         self.venue_calls.append("get_order")
         self.order_queries.append(client_order_id or "")
+        if self._leg_answers is not None:
+            # Keyed off the id's own leg suffix, so a test states its answers in
+            # the vocabulary the code derives rather than restating a full id.
+            leg = (client_order_id or "").rsplit("-", 1)[-1]
+            answer = self._leg_answers[leg]
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
         if self.order_error is not None:
             raise self.order_error
         filled = D(self.filled_quantity) if self.fill_price is not None else D("0")
@@ -432,15 +459,27 @@ class TestRefusals:
     ) -> None:
         """`RiskManager.evaluate` produces an `ExitIntent` today, so this is
         reachable. A DROPPED signal is how an operator finds the gap by not
-        seeing an exit; the refusal must name itself."""
-        executor, client, _ = build()
+        seeing an exit; the refusal must name itself.
+
+        **THE REASON MOVED FROM `close_not_implemented` TO A PER-VERDICT
+        STRING**, because the close path now PLANS before it refuses. What this
+        test pins is unchanged and is the part that must not regress: a CLOSE
+        still places nothing, and it still refuses under a name. Which name
+        depends on what the confirming query found, and the verdicts have their
+        own tests in `TestTheClosePlan`.
+
+        Driven against a portfolio holding the position, so the plan runs; the
+        no-position path is pinned separately.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
         refusals = _records(caplog, "dispatch_refused")
         assert len(refusals) == 1
-        assert refusals[0].reason == "close_not_implemented"  # type: ignore[attr-defined]
+        assert refusals[0].reason.startswith("close_")  # type: ignore[attr-defined]
         assert refusals[0].action == "CLOSE"  # type: ignore[attr-defined]
         assert client.otoco == [] and client.oto == []
 
@@ -1335,3 +1374,302 @@ class TestThePendingUnion:
         )
 
         assert executor._pending == {SYMBOL: _close()}
+
+
+# --------------------------------------------------------------------------
+# Q-C section 4b's READ half -- plan, report, refuse
+# --------------------------------------------------------------------------
+CLOSE_QTY = D("0.5")
+
+
+def _leg(executed: str, status: OrderStatus = OrderStatus.NEW) -> Order:
+    """One protective leg's point-query answer."""
+    return Order(
+        order_id="9",
+        symbol=SYMBOL,
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        status=status,
+        quantity=CLOSE_QTY,
+        filled_quantity=D(executed),
+    )
+
+
+def _held(*, stop: str | None = "95", target: str | None = "110") -> Portfolio:
+    """A portfolio holding the position `close_signal` would close.
+
+    `build()`'s default portfolio holds NOTHING, so a close against it refuses
+    at `close_no_position` and makes zero reads -- which cannot express any row
+    of the decision table. This is the fixture that can.
+    """
+    return Portfolio(
+        free_quote=D("10000"),
+        positions={
+            SYMBOL: Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=CLOSE_QTY,
+                entry_price=D("100"),
+                entry_bar_time=BAR,
+                protection=ProtectionState.UNKNOWN,
+                order_list_id="tb1-BTCUSDT-1714564800000-0-L",
+                stop_loss=D(stop) if stop is not None else None,
+                take_profit=D(target) if target is not None else None,
+            )
+        },
+    )
+
+
+def _plan_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return _records(caplog, "close_planned")
+
+
+class TestTheClosePlan:
+    """The read half runs, reports and refuses. NOTHING IRREVERSIBLE HAPPENS."""
+
+    async def test_no_leg_executed_plans_a_sell_and_refuses_it(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Section 4b row one, and the reason says the sell is RESERVED.
+
+        MUTATION: return `CloseAction.SELL`'s reason for every verdict.
+
+        The refusal reason is what an operator acts on: a reserved sell is work
+        waiting on the next commit, where a halt is a state nobody may sell
+        against. Asserting the specific string is what separates them.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        plans = _plan_records(caplog)
+        assert len(plans) == 1
+        assert plans[0].decision == "sell"  # type: ignore[attr-defined]
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[0].reason == "close_sell_reserved"  # type: ignore[attr-defined]
+
+    async def test_a_filled_leg_plans_already_closed_and_books_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Section 4b row two -- and the half that matters is what does NOT happen.
+
+        MUTATION: call `close_position` on the ALREADY_CLOSED branch.
+
+        Booking a bot-sent close is the NEXT commit's. The position stays in
+        `portfolio.positions` deliberately: the reconciliation driver's booking
+        path is already live for a venue-triggered fill and will see this leg on
+        its next pass. Booking here would be a second path racing that one, and
+        the two would double-book. Asserted on the ledger AND on `positions`,
+        because a booking that credited without deleting would pass the second
+        alone.
+        """
+        portfolio = _held()
+        client = FakeClient(
+            leg_answers={
+                "SL": _leg("0.5", status=OrderStatus.FILLED),
+                "TP": _leg("0", status=OrderStatus.EXPIRED),
+            }
+        )
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert _plan_records(caplog)[0].decision == "already_closed"  # type: ignore[attr-defined]
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[0].reason == "close_already_closed"  # type: ignore[attr-defined]
+        # NOTHING WAS BOOKED.
+        assert portfolio.ledger is None
+        assert SYMBOL in portfolio.positions
+        assert portfolio.free_quote == D("10000")
+
+    async def test_a_partial_fill_plans_a_halt(self, caplog: pytest.LogCaptureFixture) -> None:
+        """Section 4b's UNMEASURED row, reached through the real decision table.
+
+        MUTATION: pass `order.quantity` as `requested` instead of the position's.
+
+        A leg's `origQty` and the position's quantity agree today, so that
+        mutation is invisible to a fixture where they match -- this one sets the
+        executed quantity BETWEEN zero and the position size, which is what
+        makes the partial row reachable at all.
+        """
+        client = FakeClient(
+            leg_answers={"SL": _leg("0.2", status=OrderStatus.FILLED), "TP": _leg("0")}
+        )
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert _plan_records(caplog)[0].decision == "halt"  # type: ignore[attr-defined]
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[0].reason == "close_halted"  # type: ignore[attr-defined]
+
+    async def test_an_unreadable_leg_is_distinguishable_from_one_that_answered(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**A query failure is not a separate verdict -- it is a NULL that the
+        table reads as unreadable, and the LOG is what tells the two apart.**
+
+        MUTATION: report a failed read as `executed=Decimal(0)`.
+
+        Under it the verdict flips from HALT to SELL -- a failed query becomes a
+        licence to sell, the one direction this may not err in -- and the log
+        would show `sl_executed=0` beside `tp_executed=0`, indistinguishable
+        from two legs that both answered "nothing executed". Asserting the null
+        AND the error field is what makes the distinction visible; asserting the
+        verdict alone would pass for a fake whose other leg happened to halt.
+        """
+        client = FakeClient(leg_answers={"SL": ExchangeConnectionError("reset"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        plan = _plan_records(caplog)[0]
+        assert plan.decision == "halt"  # type: ignore[attr-defined]
+        # The unreadable leg: null status, null quantity, and a named cause.
+        assert plan.sl_status is None  # type: ignore[attr-defined]
+        assert plan.sl_executed is None  # type: ignore[attr-defined]
+        assert plan.sl_error == "ExchangeConnectionError"  # type: ignore[attr-defined]
+        # The leg that ANSWERED, on the same record, saying something different.
+        assert plan.tp_status == "NEW"  # type: ignore[attr-defined]
+        assert plan.tp_executed == D("0")  # type: ignore[attr-defined]
+        assert not hasattr(plan, "tp_error")
+
+    async def test_exactly_two_venue_reads_are_made(self) -> None:
+        """THE READ COUNT, ruled at two and asserted on the fake.
+
+        MUTATION: query the working leg as well.
+
+        A third read would cost a round trip on the candle pipeline and yield no
+        protection state -- the entry leg is `LIMIT`+`FOK` and terminal at
+        placement. Asserted as an exact list, not a count, so a read of the
+        WRONG leg fails here too.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == ["get_order", "get_order"]
+        assert [q.rsplit("-", 1)[-1] for q in client.order_queries] == ["SL", "TP"]
+
+    async def test_a_leg_that_was_never_requested_is_never_queried(self) -> None:
+        """An OTO position has one protective leg, so it reads once.
+
+        MUTATION: query both legs unconditionally.
+
+        A leg that was never requested has no id at the venue, so querying it
+        spends a call to be told `-2011`. The read count follows what was
+        REQUESTED, which is the same key Q-C reconciles on.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held(target=None))
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == ["get_order"]
+
+    async def test_no_position_refuses_without_reading_anything(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The position left between evaluate and dispatch.
+
+        MUTATION: drop the `position is None` guard.
+
+        Without it the derivation raises `AttributeError` inside a method the
+        module docstring says must never raise. Asserting zero reads is what
+        pins that the refusal happens BEFORE any venue contact.
+        """
+        executor, client, _ = build()  # default portfolio holds nothing
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[0].reason == "close_no_position"  # type: ignore[attr-defined]
+        assert client.venue_calls == []
+        assert _plan_records(caplog) == []
+
+    async def test_the_elapsed_time_of_the_reads_is_logged(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE FIELD THE WHOLE READ HALF EXISTS TO PRODUCE.**
+
+        MUTATION: drop `elapsed_s` from the record.
+
+        `dispatch` samples its budget once, with `now == started_at`, THIRTY
+        LINES BELOW the branch that reaches the close path -- so these reads are
+        charged against nothing and the budget will never report their cost.
+        This field is the only instrument that will. Asserted as a real
+        non-negative float, because a string would cross `extra=` unnoticed
+        (`default=str` is a catch-all) and both sinks would render it plausibly.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        elapsed = _plan_records(caplog)[0].elapsed_s  # type: ignore[attr-defined]
+        assert isinstance(elapsed, float)
+        assert elapsed >= 0.0
+
+    async def test_the_close_path_writes_nothing_at_the_venue(self) -> None:
+        """No cancel, no sell -- asserted behaviourally AND by reading the source.
+
+        MUTATION: call `create_order` or a cancel from the close path.
+
+        **THE BEHAVIOURAL HALF ALONE IS NOT ENOUGH, which is why the source is
+        read too.** A write on a branch this fixture does not reach would
+        satisfy every assertion above it: `venue_calls` records only what ran.
+
+        **AND THE SOURCE CHECK IS AN AST WALK, NOT A TEXT GREP -- the grep was
+        written first and it FAILED, on this method's own prose.** `_plan_close`
+        documents that it sends no cancel and that `cancel_order_list` is
+        undeclared, so the substring `cancel` appears in it several times while
+        no such call exists. A text search over source counts DOCUMENTATION as
+        code, and it would have failed for as long as the docstring said the
+        right thing. Collecting the called attribute names is the direct
+        observation the proxy stood for.
+
+        Scoped to the two close methods rather than the file, so the ENTRY
+        path's own placements cannot mask a write here.
+        """
+        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == ["get_order", "get_order"]
+        assert client.otoco == [] and client.oto == []
+
+        tree = ast.parse(Path(inspect.getfile(OrderExecutor)).read_text(encoding="utf-8"))
+        closers = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
+            and node.name in {"_plan_close", "_confirm_protective_legs"}
+        ]
+        assert len(closers) == 2, "both close methods must be found, or this pins nothing"
+
+        called = {
+            node.func.attr
+            for fn in closers
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert called & {"get_order"}, "the confirm step must actually query"
+        assert not called & {
+            "create_order",
+            "create_otoco_order_list",
+            "create_oto_order_list",
+            "cancel_order",
+            "cancel_order_list",
+            "close_position",
+            "open_position",
+            "record_realised_pnl",
+        }, sorted(called)

@@ -20,7 +20,7 @@ bar, with no counter quarantining anything. So every phase carries its own
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Final, Literal
 
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import PositionSide, ProtectionState
@@ -33,6 +33,7 @@ from trading_bot.core.models import (
     Position,
 )
 from trading_bot.exchange.ids import OrderListLeg, client_order_id
+from trading_bot.execution.close_plan import CloseAction, LegReport, plan_close
 from trading_bot.execution.dispatch_budget import DispatchBudget
 from trading_bot.execution.placement import build_placement
 from trading_bot.execution.resolution import (
@@ -111,6 +112,12 @@ _EVENT_NO_ENTRY_FILL = "entry_fill_absent"
 #: from the first. It also fires on the query-failure path, which
 #: `entry_fill_absent` does not.
 _EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
+#: Q-C section 4b's confirming query ran and its decision table answered. **The
+#: ONLY instrument that will ever report how long that costs**, because the
+#: close branch sits ahead of `dispatch`'s single budget sample -- see
+#: `_plan_close`. `elapsed_s` is the field the whole read half exists to
+#: produce.
+_EVENT_CLOSE_PLANNED = "close_planned"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -118,7 +125,36 @@ _EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
 #: placement was accepted and the FOK simply found no counterparty.
 _REASON_ENTRY_EXPIRED = "entry_leg_expired"
 
-_REASON_CLOSE = "close_not_implemented"
+#: The close path PLANNED and did not act. One reason per verdict, because an
+#: operator acts differently on each: a reserved sell is work waiting on C5, an
+#: already-closed position is the reconciler's to book, and a halt is a state
+#: nobody may sell against. Reusing one string would collapse three responses
+#: into one line -- the shape `_REASON_PENDING`'s comment already rejects.
+_REASON_CLOSE_SELL_RESERVED = "close_sell_reserved"
+_REASON_CLOSE_ALREADY_CLOSED = "close_already_closed"
+_REASON_CLOSE_HALTED = "close_halted"
+#: The portfolio holds nothing for this symbol by the time dispatch runs.
+#: Distinct from `RiskManager`'s `nothing_to_close`, which is the CORRECT
+#: refusal made at evaluate time; this one means the position left between the
+#: two, and an operator meeting it should look for what removed it.
+_REASON_CLOSE_NO_POSITION = "close_no_position"
+
+#: One refusal reason per verdict, as a total mapping rather than a chain of
+#: ``if``s. Exhaustive by construction: `CloseAction` has three members and a
+#: fourth would raise `KeyError` at the site rather than falling through to a
+#: default, which is the same reason `plan_close` has no trailing ``else``.
+_CLOSE_REFUSALS: Final[dict[CloseAction, str]] = {
+    CloseAction.SELL: _REASON_CLOSE_SELL_RESERVED,
+    CloseAction.ALREADY_CLOSED: _REASON_CLOSE_ALREADY_CLOSED,
+    CloseAction.HALT: _REASON_CLOSE_HALTED,
+}
+
+#: The generation the confirm step derives leg ids at. Zero, and NOT read off
+#: the position -- `Position` carries no generation. The same constant
+#: `reconcile_open_positions` uses under the same name-in-spirit, for the same
+#: stated reason: nothing in this tree computes a non-zero generation yet.
+_CLOSE_GENERATION: Final = 0
+
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
 _REASON_PENDING = "placement_pending"
@@ -597,13 +633,18 @@ class OrderExecutor:
             return
         intent = assessment.intent
 
-        # R21, refusal one: CLOSE is not implemented, and is refused BY NAME.
-        # `RiskManager.evaluate` produces an `ExitIntent` today, so this is a
-        # reachable state and not a defensive branch. A dropped signal is how an
-        # operator discovers the gap by not seeing an exit; a named refusal is
-        # how they discover it by reading one line. CLOSE dispatch is M5g's.
+        # Refusal one: CLOSE is PLANNED AND REPORTED, and still refused.
+        #
+        # This branch used to refuse by name under `close_not_implemented`,
+        # which fired 27 times across 8 supervised runs while saying nothing
+        # about what an exit would have done. It now runs Q-C section 4b's READ
+        # half -- confirm, then decide -- and refuses the sell.
+        #
+        # **NOTHING IRREVERSIBLE HAPPENS HERE.** No cancel, no sell, no
+        # booking. The two point queries are reads. Every write in section 4b's
+        # sequence is reserved.
         if not isinstance(intent, EntryIntent):
-            self._refuse(signal, _REASON_CLOSE, candle)
+            await self._plan_close(signal, candle)
             return
 
         # R21, refusal two: the unprotected branch. Q-C section 2's fourth row
@@ -1101,6 +1142,177 @@ class OrderExecutor:
             self._persist_pending(records)
         except Exception as exc:  # never raises; see the module docstring
             self._log_failure("persist-delete", symbol, exc)
+
+    async def _plan_close(self, signal: Signal, candle: Candle) -> None:
+        """Q-C section 4b's READ half: confirm by query, decide, report, refuse.
+
+        **IT PLANS AND IT DOES NOT ACT.** Section 4b's sequence is cancel ->
+        confirm -> sell, and only the middle step runs here. No cancel is sent,
+        no sell is dispatched, and nothing is booked. Every irreversible step is
+        the commit that supplies the caller for `cancel_order_list`, which is
+        deliberately still undeclared on the port -- finding GG binds a port
+        declaration to its production caller, and this method is not one.
+
+        **WHY IT RUNS AT ALL, given that it refuses either way.** The one thing
+        nobody can answer from the tree is what section 4b's confirm step COSTS.
+        `dispatch_deadline_s = 9.0` is a PLACEHOLDER, its four-call derivation
+        is arithmetic rather than observation, and no close has ever run. This
+        emits `elapsed_s` on every CLOSE signal, so the duration is measured in
+        production before anything irreversible is written against it.
+
+        **THE BUDGET WILL NOT MEASURE IT, WHICH IS WHY THIS DOES.** `dispatch`
+        samples once, at ``bounds_for_next_call(started_at=x, now=x)`` -- zero
+        elapsed, the full deadline granted -- and that sample is taken THIRTY
+        LINES BELOW the branch that reaches here. So these reads are charged
+        against nothing at runtime and would lengthen the candle pipeline
+        unobserved. The elapsed field is the only instrument that will ever see
+        them.
+
+        **THEY ARE BOUNDED ANYWAY, and that is a locked decision rather than a
+        precaution.** `CLAUDE.md`: *"the candle pipeline must never be blocked
+        by latency we do not bound ourselves -- a budget, not an abstinence."*
+        A fresh `started_at` opens a sequence, each read takes the remainder,
+        and a read that cannot begin is refused rather than started. That is the
+        same shape a full close will need, exercised early on its read half.
+
+        **TWO READS, AND THE COUNT IS RULED.** The confirm step queries the
+        PROTECTIVE legs only. The working leg is `LIMIT`+`FOK` and terminal at
+        placement, so a point query on it costs a round trip and yields no
+        protection state. A leg that was never requested is not queried, because
+        it has no id to query -- so an OTO position reads once and a
+        both-disabled position reads not at all, which `plan_close` answers with
+        HALT on its empty-set row.
+
+        **A LEG THAT CANNOT BE READ IS `executed=None`, NEVER `Decimal(0)`.**
+        The verdict it produces is HALT, but the LOG distinguishes it from a leg
+        that answered: an unreadable leg carries a null status and its error type
+        appears beside it. Section 4b reads `executedQty`, not merely `status`,
+        and `LegReport.executed` is the field that carries it -- a leg reporting
+        FILLED with nothing executed decides on the quantity.
+
+        **NOTHING CALLS `close_position` HERE, INCLUDING ON `ALREADY_CLOSED`.**
+        A protective leg that filled while we were deciding means the position
+        is gone at the venue -- and booking it is the next commit's, not this
+        one's. The position stays in `portfolio.positions`, which is not a leak:
+        the reconciliation driver's booking path is already live for exactly
+        this shape, and it will see the filled leg on its next pass and book it.
+        Doing it here would be a SECOND booking path racing that one.
+        """
+        position = self._portfolio.positions.get(signal.symbol)
+        if position is None:
+            # `RiskManager._exit_assessment` already refuses when nothing is
+            # held, so reaching here means the position left between evaluate
+            # and dispatch. Its own reason, not that one's: an operator meeting
+            # this should look for what removed it.
+            self._refuse(signal, _REASON_CLOSE_NO_POSITION, candle)
+            return
+
+        started_at = utc_now()
+        legs, failures = await self._confirm_protective_legs(position, started_at=started_at)
+        elapsed_s = (utc_now() - started_at).total_seconds()
+
+        plan = plan_close(legs)
+        reason = _CLOSE_REFUSALS[plan.action]
+
+        extra: dict[str, object] = {
+            "event": _EVENT_CLOSE_PLANNED,
+            "symbol": signal.symbol,
+            "decision": plan.action.value,
+            "detail": plan.reason,
+            "reads": len(legs),
+            "elapsed_s": elapsed_s,
+            "refused_as": reason,
+            "candle_time": candle.close_time.isoformat(),
+        }
+        if position.order_list_id is not None:
+            extra["list_client_order_id"] = position.order_list_id
+        for report in legs:
+            # ABSENT means the leg was never requested; NULL means it was
+            # requested and could not be read. Two different facts, and the log
+            # schema's absent-not-null rule is what keeps them apart.
+            extra[f"{report.leg.lower()}_status"] = report.status
+            extra[f"{report.leg.lower()}_executed"] = report.executed
+        for leg_code, error in failures.items():
+            extra[f"{leg_code.lower()}_error"] = error
+
+        _log.info(
+            "Close planned for %s: %s",
+            signal.symbol,
+            plan.action.value,
+            extra=extra,
+        )
+        self._refuse(signal, reason, candle)
+
+    async def _confirm_protective_legs(
+        self, position: Position, *, started_at: datetime
+    ) -> tuple[tuple[LegReport, ...], dict[str, str]]:
+        """Point-query each REQUESTED protective leg. Reads only; never raises.
+
+        Returns the reports and, separately, the error type per leg that could
+        not be read -- separately because `LegReport` is the DECISION's input and
+        an exception's type is not something the decision may branch on. It
+        belongs in the log beside the null, not in the value the table reads.
+
+        The ids are derived, not remembered: Q-C section 6 makes a generation-0
+        leg id pure computation over ``(symbol, entry_bar_time, leg)``, and
+        `Position` carries the bar. **`generation` is 0 and is NOT read off the
+        position, because `Position` does not carry one** -- the same constant
+        `reconcile_open_positions` uses, for the same reason: nothing in this
+        tree computes a non-zero generation yet, and the first re-placement is
+        what arms it.
+        """
+        requested = [
+            (OrderListLeg.STOP_LOSS, position.stop_loss),
+            (OrderListLeg.TAKE_PROFIT, position.take_profit),
+        ]
+        reports: list[LegReport] = []
+        failures: dict[str, str] = {}
+
+        for leg, level in requested:
+            if level is None:
+                # Never requested, so there is no id and nothing to ask. Not a
+                # failure and not an unreadable leg -- it is absent from the
+                # report set entirely, which is what keeps `plan_close`'s
+                # unreadable row about legs that were actually asked for.
+                continue
+
+            bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
+            if bounds is None:
+                # The sequence is spent. REFUSED TO BEGIN, never abandoned
+                # mid-flight -- and the leg is reported unreadable rather than
+                # skipped, so the decision sees a hole instead of a clean set.
+                failures[leg.value] = "budget_exhausted"
+                reports.append(LegReport(leg=leg.value, executed=None, requested=position.quantity))
+                continue
+
+            try:
+                order = await self._client.get_order(
+                    position.symbol,
+                    client_order_id=client_order_id(
+                        position.symbol,
+                        position.entry_bar_time,
+                        leg,
+                        generation=_CLOSE_GENERATION,
+                    ),
+                    timeout_s=bounds.timeout_s,
+                    attempts=bounds.attempts,
+                )
+            except Exception as exc:  # dispatch must never raise; see the module docstring
+                self._log_failure("close-confirm", position.symbol, exc)
+                failures[leg.value] = type(exc).__name__
+                reports.append(LegReport(leg=leg.value, executed=None, requested=position.quantity))
+                continue
+
+            reports.append(
+                LegReport(
+                    leg=leg.value,
+                    executed=order.filled_quantity,
+                    requested=position.quantity,
+                    status=order.status.value,
+                )
+            )
+
+        return tuple(reports), failures
 
     def _refuse(self, signal: Signal, reason: str, candle: Candle) -> None:
         _log.warning(
