@@ -47,8 +47,10 @@ __all__ = [
     "ListClientOrderIdParts",
     "OrderListLeg",
     "client_order_id",
+    "close_client_order_id",
     "list_client_order_id",
     "parse_client_order_id",
+    "parse_close_client_order_id",
     "parse_list_client_order_id",
 ]
 
@@ -125,6 +127,35 @@ _ID_PATTERN: Final = re.compile(_ID_BODY + r"(?P<leg>W|SL|TP)$")
 #: other's suffix, and there is no shared alternation for a later hand to widen.
 _LIST_ID_PATTERN: Final = re.compile(_ID_BODY + re.escape(LIST_SUFFIX) + r"$")
 
+# A THIRD PATTERN, for the same structural reason the second one exists -- and
+# the consequence of widening is WORSE here than it was for `L`. The pattern
+# itself is defined BELOW `OrderListLeg`, because it reads that enum's `.value`
+# and a module body executes top to bottom; the reasoning lives here, beside
+# the two patterns it is about.
+#
+# Written above the class first, and caught by IMPORTING the module -- mypy
+# reported success on the broken form, which is exactly the blind spot
+# `CLAUDE.md` records for `core/exceptions.py`.
+#
+# Admitting `CL` to `_ID_PATTERN`'s alternation would make
+# `parse_client_order_id` recognise a close sell as a leg. That parser has two
+# production callers on the reconciliation hot path, and both would act on it:
+# `get_own_open_orders` would count the sell as ours, and `_compare_set` would
+# hand it to `classify_protection`, whose `protective_legs` is scoped as
+# *everything that is not* `WORKING`. A close sell would be read as PROTECTION.
+#
+# The `L` case failed loudly -- `OrderListLeg("L")` has no member, so it
+# raised. THIS ONE WOULD NOT FAIL AT ALL. `OrderListLeg("CL")` is a valid
+# member now, so the sell would flow through silently; and if it reported
+# FILLED, `classify_protection` would build an `ExitFill` and the
+# reconciliation driver would BOOK IT -- a second, undesigned booking path
+# racing the one Q-C section 4b assigns to the close itself. Silent
+# double-booking of a realised loss, arriving through a regex alternation.
+#
+# Disjointness is STRUCTURAL across all three patterns: `CL` is not `W`, `SL`
+# or `TP`, and `-0-CL` does not match `-0-L$` under a fullmatch. There is no
+# shared alternation for a later hand to widen.
+
 
 class OrderListLeg(str, Enum):
     """Which leg of a Q-C order list an ID belongs to.
@@ -138,13 +169,38 @@ class OrderListLeg(str, Enum):
     :func:`client_order_id` builds from ``.value`` only, and the output guard
     catches any future edit that stops doing so.
 
-    The three codes are section 3's leg set and are what the M5c probe sent, so
-    they match the only IDs the venue has been measured to honour byte-for-byte.
+    The first three codes are section 3's leg set and are what the M5c probe
+    sent, so they match the only IDs the venue has been measured to honour
+    byte-for-byte.
+
+    **``CLOSE`` IS NOT A LEG OF ANY LIST, AND THE NAME IS BY ANALOGY.** A
+    discretionary ``SignalAction.CLOSE`` dispatches a standalone ``MARKET``
+    sell under Q-C section 4b -- it is never submitted as part of an order
+    list, and it will never appear in an ``OrderList``'s ``orderReports``. A
+    reader who takes this enum's name literally will go looking for it there
+    and find nothing. It lives here because what the enum actually governs is
+    the **leg-code segment of one of our client order IDs**, and a close sell
+    needs one of those for exactly the reason the legs do: Q-C section 6 makes
+    the ID derivable by pure computation, which is what lets a timed-out write
+    be resolved by querying the ID we *would have sent*.
+
+    **It is deliberately absent from :data:`_ID_PATTERN`.** See
+    :data:`_CLOSE_ID_PATTERN`: admitting it there would feed a close sell into
+    the reconciler's protective compare set.
     """
 
     WORKING = "W"
     STOP_LOSS = "SL"
     TAKE_PROFIT = "TP"
+    #: A discretionary close sell. Two characters, matching the worst measured
+    #: leg code, so :data:`MAX_GENERATION` -- which was DERIVED from that
+    #: two-character case -- is unchanged by its arrival.
+    CLOSE = "CL"
+
+
+#: The close form's pattern. See the block above :class:`OrderListLeg` for why
+#: it is a separate pattern; it lives here because it reads ``CLOSE.value``.
+_CLOSE_ID_PATTERN: Final = re.compile(_ID_BODY + re.escape(OrderListLeg.CLOSE.value) + r"$")
 
 
 class ClientOrderIdParts(NamedTuple):
@@ -194,13 +250,28 @@ def client_order_id(
     non-zero one** -- see the module docstring. A caller that has recovered a
     higher generation from the venue may pass it.
 
-    :raises ValueError: ``entry_bar_time`` is naive, or ``generation`` is
-        outside ``0..MAX_GENERATION``. Both are caller bugs detectable without
-        building anything.
+    **:attr:`OrderListLeg.CLOSE` IS REFUSED HERE.** It is a member of that enum
+    for the reason the enum's docstring gives, and it is not a leg of a list.
+    Building it through this function would succeed and produce an ID that
+    :func:`parse_client_order_id` cannot read -- unparseable by its own
+    family's parser, silently, and only at the moment something tried to
+    resolve it. Refusing costs one line and converts that into a caller bug
+    caught without I/O. :func:`close_client_order_id` is the builder.
+
+    :raises ValueError: ``entry_bar_time`` is naive, ``generation`` is outside
+        ``0..MAX_GENERATION``, or ``leg`` is ``CLOSE``. All three are caller
+        bugs detectable without building anything.
     :raises ContractViolationError: the assembled ID violates the venue's
         measured rule. The message says **which** rule, which the venue's own
         message does not.
     """
+    if leg is OrderListLeg.CLOSE:
+        raise ValueError(
+            "OrderListLeg.CLOSE is not a leg of an order list and has no place in a leg ID; "
+            "use close_client_order_id. Building it here would produce an ID that "
+            "parse_client_order_id refuses by design, which would surface only when "
+            "something tried to resolve it"
+        )
     return _assemble(symbol, entry_bar_time, generation, leg.value)
 
 
@@ -237,6 +308,41 @@ def list_client_order_id(
     :raises ContractViolationError: as :func:`client_order_id`.
     """
     return _assemble(symbol, entry_bar_time, generation, LIST_SUFFIX)
+
+
+def close_client_order_id(
+    symbol: str,
+    entry_bar_time: datetime,
+    *,
+    generation: int = 0,
+) -> str:
+    """Build the client order ID for a discretionary close sell.
+
+    Q-C section 4b's ``MARKET`` sell is a standalone order, not a leg -- see
+    :class:`OrderListLeg` for why its code lives in that enum anyway.
+
+    **``entry_bar_time`` IS THE POSITION'S ENTRY BAR, NOT THE CLOSE'S BAR**, and
+    that is the whole of what makes this resolvable. The seed has to be
+    something a restarted process can re-derive, and after a restart the bar the
+    close was decided on is gone -- it lived only in the dead process's memory.
+    The entry bar survives on :attr:`Position.entry_bar_time`, which is
+    precisely why section 5 put it there rather than relying on ``opened_at``.
+    So a close ID is derivable from the position alone, exactly as a leg ID is.
+
+    The cost is stated rather than hidden: a symbol can carry **one** derivable
+    close ID per position per generation. That is sufficient because a position
+    is closed once -- and because the pending guard refuses a second dispatch
+    while the first is unresolved. A second close on the same position would
+    need a generation, which is the same escape hatch the legs use.
+
+    Pure: no persistence, no I/O, no clock. Same seeds, same guard and same
+    generation bound as :func:`client_order_id`, through the same
+    :func:`_assemble`.
+
+    :raises ValueError: as :func:`client_order_id`.
+    :raises ContractViolationError: as :func:`client_order_id`.
+    """
+    return _assemble(symbol, entry_bar_time, generation, OrderListLeg.CLOSE.value)
 
 
 def _assemble(symbol: str, entry_bar_time: datetime, generation: int, suffix: str) -> str:
@@ -343,4 +449,34 @@ def parse_list_client_order_id(value: str) -> ListClientOrderIdParts | None:
         symbol=match["symbol"],
         entry_bar_time=_EPOCH + timedelta(milliseconds=int(match["ms"])),
         generation=int(match["generation"]),
+    )
+
+
+def parse_close_client_order_id(value: str) -> ClientOrderIdParts | None:
+    """Decompose one of our CLOSE IDs, or return ``None`` if it is not ours.
+
+    ``None`` rather than a raise, for :func:`parse_client_order_id`'s reason.
+
+    Returns :class:`ClientOrderIdParts` rather than a fourth tuple type: the
+    segments are identical and its ``leg`` field carries
+    :attr:`OrderListLeg.CLOSE`, so a caller holding one always knows which
+    family it came from. A third NamedTuple with the same four fields would be
+    surface with no distinguishing content.
+
+    **It recovers what :func:`parse_client_order_id` deliberately will not.**
+    That parser rejects a close ID -- see :data:`_CLOSE_ID_PATTERN` -- so this
+    is the only way back from a close ID to its seeds, and the two are
+    structurally incapable of both matching one string.
+
+    ``entry_bar_time`` here is the POSITION'S entry bar; see
+    :func:`close_client_order_id`.
+    """
+    match = _CLOSE_ID_PATTERN.fullmatch(value)
+    if match is None:
+        return None
+    return ClientOrderIdParts(
+        symbol=match["symbol"],
+        entry_bar_time=_EPOCH + timedelta(milliseconds=int(match["ms"])),
+        generation=int(match["generation"]),
+        leg=OrderListLeg.CLOSE,
     )

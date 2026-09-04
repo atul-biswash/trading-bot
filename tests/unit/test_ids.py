@@ -26,13 +26,26 @@ from trading_bot.exchange.ids import (
     ListClientOrderIdParts,
     OrderListLeg,
     client_order_id,
+    close_client_order_id,
     list_client_order_id,
     parse_client_order_id,
+    parse_close_client_order_id,
     parse_list_client_order_id,
 )
 
 BAR = datetime(2026, 8, 14, 12, 0, tzinfo=timezone.utc)
 BAR_MS = 1_786_708_800_000  # (BAR - epoch) in milliseconds, 13 digits
+
+#: The members that really are legs of a Q-C section 3 order list.
+#:
+#: **DERIVED BY EXCLUSION, not listed by hand**, so a fifth member added later
+#: joins these tests automatically and has to be excluded deliberately -- the
+#: direction that fails loudly. Spelling the three out would let a new member
+#: land untested with nothing to report it.
+#:
+#: ``CLOSE`` is excluded because it is not a leg: ``client_order_id`` refuses
+#: it and ``parse_client_order_id`` will not read it. Both are pinned below.
+LIST_LEGS = tuple(m for m in OrderListLeg if m is not OrderListLeg.CLOSE)
 
 
 def test_generation_zero_is_derivable_and_deterministic() -> None:
@@ -47,7 +60,7 @@ def test_generation_zero_is_derivable_and_deterministic() -> None:
     )
 
 
-@pytest.mark.parametrize("leg", list(OrderListLeg), ids=[m.value for m in OrderListLeg])
+@pytest.mark.parametrize("leg", LIST_LEGS, ids=[m.value for m in LIST_LEGS])
 def test_every_leg_round_trips(leg: OrderListLeg) -> None:
     """Generate then parse returns exactly what went in, including the leg.
 
@@ -61,7 +74,7 @@ def test_every_leg_round_trips(leg: OrderListLeg) -> None:
     )
 
 
-@pytest.mark.parametrize("leg", list(OrderListLeg), ids=[m.value for m in OrderListLeg])
+@pytest.mark.parametrize("leg", LIST_LEGS, ids=[m.value for m in LIST_LEGS])
 def test_the_leg_segment_is_the_value_not_the_member(leg: OrderListLeg) -> None:
     """`CLAUDE.md`'s ``str, Enum`` trap, pinned directly.
 
@@ -250,8 +263,14 @@ def test_a_leg_id_does_not_parse_as_a_list() -> None:
     group would break -- and widening the LEG group is the dangerous one, since
     ``_compare_set`` would reach ``OrderListLeg("L")`` and raise ``ValueError``
     where it promises ``ContractViolationError``.
+
+    **Scoped to ``LIST_LEGS`` rather than every member**, because
+    ``client_order_id`` now refuses ``CLOSE`` -- see
+    ``test_the_leg_builder_refuses_the_close_code``. The close form's
+    disjointness from both other families is asserted separately, in
+    ``test_a_close_id_does_not_parse_as_a_leg_and_a_leg_does_not_parse_as_a_close``.
     """
-    for leg in OrderListLeg:
+    for leg in LIST_LEGS:
         assert parse_list_client_order_id(client_order_id("BTCUSDT", BAR, leg)) is None
 
 
@@ -277,3 +296,188 @@ def test_a_list_id_that_is_not_ours_parses_to_none(value: str) -> None:
     symbol on the strength of somebody else's string.
     """
     assert parse_list_client_order_id(value) is None
+
+
+# --------------------------------------------------------------------------
+# The CLOSE identity -- a standalone MARKET sell, not a leg of any list
+# --------------------------------------------------------------------------
+def test_the_close_id_is_deterministic_and_uses_the_same_seeds() -> None:
+    """Same seeds, same shape, differing only in the code.
+
+    MUTATION: build from a clock or a counter instead of the seeds.
+
+    Called twice, because "deterministic" is the claim and one call cannot
+    make it -- the property that lets a restarted process re-derive the ID it
+    would have sent.
+    """
+    assert close_client_order_id("BTCUSDT", BAR) == f"tb1-BTCUSDT-{BAR_MS}-0-CL"
+    assert close_client_order_id("BTCUSDT", BAR) == close_client_order_id("BTCUSDT", BAR)
+
+
+def test_the_close_code_is_distinct_from_every_other_suffix() -> None:
+    """Four identity families, no two sharing a code.
+
+    MUTATION: set ``CLOSE = "TP"``, or ``CLOSE = "L"``.
+
+    Asserted over the ENUM and the list suffix together, so a collision with
+    either family fails here rather than at the venue -- where a colliding code
+    would silently address somebody else's order.
+    """
+    codes = [m.value for m in OrderListLeg]
+
+    assert len(codes) == len(set(codes))
+    assert OrderListLeg.CLOSE.value not in {m.value for m in LIST_LEGS}
+    assert OrderListLeg.CLOSE.value != LIST_SUFFIX
+
+
+def test_the_close_id_round_trips() -> None:
+    """Generate then parse returns exactly what went in.
+
+    MUTATION: drop the ``leg`` field from ``parse_close_client_order_id``'s
+    return, or have it read ``match["leg"]`` from a group that does not exist.
+
+    The generation is non-zero deliberately: at 0 a parser that dropped the
+    segment and defaulted would still pass.
+    """
+    generated = close_client_order_id("ETHUSDT", BAR, generation=7)
+
+    assert parse_close_client_order_id(generated) == ClientOrderIdParts(
+        symbol="ETHUSDT", entry_bar_time=BAR, generation=7, leg=OrderListLeg.CLOSE
+    )
+
+
+def test_a_close_id_does_not_parse_as_a_leg_and_a_leg_does_not_parse_as_a_close() -> None:
+    """THE STRUCTURAL DISJOINTNESS, asserted in both directions.
+
+    MUTATION: widen ``_ID_PATTERN`` to ``(?P<leg>W|SL|TP|CL)``.
+
+    **This is the test that guards a silent double-booking.**
+    ``parse_client_order_id`` has two production callers on the reconciliation
+    hot path. If it recognised a close sell, ``_compare_set`` would hand it to
+    ``classify_protection``, whose ``protective_legs`` is scoped as everything
+    that is not ``WORKING`` -- so the sell would be read as PROTECTION, and a
+    filled one would build an ``ExitFill`` that the reconciliation driver
+    books. A realised loss booked twice, through a regex alternation.
+
+    The ``L`` case failed loudly because ``OrderListLeg("L")`` has no member.
+    This one would NOT: ``OrderListLeg("CL")`` is valid, so nothing raises and
+    nothing reports it. That asymmetry is why this assertion exists.
+    """
+    close_id = close_client_order_id("BTCUSDT", BAR)
+    leg_id = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS)
+    list_id = list_client_order_id("BTCUSDT", BAR)
+
+    assert parse_client_order_id(close_id) is None
+    assert parse_list_client_order_id(close_id) is None
+    assert parse_close_client_order_id(leg_id) is None
+    assert parse_close_client_order_id(list_id) is None
+
+
+def test_the_leg_builder_refuses_the_close_code() -> None:
+    """``CLOSE`` is in the enum and is not a leg; the leg builder says so.
+
+    MUTATION: delete the guard in ``client_order_id``.
+
+    Without it the call SUCCEEDS and returns ``tb1-BTCUSDT-...-0-CL`` -- an ID
+    whose own family's parser refuses it, discovered only when something tried
+    to resolve it. Asserted on the surviving behaviour too: the close builder
+    produces exactly the string the leg builder would have.
+    """
+    with pytest.raises(ValueError, match="not a leg"):
+        client_order_id("BTCUSDT", BAR, OrderListLeg.CLOSE)
+
+    assert close_client_order_id("BTCUSDT", BAR).endswith("-CL")
+
+
+def test_the_close_segment_is_the_value_not_the_member() -> None:
+    """`CLAUDE.md`'s ``str, Enum`` trap, on the one member the parametrized
+    test above cannot cover.
+
+    MUTATION: build the close ID from ``OrderListLeg.CLOSE`` rather than its
+    ``.value``.
+
+    That yields ``OrderListLeg.CLOSE``, which puts a ``.`` in the ID and blows
+    both the length and the character class at once -- and the venue reports
+    the length violation as a character one, which is the misdiagnosis
+    ``_enforce_venue_rule`` exists to prevent.
+    """
+    generated = close_client_order_id("BTCUSDT", BAR)
+
+    assert "OrderListLeg" not in generated
+    assert generated.endswith(f"-{OrderListLeg.CLOSE.value}")
+
+
+@pytest.mark.parametrize("symbol", ["BTCUSDT", "ETHUSDT"])
+def test_the_close_id_fits_the_ceiling_on_the_shipped_symbols(symbol: str) -> None:
+    """Headroom on what actually ships, asserted rather than reasoned.
+
+    MUTATION: make ``CLOSE`` three characters, e.g. ``"CLS"``.
+
+    31 characters at the maximum generation -- identical to the ``SL``/``TP``
+    figure the leg test asserts, because the code is the same width.
+    """
+    generated = close_client_order_id(symbol, BAR, generation=MAX_GENERATION)
+
+    assert len(generated) <= MAX_CLIENT_ORDER_ID_LENGTH
+    assert len(generated) == 31
+
+
+def test_the_close_id_fits_the_worst_case_the_ceiling_was_derived_from() -> None:
+    """THE BINDING CASE, and the proof that ``CLOSE`` does not move it.
+
+    MUTATION: make ``CLOSE`` three characters.
+
+    ``MAX_GENERATION`` was DERIVED from ``20 + 12 + G + 2 <= 36`` -- a
+    twelve-character symbol and a TWO-character leg code. ``CL`` is two
+    characters, so it lands on exactly that bound and adds no new worst case.
+    Asserted at 36, the measured limit, so a third character fails here rather
+    than at the venue with a mislabelled error.
+
+    A thirteen-character symbol still exceeds it and is still caught only by
+    the output guard; that is unchanged and is asserted by the leg tests.
+    """
+    twelve = "ABCDEFGHIJKL"
+
+    generated = close_client_order_id(twelve, BAR, generation=MAX_GENERATION)
+
+    assert len(twelve) == 12
+    assert len(generated) == MAX_CLIENT_ORDER_ID_LENGTH
+
+
+def test_the_close_id_shares_the_generation_bound_and_the_naive_refusal() -> None:
+    """One ``_assemble`` means one bound and one guard; this is what says so.
+
+    MUTATION: give ``close_client_order_id`` its own arithmetic instead of
+    calling ``_assemble``.
+
+    A second copy would drift in exactly the three things the shared helper
+    exists to hold together -- the bound, the epoch arithmetic and the guard.
+    """
+    with pytest.raises(ValueError, match="generation must be in"):
+        close_client_order_id("BTCUSDT", BAR, generation=MAX_GENERATION + 1)
+
+    with pytest.raises(ValueError, match="must be timezone-aware"):
+        close_client_order_id("BTCUSDT", BAR.replace(tzinfo=None))
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "tb1-BTCUSDT-1786708800000-0-SL",
+        "tb1-BTCUSDT-1786708800000-0-L",
+        "tb1-garbage",
+        "x-BTCUSDT-1786708800000-0-CL",
+        "tb1-BTC-USDT-1786708800000-0-CL",
+    ],
+    ids=["a_leg", "a_list", "prefix_only", "foreign_prefix", "hyphenated_symbol"],
+)
+def test_a_close_id_that_is_not_ours_parses_to_none(value: str) -> None:
+    """``None``, never a raise -- the same reason the other two parsers give.
+
+    MUTATION: recognise by ``startswith("tb1-")`` instead of by parsing.
+
+    ``tb1-garbage`` is the row that earns this: a prefix check accepts it, and
+    Q-C records that admitting a human's order which merely starts the same way
+    is the failure parse-don't-prefix exists to prevent.
+    """
+    assert parse_close_client_order_id(value) is None
