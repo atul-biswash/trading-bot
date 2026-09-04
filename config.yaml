@@ -97,10 +97,10 @@ risk:
                                     # checks it, and a value that fires on a healthy
                                     # system trains you to ignore the line.
   dispatch_deadline_s: 9.0          # PLACEHOLDER -- NOT MEASURED. Bounds the WHOLE
-                                    # dispatch sequence, worst case a three-call
-                                    # CLOSE. The per-call share is DERIVED (~3.0s),
-                                    # never set here. Not exchange.requests_timeout_s:
-                                    # a three-call CLOSE at that 10s would be 30s.
+                                    # dispatch sequence, worst case a FOUR-call
+                                    # CLOSE. THERE IS NO PER-CALL SHARE, derived or
+                                    # otherwise. Not exchange.requests_timeout_s:
+                                    # a four-call CLOSE at that 10s would be 40s.
                                     #
                                     # ANNOTATED at M5f: "three-call CLOSE" counts
                                     # Q-C section 4b's three STEPS as three CALLS,
@@ -127,6 +127,35 @@ risk:
                                     # the two protective ones is UNRULED and
                                     # reserved to the project owner; it decides 5
                                     # against 4.
+                                    #
+                                    # RULED at M5h: the confirm step queries the
+                                    # TWO PROTECTIVE LEGS ONLY, so a full close is
+                                    # FOUR calls -- cancel 1 (MEASURED at M5c: one
+                                    # cancel collapses the whole list) + confirm 2
+                                    # + sell 1. The entry leg is LIMIT+FOK and
+                                    # terminal at placement, so querying it adds
+                                    # latency and yields no protection state. The
+                                    # head of this block is corrected in place,
+                                    # per CLAUDE.md: a count describes the tree and
+                                    # is corrected, where a finding is annotated.
+                                    #
+                                    # AND THERE IS NO PER-CALL SHARE TO CORRECT --
+                                    # the "~3.0s" named a division the code has
+                                    # never performed. The budget's
+                                    # bounds_for_next_call returns CallBounds with
+                                    # timeout_s=remaining and attempts=1: the WHOLE
+                                    # remainder, to every call, at every point in
+                                    # the sequence. This field is a wall-clock
+                                    # deadline for the sequence, spent greedily,
+                                    # never a budget divided among its calls.
+                                    #
+                                    # THE COUNT IS DERIVED; THE DURATION IS NOT
+                                    # MEASURED. Whether four calls fit inside 9.0s
+                                    # is UNMEASURED and stays that way until the
+                                    # read half of section 4b has run in
+                                    # production -- which is what M5h's C4b logs.
+                                    # No timing figure is written here, because
+                                    # none has been observed.
   reconcile_deadline_s: 3.0         # PLACEHOLDER -- NOT MEASURED. One order-list
                                     # query, so a slow read cannot starve the pass.
 
