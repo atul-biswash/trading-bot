@@ -20,7 +20,7 @@ bar, with no counter quarantining anything. So every phase carries its own
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import PositionSide, ProtectionState
@@ -55,7 +55,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.core.models import Candle, OrderList, Signal
     from trading_bot.core.portfolio import Portfolio
 
-__all__ = ["OrderExecutor", "PendingPlacement"]
+__all__ = ["OrderExecutor", "Pending", "PendingClose", "PendingPlacement"]
 
 
 def _matched_list_id(verdict: PlacementVerdict) -> str | None:
@@ -181,6 +181,72 @@ class PendingPlacement:
     entry_limit: Money
     stop_loss: Money | None
     take_profit: Money | None
+    #: The union tag. LAST because it has a default and the others do not, and
+    #: defaulted so every existing construction in this tree and its tests is
+    #: unchanged -- the tag adds a discriminator without adding a keyword to
+    #: forty call sites.
+    kind: Literal["placement"] = "placement"
+
+
+@dataclass(frozen=True, slots=True)
+class PendingClose:
+    """A discretionary close whose outcome we did not observe.
+
+    **The sibling of :class:`PendingPlacement`, and it holds FOUR fields where
+    that holds seven.** The difference is not economy: an exit HAS no
+    ``entry_limit``, because Q-C section 4b dispatches a ``MARKET`` sell, and
+    it has no ``stop_loss`` or ``take_profit``, because it removes protection
+    rather than requesting it. ``PendingPlacement``'s line is *"every field is
+    something WE REQUESTED"*; a limit price on a market order is not something
+    anyone requested, so carrying one would be a fabricated value in the one
+    type whose whole justification is that it holds none.
+
+    That is why this is a sibling rather than a widening. Making
+    ``entry_limit`` optional on ``PendingPlacement`` would put three fields
+    that are meaningless for half its instances into one type, and would erase
+    the inclusion test that makes the record safe to hold.
+
+    **The first three fields are the ID SEEDS**, exactly as they are next door,
+    and they carry the same guarantee: ``close_client_order_id`` derives the
+    sell's identity from ``(symbol, entry_bar_time, generation)`` by pure
+    computation, so a restarted process can query the ID it *would have sent*
+    without ever having stored it. ``entry_bar_time`` is the POSITION'S entry
+    bar -- see that function for why the close's own bar cannot serve.
+
+    ``quantity`` is the fourth and is the requested economics in full: what we
+    asked the venue to sell. It falls on the requested side of the line.
+
+    **What must never be added here is what must never be added there**:
+    ``executedQty``, a fill price, an order status or an ``orderId``. Those are
+    venue facts, and this type is a record of our intent.
+
+    **NOTHING CONSTRUCTS ONE.** The dispatch path that would is Q-C section
+    4b's, and the executor still refuses ``CLOSE`` by name. This is the shape
+    arriving before its writer, as ``persist_pending`` and ``persist_ledger``
+    each did one commit before theirs.
+    """
+
+    symbol: str
+    entry_bar_time: datetime
+    generation: int
+    quantity: Money
+    #: The union tag; see :attr:`PendingPlacement.kind`.
+    kind: Literal["close"] = "close"
+
+
+#: One unresolved write against one symbol, of either kind.
+#:
+#: **ONE KEYSPACE, and that is the ruling rather than a convenience.** Both
+#: kinds live in ``OrderExecutor._pending``, keyed by symbol, because the
+#: EXISTING guard -- ``if signal.symbol in self._pending`` -- then refuses an
+#: entry while an exit is unresolved with no rewrite of entry gating at all. A
+#: separate dictionary for closes would leave that guard blind to them, and an
+#: entry could dispatch on a symbol the bot is midway through exiting.
+#:
+#: Discriminated by ``kind`` rather than by ``isinstance``, so a narrowing that
+#: forgets a member fails the TYPE CHECK rather than falling through at
+#: runtime.
+Pending = PendingPlacement | PendingClose
 
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -194,10 +260,15 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     #: the ledger this executor never sees.
     #:
     #: Declared HERE rather than in the import block above because it names
-    #: ``PendingPlacement``, which is defined immediately above it. A forward
-    #: reference would need a quoted name, and this project's style forbids
-    #: those in new code.
-    PendingWriter = Callable[[tuple[PendingPlacement, ...]], None]
+    #: ``Pending``, which is defined immediately above it. A forward reference
+    #: would need a quoted name, and this project's style forbids those in new
+    #: code.
+    #:
+    #: **It takes the UNION, so the root's closure must map both kinds.** That
+    #: is contravariance doing useful work: a closure written for placements
+    #: alone stops satisfying this alias, and mypy names the site rather than
+    #: letting a close reach a mapper that would drop it.
+    PendingWriter = Callable[[tuple[Pending, ...]], None]
 
 
 @dataclass(frozen=True, slots=True)
@@ -238,7 +309,7 @@ class OrderExecutor:
         portfolio: Portfolio,
         budget: DispatchBudget,
         persist_pending: PendingWriter | None = None,
-        restored_pending: Sequence[PendingPlacement] = (),
+        restored_pending: Sequence[Pending] = (),
     ) -> None:
         """Build the executor, optionally seeded with records from a prior process.
 
@@ -285,9 +356,7 @@ class OrderExecutor:
         #: existing test and any caller not yet updated byte-for-byte
         #: unchanged. The composition root supplies the real writer.
         self._persist_pending = persist_pending
-        self._pending: dict[str, PendingPlacement] = {
-            record.symbol: record for record in restored_pending
-        }
+        self._pending: dict[str, Pending] = {record.symbol: record for record in restored_pending}
 
     # -- Option 4 resolution, on the candle subscription --------------------
     async def __call__(self, candle: Candle) -> None:
@@ -325,6 +394,23 @@ class OrderExecutor:
         now = utc_now()
         started_at = now
         for symbol, record in list(self._pending.items()):
+            if record.kind != "placement":
+                # A PENDING CLOSE IS NOT RESOLVABLE HERE, and skipping is the
+                # honest answer rather than a gap. `resolve_placement` asks
+                # `get_all_order_lists` whether a LIST bearing our
+                # `listClientOrderId` rests; a discretionary close is a
+                # standalone MARKET sell and is not a list, so that query would
+                # answer NOT_PLACED for one whatever actually happened -- a
+                # wrong answer, confidently given, on the fail-closed path.
+                # Q-C section 4b's close resolution is a `get_order` against
+                # `close_client_order_id`, and it belongs to the commit that
+                # dispatches one.
+                #
+                # UNREACHABLE TODAY: nothing constructs a `PendingClose`, so
+                # `_pending` holds only placements. The record survives to the
+                # next bar untouched, which is the same thing an exhausted
+                # budget does to it.
+                continue
             bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
             if bounds is None:
                 # Out of budget this bar. The record survives to the next one --
@@ -994,7 +1080,7 @@ class OrderExecutor:
             tuple(record for key, record in self._pending.items() if key != symbol), symbol
         )
 
-    def _persist_quietly(self, records: tuple[PendingPlacement, ...], symbol: str) -> None:
+    def _persist_quietly(self, records: tuple[Pending, ...], symbol: str) -> None:
         """Write ``records`` durably. **NEVER raises.**
 
         Deliberately the OPPOSITE of the write path's refusal, and the

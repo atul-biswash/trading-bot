@@ -154,7 +154,12 @@ from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
-from trading_bot.execution.executor import OrderExecutor, PendingPlacement
+from trading_bot.execution.executor import (
+    OrderExecutor,
+    Pending,
+    PendingClose,
+    PendingPlacement,
+)
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
@@ -440,7 +445,7 @@ def _require_live_connection_mode(settings: Settings) -> None:
     )
 
 
-def _restore_pending(state: store.PersistedState | None) -> tuple[PendingPlacement, ...]:
+def _restore_pending(state: store.PersistedState | None) -> tuple[Pending, ...]:
     """Map stored records back into the executor's own type, field for field.
 
     **The exact reverse of the forward mapping in :func:`live_system`**, and it
@@ -461,7 +466,14 @@ def _restore_pending(state: store.PersistedState | None) -> tuple[PendingPlaceme
     if state is None:
         return ()
     return tuple(
-        PendingPlacement(
+        PendingClose(
+            symbol=record.symbol,
+            entry_bar_time=record.entry_bar_time,
+            generation=record.generation,
+            quantity=record.quantity,
+        )
+        if record.kind == "close"
+        else PendingPlacement(
             symbol=record.symbol,
             entry_bar_time=record.entry_bar_time,
             generation=record.generation,
@@ -1113,22 +1125,49 @@ async def live_system(
                 # inside the owner.
                 persisted = restored if restored is not None else store.PersistedState()
 
-                def _persist_pending(records: tuple[PendingPlacement, ...]) -> None:
+                def _to_record(
+                    record: Pending,
+                ) -> store.PendingRecord | store.PendingCloseRecord:
+                    """One domain record into its store shape, dispatched on ``kind``.
+
+                    **THE MAPPING STAYS HERE, and the union is why it had to
+                    grow.** `CLAUDE.md` has outer layers depend inward only, so
+                    ``execution/`` never imports ``persistence/`` and the root
+                    is the one layer permitted to know both. When ``_pending``
+                    became ``PendingPlacement | PendingClose`` the writer alias
+                    widened with it, and contravariance made a closure written
+                    for placements alone stop satisfying it -- so mypy named
+                    THIS site rather than letting a close reach a mapper that
+                    would have dropped it. That is the union doing the work it
+                    was chosen for.
+
+                    Lifted out of the closure because it now branches; a
+                    conditional expression inside a generator inside a
+                    constructor is where this would have become unreadable.
+                    """
+                    if record.kind == "close":
+                        return store.PendingCloseRecord(
+                            kind="close",
+                            symbol=record.symbol,
+                            entry_bar_time=record.entry_bar_time,
+                            generation=record.generation,
+                            quantity=record.quantity,
+                        )
+                    return store.PendingRecord(
+                        symbol=record.symbol,
+                        entry_bar_time=record.entry_bar_time,
+                        generation=record.generation,
+                        quantity=record.quantity,
+                        entry_limit=record.entry_limit,
+                        stop_loss=record.stop_loss,
+                        take_profit=record.take_profit,
+                    )
+
+                def _persist_pending(records: tuple[Pending, ...]) -> None:
                     """Write the executor's pending set, preserving the ledger."""
                     nonlocal persisted
                     persisted = store.PersistedState(
-                        pending=tuple(
-                            store.PendingRecord(
-                                symbol=record.symbol,
-                                entry_bar_time=record.entry_bar_time,
-                                generation=record.generation,
-                                quantity=record.quantity,
-                                entry_limit=record.entry_limit,
-                                stop_loss=record.stop_loss,
-                                take_profit=record.take_profit,
-                            )
-                            for record in records
-                        ),
+                        pending=tuple(_to_record(record) for record in records),
                         ledger=persisted.ledger,
                     )
                     store.save(persisted)

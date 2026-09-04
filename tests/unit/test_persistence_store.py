@@ -588,3 +588,211 @@ class TestOnlyTheCompositionRootMayImportTheStore:
             and "trading_bot.persistence" in path.read_text(encoding="utf-8")
         )
         assert importers == ["engine/modes.py"]
+
+
+# --------------------------------------------------------------------------
+# The pending CLOSE -- a second record shape at the SAME schema
+# --------------------------------------------------------------------------
+def _close_record(**overrides: object) -> s.PendingCloseRecord:
+    """A close against the same position ``_record`` describes."""
+    fields: dict[str, object] = {
+        "kind": "close",
+        "symbol": "ETHUSDT",
+        "entry_bar_time": BAR,
+        "generation": 0,
+        "quantity": D("0.72650000"),
+    }
+    fields.update(overrides)
+    return s.PendingCloseRecord(**fields)  # type: ignore[arg-type]
+
+
+class TestThePendingClose:
+    """The second member of the stored union, and the file already on disk."""
+
+    def test_a_close_record_round_trips_exactly(self, tmp_path: Path) -> None:
+        """Save then load returns the same object, field for field.
+
+        MUTATION: drop ``quantity`` from ``_dump_pending``'s close branch, or
+        write the close through the placement branch.
+
+        Equality on a frozen pydantic model compares every field, so this
+        cannot pass while one is silently dropped -- and ``quantity`` is the
+        one field a close carries that is not an ID seed.
+        """
+        path = tmp_path / "state.json"
+        state = s.PersistedState(pending=(_close_record(),))
+
+        s.save(state, path)
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.pending == (_close_record(),)
+
+    def test_the_schema_stays_at_one_so_a_close_needs_no_bump(self, tmp_path: Path) -> None:
+        """THE RULING, asserted rather than trusted.
+
+        MUTATION: bump ``SCHEMA_VERSION`` to 2.
+
+        ``load`` tests the version by strict EQUALITY, so a bump would make
+        THIS build refuse the store already on disk -- which carries the only
+        real ledger this project has -- and ``live_system`` refuses to boot on
+        a corrupt store. Asserting the integer on a file that contains a close
+        is what pins the growth as additive.
+        """
+        path = tmp_path / "state.json"
+
+        s.save(s.PersistedState(pending=(_close_record(),)), path)
+
+        assert json.loads(path.read_text(encoding="utf-8"))["schema"] == 1
+        assert s.SCHEMA_VERSION == 1
+
+    def test_a_file_written_before_the_tag_still_loads_as_a_placement(self, tmp_path: Path) -> None:
+        """**THE COMPATIBILITY CLAIM, on a payload shaped like the live file.**
+
+        MUTATION: remove the default from ``PendingRecord.kind``, or make
+        ``_load_pending`` require the key.
+
+        Hand-written rather than produced by ``save``, deliberately: a record
+        this build wrote would carry ``kind`` and could not express the
+        absence. This is the shape of ``data/state.json`` as it exists today,
+        ledger included, and it must load unchanged.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "pending": [
+                        {
+                            "symbol": "ETHUSDT",
+                            "entry_bar_time": BAR.isoformat(),
+                            "generation": 0,
+                            "quantity": "0.72650000",
+                            "entry_limit": "2508.41000000",
+                            "stop_loss": "2458.25000000",
+                            "take_profit": "2608.74000000",
+                        }
+                    ],
+                    "ledger": {"pnl_date": "2026-09-04", "realised_pnl": "-81.2855010000"},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.pending == (_record(),)
+        assert loaded.pending[0].kind == "placement"
+        assert loaded.ledger == s.LedgerRecord(
+            realised_pnl=D("-81.2855010000"), pnl_date=date(2026, 9, 4)
+        )
+
+    def test_both_kinds_survive_one_file_together(self, tmp_path: Path) -> None:
+        """One keyspace, two shapes, neither erasing the other.
+
+        MUTATION: have ``_load_pending`` ignore ``kind`` and always build a
+        ``PendingRecord``.
+
+        Under it the close entry raises on the missing ``entry_limit`` -- which
+        ``load`` reports as ``StoreCorruptError`` -- so the failure is loud
+        rather than a silently dropped record.
+        """
+        path = tmp_path / "state.json"
+        state = s.PersistedState(pending=(_record(), _close_record(symbol="BTCUSDT")))
+
+        s.save(state, path)
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert [r.kind for r in loaded.pending] == ["placement", "close"]
+        assert loaded.pending == (_record(), _close_record(symbol="BTCUSDT"))
+
+    def test_a_close_record_has_no_entry_economics_and_cannot_acquire_any(
+        self, tmp_path: Path
+    ) -> None:
+        """The line ``PendingPlacement`` draws, held on the store side too.
+
+        MUTATION: add ``entry_limit`` to ``PendingCloseRecord``.
+
+        A MARKET sell has no limit price, so a limit on a close record would be
+        a fabricated value in a type whose whole justification is that it holds
+        none.
+
+        **ASSERTED AS ABSENCE, NOT AS A RAISE, and the first draft of this test
+        got that wrong.** ``_Frozen`` sets only ``frozen=True``; pydantic's
+        default is ``extra="ignore"``, so passing ``entry_limit=`` to a close
+        record is silently DROPPED rather than refused. That is safe -- nothing
+        reads a field the model does not declare -- but it means a raise is the
+        wrong instrument. What is pinned instead is stronger and true: the
+        field is not on the model, and a hand-edited file carrying one cannot
+        put it there.
+        """
+        assert not (
+            {"entry_limit", "stop_loss", "take_profit"} & set(s.PendingCloseRecord.model_fields)
+        )
+
+        path = tmp_path / "state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "pending": [
+                        {
+                            "kind": "close",
+                            "symbol": "ETHUSDT",
+                            "entry_bar_time": BAR.isoformat(),
+                            "generation": 0,
+                            "quantity": "0.72650000",
+                            "entry_limit": "2508.41000000",
+                        }
+                    ],
+                    "ledger": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.pending == (_close_record(),)
+        assert not hasattr(loaded.pending[0], "entry_limit")
+
+    def test_an_unknown_kind_is_refused_rather_than_defaulted(self, tmp_path: Path) -> None:
+        """A value we cannot read is not a placement.
+
+        MUTATION: make ``_load_pending``'s final branch ``return
+        PendingRecord(**entry)`` unconditionally.
+
+        Defaulting an unrecognised tag would hand the resolver a record of a
+        shape it cannot use, from a file a future build wrote. Refusing keeps
+        the failure at the boundary, in the type this module documents.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "schema": 1,
+                    "pending": [{"kind": "amend", "symbol": "ETHUSDT"}],
+                    "ledger": None,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(s.StoreCorruptError, match="amend"):
+            s.load(path)
+
+    def test_a_close_still_counts_toward_the_one_record_per_symbol_rule(self) -> None:
+        """The duplicate guard reads ``symbol``, which both kinds carry.
+
+        MUTATION: scope ``_reject_duplicate_symbols`` to placements only.
+
+        This is the store-side mirror of the single ``_pending`` keyspace: a
+        symbol carries at most ONE unresolved write, of either kind. Without
+        it a close and an entry could both be recorded against one symbol,
+        which is the state the executor's guard exists to make impossible.
+        """
+        with pytest.raises(ValidationError):
+            s.PersistedState(pending=(_record(), _close_record()))

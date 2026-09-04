@@ -47,7 +47,7 @@ from trading_bot.core.models import (
 )
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.execution.dispatch_budget import DispatchBudget
-from trading_bot.execution.executor import OrderExecutor, PendingPlacement
+from trading_bot.execution.executor import OrderExecutor, PendingClose, PendingPlacement
 from trading_bot.execution.resolution import PlacementOutcome, PlacementVerdict
 
 D = Decimal
@@ -247,6 +247,29 @@ class FakeClient:
             raise self.place_error
         self.otoco.append(request)
         return placed_list()
+
+    async def get_all_order_lists(
+        self,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[OrderList]:
+        """The enumeration ``resolve_placement`` asks.
+
+        **IT EXISTS SO A ROUTING MISTAKE IS OBSERVABLE**, and it was added
+        because a mutation proved invisible without it. Before it, this fake
+        had no such method: a record wrongly routed to ``resolve_placement``
+        made the call raise ``AttributeError``, which that function catches
+        INTERNALLY and converts to an ``UNRESOLVED`` verdict -- so nothing
+        escaped, nothing was logged, and ``venue_calls`` stayed empty. A close
+        that was resolved-and-failed looked exactly like one that was skipped.
+
+        Returning empty rather than raising, for ``FakeRootClient``'s stated
+        reason: an unconfigured answer from a venue call is a real
+        classification, and a raise would let the fixture decide the result.
+        """
+        self.venue_calls.append("get_all_order_lists")
+        return []
 
     async def create_oto_order_list(
         self,
@@ -1157,3 +1180,158 @@ class TestTheEntryFillPrice:
         # Fail-closed regardless: this position cannot reach the ledger.
         with pytest.raises(ValueError, match="cost basis is unknown"):
             portfolio.positions[SYMBOL].unrealized_pnl(D("110"))
+
+
+# --------------------------------------------------------------------------
+# The pending UNION -- one keyspace, two kinds
+# --------------------------------------------------------------------------
+def _close(symbol: str = SYMBOL) -> PendingClose:
+    """A pending close against the same position the entry fixtures open."""
+    return PendingClose(symbol=symbol, entry_bar_time=BAR, generation=0, quantity=D("0.5"))
+
+
+class TestThePendingUnion:
+    """Both kinds share ``_pending``, and the existing guards still bind.
+
+    **NOTHING IN ``src/`` CONSTRUCTS A ``PendingClose``** -- the dispatch path
+    that would is Q-C section 4b's, and the executor still refuses ``CLOSE``.
+    These tests reach the shape through ``restored_pending``, which is the only
+    door into ``_pending`` that does not go through dispatch.
+    """
+
+    def test_both_kinds_carry_a_tag_and_the_tags_differ(self) -> None:
+        """The discriminator, asserted on the values a narrowing branches on.
+
+        MUTATION: give ``PendingClose.kind`` the default ``"placement"``.
+
+        Under it every narrowing in the tree silently takes the entry branch --
+        including the resolver's -- and a close would be handed to
+        ``resolve_placement``. Asserting the pair is what makes the tag a fact
+        rather than a convention.
+        """
+        assert _close().kind == "close"
+        assert (
+            PendingPlacement(
+                symbol=SYMBOL,
+                entry_bar_time=BAR,
+                generation=0,
+                quantity=D("0.5"),
+                entry_limit=D("100"),
+                stop_loss=D("95"),
+                take_profit=D("110"),
+            ).kind
+            == "placement"
+        )
+
+    def test_a_close_carries_no_entry_economics(self) -> None:
+        """Four fields, and the three an exit has no business holding are absent.
+
+        MUTATION: add ``entry_limit`` to ``PendingClose``.
+
+        ``PendingPlacement``'s line is *"every field is something WE
+        REQUESTED"*. A MARKET sell requests no limit price, so a limit here
+        would be a fabricated value in the one type whose justification is that
+        it holds none. Asserted over ``__slots__`` rather than by a raise: the
+        dataclass is ``slots=True``, so the field's absence is structural.
+        """
+        assert set(PendingClose.__slots__) == {
+            "symbol",
+            "entry_bar_time",
+            "generation",
+            "quantity",
+            "kind",
+        }
+
+    async def test_an_entry_is_refused_while_a_close_is_pending(self) -> None:
+        """**THE REASON FOR ONE KEYSPACE, and the whole of it.**
+
+        MUTATION: key closes in a separate dict from ``_pending``.
+
+        The guard is ``if signal.symbol in self._pending`` and it was written
+        for placements. Putting closes in the same keyspace means it refuses an
+        entry during an unresolved exit with NO rewrite of entry gating -- a
+        separate dict would leave it blind, and an entry could dispatch on a
+        symbol the bot is midway through exiting.
+
+        DECLARED: this passes today only because the union shares the dict.
+        Nothing else in the tree would report the separation.
+        """
+        executor, client, _ = build()
+        executor._pending[SYMBOL] = _close()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert client.otoco == []
+        assert client.oto == []
+        assert client.venue_calls == []
+
+    async def test_a_pending_close_is_skipped_by_placement_resolution(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The resolver does not answer for a close, and says nothing rather
+        than answering wrongly.
+
+        MUTATION: delete the ``kind != "placement"`` guard in ``__call__``.
+
+        Under it a close reaches ``resolve_placement``, which asks
+        ``get_all_order_lists`` whether a LIST bearing our
+        ``listClientOrderId`` rests. A discretionary close is a standalone
+        MARKET sell and is not a list, so that query answers ``NOT_PLACED``
+        whatever actually happened -- and on the fail-closed path a wrong
+        answer confidently given is worse than none.
+
+        **WHAT ACTUALLY CATCHES THE MUTATION IS PYTHON, NOT THESE
+        ASSERTIONS -- stated plainly, because two wrong predictions were spent
+        establishing it and the honest answer is not the flattering one.**
+        Remove the guard and the close reaches the placement branch, which
+        reads ``record.entry_limit``; ``PendingClose`` has no such attribute,
+        so it raises ``AttributeError`` DURING ``await executor(candle())``,
+        before any assertion below is reached. That is this project's third
+        kind of coverage -- enforcement by the interpreter -- and it is the
+        strongest of the three, because no future edit to a test can delete
+        it. It is not, however, an assertion, and the difference is recorded
+        rather than glossed.
+
+        **Two earlier attempts failed for two DIFFERENT reasons, both worth
+        keeping.** The first asserted only ``venue_calls == []`` and did not
+        bite: ``FakeClient`` had no ``get_all_order_lists``, so the call raised
+        inside ``resolve_placement``, which catches internally and returns
+        ``UNRESOLVED`` -- nothing escaped, nothing was logged, and no venue
+        call was recorded because the fake was never entered. A
+        resolved-and-failed close looked exactly like a skipped one. The fake
+        gained the method for that reason; see it. The second added the
+        ``collaborator_failed`` assertion on the theory that the exception
+        escapes to ``__call__``, which it does not -- ``resolve_placement``
+        swallows it one layer down.
+
+        The three assertions below pin the INTENDED behaviour, which is worth
+        pinning on its own terms: no venue call, no failure logged, record
+        preserved.
+        """
+        executor, client, _ = build()
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.ERROR):
+            await executor(candle())
+
+        assert _records(caplog, "collaborator_failed") == []
+        assert client.venue_calls == []
+        assert executor._pending[SYMBOL] == _close()
+
+    async def test_a_restored_close_reaches_the_pending_set(self) -> None:
+        """The restore door, which is how a close survives a process death.
+
+        MUTATION: narrow ``restored_pending`` back to ``PendingPlacement``.
+
+        mypy is the instrument for the annotation; this pins the runtime half
+        -- that the record arrives keyed by its symbol and is the same object,
+        so the guard above has something to find.
+        """
+        executor = OrderExecutor(
+            client=FakeClient(),  # type: ignore[arg-type]
+            portfolio=Portfolio(free_quote=D("10000")),
+            budget=DispatchBudget(deadline_s=9.0),
+            restored_pending=(_close(),),
+        )
+
+        assert executor._pending == {SYMBOL: _close()}

@@ -134,7 +134,7 @@ import os
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -145,6 +145,7 @@ __all__ = [
     "DEFAULT_STORE_PATH",
     "SCHEMA_VERSION",
     "LedgerRecord",
+    "PendingCloseRecord",
     "PendingRecord",
     "PersistedState",
     "StoreCorruptError",
@@ -200,6 +201,42 @@ class PendingRecord(_Frozen):
     # module documents.
     stop_loss: Money | None
     take_profit: Money | None
+    #: The union tag. **DEFAULTED, and that default is what keeps this build
+    #: reading the file already on disk.** An entry written before this commit
+    #: carries no ``kind`` key at all, so it reads as a placement -- which is
+    #: what it is. Without the default, every existing store would fail
+    #: validation and :func:`load` would report it as corrupt.
+    kind: Literal["placement"] = "placement"
+
+
+class PendingCloseRecord(_Frozen):
+    """One discretionary close whose outcome was not observed.
+
+    The four fields ``PendingClose`` carries, and no more. Same inclusion test
+    as :class:`PendingRecord` -- every one is something WE REQUESTED -- and the
+    three it does not carry are absent because an exit has no ``entry_limit``,
+    no ``stop_loss`` and no ``take_profit`` to request.
+
+    **A SECOND MODEL RATHER THAN OPTIONAL FIELDS ON THE FIRST.** Making
+    ``entry_limit`` nullable on :class:`PendingRecord` would break the
+    required-key discipline that type states in the comment above
+    ``stop_loss``: the KEY must be present so a truncated store RAISES instead
+    of reading as something benign. A close record has no such key to require,
+    and a shared model would have to drop the requirement for both.
+
+    ``kind`` carries NO DEFAULT here, deliberately, where its sibling's is
+    defaulted. The sibling's default exists to read files written before the
+    tag; no file has ever contained a close record, so there is nothing to be
+    lenient towards, and requiring it means a close entry that lost its tag is
+    refused rather than silently read as a placement -- which would hand the
+    resolver an entry-shaped record with no ``entry_limit``.
+    """
+
+    kind: Literal["close"]
+    symbol: str
+    entry_bar_time: datetime
+    generation: int
+    quantity: Money
 
 
 class LedgerRecord(_Frozen):
@@ -219,7 +256,19 @@ class PersistedState(_Frozen):
     """Everything the store holds. ``ledger=None`` means never accrued."""
 
     schema_version: int = Field(default=SCHEMA_VERSION, ge=1)
-    pending: tuple[PendingRecord, ...] = ()
+    #: Either kind of unresolved write, discriminated by ``kind``.
+    #:
+    #: **THE SCHEMA STAYS AT 1, and that is a decision with a measured
+    #: reason.** :func:`load` tests the version by strict EQUALITY --
+    #: ``if version != SCHEMA_VERSION`` -- and reports a mismatch as
+    #: :class:`StoreCorruptError`, whose message says "this build reads
+    #: {SCHEMA_VERSION} only". A bump to 2 would therefore REFUSE the store
+    #: already on disk, which carries this project's only real ledger, and
+    #: ``live_system`` refuses to boot on a corrupt store. The growth here is
+    #: additive -- a new optional key on one model and a new model reached only
+    #: when that key says so -- so a file written before this commit still
+    #: loads unchanged, which is exactly what a schema integer is for.
+    pending: tuple[PendingRecord | PendingCloseRecord, ...] = ()
     ledger: LedgerRecord | None = None
 
     @model_validator(mode="after")
@@ -271,9 +320,28 @@ def _dump_optional_money(value: Decimal | None) -> str | None:
     return None if value is None else _dump_money(value)
 
 
-def _dump_pending(record: PendingRecord) -> dict[str, Any]:
-    """One record, field by named field. There is no catch-all serialiser."""
+def _dump_pending(record: PendingRecord | PendingCloseRecord) -> dict[str, Any]:
+    """One record, field by named field. There is no catch-all serialiser.
+
+    Dispatches on ``kind``, and the branch is exhaustive by TYPE rather than by
+    a trailing ``else``: adding a third member to the union fails the type
+    check here instead of falling through to a shape that silently drops
+    fields.
+    """
+    if record.kind == "close":
+        return {
+            "kind": record.kind,
+            "symbol": record.symbol,
+            "entry_bar_time": record.entry_bar_time.isoformat(),
+            "generation": record.generation,
+            "quantity": _dump_money(record.quantity),
+        }
     return {
+        # WRITTEN EXPLICITLY, though the model defaults it. A file this build
+        # writes states what it is; only a file written BEFORE the tag existed
+        # relies on the default. That keeps the leniency confined to reading
+        # history rather than becoming how new records are shaped.
+        "kind": record.kind,
         "symbol": record.symbol,
         "entry_bar_time": record.entry_bar_time.isoformat(),
         "generation": record.generation,
@@ -282,6 +350,25 @@ def _dump_pending(record: PendingRecord) -> dict[str, Any]:
         "stop_loss": _dump_optional_money(record.stop_loss),
         "take_profit": _dump_optional_money(record.take_profit),
     }
+
+
+def _load_pending(entry: dict[str, Any]) -> PendingRecord | PendingCloseRecord:
+    """One record back from its payload, dispatched on ``kind``.
+
+    **A MISSING ``kind`` MEANS PLACEMENT**, which is the whole of what lets a
+    store written before this commit load unchanged. An unrecognised one is
+    refused rather than defaulted: a value we do not know how to read is not a
+    placement, and treating it as one would hand the resolver a record of a
+    shape it cannot use.
+    """
+    kind = entry.get("kind", "placement")
+    if kind == "close":
+        return PendingCloseRecord(**entry)
+    if kind != "placement":
+        raise ValueError(
+            f"pending entry declares kind {kind!r}; this build reads 'placement' and 'close'"
+        )
+    return PendingRecord(**entry)
 
 
 def _dump_ledger(ledger: LedgerRecord | None) -> dict[str, Any] | None:
@@ -342,10 +429,10 @@ def load(path: Path = DEFAULT_STORE_PATH) -> PersistedState | None:
     try:
         return PersistedState(
             schema_version=SCHEMA_VERSION,
-            pending=tuple(PendingRecord(**entry) for entry in payload.get("pending", [])),
+            pending=tuple(_load_pending(entry) for entry in payload.get("pending", [])),
             ledger=(None if payload.get("ledger") is None else LedgerRecord(**payload["ledger"])),
         )
-    except (ValidationError, TypeError) as exc:
+    except (ValidationError, TypeError, ValueError) as exc:
         raise StoreCorruptError(f"{path} does not match the expected shape: {exc}") from exc
 
 
