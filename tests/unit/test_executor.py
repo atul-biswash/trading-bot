@@ -37,12 +37,14 @@ from trading_bot.core.enums import (
 from trading_bot.core.exceptions import (
     ExchangeConnectionError,
     FilterRejectedError,
+    OrderNotFoundError,
     SymbolInfoNotPrimedError,
 )
 from trading_bot.core.models import (
     Candle,
     Order,
     OrderList,
+    OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
     Position,
@@ -51,7 +53,12 @@ from trading_bot.core.models import (
 )
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.execution.dispatch_budget import DispatchBudget
-from trading_bot.execution.executor import OrderExecutor, PendingClose, PendingPlacement
+from trading_bot.execution.executor import (
+    OrderExecutor,
+    Pending,
+    PendingClose,
+    PendingPlacement,
+)
 from trading_bot.execution.resolution import PlacementOutcome, PlacementVerdict
 
 D = Decimal
@@ -209,7 +216,20 @@ class FakeClient:
         filled_quantity: str = "0.5",
         order_error: Exception | None = None,
         leg_answers: dict[str, Order | Exception] | None = None,
+        cancel_answer: Exception | None = None,
+        sell_answer: Order | Exception | None = None,
     ) -> None:
+        #: What the list cancel does. ``None`` succeeds; an exception is raised.
+        #: `OrderNotFoundError` is how a test says ``-2011``, which is NORMAL on
+        #: this path rather than a failure.
+        self._cancel_answer = cancel_answer
+        #: What the MARKET sell returns, or raises. ``None`` fills completely at
+        #: a quote total, which is the ordinary case.
+        #:
+        #: **THESE TWO ARE WRITES AND EVERY EXISTING TEST LEAVES THEM ALONE.**
+        #: Defaults keep the fake's behaviour identical for anything that does
+        #: not close a position; only the close tests configure them.
+        self._sell_answer = sell_answer
         #: PER-LEG answers for the close path's confirming query, keyed by leg
         #: code (``"SL"`` / ``"TP"``).
         #:
@@ -237,6 +257,9 @@ class FakeClient:
         self.order_queries: list[str] = []
         #: Every venue round trip this fake served, in order.
         self.venue_calls: list[str] = []
+        #: ``(symbol, order_list_id)`` per cancel, and the SELL requests.
+        self.cancelled: list[tuple[str, int]] = []
+        self.sold: list[OrderRequest] = []
 
     async def get_order(
         self,
@@ -285,6 +308,36 @@ class FakeClient:
             raise self.place_error
         self.otoco.append(request)
         return placed_list()
+
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """The list cancel. Records the numeric id it was actually given.
+
+        Recording the id is what lets a test assert the close cancelled by the
+        VENUE's number rather than by ours -- the substitution that cost 28
+        false verdicts in run 1 and that `Position` now separates by type.
+        """
+        self.venue_calls.append("cancel_order_list")
+        self.cancelled.append((symbol, order_list_id))
+        if self._cancel_answer is not None:
+            raise self._cancel_answer
+        return placed_list()
+
+    async def create_order(self, request: OrderRequest) -> Order:
+        """The MARKET sell. Records the request so its shape can be asserted."""
+        self.venue_calls.append("create_order")
+        self.sold.append(request)
+        if isinstance(self._sell_answer, Exception):
+            raise self._sell_answer
+        if self._sell_answer is not None:
+            return self._sell_answer
+        return sell_fill()
 
     async def get_all_order_lists(
         self,
@@ -481,8 +534,13 @@ class TestRefusals:
 
         Driven against a portfolio holding the position, so the plan runs; the
         no-position path is pinned separately.
+
+        **DRIVEN TO A HALT VERDICT SINCE M5h's C5.** A `SELL` plan no longer
+        refuses -- it cancels, re-confirms and sells. The refusal-by-name
+        contract still holds for every verdict that does NOT sell, which is what
+        this asserts; the executing path has its own suite.
         """
-        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        client = FakeClient(leg_answers={"SL": _leg("0.2"), "TP": _leg("0")})
         executor, _, _ = build(client=client, portfolio=_held())
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
@@ -1391,6 +1449,33 @@ class TestThePendingUnion:
 # Q-C section 4b's READ half -- plan, report, refuse
 # --------------------------------------------------------------------------
 CLOSE_QTY = D("0.5")
+#: The venue's own quote total for a complete sell.
+#:
+#: **DELIBERATELY NOT `CLOSE_QTY * entry_fill`.** Entry is 98.00000000 x 0.5 =
+#: 49.0; this is 51.25, so the realised figure is a non-zero +2.25 and a booking
+#: that credited the wrong number, or booked nothing, changes it. A total equal
+#: to the cost basis would make every P&L assertion pass at zero.
+SELL_TOTAL = D("51.25000000")
+
+
+def sell_fill(*, executed: Decimal = CLOSE_QTY, total: Decimal | None = SELL_TOTAL) -> Order:
+    """The MARKET sell's response.
+
+    ``total=None`` is the shape that forces the point-query fallback: the tree
+    sets ``newOrderRespType`` NOWHERE, so a response carrying no
+    ``cummulativeQuoteQty`` is a state the design must handle rather than
+    assume away.
+    """
+    return Order(
+        order_id="777",
+        symbol=SYMBOL,
+        side=OrderSide.SELL,
+        type=OrderType.MARKET,
+        status=OrderStatus.FILLED,
+        quantity=CLOSE_QTY,
+        filled_quantity=executed,
+        filled_quote_quantity=total,
+    )
 
 
 def _leg(executed: str, status: OrderStatus = OrderStatus.NEW) -> Order:
@@ -1406,12 +1491,28 @@ def _leg(executed: str, status: OrderStatus = OrderStatus.NEW) -> Order:
     )
 
 
-def _held(*, stop: str | None = "95", target: str | None = "110") -> Portfolio:
+def _held(
+    *,
+    stop: str | None = "95",
+    target: str | None = "110",
+    venue_id: int | None = int(VENUE_LIST_ID),
+    entry_fill: str | None = "98.00000000",
+) -> Portfolio:
     """A portfolio holding the position `close_signal` would close.
 
     `build()`'s default portfolio holds NOTHING, so a close against it refuses
     at `close_no_position` and makes zero reads -- which cannot express any row
-    of the decision table. This is the fixture that can.
+    of the decision table.
+
+    **`venue_id` DEFAULTS TO PRESENT, and it did not used to exist.** Without it
+    every close refuses at `close_no_venue_list_id` before the cancel, so no
+    test could reach the executing path at all -- the fixture, not the
+    assertions, would have been the limit. It is parameterised so ruling 1's
+    refusal is reachable too.
+
+    **`entry_fill` likewise**: booking reads `entry_fill_price` and
+    `close_position` refuses without one, so a fixture that omitted it could
+    express a sell but never a BOOKED close.
     """
     return Portfolio(
         free_quote=D("10000"),
@@ -1421,9 +1522,11 @@ def _held(*, stop: str | None = "95", target: str | None = "110") -> Portfolio:
                 side=PositionSide.LONG,
                 quantity=CLOSE_QTY,
                 entry_price=D("100"),
+                entry_fill_price=D(entry_fill) if entry_fill is not None else None,
                 entry_bar_time=BAR,
                 protection=ProtectionState.UNKNOWN,
-                order_list_id="tb1-BTCUSDT-1714564800000-0-L",
+                order_list_id=CLIENT_LIST_ID,
+                venue_order_list_id=venue_id,
                 stop_loss=D(stop) if stop is not None else None,
                 take_profit=D(target) if target is not None else None,
             )
@@ -1438,16 +1541,18 @@ def _plan_records(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
 class TestTheClosePlan:
     """The read half runs, reports and refuses. NOTHING IRREVERSIBLE HAPPENS."""
 
-    async def test_no_leg_executed_plans_a_sell_and_refuses_it(
+    async def test_no_leg_executed_plans_a_sell_and_proceeds(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Section 4b row one, and the reason says the sell is RESERVED.
+        """Section 4b row one. **The plan says SELL and the sell now HAPPENS.**
 
-        MUTATION: return `CloseAction.SELL`'s reason for every verdict.
+        MUTATION: keep C4b's refusal on the SELL branch.
 
-        The refusal reason is what an operator acts on: a reserved sell is work
-        waiting on the next commit, where a halt is a state nobody may sell
-        against. Asserting the specific string is what separates them.
+        This test read `..._and_refuses_it` until C5 and asserted
+        `close_sell_reserved`. That reason no longer exists on this path: a
+        `SELL` verdict proceeds to cancel, re-confirm and sell. What survives is
+        the plan record itself, which is still emitted before anything
+        irreversible.
         """
         client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
         executor, _, _ = build(client=client, portfolio=_held())
@@ -1458,8 +1563,8 @@ class TestTheClosePlan:
         plans = _plan_records(caplog)
         assert len(plans) == 1
         assert plans[0].decision == "sell"  # type: ignore[attr-defined]
-        refusals = _records(caplog, "dispatch_refused")
-        assert refusals[0].reason == "close_sell_reserved"  # type: ignore[attr-defined]
+        assert _records(caplog, "dispatch_refused") == []
+        assert client.sold  # it really sold
 
     async def test_a_filled_leg_plans_already_closed_and_books_nothing(
         self, caplog: pytest.LogCaptureFixture
@@ -1559,8 +1664,12 @@ class TestTheClosePlan:
         protection state -- the entry leg is `LIMIT`+`FOK` and terminal at
         placement. Asserted as an exact list, not a count, so a read of the
         WRONG leg fails here too.
+
+        Driven to a HALT verdict, so the PLAN's read count is what is measured
+        rather than the whole sequence -- a SELL now continues into a cancel and
+        two more reads, and the full sequence is asserted in its own test.
         """
-        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        client = FakeClient(leg_answers={"SL": _leg("0.2"), "TP": _leg("0")})
         executor, _, _ = build(client=client, portfolio=_held())
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
@@ -1577,7 +1686,7 @@ class TestTheClosePlan:
         spends a call to be told `-2011`. The read count follows what was
         REQUESTED, which is the same key Q-C reconciles on.
         """
-        client = FakeClient(leg_answers={"SL": _leg("0")})
+        client = FakeClient(leg_answers={"SL": _leg("0.2")})
         executor, _, _ = build(client=client, portfolio=_held(target=None))
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
@@ -1650,13 +1759,14 @@ class TestTheClosePlan:
         Scoped to the two close methods rather than the file, so the ENTRY
         path's own placements cannot mask a write here.
         """
-        client = FakeClient(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+        client = FakeClient(leg_answers={"SL": _leg("0.2"), "TP": _leg("0")})
         executor, _, _ = build(client=client, portfolio=_held())
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
         assert client.venue_calls == ["get_order", "get_order"]
         assert client.otoco == [] and client.oto == []
+        assert client.cancelled == [] and client.sold == []
 
         tree = ast.parse(Path(inspect.getfile(OrderExecutor)).read_text(encoding="utf-8"))
         closers = [
@@ -1683,6 +1793,63 @@ class TestTheClosePlan:
             "close_position",
             "open_position",
             "record_realised_pnl",
+        }, sorted(called)
+
+    def test_the_whole_close_path_touches_exactly_three_venue_methods(self) -> None:
+        """**THE CENSUS OF EVERY IRREVERSIBLE THING THIS COMMIT CAN DO.**
+
+        MUTATION: call any other client method from the close path.
+
+        The test above scopes to the PLAN, which still writes nothing. This one
+        covers the executing half too, and it is the assertion that says what
+        the bot can now do at a venue of its own volition: cancel a list, query
+        an order, place an order. Nothing else.
+
+        An AST walk over the named methods, **never a text grep**: a grep for
+        forbidden call names matched this file's own docstrings twice this
+        milestone, because a docstring saying "no cancel is sent" contains the
+        word. Collecting CALLED attribute names is the direct observation the
+        grep was standing in for.
+
+        `create_otoco_order_list` and `create_oto_order_list` stay forbidden
+        here: an exit may never open a position.
+        """
+        tree = ast.parse(Path(inspect.getfile(OrderExecutor)).read_text(encoding="utf-8"))
+        close_methods = {
+            "_plan_close",
+            "_execute_close",
+            "_confirm_protective_legs",
+            "_cancel_protection",
+            "_sell_and_book",
+            "_requery_sell_total",
+            "_book_close",
+            "_go_naked",
+        }
+        found = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AsyncFunctionDef | ast.FunctionDef)
+            and node.name in close_methods
+        ]
+        assert {fn.name for fn in found} == close_methods, "a close method was renamed or lost"
+
+        called = {
+            node.func.attr
+            for fn in found
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+        }
+        assert called & {"cancel_order_list", "get_order", "create_order"} == {
+            "cancel_order_list",
+            "get_order",
+            "create_order",
+        }
+        assert not called & {
+            "create_otoco_order_list",
+            "create_oto_order_list",
+            "cancel_order",
+            "cancel_all_open_orders",
+            "get_all_order_lists",
         }, sorted(called)
 
 
@@ -1837,3 +2004,379 @@ class TestTheTwoListIdentifiers:
 
         assert position.venue_order_list_id is None
         assert position.order_list_id is None
+
+
+# --------------------------------------------------------------------------
+# Q-C section 4b's IRREVERSIBLE half -- cancel, re-confirm, sell, book
+# --------------------------------------------------------------------------
+#: The whole sequence, in order. Two plan reads, one cancel, two CONFIRM reads,
+#: one sell. **The two read pairs are not the same reads** -- ruling 4 requires
+#: the second pair be taken AFTER the cancel, because a read taken before it
+#: cannot see a leg that filled during it.
+FULL_CLOSE = [
+    "get_order",
+    "get_order",
+    "cancel_order_list",
+    "get_order",
+    "get_order",
+    "create_order",
+]
+
+
+def _selling_client(**kwargs: Any) -> FakeClient:
+    """A fake whose legs are quiet, so the plan says SELL and the path runs."""
+    kwargs.setdefault("leg_answers", {"SL": _leg("0"), "TP": _leg("0")})
+    return FakeClient(**kwargs)
+
+
+class TestTheCloseExecutes:
+    """The cancel, the re-confirm, the sell and the booking.
+
+    **THIS IS THE ONLY SUITE COVERING IRREVERSIBLE VENUE WRITES THE BOT SENDS
+    OF ITS OWN VOLITION**, and none of it has run against a venue.
+    """
+
+    async def test_the_full_sequence_is_exactly_six_calls_in_order(self) -> None:
+        """**THE ORDERING, asserted as a list rather than a count.**
+
+        MUTATION: sell before cancelling; or skip the re-confirm.
+
+        Section 4b forces cancel-then-sell: the reverse leaves the position flat
+        with a live protective leg, which can sell base no longer held. A count
+        would pass under a reordering; the list will not. And the two `get_order`
+        pairs straddling the cancel are what ruling 4 requires -- collapsing them
+        into one pair passes a count of six and fails this.
+        """
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == FULL_CLOSE
+
+    async def test_the_cancel_uses_the_venue_numeric_id(self) -> None:
+        """MUTATION: cancel with `position.order_list_id`.
+
+        That is the run-1 substitution, now on an irreversible write. The fake
+        records what it was actually handed, so a cancel addressed by our
+        `tb1-...` id fails here rather than at the venue -- where it would
+        either error or, worse, address someone else's list.
+        """
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.cancelled == [(SYMBOL, int(VENUE_LIST_ID))]
+
+    async def test_a_missing_venue_id_refuses_before_any_call(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """RULING 1. **No fallback to the documented client id.**
+
+        MUTATION: fall back to `listClientOrderId` when the number is absent.
+
+        Binance documents that alternative and this project has NEVER SENT ONE.
+        Staking an irreversible write on an unmeasured wire parameter, when the
+        verified path is simply absent, is the gamble the refusal exists to
+        refuse. Asserting ZERO calls is the point: the refusal precedes the
+        cancel, so nothing is at the venue to undo.
+        """
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held(venue_id=None))
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[-1].reason == "close_no_venue_list_id"  # type: ignore[attr-defined]
+        assert client.cancelled == [] and client.sold == []
+
+    async def test_a_persist_failure_refuses_before_the_cancel(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**RULING 3, and the assertion that matters is `cancelled == []`.**
+
+        MUTATION: move the persist to after the cancel.
+
+        `dispatch`'s entry path persists before ONE venue write. Here the record
+        covers a SEQUENCE whose first irreversible step is the cancel -- so a
+        persist that failed after it would leave a position with its protection
+        gone and no durable trace anything was attempted. Refusing here costs
+        nothing because nothing has been sent, which is exactly what the empty
+        `cancelled` list says.
+        """
+
+        def _boom(_records: object) -> None:
+            raise OSError("no space left on device")
+
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held(), persist=_boom)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        refusals = _records(caplog, "dispatch_refused")
+        assert refusals[-1].reason == "store_unwritable"  # type: ignore[attr-defined]
+        assert client.cancelled == []
+        assert client.sold == []
+
+    async def test_a_pending_close_is_written_before_the_cancel(self) -> None:
+        """The record exists by the time the first venue write goes out.
+
+        MUTATION: write the record after the sell.
+
+        Asserted on what the WRITER received rather than on `_pending`, because
+        the in-memory dict is cleared on success and would show nothing
+        afterwards -- so a test reading it would pass for a record that was
+        never persisted at all.
+
+        **IT RECORDS THE VENUE CALLS AS THEY STOOD WHEN THE WRITE HAPPENED, and
+        the first draft did not.** That draft asserted the record's CONTENT
+        only, so it could not fail the very mutation it is named for -- moving
+        the persist after the cancel leaves the content identical. The gap was
+        found by predicting the mutation's failure set and noticing this test
+        was not in it. Capturing the call log inside the writer turns the name
+        into an assertion.
+        """
+        written: list[tuple[Pending, ...]] = []
+        seen_at_write: list[list[str]] = []
+        client = _selling_client()
+
+        def _persist(records: tuple[Pending, ...]) -> None:
+            written.append(records)
+            seen_at_write.append(list(client.venue_calls))
+
+        executor, _, _ = build(client=client, portfolio=_held(), persist=_persist)
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert written, "nothing was ever persisted"
+        first = written[0]
+        assert [r.kind for r in first] == ["close"]
+        assert first[0].symbol == SYMBOL
+        assert first[0].quantity == CLOSE_QTY
+        # THE ORDERING: only the plan's two reads had happened. No cancel.
+        assert seen_at_write[0] == ["get_order", "get_order"]
+
+    async def test_minus_2011_is_normal_and_proceeds_to_the_requery(self) -> None:
+        """`-2011` means already terminal, NOT an error.
+
+        MUTATION: treat `OrderNotFoundError` like any other cancel failure.
+
+        Section 4b: *"A close path written to drive three cancels to success
+        would treat its own normal teardown as two errors."* And `-2011` cannot
+        distinguish already-cancelled from already-FILLED, which demand opposite
+        actions -- so it must proceed to the re-query, which is the only thing
+        that separates them.
+        """
+        client = _selling_client(cancel_answer=OrderNotFoundError("Unknown order sent."))
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == FULL_CLOSE
+
+    async def test_any_other_cancel_failure_does_not_sell(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The venue state is unknown, so selling could sell against a live stop.
+
+        MUTATION: proceed to the sell on any cancel failure.
+
+        `CRITICAL` rather than a warning because nothing else marks this: the
+        position keeps whatever protection it has and entries are not blocked,
+        so the log line is all an operator gets.
+        """
+        client = _selling_client(cancel_answer=ExchangeConnectionError("reset"))
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.sold == []
+        assert [r.levelno for r in _records(caplog, "close_cancel_failed")] == [logging.CRITICAL]
+
+    async def test_a_leg_that_filled_during_the_cancel_abandons_the_sell(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**RULING 4's WHOLE POINT, and only the second read can see it.**
+
+        MUTATION: reuse the plan's reads instead of re-querying.
+
+        The fake answers quietly on the first pair and FILLED on the second, so
+        the plan says SELL and the confirm says ALREADY_CLOSED. Under the
+        mutation the sell goes out against a position the venue has already
+        closed -- a double sell, which is the failure section 4b's ordering
+        exists to prevent. A fixture that answered the same both times could not
+        express it.
+        """
+
+        class _ChangingClient(FakeClient):
+            def __init__(self) -> None:
+                super().__init__(leg_answers={"SL": _leg("0"), "TP": _leg("0")})
+                self._pairs = 0
+
+            async def get_order(self, symbol: str, **kwargs: Any) -> Order:
+                order = await super().get_order(symbol, **kwargs)
+                self._pairs += 1
+                if self._pairs > 2:  # the SECOND pair, taken after the cancel
+                    return _leg("0.5", status=OrderStatus.FILLED)
+                return order
+
+        client = _ChangingClient()
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.sold == []
+        assert _records(caplog, "close_abandoned_after_cancel")
+        assert portfolio.ledger is None  # and nothing was booked here
+
+    async def test_a_full_fill_books_the_venues_exact_quote_total(self) -> None:
+        """**THE BOT'S OWN EXIT REACHING THE LEDGER.**
+
+        MUTATION: book `quantity * a derived price` instead of the total.
+
+        The total is the venue's own figure and booking takes it verbatim --
+        recovering a price by dividing is MEASURED lossy to 28 digits, and
+        `_dump_money` writes such a residual into `data/state.json`. The fixture
+        sets the total APART from the cost basis (51.25 against 49.0), so the
+        realised figure is a non-zero +2.25 and a wrong or absent booking moves
+        it.
+        """
+        client = _selling_client()
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
+        assert portfolio.free_quote == D("10000") + SELL_TOTAL
+        assert SYMBOL not in portfolio.positions
+
+    async def test_a_response_without_the_total_is_point_queried(self) -> None:
+        """P-c's fallback. **The total is never invented.**
+
+        MUTATION: book `Decimal(0)` when the response carries no total.
+
+        `newOrderRespType` is set NOWHERE in this tree, so the response shape is
+        DOCUMENTED and never measured here -- the only MARKET payload the
+        repository holds is a hand-written fixture. So a missing total is a real
+        possibility, and the answer is to re-read the sell by the id it was sent
+        under, which is what C1's `close_client_order_id` was built for.
+        """
+        client = _selling_client(sell_answer=sell_fill(total=None))
+        # The re-read answers with the total; keyed by the close leg suffix.
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(),
+        }
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
+        assert client.order_queries[-1].endswith("-CL")
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
+
+    async def test_a_partial_fill_books_nothing_and_goes_naked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**RULING 5, and it must fail closed because a partial CANNOT BE
+        REPRESENTED.**
+
+        MUTATION: book the partial's total.
+
+        `close_position` deletes the whole entry and credits one total; there is
+        no partial-close path and no way to say "0.3 of 0.5 sold". Booking it
+        would delete a position that still exists at the venue and credit
+        proceeds for base still held -- a corrupted ledger, in the direction
+        nobody notices.
+
+        DECLARED RESIDUAL: `Position.quantity` is now OVERSTATED, and this
+        design cannot close that. It is asserted here so the defect is pinned
+        rather than merely described.
+        """
+        client = _selling_client(sell_answer=sell_fill(executed=D("0.2")))
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+        # THE RESIDUAL, pinned: the position still claims the whole size.
+        assert portfolio.positions[SYMBOL].quantity == CLOSE_QTY
+
+    async def test_a_failed_sell_leaves_the_position_naked_and_says_so(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**RULING 6. Protection is gone and the position is not closed.**
+
+        MUTATION: retry the sell, or leave `protection` untouched.
+
+        No retry: a second sell could double-sell if the first landed and its
+        answer was lost, and nothing here can tell those apart. `UNKNOWN` is
+        what blocks entries portfolio-wide, which is the only automatic
+        consequence this state has.
+
+        The `resolution` field is asserted because ruling 6 requires the log to
+        SAY the state is self-refreshing -- a `CRITICAL` that did not would
+        leave an operator waiting for a reconciler that never resolves it.
+        """
+        client = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        naked = _records(caplog, "close_position_naked")
+        assert [r.levelno for r in naked] == [logging.CRITICAL]
+        assert "SELF-REFRESHING" in naked[0].resolution  # type: ignore[attr-defined]
+        assert "restarting" in naked[0].resolution  # type: ignore[attr-defined]
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+        assert portfolio.ledger is None
+
+    async def test_the_unprotected_window_is_logged_on_entry(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Section 4b requires the window logged. **Entry only; see the site.**
+
+        MUTATION: drop the window log.
+
+        There is no exit event because the naked state does not resolve
+        in-process -- half-satisfiable as designed, and recorded rather than
+        quietly dropped. The entry log is emitted BEFORE the cancel, so it
+        exists even when the process dies during the sequence.
+        """
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        opened = _records(caplog, "close_window_open")
+        assert len(opened) == 1
+        assert opened[0].venue_order_list_id == int(VENUE_LIST_ID)  # type: ignore[attr-defined]
+
+    async def test_a_booked_close_releases_the_pending_record(self) -> None:
+        """The symbol is not blocked forever once the outcome is known.
+
+        MUTATION: leave the record in `_pending`.
+
+        The pending guard refuses every later dispatch on a symbol that has one,
+        so a record never released would block the symbol permanently -- and
+        `__call__` deliberately skips a `PendingClose`, so nothing else would
+        clear it either.
+        """
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert executor._pending == {}

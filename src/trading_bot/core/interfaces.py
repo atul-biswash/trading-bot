@@ -204,6 +204,43 @@ class ExchangeClient(ABC):
         ...
 
     @abstractmethod
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Cancel a whole order list by the venue's numeric id. **A WRITE.**
+
+        Declared with its first production caller -- Q-C section 4b's close
+        path -- and not before, per finding GG: port surface with no caller is
+        surface written against assumptions the milestone that supplies the
+        caller has not yet made.
+
+        **ONE CALL COLLAPSES THE LIST.** MEASURED at M5c: cancelling one leg
+        auto-cancelled both others, and the subsequent per-leg cancels returned
+        ``-2011``. So a close path drives this ONCE and must not treat its own
+        normal teardown as two errors.
+
+        **``order_list_id`` IS THE VENUE'S NUMERIC ID, NOT OUR
+        ``listClientOrderId``**, and the ``int`` says so structurally. Binance
+        documents ``listClientOrderId`` as an alternative and **this project has
+        never sent one**, so the close path refuses rather than gambling an
+        irreversible write on an unmeasured wire parameter. Conflating the two
+        spaces already cost 28 consecutive false verdicts in run 1; see
+        :attr:`~trading_bot.core.models.Position.order_list_id`.
+
+        :raises OrderNotFoundError: ``-2011``, which is **NORMAL** on this path
+            rather than a failure -- the list was already terminal. It cannot
+            distinguish *already cancelled* from *already filled*, and those
+            demand opposite actions, which is why section 4b confirms by query
+            afterwards and never by this response.
+        """
+        ...
+
+    @abstractmethod
     async def close(self) -> None: ...
 
 

@@ -78,6 +78,10 @@ class _AsyncBinanceAPI(Protocol):
     async def v3_post_order_list_otoco(self, **params: Any) -> dict[str, Any]: ...
     async def v3_post_order_list_oto(self, **params: Any) -> dict[str, Any]: ...
     async def v3_get_order_list(self, **params: Any) -> dict[str, Any]: ...
+
+    #: The one list-level WRITE this protocol carries. Signed, MEASURED from
+    #: python-binance 1.0.37.
+    async def v3_delete_order_list(self, **params: Any) -> dict[str, Any]: ...
     async def v3_get_order(self, **params: Any) -> dict[str, Any]: ...
     async def v3_get_all_order_list(self, **params: Any) -> list[dict[str, Any]]: ...
     async def get_open_orders(self, **params: Any) -> list[dict[str, Any]]: ...
@@ -252,6 +256,46 @@ class BinanceClient(BaseExchangeClient):
             **self._with_call_timeout(params, timeout_s),
         )
         return to_order(raw)
+
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Cancel a whole order list by its venue id. See the port for the rules.
+
+        **``DELETE /api/v3/orderList``, signed** (MEASURED from python-binance
+        1.0.37). The response is the list in its terminal state and maps through
+        :func:`to_order_list` like every other list-shaped payload.
+
+        **``idempotent=False``, and it is a WRITE despite being a cancel.** The
+        same reasoning as :meth:`create_order`: retry only on a rate limit,
+        which is rejected pre-acceptance, and never on a connection timeout that
+        may have landed. A cancel that timed out is resolved by QUERY -- which
+        is exactly what section 4b's confirm step is -- never by sending it
+        again.
+
+        **This is the ONLY list-cancel in ``src/``.** The single-leg
+        ``cancel_order`` collapses a list too, as a side effect, and
+        ``scripts/cancel_testnet_order_list.py`` records why the list-level
+        endpoint is preferred: it says what it does where the leg route relies
+        on a consequence.
+        """
+        params: dict[str, Any] = {
+            "symbol": symbol,
+            "orderListId": order_list_id,
+            "recvWindow": self._recv_window,
+        }
+        raw = await self._call(
+            self._client.v3_delete_order_list,
+            idempotent=False,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
+        return to_order_list(raw)
 
     async def validate_order(self, request: OrderRequest) -> None:
         """Validate an order via Binance's test endpoint without placing it.

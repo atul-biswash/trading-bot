@@ -23,18 +23,19 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal
 
 from trading_bot.core.assessment import EntryIntent
-from trading_bot.core.enums import PositionSide, ProtectionState
-from trading_bot.core.exceptions import ClientRefusalError
+from trading_bot.core.enums import OrderSide, OrderType, PositionSide, ProtectionState
+from trading_bot.core.exceptions import ClientRefusalError, OrderNotFoundError
 from trading_bot.core.models import (
     Money,
+    Order,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
     Position,
 )
-from trading_bot.exchange.ids import OrderListLeg, client_order_id
+from trading_bot.exchange.ids import OrderListLeg, client_order_id, close_client_order_id
 from trading_bot.execution.close_plan import CloseAction, LegReport, plan_close
-from trading_bot.execution.dispatch_budget import DispatchBudget
+from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.placement import build_placement
 from trading_bot.execution.resolution import (
     _LIVE_STATUSES as _LIVE_LIST_STATUSES,
@@ -186,6 +187,19 @@ _EVENT_CLOSE_PLANNED = "close_planned"
 #: payload this project has measured, and named rather than silent because the
 #: consequence is a position the close path cannot cancel by number.
 _EVENT_NON_NUMERIC_LIST_ID = "order_list_id_not_numeric"
+#: Q-C section 4b's unprotected window OPENS. There is no matching close event,
+#: and `_go_naked` says why: the state it can leave behind does not resolve
+#: in-process, so there is nothing in-process to report its end.
+_EVENT_CLOSE_WINDOW_OPEN = "close_window_open"
+_EVENT_CLOSE_CANCEL_TERMINAL = "close_cancel_already_terminal"
+_EVENT_CLOSE_CANCEL_FAILED = "close_cancel_failed"
+#: The re-query after a successful cancel disagreed with the plan. Its own
+#: event, because the plan's `close_planned` already said SELL and a reader
+#: needs to see that the second look changed the answer.
+_EVENT_CLOSE_ABANDONED = "close_abandoned_after_cancel"
+_EVENT_CLOSE_BOOKED = "close_booked"
+_EVENT_CLOSE_BOOK_FAILED = "close_book_failed"
+_EVENT_CLOSE_NAKED = "close_position_naked"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -206,6 +220,14 @@ _REASON_CLOSE_HALTED = "close_halted"
 #: refusal made at evaluate time; this one means the position left between the
 #: two, and an operator meeting it should look for what removed it.
 _REASON_CLOSE_NO_POSITION = "close_no_position"
+#: No numeric list id, so the cancel cannot be addressed. Ruling 1: the
+#: documented `listClientOrderId` alternative has never been sent by this
+#: project and an irreversible write does not gamble on an unmeasured wire
+#: parameter.
+_REASON_CLOSE_NO_VENUE_ID = "close_no_venue_list_id"
+_REASON_CLOSE_CANCEL_FAILED = "close_cancel_failed"
+_REASON_CLOSE_SELL_FAILED = "close_sell_failed"
+_REASON_CLOSE_PARTIAL_FILL = "close_partial_fill"
 
 #: One refusal reason per verdict, as a total mapping rather than a chain of
 #: ``if``s. Exhaustive by construction: `CloseAction` has three members and a
@@ -1324,7 +1346,433 @@ class OrderExecutor:
             plan.action.value,
             extra=extra,
         )
+
+        if plan.action is not CloseAction.SELL:
+            # ALREADY_CLOSED and HALT both stop here, and neither books. A
+            # filled leg means the reconciliation driver's booking path will
+            # see it on its next pass; booking it here would be a SECOND path
+            # racing that one.
+            self._refuse(signal, reason, candle)
+            return
+        await self._execute_close(signal, position, candle)
+
+    async def _execute_close(self, signal: Signal, position: Position, candle: Candle) -> None:
+        """Q-C section 4b's IRREVERSIBLE half: cancel, re-confirm, sell, book.
+
+        **THE FIRST PLACE THIS BOT WRITES AT A VENUE OF ITS OWN VOLITION.**
+        Everything before it either read, or wrote an order the strategy asked
+        for. This cancels protection and sells a position, and neither can be
+        un-sent.
+
+        **THE ORDER IS FORCED, and section 4b argues it rather than asserting
+        it.** Sell-then-cancel leaves the position flat with a live protective
+        leg, which can sell base no longer held. Cancel-then-sell leaves it open
+        and unprotected between two calls we are actively making.
+        *"Unprotected-and-known is preferable to protected-against-nothing."*
+
+        **THE POSITION IS RE-CHECKED, and the state it guards is currently
+        UNREACHABLE.** `_book_exits` runs at subscriber ZERO and may delete a
+        position earlier in the same bar; dispatch is later. That cannot bite
+        today, because `RiskManager._exit_assessment` then answers
+        `nothing_to_close` and no `ExitIntent` is approved -- and because the
+        whole chain runs on ONE task, so nothing interleaves with the awaits
+        above. **Both of those are properties of other files.** D1 locked the
+        single-task model precisely so `Portfolio` is not written from a task
+        that is not reading it; if that ever changes, this guard is what stops a
+        cancel being sent for a position that no longer exists -- a venue write
+        against nothing.
+
+        **THE UNPROTECTED WINDOW IS LOGGED ON ENTRY AND NOT ON EXIT**, and that
+        is half of what section 4b asks for. There is no in-process exit event
+        because the naked-position state does not resolve in-process; see
+        :meth:`_go_naked`. Recorded rather than quietly dropped.
+        """
+        if self._portfolio.positions.get(signal.symbol) is not position:
+            # See the docstring: unreachable today, guarded because the write
+            # below is irreversible and the reasoning that makes it unreachable
+            # lives in three other files.
+            self._refuse(signal, _REASON_CLOSE_NO_POSITION, candle)
+            return
+
+        if position.venue_order_list_id is None:
+            # RULING 1. The cancel endpoint takes the venue's numeric id, and
+            # Binance documents `listClientOrderId` as an alternative --
+            # **which this project has never sent.** Falling back to it would
+            # stake an irreversible write on an unmeasured wire parameter when
+            # the verified path is simply absent here. A refused close costs a
+            # missed exit and the position keeps its protection; a cancel that
+            # silently addressed nothing would leave both.
+            self._refuse(signal, _REASON_CLOSE_NO_VENUE_ID, candle)
+            return
+
+        record = PendingClose(
+            symbol=signal.symbol,
+            entry_bar_time=position.entry_bar_time,
+            generation=_CLOSE_GENERATION,
+            quantity=position.quantity,
+        )
+        # RULING 3: THE DURABLE WRITE PRECEDES THE **CANCEL**, not the sell --
+        # and that is a departure from `dispatch`'s ordering worth stating.
+        # There, the record covers one venue write and precedes it. Here it
+        # covers a SEQUENCE, and the first irreversible step is the cancel. A
+        # persist that failed after the cancel would leave a position with its
+        # protection gone and no durable trace that anything was attempted;
+        # refusing here costs nothing, because nothing has been sent.
+        if self._persist_pending is not None:
+            try:
+                self._persist_pending((*self._pending.values(), record))
+            except Exception as exc:
+                self._log_failure("persist-close", signal.symbol, exc)
+                self._refuse(signal, _REASON_STORE_UNWRITABLE, candle)
+                return
+        self._pending[signal.symbol] = record
+
+        _log.warning(
+            "Cancelling protection to close %s; the position is unprotected from here",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_WINDOW_OPEN,
+                "symbol": signal.symbol,
+                "venue_order_list_id": position.venue_order_list_id,
+                "quantity": position.quantity,
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+
+        started_at = utc_now()
+        if not await self._cancel_protection(
+            signal,
+            position,
+            candle,
+            # Bound as an ``int`` at the one site that proved it is not ``None``,
+            # so the narrowing travels with the value rather than being
+            # re-established -- or asserted -- further down.
+            venue_order_list_id=position.venue_order_list_id,
+            started_at=started_at,
+        ):
+            return
+
+        # RULING 4: RE-QUERY AFTER THE CANCEL. The plan's reads were taken
+        # BEFORE it and cannot see a leg that filled DURING it -- which is the
+        # one state that makes selling wrong, because the position would already
+        # be closed. Section 4b places the confirm after the cancel for exactly
+        # this, and `-2011` cannot distinguish already-cancelled from
+        # already-filled, so the cancel's own response can never serve.
+        legs, _failures = await self._confirm_protective_legs(position, started_at=started_at)
+        confirmed = plan_close(legs)
+        if confirmed.action is not CloseAction.SELL:
+            _log.warning(
+                "Close abandoned after cancel for %s: %s",
+                signal.symbol,
+                confirmed.action.value,
+                extra={
+                    "event": _EVENT_CLOSE_ABANDONED,
+                    "symbol": signal.symbol,
+                    "decision": confirmed.action.value,
+                    "detail": confirmed.reason,
+                    "candle_time": candle.close_time.isoformat(),
+                },
+            )
+            # The legs are gone and nothing was sold. On ALREADY_CLOSED the
+            # venue closed the position for us and the reconciler books it; on
+            # HALT the state is unknown. Either way protection no longer rests,
+            # so this is the naked state whether or not a sell was attempted.
+            self._go_naked(signal, position, candle, _CLOSE_REFUSALS[confirmed.action])
+            return
+
+        await self._sell_and_book(signal, position, candle, started_at=started_at)
+
+    async def _cancel_protection(
+        self,
+        signal: Signal,
+        position: Position,
+        candle: Candle,
+        *,
+        venue_order_list_id: int,
+        started_at: datetime,
+    ) -> bool:
+        """Cancel the whole list. ``True`` to continue, ``False`` to stop.
+
+        **ONE CALL, NOT THREE.** MEASURED at M5c: cancelling one leg
+        auto-cancelled the others and the follow-up cancels returned ``-2011``.
+        A close path driving three cancels to success would treat its own normal
+        teardown as two errors.
+
+        **``-2011`` IS NORMAL AND CONTINUES.** It means the list was already
+        terminal -- and it cannot say whether that was a cancel or a FILL, which
+        demand opposite actions. That ambiguity is not resolved here and must
+        not be: the caller re-queries the legs immediately after, which is the
+        only thing that separates them.
+
+        **ANY OTHER FAILURE STOPS, AND PROTECTION IS LEFT IN PLACE.** The venue
+        state is unknown, so selling could sell against a live stop. `CRITICAL`
+        rather than a warning because entries are not blocked by this -- the
+        position keeps whatever protection it has and nothing marks it -- so the
+        log line is the only thing an operator gets.
+        """
+        bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
+        if bounds is None:
+            self._refuse(signal, _REASON_NO_BUDGET, candle)
+            return False
+
+        try:
+            await self._client.cancel_order_list(
+                position.symbol,
+                venue_order_list_id,
+                timeout_s=bounds.timeout_s,
+                attempts=bounds.attempts,
+            )
+        except OrderNotFoundError:
+            # `-2011`: already terminal. NORMAL, and the re-query decides what
+            # it meant. Logged at INFO because it is an expected teardown
+            # outcome rather than a fault.
+            _log.info(
+                "Order list for %s was already terminal at cancel",
+                signal.symbol,
+                extra={
+                    "event": _EVENT_CLOSE_CANCEL_TERMINAL,
+                    "symbol": signal.symbol,
+                    "venue_order_list_id": venue_order_list_id,
+                    "candle_time": candle.close_time.isoformat(),
+                },
+            )
+            return True
+        except Exception as exc:  # dispatch must never raise
+            _log.critical(
+                "Cancel failed for %s; the venue state is unknown and nothing was sold",
+                signal.symbol,
+                extra={
+                    "event": _EVENT_CLOSE_CANCEL_FAILED,
+                    "symbol": signal.symbol,
+                    "venue_order_list_id": position.venue_order_list_id,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "candle_time": candle.close_time.isoformat(),
+                },
+            )
+            self._release_close(signal.symbol)
+            self._refuse(signal, _REASON_CLOSE_CANCEL_FAILED, candle)
+            return False
+        return True
+
+    async def _sell_and_book(
+        self, signal: Signal, position: Position, candle: Candle, *, started_at: datetime
+    ) -> None:
+        """Send the MARKET sell and book what it returns. Never raises.
+
+        **THE SELL IS `MARKET`**, which section 4b rules as *"the one place the
+        design accepts unbounded slippage for certainty of exit"* -- a limit
+        that missed would leave the position held AND unprotected, which is the
+        state this whole sequence exists to minimise.
+
+        **IT CARRIES A DERIVABLE CLIENT ID**, so a timed-out sell is resolvable
+        by querying the id we WOULD have sent. C1 built that derivation; this is
+        its first caller.
+
+        **THE QUOTE TOTAL IS THE VENUE'S, NEVER A DERIVED PRICE.** Booking takes
+        `exit_quote_total`, because recovering a price by dividing is MEASURED
+        lossy -- run 3's own shape round-trips to a 28-digit residual, and
+        `_dump_money` writes such a residual into `data/state.json` verbatim.
+        """
+        bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
+        if bounds is None:
+            self._go_naked(signal, position, candle, _REASON_NO_BUDGET)
+            return
+
+        request = OrderRequest(
+            symbol=position.symbol,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            quantity=position.quantity,
+            client_order_id=close_client_order_id(
+                position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+            ),
+        )
+        try:
+            # **THE SELL IS THE ONE CALL IN THIS SEQUENCE NOT BOUNDED BY `D`,
+            # AND THE REASON IS THE PORT.** `ExchangeClient.create_order` takes
+            # a request and nothing else -- no `timeout_s`, no `attempts` --
+            # where the ADAPTER's own method accepts both. So the bounds
+            # computed above cannot be handed to it, and the sell runs under the
+            # client's default policy instead: `idempotent=False`, so retries
+            # only on a rate limit, but up to `retry_attempts` at
+            # `requests_timeout_s` each. `CLAUDE.md` records that worst case as
+            # 43.5s, which EXCEEDS `dispatch_deadline_s = 9.0`.
+            #
+            # Not widened here: the port change is a separate decision and this
+            # commit is authorised for one port method. Named rather than left
+            # for a reader to discover, because "the sequence is bounded" is
+            # true of three calls out of four and the fourth is the write.
+            order = await self._client.create_order(request)
+        except Exception as exc:  # dispatch must never raise
+            self._log_failure("close-sell", signal.symbol, exc)
+            self._go_naked(signal, position, candle, _REASON_CLOSE_SELL_FAILED)
+            return
+
+        total = order.filled_quote_quantity
+        if total is None:
+            # P-c's fallback. `newOrderRespType` is set NOWHERE in this tree, so
+            # the response type is the venue's default and the shape is
+            # DOCUMENTED rather than measured here -- the only MARKET payload
+            # this repository holds is a hand-written fixture. So the total is
+            # not assumed: the sell is re-read by the id it was sent under.
+            total = await self._requery_sell_total(position, bounds)
+
+        if order.filled_quantity != position.quantity or total is None:
+            # RULING 5: A PARTIAL FILL FAILS CLOSED, and it must, because it
+            # CANNOT BE REPRESENTED. `close_position` deletes the whole entry
+            # and credits one total; there is no partial-close path and no way
+            # to express "0.3 of 0.5 sold". Booking it would delete a position
+            # that still exists at the venue and credit proceeds for base still
+            # held -- a corrupted ledger, in the direction that cannot be
+            # noticed. An unpriceable full fill takes the same branch for the
+            # same reason: there is nothing safe to book.
+            #
+            # **THE RESIDUAL, NAMED: `Position.quantity` IS NOW OVERSTATED.**
+            # It says what was held before the partial sell, and nothing in this
+            # design corrects it -- correcting it would need the partial-close
+            # path that does not exist. The operator path in `_go_naked` is what
+            # resolves it.
+            self._go_naked(signal, position, candle, _REASON_CLOSE_PARTIAL_FILL)
+            return
+
+        self._book_close(signal, position, candle, total=total, order=order)
+        self._release_close(signal.symbol)
+
+    async def _requery_sell_total(self, position: Position, bounds: CallBounds) -> Money | None:
+        """The sell's quote total, read back by the id we sent. ``None`` if not.
+
+        Its own method so the fallback is one call with one failure mode, and so
+        a reader can see that the total is never invented -- it is either the
+        venue's or absent.
+        """
+        try:
+            sold = await self._client.get_order(
+                position.symbol,
+                client_order_id=close_client_order_id(
+                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                ),
+                timeout_s=bounds.timeout_s,
+                attempts=bounds.attempts,
+            )
+        except Exception as exc:  # never raises; the caller fails closed
+            self._log_failure("close-sell-requery", position.symbol, exc)
+            return None
+        return sold.filled_quote_quantity
+
+    def _book_close(
+        self,
+        signal: Signal,
+        position: Position,
+        candle: Candle,
+        *,
+        total: Money,
+        order: Order,
+    ) -> None:
+        """Credit, accrue and delete -- the bot's own exit reaching the ledger.
+
+        **THE SECOND BOOKING PATH, AND DELETION IS WHAT KEEPS THEM APART.**
+        `_book_exits` books venue-triggered fills from a `ProtectionAssessment`;
+        this books a sell the bot itself sent, which that path can never see --
+        cancelled legs classify `DIVERGED` and carry no `ExitFill`. Both end in
+        `close_position`, which deletes the symbol, and
+        `reconcile_open_positions` builds its work list from `open_positions` --
+        so whichever books first makes the other structurally blind.
+        """
+        try:
+            realised = self._portfolio.close_position(
+                position.symbol, exit_quote_total=total, now=utc_now()
+            )
+        except Exception as exc:
+            # The credit may have landed and the accrual raised -- the C12
+            # residual, and this is a second caller of it. The position survives,
+            # so the failure is visible and repeating rather than silent.
+            _log.critical(
+                "Booking the close of %s failed after the sell landed",
+                signal.symbol,
+                extra={
+                    "event": _EVENT_CLOSE_BOOK_FAILED,
+                    "symbol": signal.symbol,
+                    "quote_total": total,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
+            return
+
+        _log.info(
+            "Closed %s",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_BOOKED,
+                "symbol": signal.symbol,
+                "order_id": order.order_id,
+                "quantity": order.filled_quantity,
+                "quote_total": total,
+                "realised": realised,
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+
+    def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
+        """Protection is cancelled and the position is not closed. RULING 6.
+
+        **NO SPECULATIVE RETRY.** A second sell could double-sell if the first
+        landed and its answer was lost, and nothing here can tell those apart.
+
+        **THE STATE IS SELF-REFRESHING AND DOES NOT RESOLVE IN-PROCESS**, which
+        is stated here because "the reconciler will handle it" is the natural
+        assumption and it is FALSE. TRACED: the legs are cancelled, so
+        `classify_protection` finds them missing and the resolver point-queries
+        them; `CANCELED` is terminal and not open, so `_refine` answers
+        `DIVERGED` with NO `ExitFill`. Both legs resolve, so nothing is carried,
+        so `record_reconciliation` STAMPS the position -- meaning
+        `last_reconciled_at` refreshes every pass and `POSITION_STALE` never
+        fires either. `_book_exits` books nothing. `DIVERGED` is outside
+        `_TRUSTED_PROTECTION`, so committed risk is uncomputable and entries are
+        refused PORTFOLIO-WIDE, indefinitely.
+
+        So the exit is an operator: sell the base by hand, then RESTART -- the
+        store holds no `Position`, so a fresh boot reseeds from balances and the
+        naked position ceases to exist. **That trade's realised P&L is lost**,
+        because the sale happens outside the bot and nothing books it.
+
+        `protection = UNKNOWN` rather than `DIVERGED`: the classifier owns
+        `DIVERGED` and will write it on the next pass anyway, and `UNKNOWN` is
+        what this path actually knows -- whether the position is still held is
+        precisely the open question.
+        """
+        position.protection = ProtectionState.UNKNOWN
+        _log.critical(
+            "%s is UNPROTECTED and still open; entries are blocked until an operator clears it",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_NAKED,
+                "symbol": signal.symbol,
+                "reason": reason,
+                "quantity": position.quantity,
+                "venue_order_list_id": position.venue_order_list_id,
+                "resolution": (
+                    "SELF-REFRESHING: cancelled legs classify DIVERGED every pass, the position "
+                    "is re-stamped so POSITION_STALE never fires, and nothing books it. Cleared "
+                    "only by selling the base manually and restarting."
+                ),
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+        self._release_close(signal.symbol)
         self._refuse(signal, reason, candle)
+
+    def _release_close(self, symbol: str) -> None:
+        """Drop the pending close now its outcome is known, durably if we can.
+
+        Mirrors `_persist_after_removal`: the in-memory record goes first
+        because it gates the next bar's dispatch, and the durable rewrite is
+        best-effort because a stale record on disk is self-correcting where a
+        stuck in-memory one is not.
+        """
+        self._pending.pop(symbol, None)
+        self._persist_after_removal(symbol)
 
     async def _confirm_protective_legs(
         self, position: Position, *, started_at: datetime

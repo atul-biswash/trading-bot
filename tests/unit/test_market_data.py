@@ -194,6 +194,23 @@ class FakeExchangeClient(ExchangeClient):
     ) -> OrderList:
         raise NotImplementedError
 
+    async def cancel_order_list(  # pragma: no cover
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Raises. **A WRITE, and nothing in this file may reach one.**
+
+        Present only because ``ExchangeClient`` is an ABC and an unimplemented
+        abstract method makes this fake unconstructible. The raise is the point:
+        a data-layer test that somehow cancelled a list would fail loudly rather
+        than pass quietly.
+        """
+        raise NotImplementedError
+
 
 class FakeMarketDataStream(MarketDataStream):
     """Captures subscriptions so the test can drive handlers directly."""

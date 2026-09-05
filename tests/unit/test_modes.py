@@ -344,6 +344,23 @@ class FakeRootClient(ExchangeClient):
     ) -> OrderList:
         raise NotImplementedError
 
+    async def cancel_order_list(  # pragma: no cover
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        """Raises. **A WRITE, and no boot path may reach one.**
+
+        The composition-root tests drive boot, teardown and the store; none of
+        them closes a position. Raising keeps it that way -- an unconfigured
+        answer from a venue WRITE is not something a test should get by
+        default, which is this fake's stated rule for ``get_own_open_orders``.
+        """
+        raise NotImplementedError
+
 
 class FakeStream(MarketDataStream):
     """Records lifecycle calls so teardown ordering is observable."""
