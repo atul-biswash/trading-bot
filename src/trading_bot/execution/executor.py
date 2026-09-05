@@ -69,10 +69,74 @@ def _matched_list_id(verdict: PlacementVerdict) -> str | None:
     ``order_list_id`` on the position is honest, where a wrong one would send
     the reconciler to compare against somebody else's legs.
     """
+    live = _single_live(verdict)
+    if live is None:
+        return None
+    return live.list_client_order_id
+
+
+def _matched_venue_list_id(verdict: PlacementVerdict) -> int | None:
+    """The VENUE's numeric id of the single live match, or ``None``.
+
+    The sibling of :func:`_matched_list_id`, and deliberately a second function
+    rather than a second return value: the two identifier spaces stay separate
+    all the way to the ``Position``, and a caller that wants both asks twice.
+    Returning a pair would put them in one expression, which is where the run-1
+    defect came from -- see :attr:`Position.order_list_id`.
+
+    **Both answer ``None`` on the SAME condition**, because the selection is
+    shared: if no single live list can be identified, neither id may be taken,
+    and taking one without the other would leave a position half-identified.
+    """
+    live = _single_live(verdict)
+    if live is None:
+        return None
+    return _venue_list_id(live)
+
+
+def _single_live(verdict: PlacementVerdict) -> OrderList | None:
+    """The one live list this verdict matched, or ``None`` if not exactly one.
+
+    Factored out so the two id accessors above cannot drift in WHICH list they
+    describe. Two copies of this filter would be two answers to "which list is
+    this position's", and the whole point of the pair is that there is one.
+    """
     live = [ol for ol in verdict.matched if ol.list_order_status in _LIVE_LIST_STATUSES]
     if len(live) != 1:
         return None
-    return live[0].list_client_order_id
+    return live[0]
+
+
+def _venue_list_id(order_list: OrderList) -> int | None:
+    """``OrderList.order_list_id`` as the integer the venue issued.
+
+    ``to_order_list`` stringifies ``orderListId`` for the domain, and the cancel
+    and read-back endpoints take it back as a number -- the adapter already
+    writes ``params["orderListId"] = int(order_list_id)``. This is that same
+    conversion, at the one place a ``Position`` acquires the value.
+
+    **``None`` rather than a raise on a non-numeric id, and the error direction
+    decides it.** Reaching here means a placement has ALREADY LANDED at the
+    venue. Raising would abandon the ``Position`` for a list that exists,
+    producing an orphan -- the direction :func:`_matched_list_id` already
+    refuses in its own words. A missing number costs the close path one
+    enumeration; a missing position costs the list entirely.
+
+    Unreachable on every payload measured: ``orderListId`` is an integer on the
+    read-back, the list history and the placement response alike.
+    """
+    try:
+        return int(order_list.order_list_id)
+    except ValueError:
+        _log.error(
+            "Order list id is not numeric",
+            extra={
+                "event": _EVENT_NON_NUMERIC_LIST_ID,
+                "symbol": order_list.symbol,
+                "order_list_id": order_list.order_list_id,
+            },
+        )
+        return None
 
 
 _log = get_logger(__name__)
@@ -118,6 +182,10 @@ _EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
 #: `_plan_close`. `elapsed_s` is the field the whole read half exists to
 #: produce.
 _EVENT_CLOSE_PLANNED = "close_planned"
+#: An ``orderListId`` that will not parse as an integer. Unreachable on every
+#: payload this project has measured, and named rather than silent because the
+#: consequence is a position the close path cannot cancel by number.
+_EVENT_NON_NUMERIC_LIST_ID = "order_list_id_not_numeric"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -555,7 +623,14 @@ class OrderExecutor:
                     stop_loss=record.stop_loss,
                     take_profit=record.take_profit,
                     entry_bar_time=record.entry_bar_time,
+                    # A RESTORED POSITION GETS BOTH, and that was not obvious.
+                    # `PendingPlacement` carries only what we requested, so the
+                    # venue's number cannot come from the record -- but
+                    # `resolve_placement` enumerates real `OrderList` objects
+                    # from the venue, and the one it matched carries it. So the
+                    # recovery path is no worse off than the dispatch path.
                     order_list_id=_matched_list_id(verdict),
+                    venue_order_list_id=_matched_venue_list_id(verdict),
                 )
 
             del self._pending[symbol]
@@ -880,6 +955,7 @@ class OrderExecutor:
             take_profit=intent.levels.take_profit,
             entry_bar_time=entry_bar_time,
             order_list_id=order_list.list_client_order_id,
+            venue_order_list_id=_venue_list_id(order_list),
         )
         _log.info(
             "Order list placed",
@@ -1004,6 +1080,7 @@ class OrderExecutor:
         take_profit: Money | None,
         entry_bar_time: datetime,
         order_list_id: str | None,
+        venue_order_list_id: int | None,
     ) -> None:
         """Construct the position this placement opened, UNKNOWN until reconciled.
 
@@ -1057,7 +1134,13 @@ class OrderExecutor:
             entry_fill_price=entry_fill_price,
             entry_bar_time=entry_bar_time,
             protection=ProtectionState.UNKNOWN,
+            # BOTH IDENTIFIER SPACES, under names that say which is which. The
+            # first is ours and the second is the venue's; see
+            # `Position.order_list_id` for the run-1 defect that conflating them
+            # produced, and why the differing types are load-bearing rather than
+            # incidental.
             order_list_id=order_list_id,
+            venue_order_list_id=venue_order_list_id,
             stop_loss=stop_loss,
             take_profit=take_profit,
         )

@@ -130,9 +130,20 @@ def refused_assessment() -> RiskAssessment:
     )
 
 
-def placed_list(list_id: str = "tb1-BTCUSDT-1714564800000-0-L") -> OrderList:
+#: THE VENUE's numeric list id -- the real one from the first live run.
+#:
+#: **It was ``"1"`` until M5h, and ``"1"`` cannot express the bug the two id
+#: fields exist to prevent.** A one-character numeric string sits close enough
+#: to any placeholder that a test asserting it could pass for the wrong reason;
+#: this value is unmistakably the venue's and unmistakably not a ``tb1-`` id.
+VENUE_LIST_ID = "255471"
+#: OURS, derived. Deliberately a different SHAPE, not merely a different value.
+CLIENT_LIST_ID = "tb1-BTCUSDT-1714564800000-0-L"
+
+
+def placed_list(list_id: str = CLIENT_LIST_ID, *, venue_id: str = VENUE_LIST_ID) -> OrderList:
     return OrderList(
-        order_list_id="1",
+        order_list_id=venue_id,
         list_client_order_id=list_id,
         list_order_status="EXECUTING",
         list_status_type="EXEC_STARTED",
@@ -1673,3 +1684,156 @@ class TestTheClosePlan:
             "open_position",
             "record_realised_pnl",
         }, sorted(called)
+
+
+# --------------------------------------------------------------------------
+# The two identifier spaces -- ours and the venue's
+# --------------------------------------------------------------------------
+class TestTheTwoListIdentifiers:
+    """A ``Position`` carries BOTH ids, under names and types that separate them.
+
+    **THE FIXTURE IS WHAT MAKES THESE EXPRESSIVE**, and it did not used to be.
+    ``placed_list`` returned ``order_list_id="1"`` -- a value close enough to a
+    placeholder that a test asserting it could pass for the wrong reason. It now
+    returns the venue's real ``255471`` beside our ``tb1-...-0-L``: different
+    values, different SHAPES, and different types on the model. A fixture whose
+    two ids were interchangeable could not express the substitution these tests
+    exist to catch.
+    """
+
+    async def test_a_placed_position_carries_both_ids_and_they_differ(self) -> None:
+        """THE CENTRAL ASSERTION. Both populated, and NOT equal.
+
+        MUTATION: populate `venue_order_list_id` from `list_client_order_id`.
+
+        That is the exact confusion `classify_protection` made in run 1 -- 28
+        consecutive false `DIVERGED` verdicts, because both fields were `str`
+        and no type could see it. Asserting each value AND their inequality is
+        what makes a substitution fail here rather than at the venue.
+        """
+        executor, _, portfolio = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        position = portfolio.positions[SYMBOL]
+        assert position.order_list_id == CLIENT_LIST_ID
+        assert position.venue_order_list_id == int(VENUE_LIST_ID)
+        assert str(position.venue_order_list_id) != position.order_list_id
+
+    async def test_the_venue_id_is_an_int_not_a_string(self) -> None:
+        """The type is load-bearing, so it is asserted rather than assumed.
+
+        MUTATION: declare `venue_order_list_id: str | None`.
+
+        Two `str` fields side by side is precisely the shape that let run 1's
+        substitution happen unseen. `int` makes the swap a TYPE error, which is
+        an instrument the earlier defect had none of. `is True` on the isinstance
+        rather than a truthy check, because `bool` is an `int` subclass and a
+        stray `True` would satisfy a looser assertion.
+        """
+        executor, _, portfolio = build()
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert isinstance(portfolio.positions[SYMBOL].venue_order_list_id, int) is True
+        assert not isinstance(portfolio.positions[SYMBOL].venue_order_list_id, bool)
+
+    async def test_a_restored_position_also_carries_the_venue_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**THE RECOVERY PATH IS NOT WORSE OFF, and that was not obvious.**
+
+        MUTATION: pass `venue_order_list_id=None` on the `PLACED_LIVE` branch.
+
+        `PendingPlacement` carries only what we REQUESTED, so the venue's number
+        cannot come from the record -- which is what made this look like a hole.
+        It is not: `resolve_placement` enumerates real `OrderList` objects from
+        the venue, and the one it matched carries the id. Without this test the
+        design would have to assume a restored position cannot be cancelled by
+        number, which is the assumption the close path would then be built on.
+        """
+        executor, _, portfolio = build(client=FakeClient(place_error=TimeoutError("reset")))
+        await executor.dispatch(buy(), entry_assessment(), candle())
+        assert SYMBOL in executor._pending
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        executor._client = FakeClient()  # type: ignore[assignment]
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        position = portfolio.positions[SYMBOL]
+        assert position.order_list_id == CLIENT_LIST_ID
+        assert position.venue_order_list_id == int(VENUE_LIST_ID)
+
+    def test_both_ids_are_none_together_when_no_single_live_list_matched(self) -> None:
+        """They answer `None` on the SAME condition, never one without the other.
+
+        MUTATION: give `_matched_venue_list_id` its own filter.
+
+        A position half-identified -- our id present, the venue's absent, or the
+        reverse -- would be worse than one with neither, because a caller would
+        reasonably read the presence of one as evidence about the other. The
+        shared `_single_live` is what makes that unrepresentable; this pins it
+        over the two shapes that produce it.
+        """
+        from trading_bot.execution.executor import _matched_list_id, _matched_venue_list_id
+
+        none_live = PlacementVerdict(
+            outcome=PlacementOutcome.PLACED_TERMINAL, reason="terminal", matched=()
+        )
+        two_live = PlacementVerdict(
+            outcome=PlacementOutcome.UNRESOLVED,
+            reason="several live",
+            matched=(placed_list(), placed_list(venue_id="255472")),
+        )
+
+        for verdict in (none_live, two_live):
+            assert _matched_list_id(verdict) is None
+            assert _matched_venue_list_id(verdict) is None
+
+    def test_a_non_numeric_list_id_is_none_and_logged_not_raised(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The error direction, on a state no measured payload produces.
+
+        MUTATION: let the `int()` raise instead of returning `None`.
+
+        Reaching here means a placement has ALREADY LANDED. Raising would
+        abandon the `Position` for a list that exists -- an orphan, the
+        direction `_matched_list_id` already refuses in its own words. A missing
+        number costs the close path one enumeration; a missing position costs
+        the list. Asserted with the log, because a silent `None` here would be a
+        fake default.
+        """
+        from trading_bot.execution.executor import _venue_list_id
+
+        with caplog.at_level(logging.ERROR, logger=_EXEC_LOGGER):
+            result = _venue_list_id(placed_list(venue_id="not-a-number"))
+
+        assert result is None
+        assert _records(caplog, "order_list_id_not_numeric")
+
+    def test_a_position_defaults_the_venue_id_to_none(self) -> None:
+        """Every existing construction still works, unchanged.
+
+        MUTATION: make `venue_order_list_id` required.
+
+        `Position` is constructed in fixtures across this suite and in `src/`
+        only by `_open_position`. A required field would break every one of
+        them -- which is the LOUD direction, but it would also force a value at
+        sites that genuinely have none. `None` is a real state here; see the
+        field's docstring for the two facts it covers.
+        """
+        position = Position(
+            symbol=SYMBOL,
+            side=PositionSide.LONG,
+            quantity=D("0.5"),
+            entry_price=D("100"),
+            entry_bar_time=BAR,
+            protection=ProtectionState.UNKNOWN,
+        )
+
+        assert position.venue_order_list_id is None
+        assert position.order_list_id is None

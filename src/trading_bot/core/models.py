@@ -657,8 +657,42 @@ class Position(BaseModel):
     #: Wall-clock creation time of this object. Not restart-stable; see
     #: :attr:`entry_bar_time`.
     opened_at: datetime = Field(default_factory=_utcnow)
-    #: The exchange's order-list identity, once one is known.
+    #: **OUR derived ``listClientOrderId`` -- ``tb1-BTCUSDT-<ms>-0-L`` -- and
+    #: NOT the exchange's own identity.** This line read *"the exchange's
+    #: order-list identity"* until M5h and was false: both writers pass
+    #: :attr:`OrderList.list_client_order_id`, which is the id WE computed from
+    #: Q-C section 6's seeds and sent, and the venue never issues one.
+    #:
+    #: **The two identifier spaces are distinct and conflating them has already
+    #: cost this project a live defect.** ``classify_protection`` compared this
+    #: field against the venue's numeric ``orderListId`` and read every
+    #: correctly protected position as ``DIVERGED`` -- 28 consecutive false
+    #: verdicts in run 1, fixed at ``3970968``. Both are ``str | None`` there,
+    #: so no type could see it. Here they cannot be confused by type either:
+    #: this is ``str`` and :attr:`venue_order_list_id` is ``int``.
     order_list_id: str | None = None
+    #: **THE VENUE'S OWN numeric ``orderListId``** -- ``255471`` in the first
+    #: live run -- as distinct from :attr:`order_list_id` directly above.
+    #:
+    #: It exists because the cancel endpoint takes THIS one. ``DELETE
+    #: /api/v3/orderList`` is addressed by ``orderListId``, so a close path
+    #: holding only our derived id cannot cancel the list it is closing, and
+    #: would have to spend an extra enumeration to find the number.
+    #:
+    #: ``int`` rather than ``str``, and the type is doing work: it makes the two
+    #: spaces **structurally** unconfusable, where two ``str`` fields would sit
+    #: side by side inviting exactly the substitution that produced run 1's
+    #: defect. The adapter already round-trips the value through ``int`` when it
+    #: addresses a list by number, so nothing is lost.
+    #:
+    #: **``None`` covers TWO DIFFERENT FACTS and a reader must not collapse
+    #: them.** *No list was identified* -- the ``PLACED_LIVE`` branch found
+    #: several matches or none live, so it takes neither id and both fields are
+    #: ``None`` together. Or *the construction site supplied none* -- a test, or
+    #: a future caller. What it never means is "the venue issued no id": every
+    #: :class:`OrderList` carries one, because ``to_order_list`` reads
+    #: ``orderListId`` as a required key.
+    venue_order_list_id: int | None = None
     #: When this position was last read back from the exchange. ``None`` means
     #: never, which is what a freshly opened position reports until the first
     #: reconciliation pass reaches it.
