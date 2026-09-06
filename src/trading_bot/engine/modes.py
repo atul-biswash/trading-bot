@@ -1164,23 +1164,87 @@ async def live_system(
                     )
 
                 def _persist_pending(records: tuple[Pending, ...]) -> None:
-                    """Write the executor's pending set, preserving the ledger."""
+                    """Write the executor's pending set, carrying the LIVE ledger.
+
+                    **``portfolio.ledger`` IS READ HERE, AT SERIALISATION TIME.
+                    IT USED TO PASS ``persisted.ledger`` AND THAT LOST REAL
+                    MONEY.** ``persisted`` is seeded from the boot read and
+                    rebound only by these two closures, so its ledger slice is a
+                    SNAPSHOT -- and the executor's booking path accrues through
+                    ``Portfolio.close_position``, which goes through no writer
+                    at all. Every pending write therefore stamped the boot value
+                    over whatever had been booked since.
+
+                    MEASURED, and it is the reason this closure changed: on
+                    2026-09-06 the bot closed four positions between 06:15 and
+                    10:16 -- ``-6.9908540000``, ``+1.4531076000``,
+                    ``+0.9816510000``, ``+1.1078115000``, the project's first
+                    profits -- and each close's pending DELETION rewrote
+                    ``data/state.json`` with the boot snapshot. The file's mtime
+                    was ``10:16:03``, the instant of the last booking, and its
+                    contents read ``-135.8406927000``: the value from two days
+                    earlier. The live accrual, ``-3.4482839000`` on a rolled
+                    ``pnl_date``, never reached disk.
+
+                    **Reading the portfolio is what makes the slice unownable by
+                    a stale local.** The ledger has exactly one writer --
+                    ``record_realised_pnl``, reached only from
+                    ``close_position`` -- so ``portfolio.ledger`` is current
+                    truth at every instant, and a closure that reads it cannot
+                    be behind. A cached copy can only ever be equal or wrong.
+
+                    **THIS IS ALSO WHAT MAKES A CLOSE ONE ATOMIC SAVE.** The
+                    close's completion drops the symbol from ``_pending`` and
+                    calls this once; the deletion and the accrual are now in the
+                    SAME ``PersistedState`` and reach disk in the same
+                    ``os.replace``. No second callback is needed and none is
+                    added -- a separate completion writer would be a second
+                    owner of one slice, which is the clobber this root holds the
+                    whole state to prevent.
+                    """
                     nonlocal persisted
                     persisted = store.PersistedState(
                         pending=tuple(_to_record(record) for record in records),
-                        ledger=persisted.ledger,
+                        ledger=(
+                            None
+                            if portfolio.ledger is None
+                            else store.LedgerRecord(
+                                realised_pnl=portfolio.ledger.realised_pnl,
+                                pnl_date=portfolio.ledger.pnl_date,
+                            )
+                        ),
                     )
                     store.save(persisted)
 
                 def _persist_ledger(ledger: Ledger) -> None:
                     """Write the accrued ledger, preserving the pending set.
 
-                    **THE EXACT MIRROR of the closure above, and the mirroring
-                    is what avoids the clobber.** ``store.save`` is WHOLE-FILE,
-                    so two writers each owning one slice must each carry the
-                    other across: that one passes ``ledger=persisted.ledger``,
-                    and this one passes ``pending=persisted.pending``. Drop
-                    either and the next write of one slice erases the other.
+                    **NO LONGER AN EXACT MIRROR, and the asymmetry is the
+                    point.** ``store.save`` is WHOLE-FILE, so each writer must
+                    carry the other's slice across. That one now reads
+                    ``portfolio.ledger`` LIVE; this one still passes
+                    ``pending=persisted.pending``, and the two are not the same
+                    risk.
+
+                    **Why this side may cache where that side could not.** The
+                    ledger changes through ``close_position``, which goes
+                    through NO writer -- so a cached ledger goes stale
+                    invisibly, which is exactly what cost four bookings on
+                    2026-09-06. The pending set changes only through the
+                    executor, which persists on EVERY mutation, so
+                    ``persisted.pending`` is refreshed by the same act that
+                    changes it.
+
+                    **THE RESIDUAL, NAMED RATHER THAN FIXED.**
+                    ``_persist_quietly`` SWALLOWS a failed delete-write by
+                    design -- a stale record on disk is self-correcting where a
+                    refused write is not. On that path ``_pending`` has changed
+                    and ``persisted.pending`` has not, so a later ledger write
+                    would restore the stale set. Narrow, reachable only through
+                    a swallowed write failure, and NOT closed here: the ruling
+                    that produced this commit names ``_persist_pending`` only,
+                    and widening it unasked would be a second change hiding
+                    inside a fix.
 
                     **The mapping lives HERE for the same reason the callable
                     does.** ``CLAUDE.md`` has outer layers "depend inward
@@ -1190,9 +1254,11 @@ async def live_system(
                     may name -- and ``store.LedgerRecord`` never leaves this
                     file, exactly as ``store.PendingRecord`` never leaves it.
 
-                    NOTHING CALLS THIS. Booking is a later commit; this is a
-                    write path with no caller, deliberately, so the caller
-                    arrives to a mechanism rather than shipping one.
+                    **THE RECONCILER CALLS THIS**, for a venue-triggered fill it
+                    books itself. The executor's own close path does NOT -- it
+                    holds no ledger writer, and after this commit it does not
+                    need one: its pending write carries the live ledger, so a
+                    close's deletion and its accrual reach disk together.
                     """
                     nonlocal persisted
                     persisted = store.PersistedState(

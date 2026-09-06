@@ -2523,18 +2523,34 @@ class TestTheStoreIsReadAtBoot:
     ) -> None:
         """The same guard from the other side, so neither writer is trusted alone.
 
-        MUTATION: drop `ledger=persisted.ledger` from `_persist_pending`.
+        MUTATION: pass `ledger=persisted.ledger` in `_persist_pending`.
 
-        That direction was already covered for a RESTORED ledger; this covers
-        one this process wrote, which is the case booking will actually
-        produce.
+        **THE LEDGER IS NOW ACCRUED INTO THE PORTFOLIO, NOT FABRICATED, AND
+        THAT IS THE WHOLE CORRECTION.** This test drove `_persist_ledger` with a
+        hand-made `Ledger` the portfolio never held, then asserted a pending
+        write preserved it. That encoded the OLD contract -- *"the pending
+        writer preserves whatever ledger was last written"* -- and it cannot
+        express the new one, because the value it checks for exists nowhere but
+        the test.
+
+        Production has no such state: `_book_exits` passes
+        `self._portfolio.ledger`, so the writer and the portfolio are always the
+        same object's field. Accruing through `record_realised_pnl` reproduces
+        that, and the assertion then means what it says -- the pending write
+        carried the ledger the portfolio actually holds.
         """
         settings = write_settings(tmp_path)
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.portfolio.record_realised_pnl(
+                D("-12.5"), now=datetime(2026, 9, 3, 12, 0, tzinfo=timezone.utc)
+            )
+            ledger = system.portfolio.ledger
+            assert ledger is not None
+
             ledger_writer = system.reconciler._persist_ledger
             assert ledger_writer is not None
-            ledger_writer(Ledger(realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3)))
+            ledger_writer(ledger)
 
             pending_writer = system.executor._persist_pending
             assert pending_writer is not None
@@ -2651,4 +2667,183 @@ class TestTheStoreIsReadAtBoot:
 
         after = store.load()
         assert after is not None
+        assert after.pending == (_STORED,)
+
+
+class TestThePendingWriteCarriesTheLiveLedger:
+    """The defect of 2026-09-06, and the closure change that closes it.
+
+    **MEASURED.** Between 06:15 and 10:16 the bot closed four positions --
+    ``-6.9908540000``, ``+1.4531076000``, ``+0.9816510000``, ``+1.1078115000``
+    -- and every close's pending DELETION rewrote ``data/state.json`` with the
+    boot snapshot. The file's mtime was ``10:16:03``, the instant of the last
+    booking; its contents read ``-135.8406927000``, the value from two days
+    earlier. The live accrual never reached disk.
+
+    **C5b's tests could not see it and were not wrong to miss it.** They assert
+    the in-memory accrual, which was correct throughout. What was missing was a
+    COLLABORATOR -- the executor holds no ledger writer -- and no test of the
+    executor can observe a writer that was never injected. It took the root's
+    own tests, which is where the closure lives.
+
+    **The fixtures here differ from `-135.84` deliberately.** A test whose
+    ledger is ``None``, or whose before and after agree, cannot express a stale
+    snapshot at all: the wrong value and the right one would be the same value.
+    """
+
+    async def test_a_pending_write_carries_the_ledger_accrued_after_boot(
+        self, tmp_path: Path
+    ) -> None:
+        """**THE DEFECT'S EXACT SHAPE, reproduced.**
+
+        MUTATION: restore `ledger=persisted.ledger` in `_persist_pending`.
+
+        A ledger is on disk at boot, the process books something new, and then
+        an ordinary pending write happens. Under the defect that write stamps
+        the BOOT value back over the accrual -- which is what four bookings hit
+        on 2026-09-06. The two values are far apart and of opposite sign, so a
+        write carrying the wrong one cannot coincidentally pass.
+        """
+        settings = write_settings(tmp_path)
+        store.save(
+            store.PersistedState(
+                ledger=store.LedgerRecord(
+                    realised_pnl=D("-135.8406927000"), pnl_date=date(2026, 9, 4)
+                )
+            )
+        )
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.portfolio.record_realised_pnl(
+                D("1.1078115000"), now=datetime(2026, 9, 6, 4, 16, tzinfo=timezone.utc)
+            )
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        assert after.ledger == store.LedgerRecord(
+            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6)
+        )
+        assert after.pending == (_STORED,)
+
+    async def test_the_close_completion_is_exactly_one_save(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**ONE `os.replace`, asserted as a COUNT and not as content.**
+
+        MUTATION: issue the ledger write and the pending deletion as two
+        sequential saves.
+
+        Two saves producing the right final file would pass any content
+        assertion, so the count is the only thing that can fail on it. And the
+        count matters: between the two writes the file holds a pending set that
+        no longer matches the ledger beside it, and a crash there leaves the
+        deletion durable with the accrual lost -- the very split this closure
+        change exists to remove.
+
+        Driven through `_release_close`, which is what `_execute_close` calls
+        once its outcome is known. DECLARED: this covers the COMPLETION, not the
+        whole close -- the record's write before the cancel is a separate,
+        necessary save, and it is not counted here.
+        """
+        settings = write_settings(tmp_path)
+        saves: list[store.PersistedState] = []
+        real_save = store.save
+
+        def _counting_save(state: store.PersistedState, *args: object, **kwargs: object) -> None:
+            saves.append(state)
+            real_save(state, *args, **kwargs)  # type: ignore[arg-type]
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.executor._pending[SYMBOL] = _EXPECTED
+            system.portfolio.record_realised_pnl(
+                D("1.1078115000"), now=datetime(2026, 9, 6, 4, 16, tzinfo=timezone.utc)
+            )
+            monkeypatch.setattr("trading_bot.persistence.store.save", _counting_save)
+            system.executor._release_close(SYMBOL)
+
+        assert len(saves) == 1, [s.ledger for s in saves]
+        # ONE state carrying BOTH facts: the symbol is gone AND the accrual is in.
+        assert saves[0].pending == ()
+        assert saves[0].ledger == store.LedgerRecord(
+            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6)
+        )
+
+    async def test_a_pending_write_after_a_booking_does_not_revert_the_ledger(
+        self, tmp_path: Path
+    ) -> None:
+        """**BOTH BOOKING PATHS, and only one of them refreshes the cache.**
+
+        MUTATION: restore `ledger=persisted.ledger` in `_persist_pending`.
+
+        The reconciler books a venue-triggered fill and writes the ledger, so
+        the closure's cached slice is CORRECT at that instant. Then the executor
+        books a close -- through `close_position`, touching no writer -- and an
+        ordinary pending write follows. Under the defect that write carries the
+        reconciler's value and silently discards the executor's.
+
+        **AN EARLIER DRAFT OF THIS TEST ABSTAINED, and the reason is worth more
+        than the test.** It booked once, wrote the ledger, then wrote pending --
+        so the cache was warm and the mutation read the right value BY ACCIDENT.
+        It reproduced the RECONCILER's shape, where the cache is refreshed by
+        the same act that changes the ledger, and the executor's path is
+        precisely the one where that does not happen. Predicting the mutation's
+        failure set is what exposed it: the test was named for the defect and
+        could not fail on it.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            # The reconciler books, and DOES refresh the cached slice.
+            system.portfolio.record_realised_pnl(
+                D("-54.5551917000"), now=datetime(2026, 9, 6, 4, 0, tzinfo=timezone.utc)
+            )
+            ledger_writer = system.reconciler._persist_ledger
+            assert ledger_writer is not None
+            first = system.portfolio.ledger
+            assert first is not None
+            ledger_writer(first)
+
+            # The EXECUTOR books, through no writer at all. The cache is now
+            # behind, and nothing in the process knows it.
+            system.portfolio.record_realised_pnl(
+                D("1.1078115000"), now=datetime(2026, 9, 6, 4, 16, tzinfo=timezone.utc)
+            )
+
+            pending_writer = system.executor._persist_pending
+            assert pending_writer is not None
+            pending_writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        assert after.ledger == store.LedgerRecord(
+            realised_pnl=D("-53.4473802000"), pnl_date=date(2026, 9, 6)
+        )
+
+    async def test_an_absent_ledger_stays_absent_through_a_pending_write(
+        self, tmp_path: Path
+    ) -> None:
+        """`None` is a real state and must not become a zero ledger.
+
+        MUTATION: build a `LedgerRecord` unconditionally from
+        `portfolio.ledger`.
+
+        The store documents absent-versus-zero as load-bearing: an absent ledger
+        means never accrued, where a zero one means accrued to nothing. A
+        closure that constructed a record from a `None` portfolio ledger would
+        raise; one that defaulted it to zero would erase the distinction.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.ledger is None
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        assert after.ledger is None
         assert after.pending == (_STORED,)
