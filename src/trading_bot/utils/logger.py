@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +30,28 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 #: is a native ``LogRecord`` attribute and is therefore filtered out of
 #: ``surplus_fields``, so it cannot arrive there via ``extra=``.
 _PLAIN_FORMAT = "%(asctime)s | %(levelname)-8s | pid=%(process)d | %(name)s | %(message)s"
-_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+#: **ISO-8601 IN UTC, WITH THE ``Z`` AS PART OF THE FORMAT.** It read
+#: ``"%Y-%m-%d %H:%M:%S"`` until M5h -- LOCAL time, with nothing saying so.
+#:
+#: **A LINE AND ITS OWN FIELDS WERE IN DIFFERENT TIMEZONES**, silently. This
+#: host runs at ``+0600``, and one real record read:
+#:
+#:     2026-09-09 05:20:02 ... candle_time=2026-09-08T23:19:59.999000+00:00
+#:
+#: -- a line stamped the 9th carrying a field explicitly on the 8th. The
+#: ``Ledger`` keys on UTC DAYS, so which day a booking belongs to is decided by
+#: a clock the log did not report. Five closes that read as one day were four on
+#: UTC 09-08 and one on 09-09; a full investigation followed into a defect that
+#: did not exist, and the ledger had been correct throughout.
+#:
+#: The ``Z`` is a literal in the format string rather than ``%z``, which is not
+#: portable over the ``struct_time`` that :meth:`logging.Formatter.formatTime`
+#: passes to ``time.strftime`` -- and a ``%z`` that rendered empty would restore
+#: the ambiguity while looking like it had been fixed.
+#:
+#: Seconds precision is unchanged. The defect was the missing zone, not the
+#: missing milliseconds, and widening precision here would be a second change.
+_DATE_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 _configured = False
 
 #: Attribute names a ``LogRecord`` carries natively, computed once at import from
@@ -68,7 +90,31 @@ def surplus_fields(record: logging.LogRecord) -> dict[str, object]:
     }
 
 
-class JsonFormatter(logging.Formatter):
+class _UtcFormatter(logging.Formatter):
+    """Base that renders every timestamp in UTC. **ONE definition, two sinks.**
+
+    ``logging.Formatter.converter`` defaults to ``time.localtime``, and both
+    formatters below reach it through :meth:`formatTime` -- the plain one via
+    ``%(asctime)s``, the JSON one by calling it directly. So the timezone was
+    decided in ONE place already; it was simply the wrong one, and nothing said
+    which.
+
+    **A shared base rather than the attribute on each class**, because the rule
+    is *"the two sinks agree on the same record"* and two copies of it are two
+    things to keep true. `CLAUDE.md` records the prior instance of exactly this
+    class of defect -- the sinks disagreeing silently on how a ``str, Enum``
+    rendered -- and the remedy there was the same: make the agreement
+    structural rather than maintained.
+
+    ``staticmethod`` because ``converter`` is called as ``self.converter(secs)``
+    and a bare function assigned to a class attribute would bind ``self`` as its
+    first argument.
+    """
+
+    converter = staticmethod(time.gmtime)
+
+
+class JsonFormatter(_UtcFormatter):
     """Render each record as a single JSON object (one line)."""
 
     def format(self, record: logging.LogRecord) -> str:
@@ -94,7 +140,7 @@ class JsonFormatter(logging.Formatter):
         return json.dumps(payload, default=str)
 
 
-class PlainFormatter(logging.Formatter):
+class PlainFormatter(_UtcFormatter):
     """Text formatter that appends ``extra=`` fields as logfmt key/value pairs.
 
     Without this, structured fields are **silently dropped** in text mode: the
@@ -133,6 +179,22 @@ def _console_handler(use_json: bool) -> logging.Handler:
     gets ``PlainFormatter("%(message)s")`` -- enough to append structured fields
     without duplicating the columns Rich already owns. It previously carried *no*
     formatter at all, falling back to the stdlib default.
+
+    **RICH'S OWN TIME COLUMN IS STILL LOCAL, AND IS THE ONE TIMESTAMP THIS
+    PROJECT DOES NOT RENDER.** Its format string carries no ``%(asctime)s``, so
+    M5h's UTC change cannot reach it -- Rich draws that column from its own
+    console clock. Left alone rather than fixed, for two reasons stated rather
+    than assumed: ``rich`` is NOT installed in this environment, so the branch
+    does not execute and a change to it could not be exercised by any test here;
+    and it is CONSOLE-ONLY, where the durable record -- the rotating file, which
+    is the only evidence a finished run leaves -- goes through
+    :class:`PlainFormatter` or :class:`JsonFormatter` and is now UTC.
+
+    So on a machine with ``rich`` installed the console shows local time and the
+    file shows UTC. That is a real inconsistency and it is named here rather
+    than discovered later; closing it means taking the column over with
+    ``show_time=False``, which is a change to an untestable branch and belongs
+    to whoever can run it.
     """
     if not use_json:
         try:
@@ -186,7 +248,22 @@ def setup_logging(config: LoggingConfig) -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """Return a module logger. Falls back to a basic config if setup was skipped."""
+    """Return a module logger. Falls back to a basic config if setup was skipped.
+
+    **THE FALLBACK BUILDS OUR FORMATTER, AND IT HAS TO.** Passing ``format=`` and
+    ``datefmt=`` to :func:`logging.basicConfig` makes it construct a BARE
+    ``logging.Formatter``, whose ``converter`` is ``time.localtime`` -- so
+    ``_DATE_FORMAT``'s trailing ``Z`` would be stamped onto a LOCAL time. That
+    is worse than the defect this commit fixes: an unmarked local timestamp is
+    merely ambiguous, where one marked ``Z`` is a positive assertion that is
+    false, and a reader doing UTC arithmetic on it would be wrong by the host's
+    offset with nothing to notice.
+
+    Handing ``basicConfig`` a configured handler instead keeps every timestamp
+    this project renders inside :class:`_UtcFormatter`.
+    """
     if not _configured:
-        logging.basicConfig(level=logging.INFO, format=_PLAIN_FORMAT, datefmt=_DATE_FORMAT)
+        handler = logging.StreamHandler()
+        handler.setFormatter(PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT))
+        logging.basicConfig(level=logging.INFO, handlers=[handler])
     return logging.getLogger(name)

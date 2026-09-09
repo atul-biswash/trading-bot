@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from decimal import Decimal
 
 import pytest
@@ -25,6 +26,7 @@ from trading_bot.utils.logger import (
     _PLAIN_FORMAT,
     JsonFormatter,
     PlainFormatter,
+    get_logger,
     setup_logging,
     surplus_fields,
 )
@@ -122,10 +124,22 @@ class TestNoExtraIsUnchanged:
 
         `os.getpid()` rather than a literal: the value is whatever process runs
         the suite, and pinning a literal would fail on every machine but one.
+
+        **AND THAT REASONING APPLIED TO THE TIMESTAMP TOO, WHICH THIS TEST DID
+        NOT NOTICE UNTIL M5h.** It read ``2023-11-15 04:13:20`` -- the ``+0600``
+        rendering of ``record.created``. A literal that fails on every machine
+        but one, in the same assertion whose docstring rejects exactly that, one
+        line above. The suite was not portable and nothing reported it, because
+        the only host that ran it was the one it was pinned to.
+
+        The new literal is UTC, so it is now the same on every machine --
+        ``1_700_000_000.0`` is ``2023-11-14T22:13:20Z`` everywhere. The
+        expectation became machine-independent as a side effect of the fix
+        rather than by a separate act.
         """
         line = PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT).format(make_record())
         assert line == (
-            f"2023-11-15 04:13:20 | INFO     | pid={os.getpid()} | "
+            f"2023-11-14T22:13:20Z | INFO     | pid={os.getpid()} | "
             "trading_bot.probe | signal BTCUSDT accepted"
         )
         assert not line.endswith(" ")
@@ -218,3 +232,138 @@ class TestReservedNames:
         log.handlers = [logging.NullHandler()]
         log.propagate = False
         log.info("x", extra=SEVEN_FIELDS)  # must not raise
+
+
+# --------------------------------------------------------------------------
+# The timestamp: UTC, explicitly, in every sink this project renders
+# --------------------------------------------------------------------------
+#: ``make_record``'s pinned epoch, in UTC. ``1_700_000_000.0`` is
+#: ``2023-11-14T22:13:20Z``.
+#:
+#: **THE HOST THIS SUITE RUNS ON IS ``+0600``, and that is what makes these
+#: tests expressive.** The same instant renders ``2023-11-15 04:13:20`` in local
+#: time -- a different DAY, not merely a different clock -- so a formatter that
+#: reverted to ``time.localtime`` cannot coincidentally produce this string. On
+#: a host whose local zone IS UTC these tests would pass under the mutation and
+#: prove nothing; that is a property of the machine, not of the assertions, and
+#: it is declared rather than assumed.
+UTC_STAMP = "2023-11-14T22:13:20Z"
+LOCAL_STAMP_HERE = "2023-11-15 04:13:20"
+
+
+class TestTheTimestampIsExplicitUtc:
+    """The log keys nothing on local time, and now says so on every line."""
+
+    def test_this_host_can_express_the_mutation(self) -> None:
+        """**THE FIXTURE-EXPRESSIVENESS CHECK, AS AN ASSERTION.**
+
+        MUTATION: none -- this test exists to say what the others can prove.
+
+        Every assertion in this class compares a UTC rendering against a
+        literal. On a host whose local zone IS UTC those assertions pass under
+        `converter = time.localtime` and prove nothing: the mutation would be
+        inexpressible and the class would abstain silently, which this project
+        treats as indistinguishable from coverage.
+
+        So the property is CHECKED rather than assumed. It passes here because
+        the host is ``+0600``, and it FAILS on a UTC host -- which is the honest
+        signal that the class below has stopped biting there, rather than a
+        false report that it still does.
+        """
+        local = time.localtime(1_700_000_000.0)
+        utc = time.gmtime(1_700_000_000.0)
+
+        assert local[:6] != utc[:6], (
+            "this host's local zone is UTC, so the timestamp tests below cannot "
+            "distinguish a UTC formatter from a local one"
+        )
+
+    def test_the_plain_sink_renders_utc_with_a_marker(self) -> None:
+        """MUTATION: drop ``converter = staticmethod(time.gmtime)``.
+
+        Under it this renders the ``+0600`` local string, which differs from the
+        UTC one by six hours AND by a calendar day. Asserting the full prefix
+        rather than merely ``endswith("Z")`` is what makes the DAY part bite: a
+        formatter that kept local time but appended a literal ``Z`` would pass a
+        marker-only check while being actively false.
+        """
+        line = PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT).format(make_record())
+
+        assert line.startswith(f"{UTC_STAMP} | ")
+        assert LOCAL_STAMP_HERE not in line
+
+    def test_the_json_sink_renders_utc_with_a_marker(self) -> None:
+        """MUTATION: give ``JsonFormatter`` its own converter, or none.
+
+        The JSON sink reaches ``formatTime`` by calling it directly rather than
+        through ``%(asctime)s``, so it is a genuinely separate path to the same
+        setting -- which is why the shared base exists and why this is asserted
+        on its own rather than inferred from the plain sink.
+        """
+        payload = json.loads(JsonFormatter().format(make_record()))
+
+        assert payload["time"] == UTC_STAMP
+
+    def test_both_sinks_agree_on_the_same_record(self) -> None:
+        """**ASSERTED AGAINST EACH OTHER, NOT EACH AGAINST A LITERAL.**
+
+        MUTATION: change the converter on one formatter only.
+
+        Two literals can drift apart while both remain true of their own sink --
+        which is exactly how the enum-rendering defect `CLAUDE.md` records
+        survived: each sink was correct about itself and they disagreed about
+        the record. Comparing the two outputs makes the AGREEMENT the subject,
+        so a change to one alone fails here even if its own literal is updated.
+        """
+        record = make_record()
+        plain = PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT).format(record)
+        rendered = json.loads(JsonFormatter().format(make_record()))["time"]
+
+        assert plain.startswith(f"{rendered} | ")
+
+    def test_a_non_utc_local_zone_still_renders_utc(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The rendering must not depend on where the process runs.
+
+        MUTATION: ``converter = staticmethod(time.localtime)``.
+
+        Driven by forcing ``TZ`` to two zones on opposite sides of UTC and
+        re-reading the same pinned instant. ``time.tzset`` is POSIX-only, so on
+        a platform without it the test SKIPS rather than passing vacuously --
+        an unconditional pass here would be the abstention this project names as
+        indistinguishable from coverage.
+        """
+        tzset = getattr(time, "tzset", None)
+        if tzset is None:
+            pytest.skip("time.tzset is POSIX-only; the TZ forcing below cannot apply")
+
+        for zone in ("Asia/Almaty", "America/Denver"):
+            monkeypatch.setenv("TZ", zone)
+            tzset()
+            line = PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT).format(make_record())
+            assert line.startswith(f"{UTC_STAMP} | "), zone
+
+    def test_the_unconfigured_fallback_also_renders_utc(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """**THE TRAP: a bare ``logging.Formatter`` would stamp ``Z`` on LOCAL.**
+
+        MUTATION: restore ``basicConfig(format=..., datefmt=...)`` in
+        ``get_logger``.
+
+        That builds a stdlib formatter whose converter is ``time.localtime``, so
+        ``_DATE_FORMAT``'s trailing ``Z`` becomes a false assertion rather than
+        a missing one -- strictly worse than the defect this commit fixes,
+        because a reader doing UTC arithmetic on it is wrong by the host offset
+        with nothing to notice. Asserted on the handler the fallback installs,
+        because the string it would produce is the thing at issue.
+        """
+        monkeypatch.setattr("trading_bot.utils.logger._configured", False)
+        root = logging.getLogger()
+        monkeypatch.setattr(root, "handlers", [])
+
+        get_logger("probe.fallback")
+
+        assert root.handlers, "the fallback installed no handler"
+        formatter = root.handlers[0].formatter
+        assert formatter is not None
+        assert formatter.format(make_record()).startswith(f"{UTC_STAMP} | ")
