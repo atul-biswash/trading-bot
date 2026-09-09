@@ -143,7 +143,9 @@ from trading_bot.core.models import Money
 
 __all__ = [
     "DEFAULT_STORE_PATH",
+    "MAX_DAILY_HISTORY",
     "SCHEMA_VERSION",
+    "DayRecord",
     "LedgerRecord",
     "PendingCloseRecord",
     "PendingRecord",
@@ -250,6 +252,62 @@ class LedgerRecord(_Frozen):
 
     realised_pnl: Money
     pnl_date: date
+    #: How many closes were booked into this day. **ADDITIVE AND DEFAULTED, so
+    #: the file already on disk still loads** -- ``load`` builds this model with
+    #: ``LedgerRecord(**payload["ledger"])`` and an absent key takes the default.
+    #:
+    #: **THE FIRST RESTORED DAY WILL UNDERSTATE, and that is unavoidable rather
+    #: than a defect to fix.** The live store carries no count, so the day it
+    #: holds restores at ``0`` against a real figure of five. The count is
+    #: correct only from the first day that begins after this ships. Written
+    #: here rather than discovered from a suspicious zero.
+    trades_count: int = Field(0, ge=0)
+
+
+class DayRecord(_Frozen):
+    """One COMPLETED UTC day: what it realised, and how many closes did it.
+
+    Written when a day ROLLS, never while it is current -- the day in progress
+    lives in :class:`LedgerRecord`, which the daily-loss gate reads. So a day
+    appears here exactly once, when it is over and its total can no longer
+    change.
+
+    **``realised`` rather than ``realised_pnl``, matching the owner's sketch.**
+    The sibling above spells it in full because it predates this and its name is
+    on disk; a new type has no such constraint, and the shorter name is what the
+    ruling asked for. Named here so the difference reads as a decision rather
+    than as drift.
+
+    **NOTHING WRITES ONE YET.** The roll that produces these is
+    ``Portfolio.record_realised_pnl``'s, and it does not push here until the
+    next commit. This is the shape arriving before its writer -- the same order
+    ``PendingClose``, ``persist_pending`` and ``persist_ledger`` each took.
+    """
+
+    realised: Money
+    trades_count: int = Field(0, ge=0)
+
+
+#: The most days :attr:`PersistedState.daily_history` may carry.
+#:
+#: **STATED HERE AND ENFORCED IN THE DOMAIN, at the roll -- do not look for the
+#: prune in this file.** The split is forced rather than chosen. The root's
+#: closure serialises the portfolio's history LIVE, so a store that pruned on
+#: the way out would drop an entry the domain still holds, and the very next
+#: save would drop it again: the file would stay at the cap while memory grew
+#: without bound, and the two would disagree permanently about what history
+#: exists while the file always looked correct.
+#:
+#: **AND IT IS NOT VALIDATED HERE EITHER**, deliberately. A ``max_length`` on
+#: the field would turn an overflow into a REFUSED SAVE -- and that save also
+#: carries the ledger and the pending set, so a history that grew one entry too
+#: far would block a booking from reaching disk. The wrong error direction, for
+#: the least important slice of the file.
+#:
+#: 400 is a year plus margin. **The bound loses granularity and not the total**,
+#: because :attr:`PersistedState.lifetime_realised` accumulates every day
+#: including the ones dropped -- which is the whole reason a bound is safe.
+MAX_DAILY_HISTORY = 400
 
 
 class PersistedState(_Frozen):
@@ -270,6 +328,41 @@ class PersistedState(_Frozen):
     #: loads unchanged, which is exactly what a schema integer is for.
     pending: tuple[PendingRecord | PendingCloseRecord, ...] = ()
     ledger: LedgerRecord | None = None
+    #: Completed UTC days, newest and oldest alike, keyed by the day they cover.
+    #:
+    #: **THE KEY IS A ``date``, AND IT DOES NOT SURVIVE JSON BY ITSELF.**
+    #: ``_serialise`` calls ``json.dumps`` with NO ``default=`` -- unlike the log
+    #: sink's catch-all, this serialiser is strict and an unconvertible value
+    #: RAISES rather than landing as a repr. That is the property being relied
+    #: on: the conversion is explicit in both directions, ``isoformat`` out and
+    #: ``date.fromisoformat`` back, and a key that is not a date fails loudly at
+    #: load as :class:`StoreCorruptError` rather than restoring as a string a
+    #: later comparison would never match.
+    #:
+    #: **EMPTY UNTIL THE FIRST UTC-MIDNIGHT ROLL AFTER THIS SHIPS.** The file
+    #: gains the key immediately; it gains an ENTRY only when a day ends with a
+    #: booking in it. A reader meeting ``{}`` on a bot that has traded is seeing
+    #: the expected state, not a lost write.
+    #:
+    #: Bounded at :data:`MAX_DAILY_HISTORY`, enforced in the domain -- see that
+    #: constant for why the prune cannot live here.
+    daily_history: dict[date, DayRecord] = Field(default_factory=dict)
+    #: Realised P&L across every day this store has ever seen roll, including
+    #: days :data:`MAX_DAILY_HISTORY` has since dropped from
+    #: :attr:`daily_history`. That is what makes the bound safe.
+    #:
+    #: **``None`` MEANS NEVER ACCRUED, NOT ZERO**, exactly as :attr:`ledger`
+    #: does -- the absent-versus-zero distinction this module documents as
+    #: load-bearing. A lifetime of ``0`` is a bot that booked and came out flat;
+    #: ``None`` is one that has never rolled a day.
+    #:
+    #: **IT IS NOT A CLAIM ABOUT ALL TRADING TO DATE.** It starts from whatever
+    #: the current day holds when the first roll after this ships occurs. The
+    #: twenty closes and three reconciler bookings already made are in the log
+    #: and not in this number, and no backfill puts them there -- a figure the
+    #: code did not compute would be indistinguishable afterwards from one it
+    #: did.
+    lifetime_realised: Money | None = None
 
     @model_validator(mode="after")
     def _reject_duplicate_symbols(self) -> PersistedState:
@@ -377,6 +470,29 @@ def _dump_ledger(ledger: LedgerRecord | None) -> dict[str, Any] | None:
     return {
         "realised_pnl": _dump_money(ledger.realised_pnl),
         "pnl_date": ledger.pnl_date.isoformat(),
+        "trades_count": ledger.trades_count,
+    }
+
+
+def _dump_history(history: dict[date, DayRecord]) -> dict[str, dict[str, Any]]:
+    """Completed days, keyed by ISO date. Field by named field, as ever.
+
+    **The key conversion is EXPLICIT because ``json.dumps`` would not do it.**
+    ``default=`` handles unconvertible VALUES and never keys, so a ``date`` key
+    reaching the serialiser raises ``TypeError: keys must be str...``. Converting
+    here means the failure cannot arrive at write time, when the fallible step is
+    supposed to have already run.
+
+    ``sort_keys=True`` in :func:`_serialise` then orders these chronologically
+    for free, because an ISO date sorts lexically. Convenient rather than
+    load-bearing -- nothing reads the order.
+    """
+    return {
+        day.isoformat(): {
+            "realised": _dump_money(record.realised),
+            "trades_count": record.trades_count,
+        }
+        for day, record in history.items()
     }
 
 
@@ -391,6 +507,8 @@ def _serialise(state: PersistedState) -> str:
         "schema": state.schema_version,
         "pending": [_dump_pending(record) for record in state.pending],
         "ledger": _dump_ledger(state.ledger),
+        "daily_history": _dump_history(state.daily_history),
+        "lifetime_realised": _dump_optional_money(state.lifetime_realised),
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
 
@@ -431,6 +549,20 @@ def load(path: Path = DEFAULT_STORE_PATH) -> PersistedState | None:
             schema_version=SCHEMA_VERSION,
             pending=tuple(_load_pending(entry) for entry in payload.get("pending", [])),
             ledger=(None if payload.get("ledger") is None else LedgerRecord(**payload["ledger"])),
+            # `.get` with a default on every new key: a file written before this
+            # commit carries none of them, and taking the default is exactly how
+            # it goes on loading unchanged at schema 1.
+            #
+            # `date.fromisoformat` raises `ValueError` on a key that is not a
+            # date, and `DayRecord(**entry)` raises `ValidationError` on a body
+            # that is not one. Both are already in the `except` below, so a
+            # corrupt history reaches `StoreCorruptError` rather than a silent
+            # default -- which is the whole reason the conversion is explicit.
+            daily_history={
+                date.fromisoformat(day): DayRecord(**entry)
+                for day, entry in payload.get("daily_history", {}).items()
+            },
+            lifetime_realised=payload.get("lifetime_realised"),
         )
     except (ValidationError, TypeError, ValueError) as exc:
         raise StoreCorruptError(f"{path} does not match the expected shape: {exc}") from exc

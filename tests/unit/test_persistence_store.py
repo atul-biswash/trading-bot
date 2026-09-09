@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -796,3 +796,187 @@ class TestThePendingClose:
         """
         with pytest.raises(ValidationError):
             s.PersistedState(pending=(_record(), _close_record()))
+
+
+# --------------------------------------------------------------------------
+# Day history and the lifetime total -- the SHAPE, which nothing writes yet
+# --------------------------------------------------------------------------
+#: The live ``data/state.json`` as it stands, byte for byte.
+#:
+#: **HAND-WRITTEN, and it has to be.** A payload produced by ``save`` would
+#: carry every key this commit adds and could not express their ABSENCE, which
+#: is the only thing worth testing here. This is the real file -- the one
+#: holding the project's only ledger -- and if it stopped loading, the next boot
+#: would refuse on a corrupt store.
+LIVE_STATE_JSON = """{
+  "ledger": {
+    "pnl_date": "2026-09-09",
+    "realised_pnl": "2.2781952000"
+  },
+  "pending": [],
+  "schema": 1
+}
+"""
+
+
+class TestTheHistoryShape:
+    """Completed days and a lifetime total. **Nothing writes one yet.**
+
+    The roll that produces them is ``Portfolio.record_realised_pnl``'s and is
+    the next commit's. This pins the shape, the round trip and -- above all --
+    that the file already on disk still loads.
+    """
+
+    def test_the_live_state_file_still_loads_unchanged(self, tmp_path: Path) -> None:
+        """**THE BACKWARD-COMPATIBILITY CLAIM, on the real file's bytes.**
+
+        MUTATION: make any new field required rather than defaulted.
+
+        ``load`` builds ``LedgerRecord(**payload["ledger"])`` and reads the two
+        new top-level keys with ``.get`` defaults, so a file carrying none of
+        them takes them all. Asserted on the LEDGER's restored value as well as
+        on the defaults, because a file that "loaded" while dropping the ledger
+        would satisfy a shape check and boot a bot believing it never accrued.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(LIVE_STATE_JSON, encoding="utf-8")
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.ledger == s.LedgerRecord(
+            realised_pnl=D("2.2781952000"), pnl_date=date(2026, 9, 9), trades_count=0
+        )
+        assert loaded.daily_history == {}
+        assert loaded.lifetime_realised is None
+        assert loaded.pending == ()
+
+    def test_a_history_round_trips_with_exact_decimals(self, tmp_path: Path) -> None:
+        """Trailing zeros survive, because ``_dump_money`` writes the exact ``str``.
+
+        MUTATION: dump ``realised`` as a JSON number, or via a second dumper.
+
+        ``-2.8077840000`` is UTC 2026-09-08's real total -- the one the roll
+        destroyed -- and its trailing zeros are what a float would silently
+        drop. Asserted as an exact STRING on disk as well as by equality, since
+        ``Decimal("-2.807784") == Decimal("-2.8077840000")`` compares true and
+        would hide the loss.
+        """
+        path = tmp_path / "state.json"
+        state = s.PersistedState(
+            daily_history={
+                date(2026, 9, 8): s.DayRecord(realised=D("-2.8077840000"), trades_count=4)
+            },
+            lifetime_realised=D("-135.8406927000"),
+        )
+
+        s.save(state, path)
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.daily_history == state.daily_history
+        assert loaded.lifetime_realised == D("-135.8406927000")
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["daily_history"]["2026-09-08"]["realised"] == "-2.8077840000"
+        assert payload["lifetime_realised"] == "-135.8406927000"
+
+    def test_a_date_key_survives_as_a_date_not_a_string(self, tmp_path: Path) -> None:
+        """**The key is a ``date`` on both sides of the file.**
+
+        MUTATION: return the key unconverted from ``load``.
+
+        JSON has only string keys, so a loader that skipped
+        ``date.fromisoformat`` would restore ``{"2026-09-08": ...}`` -- which
+        compares unequal to every ``date`` a caller looks up with, and would
+        read as "that day has no history" rather than as a type error.
+        ``isinstance`` on the key is what separates the two.
+        """
+        path = tmp_path / "state.json"
+        s.save(
+            s.PersistedState(
+                daily_history={date(2026, 9, 8): s.DayRecord(realised=D("1.5"), trades_count=1)}
+            ),
+            path,
+        )
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        (key,) = loaded.daily_history
+        assert isinstance(key, date)
+        assert key == date(2026, 9, 8)
+
+    def test_trades_count_defaults_to_zero_on_a_ledger_without_one(self, tmp_path: Path) -> None:
+        """The count is additive, and the day already on disk has none.
+
+        MUTATION: make ``LedgerRecord.trades_count`` required.
+
+        **DECLARED: a default of 0 here is a KNOWN UNDERSTATEMENT.** The live
+        file's day really saw five closes. The count is correct only from the
+        first day that begins after this ships, and that is documented on the
+        field rather than left for someone to infer from a suspicious zero.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(LIVE_STATE_JSON, encoding="utf-8")
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.ledger is not None
+        assert loaded.ledger.trades_count == 0
+
+    @pytest.mark.parametrize(
+        ("history", "why"),
+        [
+            ({"not-a-date": {"realised": "1.0", "trades_count": 1}}, "the key is not a date"),
+            ({"2026-09-08": {"realised": 1.0, "trades_count": 1}}, "realised is a JSON number"),
+            ({"2026-09-08": {"trades_count": 1}}, "realised is missing"),
+            ({"2026-09-08": {"realised": "1.0", "trades_count": -1}}, "a negative count"),
+        ],
+        ids=["bad_key", "float_money", "missing_realised", "negative_count"],
+    )
+    def test_a_corrupt_history_entry_raises_rather_than_defaulting(
+        self, tmp_path: Path, history: dict[str, object], why: str
+    ) -> None:
+        """Corruption is REFUSED, never read as an empty day.
+
+        MUTATION: wrap the history comprehension in a ``try`` that falls back to
+        ``{}``.
+
+        Each row fails through a different mechanism and all four must reach one
+        type: a bad key raises ``ValueError`` from ``date.fromisoformat``, and
+        the other three raise ``ValidationError`` from ``DayRecord`` -- money as
+        a JSON number is the ``Money`` guard, a missing field and a negative
+        count are pydantic's. ``load``'s ``except`` already names all three
+        exception types, which is why this needed no new handling and why a
+        future edit narrowing that clause fails here.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(
+            json.dumps({"schema": 1, "pending": [], "ledger": None, "daily_history": history}),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(s.StoreCorruptError):
+            s.load(path)
+
+    def test_the_bound_is_stated_here_and_enforced_elsewhere(self) -> None:
+        """The cap is a constant in this file and a prune in the domain.
+
+        MUTATION: add ``max_length=MAX_DAILY_HISTORY`` to the field.
+
+        Under it an overflow becomes a REFUSED SAVE -- and that save also
+        carries the ledger and the pending set, so one day too many would stop a
+        booking reaching disk. The wrong error direction, for the least
+        important slice of the file. This asserts the store accepts an
+        over-cap state, which is what says the enforcement is not here.
+        """
+        over_cap = {
+            date(2020, 1, 1) + timedelta(days=n): s.DayRecord(realised=D("0"), trades_count=0)
+            for n in range(s.MAX_DAILY_HISTORY + 1)
+        }
+
+        state = s.PersistedState(daily_history=over_cap)
+
+        assert len(state.daily_history) == s.MAX_DAILY_HISTORY + 1
+        assert s.MAX_DAILY_HISTORY == 400
