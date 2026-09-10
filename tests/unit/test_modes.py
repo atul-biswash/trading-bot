@@ -82,7 +82,7 @@ from trading_bot.core.models import (
     SymbolInfo,
     Ticker,
 )
-from trading_bot.core.portfolio import Ledger, Portfolio
+from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.engine.modes import (
     IntentLogger,
@@ -1360,14 +1360,34 @@ class TestTheBootReadsBalancesOnce:
         real_snapshot = modes._snapshot_unmanaged_holdings
 
         # The signature is MIRRORED here, so it is a second place it lives.
-        # `ledger` is forwarded rather than dropped: swallowing it would make
-        # this wrapper silently disable the restore for every test that
-        # monkeypatches through it.
+        # Every restored field is forwarded rather than dropped: swallowing one
+        # would make this wrapper silently disable that restore for every test
+        # that monkeypatches through it.
+        #
+        # **THE MIRROR DRIFTED AT C3 AND THE FAILURE WAS A `TypeError`, WHICH
+        # IS THE GOOD OUTCOME.** Adding two keyword-only parameters to
+        # `_seed_portfolio` left this stub accepting the old three, and the
+        # boot's call raised `unexpected keyword argument 'daily_history'`. A
+        # `**kwargs`-swallowing stub would have kept passing while quietly
+        # dropping both new fields on every test routed through it -- the
+        # restore disabled, silently, exactly as the paragraph above warns.
+        # Mirror it explicitly and let it break loudly.
         def recording_seed(
-            balances: Sequence[Balance], *, quote_asset: str, ledger: Ledger | None = None
+            balances: Sequence[Balance],
+            *,
+            quote_asset: str,
+            ledger: Ledger | None = None,
+            daily_history: dict[date, DaySummary] | None = None,
+            lifetime_realised: Decimal | None = None,
         ) -> Portfolio:
             seen.append(balances)
-            return real_seed(balances, quote_asset=quote_asset, ledger=ledger)
+            return real_seed(
+                balances,
+                quote_asset=quote_asset,
+                ledger=ledger,
+                daily_history=daily_history,
+                lifetime_realised=lifetime_realised,
+            )
 
         async def recording_snapshot(
             client: ExchangeClient,
@@ -2280,15 +2300,25 @@ class TestTheStoreIsReadAtBoot:
         Driven through `live_system` rather than `_restore_ledger` alone,
         because the mapping being correct and the mapping being CALLED are
         different claims and only the second was ever missing.
+
+        **THE STORED COUNT IS 3 AND NOT 0, DELIBERATELY.** This test is named
+        for the restore reaching the domain, and with a stored `trades_count`
+        of 0 it could not see `_restore_ledger` DROPPING that field: the
+        expected `Ledger` defaults to 0 too, so both sides agreed by accident.
+        A fixture that cannot express the mutation abstains no matter what the
+        test is called. MEASURED: with 3 stored and the field dropped, this
+        fails at `trades_count=0 != 3`.
         """
         settings = write_settings(tmp_path)
         today = datetime.now(timezone.utc)
-        stored = store.LedgerRecord(realised_pnl=D("-35.38691640"), pnl_date=today.date())
+        stored = store.LedgerRecord(
+            realised_pnl=D("-35.38691640"), pnl_date=today.date(), trades_count=3
+        )
         store.save(store.PersistedState(ledger=stored))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
             assert system.portfolio.ledger == Ledger(
-                realised_pnl=D("-35.38691640"), pnl_date=today.date()
+                realised_pnl=D("-35.38691640"), pnl_date=today.date(), trades_count=3
             )
             assert system.portfolio.realised_today(today) == D("-35.38691640")
             # Exactness, not equality: a value that lost its scale through a
@@ -2463,14 +2493,23 @@ class TestTheStoreIsReadAtBoot:
         check that the bytes survived a round trip through a store nothing read;
         the same ledger must now reach ``Portfolio`` as well, so the two halves
         -- durable and in-memory -- are pinned in one place.
+
+        **THE STORED COUNT IS 3 AND NOT 0, DELIBERATELY**, and it makes this
+        test bite on the WHOLE record rather than on two of its three fields.
+        With 0 stored, a `trades_count` dropped by the restore and a
+        `trades_count` dropped by the write BOTH left every assertion here
+        passing -- the survival this test is named for was unobservable in the
+        one field that was not surviving.
         """
         settings = write_settings(tmp_path)
-        ledger = store.LedgerRecord(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27))
+        ledger = store.LedgerRecord(
+            realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27), trades_count=3
+        )
         store.save(store.PersistedState(ledger=ledger))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
             assert system.portfolio.ledger == Ledger(
-                realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)
+                realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27), trades_count=3
             )
             writer = system.executor._persist_pending
             assert writer is not None
@@ -2497,6 +2536,12 @@ class TestTheStoreIsReadAtBoot:
         Driven in the order that bites: pending FIRST, then a ledger write.
         The reverse order would pass under the mutation, since there would be
         no pending set to lose.
+
+        **THE WRITTEN COUNT IS 3 AND NOT 0, DELIBERATELY, and this is the PURE
+        WRITE-SIDE proof** -- the domain ledger is constructed here rather than
+        restored, so no read-path mapping stands between the value and the
+        file. With the count defaulting to 0 on both sides, `_persist_ledger`
+        omitting `trades_count` was invisible to every assertion in this class.
         """
         settings = write_settings(tmp_path)
 
@@ -2507,13 +2552,15 @@ class TestTheStoreIsReadAtBoot:
 
             ledger_writer = system.reconciler._persist_ledger
             assert ledger_writer is not None
-            ledger_writer(Ledger(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)))
+            ledger_writer(
+                Ledger(realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27), trades_count=3)
+            )
 
         after = store.load()
         assert after is not None
         # BOTH slices survive. The ledger is what was just written...
         assert after.ledger == store.LedgerRecord(
-            realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27)
+            realised_pnl=D("-35.38691640"), pnl_date=date(2026, 8, 27), trades_count=3
         )
         # ...and the pending set was NOT erased by writing it.
         assert after.pending == (_STORED,)
@@ -2559,8 +2606,10 @@ class TestTheStoreIsReadAtBoot:
         after = store.load()
         assert after is not None
         assert after.pending == (_STORED,)
+        # No store at boot, so the ledger starts absent and one accrual rolls
+        # it into existence: count 1.
         assert after.ledger == store.LedgerRecord(
-            realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3)
+            realised_pnl=D("-12.5"), pnl_date=date(2026, 9, 3), trades_count=1
         )
 
     async def test_the_ledger_writer_is_injected(self, tmp_path: Path) -> None:
@@ -2723,8 +2772,10 @@ class TestThePendingWriteCarriesTheLiveLedger:
 
         after = store.load()
         assert after is not None
+        # The stored ledger is dated 09-04 and the accrual is on 09-06, so this
+        # ROLLS: the new day's count starts at this booking, hence 1 and not 2.
         assert after.ledger == store.LedgerRecord(
-            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6)
+            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6), trades_count=1
         )
         assert after.pending == (_STORED,)
 
@@ -2767,8 +2818,9 @@ class TestThePendingWriteCarriesTheLiveLedger:
         assert len(saves) == 1, [s.ledger for s in saves]
         # ONE state carrying BOTH facts: the symbol is gone AND the accrual is in.
         assert saves[0].pending == ()
+        # No store at boot; one accrual rolls the absent ledger into being.
         assert saves[0].ledger == store.LedgerRecord(
-            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6)
+            realised_pnl=D("1.1078115000"), pnl_date=date(2026, 9, 6), trades_count=1
         )
 
     async def test_a_pending_write_after_a_booking_does_not_revert_the_ledger(
@@ -2818,8 +2870,11 @@ class TestThePendingWriteCarriesTheLiveLedger:
 
         after = store.load()
         assert after is not None
+        # TWO accruals, both on 2026-09-06, so the second continues the day
+        # rather than starting one: count 2. The count is as much a thing the
+        # pending writer must not revert as the total is.
         assert after.ledger == store.LedgerRecord(
-            realised_pnl=D("-53.4473802000"), pnl_date=date(2026, 9, 6)
+            realised_pnl=D("-53.4473802000"), pnl_date=date(2026, 9, 6), trades_count=2
         )
 
     async def test_an_absent_ledger_stays_absent_through_a_pending_write(
@@ -2847,3 +2902,195 @@ class TestThePendingWriteCarriesTheLiveLedger:
         assert after is not None
         assert after.ledger is None
         assert after.pending == (_STORED,)
+
+
+class TestHistoryAndLifetimeCrossTheRoot:
+    """The two fields C1 shaped and C2 accumulated, wired in both directions.
+
+    **BEFORE THIS COMMIT EVERY TEST HERE WAS UNWRITEABLE AS A KILL.** Both
+    closures rebuilt a frozen ``PersistedState`` from named keywords and named
+    neither field, so both reverted to their defaults on every save; and no
+    restorer existed, so nothing read them back. Mutations deleting either
+    field abstained on all 1543 tests. The class exists because an unwired
+    field is indistinguishable from a wired one when nothing looks.
+
+    **THE ERASURE IS THE SUBJECT, NOT THE PLUMBING.** A write-only C3 would
+    have been worse than no C3: history would reach disk, boot would ignore it,
+    and the run's first save would rebuild the state without it -- the
+    whole-file clobber the root owns the state to prevent, arriving from inside
+    the owner. ``test_a_restored_history_survives_the_next_pending_write`` is
+    the test that fails if either closure stops carrying it.
+
+    Placed at the END OF THE FILE, after
+    ``TestThePendingWriteCarriesTheLiveLedger`` closes. Opening a class
+    anywhere inside another class ends that class and silently reparents its
+    remaining methods -- measured at C2, where a class placed beside its
+    subject absorbed 48 tests and every one of them still passed.
+    """
+
+    async def test_a_history_and_a_lifetime_total_round_trip_through_the_root(
+        self, tmp_path: Path
+    ) -> None:
+        """Both directions in one test, because either alone is half a claim.
+
+        MUTATION: drop ``daily_history`` from ``_restore_history``'s call site,
+        or from either ``PersistedState`` construction.
+
+        The two days differ in sign, magnitude and count, so a mapping that
+        transposed them or collapsed them onto one key cannot land on the right
+        answer. The exponents are run-3 shaped -- ``-2.8077840000`` does not
+        survive a float hop -- so a value that lost its scale fails the ``str``
+        assertion even where it compares equal.
+        """
+        settings = write_settings(tmp_path)
+        store.save(
+            store.PersistedState(
+                daily_history={
+                    date(2026, 9, 8): store.DayRecord(realised=D("-2.8077840000"), trades_count=4),
+                    date(2026, 9, 9): store.DayRecord(realised=D("4.0960280000"), trades_count=2),
+                },
+                lifetime_realised=D("1.2882440000"),
+            )
+        )
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            # INBOUND: the store's shape became the domain's own type.
+            assert system.portfolio.daily_history == {
+                date(2026, 9, 8): DaySummary(realised=D("-2.8077840000"), trades_count=4),
+                date(2026, 9, 9): DaySummary(realised=D("4.0960280000"), trades_count=2),
+            }
+            assert system.portfolio.lifetime_realised == D("1.2882440000")
+            assert str(system.portfolio.lifetime_realised) == "1.2882440000"
+
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))
+
+        # OUTBOUND: and back out again, unchanged, through a closure that
+        # names neither field's source as `persisted`.
+        after = store.load()
+        assert after is not None
+        assert after.daily_history == {
+            date(2026, 9, 8): store.DayRecord(realised=D("-2.8077840000"), trades_count=4),
+            date(2026, 9, 9): store.DayRecord(realised=D("4.0960280000"), trades_count=2),
+        }
+        assert after.lifetime_realised == D("1.2882440000")
+
+    async def test_a_restored_history_survives_the_next_pending_write(self, tmp_path: Path) -> None:
+        """**THE ERASURE GUARD.** A restored history must outlive the first save.
+
+        MUTATION: drop ``daily_history=`` from EITHER ``PersistedState``
+        construction, or read it from ``persisted`` instead of the portfolio.
+
+        This is the test whose absence made a write-only C3 lossy. Both
+        closures rebuild a FROZEN state from named keywords, so a field they do
+        not name reverts to its default -- ``{}`` -- and `store.save` is
+        whole-file. The restored day would therefore be deleted from disk by
+        the very next placement, with no error and a valid-looking file.
+
+        **The pending writer is driven, not the ledger writer**, because the
+        pending writer is the one the executor calls on every placement: it is
+        the first save of a normal run and therefore the first chance to erase.
+        """
+        settings = write_settings(tmp_path)
+        store.save(
+            store.PersistedState(
+                daily_history={
+                    date(2026, 9, 8): store.DayRecord(realised=D("-2.8077840000"), trades_count=4)
+                },
+                lifetime_realised=D("-2.8077840000"),
+            )
+        )
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))  # the first save of the run
+
+        after = store.load()
+        assert after is not None
+        assert after.daily_history == {
+            date(2026, 9, 8): store.DayRecord(realised=D("-2.8077840000"), trades_count=4)
+        }
+        assert after.lifetime_realised == D("-2.8077840000")
+        assert after.pending == (_STORED,)
+
+    async def test_a_utc_midnight_roll_inside_the_root_reaches_disk(self, tmp_path: Path) -> None:
+        """A day ENDING in-process becomes a history entry on disk.
+
+        MUTATION: drop ``daily_history=`` or ``lifetime_realised=`` from
+        ``_persist_pending``.
+
+        The round-trip test above proves a history the root was HANDED comes
+        back; this proves one the root PRODUCES gets out. They are different
+        claims: the first passes even if the portfolio's own accumulation never
+        reaches the closure, because the value was already in the state object.
+
+        Two accruals spanning a UTC midnight, because one cannot roll. The
+        outgoing day is asserted on total AND count -- a push that carried the
+        day but lost its count would satisfy a total-only check.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.portfolio.record_realised_pnl(
+                D("-2.8077840000"), now=datetime(2026, 9, 8, 22, 0, tzinfo=timezone.utc)
+            )
+            system.portfolio.record_realised_pnl(
+                D("2.2781952000"), now=datetime(2026, 9, 9, 1, 25, tzinfo=timezone.utc)
+            )
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer((_EXPECTED,))
+
+        after = store.load()
+        assert after is not None
+        # The day that ENDED, with its own count...
+        assert after.daily_history == {
+            date(2026, 9, 8): store.DayRecord(realised=D("-2.8077840000"), trades_count=1)
+        }
+        # ...the accumulator holding exactly it, since it is the only day to
+        # have rolled...
+        assert after.lifetime_realised == D("-2.8077840000")
+        # ...and the CURRENT day still in the ledger, not in history.
+        assert after.ledger == store.LedgerRecord(
+            realised_pnl=D("2.2781952000"), pnl_date=date(2026, 9, 9), trades_count=1
+        )
+
+    async def test_the_lifetime_total_distinguishes_absent_from_zero(self, tmp_path: Path) -> None:
+        """Three states, not two: never accrued, accrued to nothing, non-zero.
+
+        MUTATION: restore an absent lifetime total as ``Decimal(0)``, or write
+        ``portfolio.lifetime_realised or Decimal(0)``.
+
+        ``None`` means no UTC day has ever rolled. ``Decimal(0)`` means days
+        HAVE rolled and their totals netted out. Those are different facts
+        about the account and the round trip must not flatten either into the
+        other -- the same absent-versus-zero ruling ``_restore_ledger`` already
+        carries for the ledger itself.
+
+        A two-state test would pass under the flattening mutation: it is only
+        the ZERO case sitting beside the ABSENT case that can fail it.
+        """
+        settings = write_settings(tmp_path)
+
+        # 1. ABSENT -- no store at all.
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.lifetime_realised is None
+
+        # 2. ABSENT -- a store that has never rolled a day.
+        store.save(store.PersistedState())
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.lifetime_realised is None
+
+        # 3. ZERO -- days rolled and netted out. NOT the same fact as absent.
+        store.save(store.PersistedState(lifetime_realised=D("0")))
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.lifetime_realised == D("0")
+            assert system.portfolio.lifetime_realised is not None
+
+        # 4. NON-ZERO -- itself, exactly, scale intact.
+        store.save(store.PersistedState(lifetime_realised=D("-0.5295888000")))
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.lifetime_realised == D("-0.5295888000")
+            assert str(system.portfolio.lifetime_realised) == "-0.5295888000"

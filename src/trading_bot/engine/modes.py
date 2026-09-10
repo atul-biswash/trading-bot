@@ -150,7 +150,7 @@ from trading_bot.core.interfaces import (
     MarketDataStream,
     SignalHandler,
 )
-from trading_bot.core.portfolio import Ledger, Portfolio
+from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
 from trading_bot.execution.dispatch_budget import DispatchBudget
@@ -172,9 +172,10 @@ from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import AsyncIterator, Mapping, Sequence
+    from datetime import date
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Balance, Candle, Signal
+    from trading_bot.core.models import Balance, Candle, Money, Signal
 
 _log = get_logger(__name__)
 
@@ -512,13 +513,80 @@ def _restore_ledger(state: store.PersistedState | None) -> Ledger | None:
     zero:** a ``Ledger`` carrying ``Decimal(0)`` says accruals netted out on a
     day that was traded, and that is a different fact this mapping must not
     flatten.
+
+    **``trades_count`` CROSSES HERE TOO, and it did not until C3.** The field
+    was on the record and this mapping ignored it, so every restart reset the
+    day's close count to zero while carrying its total across intact -- the
+    total right and the count wrong, on the same object, from the same file.
+    Nothing reported it because the domain's own default is ``0``.
     """
     if state is None or state.ledger is None:
         return None
     return Ledger(
         realised_pnl=state.ledger.realised_pnl,
         pnl_date=state.ledger.pnl_date,
+        trades_count=state.ledger.trades_count,
     )
+
+
+def _to_day_record(summary: DaySummary) -> store.DayRecord:
+    """One completed day, domain shape into store shape.
+
+    The outbound sibling of :func:`_restore_history` and the day-level twin of
+    :func:`_to_record`. It lives here for the reason all of them do: ``core/``
+    may not import ``persistence/``, so ``core.portfolio.DaySummary`` and
+    ``store.DayRecord`` -- two frozen types carrying the same two fields under
+    the same two names -- meet in this file and nowhere else.
+
+    The field names were mirrored deliberately when ``DaySummary`` was written,
+    which is what keeps this a rename of nothing.
+    """
+    return store.DayRecord(realised=summary.realised, trades_count=summary.trades_count)
+
+
+def _restore_history(state: store.PersistedState | None) -> dict[date, DaySummary]:
+    """Completed days from the store, back into the domain's own type.
+
+    **RESTORED IN FULL, WITH NO PRUNE AND NO DATE FILTER**, for the reason
+    :func:`_restore_ledger` applies none either. The bound is the DOMAIN's and
+    is applied at the roll -- see ``core.portfolio._pruned_history`` -- so
+    trimming here would drop days the portfolio would then re-add from nothing,
+    or worse, drop them permanently on a file the domain never re-derives.
+
+    An empty mapping is returned for an absent store, which is what
+    :attr:`Portfolio.daily_history` defaults to anyway. There is no
+    absent-versus-empty distinction to preserve here: a day appears only when
+    it ENDS with a booking in it, so "no completed days" and "no file" are the
+    same fact about history and are not the same fact about the ledger.
+    """
+    if state is None:
+        return {}
+    return {
+        day: DaySummary(realised=record.realised, trades_count=record.trades_count)
+        for day, record in state.daily_history.items()
+    }
+
+
+def _restore_lifetime(state: store.PersistedState | None) -> Money | None:
+    """The lifetime accumulator from the store, preserving ABSENT versus ZERO.
+
+    **NOT A BARE PASSTHROUGH, and the reason is the same one
+    :func:`_restore_ledger` states for the ledger itself: absent is not zero.**
+    ``None`` means no day has ever rolled -- the bot has not yet completed a UTC
+    day with a booking in it. ``Decimal(0)`` means days HAVE rolled and their
+    realised totals netted out to nothing. Those are different facts about the
+    account, and a mapping that flattened either into the other would report a
+    bot that has never closed a day as one that closed several and broke even.
+
+    Written as an explicit function rather than ``state.lifetime_realised`` at
+    the call site so the distinction has somewhere to be stated and something
+    to fail. A passthrough expression carries the same value and documents
+    nothing, and the next hand to touch it has no reason not to write
+    ``or Decimal(0)``.
+    """
+    if state is None:
+        return None
+    return state.lifetime_realised
 
 
 def _pair_timeframes(settings: Settings) -> dict[str, str]:
@@ -595,7 +663,12 @@ async def _prime_pairs(
 
 
 def _seed_portfolio(
-    balances: Sequence[Balance], *, quote_asset: str, ledger: Ledger | None = None
+    balances: Sequence[Balance],
+    *,
+    quote_asset: str,
+    ledger: Ledger | None = None,
+    daily_history: dict[date, DaySummary] | None = None,
+    lifetime_realised: Money | None = None,
 ) -> Portfolio:
     """Build the boot-snapshot portfolio from the account's quote balance.
 
@@ -659,7 +732,22 @@ def _seed_portfolio(
             # `validate_assignment=True`, so seeding the ledger afterwards
             # would be a second validated write and would leave the object
             # briefly existing without the record it is supposed to boot with.
-            return Portfolio(quote_asset=normalised, free_quote=balance.free, ledger=ledger)
+            # C3 added two more restored fields and they go into this SAME
+            # call for that reason -- three restored values assigned after
+            # construction would be three such windows instead of one.
+            #
+            # `daily_history` is normalised to `{}` here rather than passed
+            # through: the field carries a dict FACTORY default, so `None` is
+            # not a value it accepts. `lifetime_realised` passes through
+            # untouched because `None` IS one of its values -- never accrued,
+            # as distinct from accrued to zero.
+            return Portfolio(
+                quote_asset=normalised,
+                free_quote=balance.free,
+                ledger=ledger,
+                daily_history=daily_history if daily_history is not None else {},
+                lifetime_realised=lifetime_realised,
+            )
     raise ConfigError(
         f"trading.base_currency is {quote_asset!r} but the account reports no "
         f"{normalised} balance entry. get_balances() returns every asset, including "
@@ -1077,6 +1165,8 @@ async def live_system(
             balances,
             quote_asset=settings.config.trading.base_currency,
             ledger=_restore_ledger(restored),
+            daily_history=_restore_history(restored),
+            lifetime_realised=_restore_lifetime(restored),
         )
         # Still before any socket, with the other four boot refusals.
         await _snapshot_unmanaged_holdings(
@@ -1115,14 +1205,29 @@ async def live_system(
                 # `execution/` and `persistence/` -- so `execution/` never
                 # imports the store and gains no outer-to-outer edge.
                 #
-                # SEEDED FROM THE STORE READ AT STEP 0a, WHICH IS WHAT MAKES
-                # THE LEDGER SURVIVE. The closure below rewrites `pending` and
-                # carries `ledger` across verbatim, so whatever was restored is
-                # preserved through every subsequent write. Starting from a
-                # fresh `PersistedState()` when a store existed would silently
-                # ERASE the ledger on the first placement -- the whole-file
-                # clobber this root owns the state to prevent, arriving from
-                # inside the owner.
+                # SEEDED FROM THE STORE READ AT STEP 0a. Starting from a fresh
+                # `PersistedState()` when a store existed would silently ERASE
+                # the ledger on the first placement -- the whole-file clobber
+                # this root owns the state to prevent, arriving from inside the
+                # owner.
+                #
+                # WHAT THIS OBJECT CARRIES, EXACTLY -- and the list is shorter
+                # than it looks. This comment used to say the closures "carry
+                # `ledger` across verbatim, so whatever was restored is
+                # preserved through every subsequent write". That was true of
+                # `ledger` and FALSE of everything C1 and C2 added, because
+                # both closures REBUILD a frozen `PersistedState` from named
+                # keywords: any field they do not name reverts to its default,
+                # whatever this object holds. A restored `daily_history` was
+                # therefore erased by the first save of the run -- the same
+                # clobber, arriving through the seeding that exists to stop it.
+                #
+                # After C3 the closures name every field they must preserve,
+                # and they take FOUR of the five from `portfolio` LIVE rather
+                # than from here. So `persisted` is now the carrier of exactly
+                # ONE slice -- `pending` -- read by `_persist_ledger` alone.
+                # That one read is the residual its own docstring names; it is
+                # UNRULED and deliberately untouched by C3.
                 persisted = restored if restored is not None else store.PersistedState()
 
                 def _to_record(
@@ -1203,6 +1308,13 @@ async def live_system(
                     whole state to prevent.
                     """
                     nonlocal persisted
+                    # EVERY FIELD BELOW IS READ LIVE FROM `portfolio`, NEVER
+                    # FROM `persisted`. `persisted` is a local refreshed only
+                    # by whichever closure last ran, and the history and the
+                    # lifetime total change through `record_realised_pnl`,
+                    # which goes through NO writer -- exactly the shape that
+                    # cost four bookings on 2026-09-06 when the ledger was
+                    # cached here.
                     persisted = store.PersistedState(
                         pending=tuple(_to_record(record) for record in records),
                         ledger=(
@@ -1211,8 +1323,14 @@ async def live_system(
                             else store.LedgerRecord(
                                 realised_pnl=portfolio.ledger.realised_pnl,
                                 pnl_date=portfolio.ledger.pnl_date,
+                                trades_count=portfolio.ledger.trades_count,
                             )
                         ),
+                        daily_history={
+                            day: _to_day_record(summary)
+                            for day, summary in portfolio.daily_history.items()
+                        },
+                        lifetime_realised=portfolio.lifetime_realised,
                     )
                     store.save(persisted)
 
@@ -1261,12 +1379,28 @@ async def live_system(
                     close's deletion and its accrual reach disk together.
                     """
                     nonlocal persisted
+                    # `trades_count` comes from the ARGUMENT, beside the two
+                    # fields already taken from it: the caller passes the
+                    # ledger it wants written, and reading two of its three
+                    # fields from the argument and the third from `portfolio`
+                    # could write a record that never existed on either.
+                    #
+                    # The history and the lifetime total have no argument, so
+                    # they are read LIVE from `portfolio` -- never from
+                    # `persisted`, which is a stale local. That is the same
+                    # rule the pending closure states above.
                     persisted = store.PersistedState(
                         pending=persisted.pending,
                         ledger=store.LedgerRecord(
                             realised_pnl=ledger.realised_pnl,
                             pnl_date=ledger.pnl_date,
+                            trades_count=ledger.trades_count,
                         ),
+                        daily_history={
+                            day: _to_day_record(summary)
+                            for day, summary in portfolio.daily_history.items()
+                        },
+                        lifetime_realised=portfolio.lifetime_realised,
                     )
                     store.save(persisted)
 
