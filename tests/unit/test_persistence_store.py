@@ -44,6 +44,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+# The domain imports are the agreement class's -- the store mirrors both types,
+# and `MAX_DAILY_HISTORY` is aliased because this file binds the store's own.
+from trading_bot.core.portfolio import MAX_DAILY_HISTORY as CORE_MAX_DAILY_HISTORY
+from trading_bot.core.portfolio import DaySummary
+
 # The one test below reaches into `execution/` on purpose; see its docstring.
 from trading_bot.execution.executor import PendingPlacement
 from trading_bot.persistence import store as s
@@ -980,3 +985,45 @@ class TestTheHistoryShape:
 
         assert len(state.daily_history) == s.MAX_DAILY_HISTORY + 1
         assert s.MAX_DAILY_HISTORY == 400
+
+
+class TestAgreementWithTheDomainsDaySummary:
+    """The store's day type and the domain's must not drift apart.
+
+    The same shape as ``TestFieldAgreementWithPendingPlacement`` above, and it
+    lives here for the same reason: a disagreement means the store cannot hold
+    what the domain will hand it, and a reader seeing THIS file fail is told
+    the persistence layer is incomplete.
+
+    **THE CONSTANT IS THE URGENT HALF, because it is DUPLICATED and the
+    duplication is declared temporary.** ``core.portfolio`` states the cap and
+    prunes to it; ``store`` states the same number again because ``core/`` may
+    not import ``persistence/`` and importing the other way would invert the
+    layering. ``core.portfolio.MAX_DAILY_HISTORY``'s own docstring promises
+    that a test asserts the two agree -- this is it. When ``store.py`` is next
+    authorised the collapse is one import and this assertion becomes trivially
+    true, which is the intended end state rather than a reason to drop it.
+
+    **WHY DRIFT WOULD BE SILENT.** Nothing composes the two numbers: the domain
+    prunes with its own and the store merely documents its own, so a store
+    lowered to 200 while the domain kept 400 would produce a file the loader
+    accepts, a history the domain never trims to the documented bound, and no
+    error anywhere -- only a comment that has quietly become false.
+
+    **WHAT THIS DOES NOT CHECK**, since an overclaiming test name is a recorded
+    defect class here (``M5f-088``, ``M5f-073``, ``M5h-045``):
+
+    * **Types**, declined for the reason the sibling class records in full --
+      the two machineries report the same declaration irreconcilably.
+    * **Arity.** No ``== 2``: adding a field to BOTH types is legitimate.
+    * **Semantics.** ``realised`` meaning two different things would pass.
+    * **That the mapping between them is correct.** The mapping is the
+      composition root's and does not exist yet; this pins only that a rename
+      is not needed when it is written.
+    """
+
+    def test_the_two_day_types_carry_the_same_field_names(self) -> None:
+        assert set(DaySummary.model_fields) == set(s.DayRecord.model_fields)
+
+    def test_the_duplicated_cap_agrees_with_the_domains(self) -> None:
+        assert CORE_MAX_DAILY_HISTORY == s.MAX_DAILY_HISTORY

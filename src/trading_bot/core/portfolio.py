@@ -170,6 +170,90 @@ class Ledger(BaseModel):
     #: ``now`` -- see :func:`_ledger_is_stale` -- so the two must not be
     #: separable.
     pnl_date: date
+    #: How many closes have been booked into :attr:`pnl_date` so far.
+    #:
+    #: **DEFAULTED, and 149 construction sites are why.** ``Ledger`` and
+    #: ``Portfolio`` are built at 23 and 126 places across ``src/`` and
+    #: ``tests/``; a required field would break every one. C1 measured that
+    #: shape the expensive way -- a mutation making one field required
+    #: predicted 2 failures and produced 15, because everything CONSTRUCTING a
+    #: model is downstream of its fields, not only everything reading them.
+    #:
+    #: **THE FIRST RESTORED DAY UNDERSTATES, AND IT IS ZERO RATHER THAN LOW.**
+    #: MEASURED against the live ``data/state.json``: it holds ``pnl_date
+    #: 2026-09-09``, ``realised_pnl 4.0960280000`` and ``trades_count 0``, while
+    #: the log carries exactly TWO closes whose ``candle_time`` falls on that
+    #: UTC day -- ``+2.2781952000`` and ``+1.8178328000``, summing to the stored
+    #: total byte for byte. The count is right only from the first day that
+    #: BEGINS after this ships; the total was already right and stays right.
+    #:
+    #: No backfill corrects it, deliberately: a count this code did not compute
+    #: would afterwards be indistinguishable from one it did.
+    trades_count: int = Field(0, ge=0)
+
+
+class DaySummary(BaseModel):
+    """One COMPLETED UTC day: what it realised, and how many closes did it.
+
+    Written when a day ROLLS, never while it is current -- the day in progress
+    is the :class:`Ledger`, which the daily-loss gate reads. A day appears here
+    exactly once, when it is over and its total can no longer change.
+
+    **THE STORE HAS A MIRROR OF THIS AND THEY ARE DELIBERATELY TWO TYPES.**
+    ``persistence.store.DayRecord`` carries the same two fields under the same
+    two names; the mapping between them is the composition root's, because
+    ``core/`` may not import ``persistence/``. That is the same split
+    :class:`Ledger` and ``store.LedgerRecord`` already take, and the field
+    names are mirrored exactly so the mapping is a rename of nothing.
+
+    ``realised`` rather than ``realised_pnl``: the store's record chose the
+    shorter name for a type with no on-disk history to preserve, and this
+    mirrors it rather than introducing a third spelling.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    realised: Money
+    trades_count: int = Field(0, ge=0)
+
+
+#: The most days :attr:`Portfolio.daily_history` may carry.
+#:
+#: **DUPLICATED FROM ``persistence.store.MAX_DAILY_HISTORY``, AND THAT IS A
+#: KNOWN TEMPORARY STATE.** One number in two files is what this project guards
+#: hardest against, and the collapse is one line: ``store.py`` already imports
+#: from ``core`` -- ``Money`` and ``TradingBotError`` -- so the store should
+#: import this and delete its own. It is not done here because ``store.py`` is
+#: outside this commit's authorisation, and importing ``persistence`` into
+#: ``core`` to avoid the duplication would invert the layering, which is far
+#: worse than a number stated twice.
+#:
+#: **A TEST ASSERTS THE TWO AGREE**, so the duplication is caught rather than
+#: silent until it is collapsed.
+#:
+#: 400 is a year plus margin. The bound loses granularity and never the total,
+#: because :attr:`Portfolio.lifetime_realised` accumulates every day including
+#: the ones pruned away -- which is the whole reason bounding is safe.
+MAX_DAILY_HISTORY = 400
+
+
+def _pruned_history(history: dict[date, DaySummary]) -> dict[date, DaySummary]:
+    """``history`` cut to the newest :data:`MAX_DAILY_HISTORY` days.
+
+    **PRUNED BY PARSED DATE, NEVER BY INSERTION ORDER.** ``sorted`` here orders
+    the ``date`` KEYS, which are real dates by the time they reach memory. A
+    dict preserves insertion order and it is tempting to drop the first item --
+    but a restored history's order is whatever the JSON file listed, and a
+    hand-edited file has no reliable order at all. Dropping "the first" would
+    then discard an arbitrary day and read as correct.
+
+    Returns the input unchanged when it is within the bound, so the common path
+    allocates nothing.
+    """
+    if len(history) <= MAX_DAILY_HISTORY:
+        return history
+    keep = sorted(history)[-MAX_DAILY_HISTORY:]
+    return {day: history[day] for day in keep}
 
 
 def _ledger_is_stale(ledger: Ledger | None, now_day: date) -> bool:
@@ -232,6 +316,37 @@ class Portfolio(BaseModel):
     ledger: Ledger | None = None
     #: Per-symbol instants before which no new entry is allowed.
     cooldown_until: dict[str, datetime] = Field(default_factory=dict)
+    #: Completed UTC days, keyed by the day they cover. Bounded at
+    #: :data:`MAX_DAILY_HISTORY` by :func:`_pruned_history`, at the roll.
+    #:
+    #: **THE RISK PATH DOES NOT READ THIS, AND IT IS ON THE OBJECT THE RISK
+    #: PATH HOLDS.** Those are different statements and the second is the
+    #: honest one. ``daily_loss_exceeded`` and ``realised_today`` are unchanged
+    #: and both read :attr:`ledger` alone; nothing consults history to decide
+    #: anything. But it sits on ``Portfolio``, within reach of any future edit,
+    #: so "no risk-path contact" would be a claim about today rather than a
+    #: property. Said this way so a later reader knows which they have.
+    #:
+    #: **EMPTY UNTIL THE FIRST UTC-MIDNIGHT ROLL AFTER THIS SHIPS.** A day
+    #: appears only when it ENDS with a booking in it, so ``{}`` on a bot that
+    #: has traded today is the expected state rather than a lost write.
+    daily_history: dict[date, DaySummary] = Field(default_factory=dict)
+    #: Realised P&L across every day that has rolled, including days
+    #: :func:`_pruned_history` has since dropped. That is what makes the bound
+    #: safe.
+    #:
+    #: **``None`` MEANS NEVER ROLLED, NOT ZERO** -- the absent-versus-zero
+    #: distinction :attr:`ledger` already carries. A lifetime of ``0`` is a bot
+    #: that closed days and came out flat; ``None`` is one that has not closed
+    #: a day yet.
+    #:
+    #: **IT IS NOT A LIFETIME FIGURE FOR TRADING ALREADY DONE.** It starts from
+    #: whatever the current day holds at the first roll after this ships. The
+    #: twenty closes and three reconciler bookings already made are in the log
+    #: and not in this number, and no backfill puts them there: a figure the
+    #: code did not compute would be indistinguishable afterwards from one it
+    #: did.
+    lifetime_realised: Money | None = None
     #: Material base holdings the account had at boot that this bot did not
     #: open, keyed by the **symbol** they are priced against -- so the same
     #: ``marks`` mapping that values positions values these too. The quantity is
@@ -667,14 +782,42 @@ class Portfolio(BaseModel):
         unconditionally would back-date on a ``now`` that has moved backwards,
         which is the defect :func:`_ledger_is_stale` exists to prevent.
 
-        **ONE ASSIGNMENT, AND THAT IS THE M5h CHANGE.** This wrote
+        **THE INVARIANT IS CONSTRUCTION-BEFORE-ASSIGNMENT. It read "ONE
+        ASSIGNMENT, AND THAT IS THE M5h CHANGE" until this commit, and that is
+        now false** -- a roll writes three attributes. Amended rather than
+        deleted, because the reason the single assignment existed still governs
+        what replaced it.
+
+        **What the single assignment prevented.** This method once wrote
         ``realised_pnl`` and then, conditionally, ``pnl_date`` -- two
         ``STORE_ATTR`` bytecodes with no suspension point between them, but
-        interruptible all the same. What that left is stated on :class:`Ledger`;
-        what matters here is that the intermediate state no longer exists to be
-        left. Note the fallible step moved EARLIER rather than merely staying
-        first: ``Ledger(...)`` validates the total before ``self.ledger`` is
-        touched at all.
+        interruptible all the same. Between them the object held **a new total
+        under a stale date**, and :meth:`realised_today` reads exactly that pair:
+        it would have reported a booked loss as zero, released the daily-loss
+        halt, and permitted an entry on a halted account. Collapsing the two
+        into one ``Ledger`` made that intermediate state unrepresentable rather
+        than merely unlikely.
+
+        **Why three assignments do not reopen it.** The hazard was never
+        arithmetic; it was that a READER could observe a half-written pair.
+        ``realised_today`` and ``daily_loss_exceeded`` read :attr:`ledger`
+        alone, and :attr:`ledger` is still written by ONE assignment of ONE
+        frozen value. :attr:`daily_history` and :attr:`lifetime_realised` are
+        read by nothing on the decision path, so an observer between those two
+        writes sees nothing it acts on.
+
+        **So the rule that binds is the one `CLAUDE.md` states generally: the
+        fallible step precedes the irreversible one.** Every construction that
+        can raise -- the new ``Ledger``, the ``DaySummary``, the pruned mapping
+        -- completes BEFORE any attribute is written. A failure therefore leaves
+        the portfolio exactly as it was, which is the property the single
+        assignment was protecting all along.
+
+        **The roll's push is guarded on the OUTGOING LEDGER, not on ``rolled``.**
+        ``_ledger_is_stale`` answers ``True`` for ``ledger is None``, which is
+        the first accrual of a fresh portfolio -- a roll with no outgoing day to
+        preserve. Pushing there would write a history entry for a day that never
+        accrued anything.
         """
         today = _utc_day("now", now)
         ledger = self.ledger
@@ -683,8 +826,40 @@ class Portfolio(BaseModel):
         # Not stale => keep the day the ledger already covers. `ledger is not
         # None` is mypy narrowing: `rolled` is True whenever it is None.
         covered = ledger.pnl_date if ledger is not None and not rolled else today
+        # THE DAY BEING LEFT BEHIND, or `None` when there is none. A first-ever
+        # accrual is `rolled` with nothing outgoing; see the docstring.
+        outgoing = ledger if rolled and ledger is not None else None
+        # A roll starts the new day's count at THIS booking; otherwise it
+        # continues the day the ledger already covers. Keyed on `rolled` alone:
+        # an outgoing day being present says which day is ENDING, never how the
+        # new one begins, and conflating the two continued the old count into
+        # the new day. `ledger is None` is mypy narrowing -- `rolled` is True
+        # whenever it is None -- exactly as the `covered` line above.
+        counted = 1 if rolled or ledger is None else 1 + ledger.trades_count
 
-        self.ledger = Ledger(realised_pnl=total, pnl_date=covered)
+        # -- CONSTRUCT. Everything below can raise; nothing above is written. --
+        new_ledger = Ledger(realised_pnl=total, pnl_date=covered, trades_count=counted)
+        history: dict[date, DaySummary] | None = None
+        lifetime: Money | None = None
+        if outgoing is not None:
+            history = _pruned_history(
+                {
+                    **self.daily_history,
+                    outgoing.pnl_date: DaySummary(
+                        realised=outgoing.realised_pnl, trades_count=outgoing.trades_count
+                    ),
+                }
+            )
+            lifetime = (self.lifetime_realised or Decimal(0)) + outgoing.realised_pnl
+
+        # -- ASSIGN. The ledger goes LAST, because it is the one the decision
+        # path reads: an observer between the two writes above sees history
+        # that nothing consults, where one that saw a half-updated ledger
+        # would act on it.
+        if history is not None:
+            self.daily_history = history
+            self.lifetime_realised = lifetime
+        self.ledger = new_ledger
 
     @staticmethod
     def _binding_stop(position: Position) -> Decimal | None:

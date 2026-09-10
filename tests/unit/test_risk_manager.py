@@ -13,7 +13,7 @@ exists to prevent.
 from __future__ import annotations
 
 import inspect
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -50,7 +50,12 @@ from trading_bot.core.models import (
     Signal,
     SymbolInfo,
 )
-from trading_bot.core.portfolio import Ledger, Portfolio
+from trading_bot.core.portfolio import (
+    MAX_DAILY_HISTORY,
+    DaySummary,
+    Ledger,
+    Portfolio,
+)
 from trading_bot.risk.manager import (
     EntryIntent,
     ExitIntent,
@@ -383,7 +388,9 @@ class TestPortfolio:
 
         assert portfolio.realised_today(NOW + timedelta(hours=13)) == D("0")
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("-450"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(
+            realised_pnl=D("-450"), pnl_date=NOW.date(), trades_count=1
+        )
 
     def test_the_daily_loss_halt_releases_at_the_next_utc_day_without_a_write(self) -> None:
         """The release used to be produced by the mutation above. It is now
@@ -401,7 +408,9 @@ class TestPortfolio:
             limit_percent=limit, equity=D("10000"), now=NOW + timedelta(hours=13), committed=D("0")
         )
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("-500"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(
+            realised_pnl=D("-500"), pnl_date=NOW.date(), trades_count=1
+        )
 
     def test_a_backwards_now_does_not_destroy_or_back_date_the_ledger(self) -> None:
         """The write half. ``now`` can move backwards -- an NTP correction, or an
@@ -419,7 +428,11 @@ class TestPortfolio:
 
         portfolio.record_realised_pnl(D("-10"), now=NOW - timedelta(hours=13))
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("-460"), pnl_date=NOW.date())
+        # TWO accruals into one day, so the count is 2: a backwards `now` does
+        # not roll, so the second continues the day rather than starting one.
+        assert portfolio.ledger == Ledger(
+            realised_pnl=D("-460"), pnl_date=NOW.date(), trades_count=2
+        )
 
     def test_a_backwards_now_does_not_hide_the_days_realised_loss(self) -> None:
         """The read half, and the same defect pointing the other way.
@@ -455,7 +468,11 @@ class TestPortfolio:
 
         portfolio.record_realised_pnl(D("-5"), now=NOW)
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("-5"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(realised_pnl=D("-5"), pnl_date=NOW.date(), trades_count=1)
+        # A FIRST-EVER accrual is `rolled` with nothing outgoing, so it pushes
+        # no history entry -- there is no previous day to preserve.
+        assert portfolio.daily_history == {}
+        assert portfolio.lifetime_realised is None
 
     @pytest.mark.parametrize(
         ("amount", "now", "expected", "match"),
@@ -505,7 +522,15 @@ class TestPortfolio:
             # non-Decimal amounts are deliberate: four of the six triggers.
             portfolio.record_realised_pnl(amount, now=now)  # type: ignore[arg-type]
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("-450"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(
+            realised_pnl=D("-450"), pnl_date=NOW.date(), trades_count=1
+        )
+        # THE SAME INVARIANT OVER THE NEW SURFACE: a failed accrual must not
+        # bump the count, push a history entry, or move the accumulator. All
+        # three are constructed before any assignment, so a raise leaves the
+        # portfolio exactly as it was -- which is what this test is about.
+        assert portfolio.daily_history == {}
+        assert portfolio.lifetime_realised is None
 
     def test_daily_loss_threshold_is_a_percent_of_equity(self) -> None:
         portfolio = Portfolio(free_quote=D("10000"))
@@ -702,7 +727,7 @@ class TestPortfolio:
         portfolio.record_realised_pnl(D("-25"), now=NOW)
         portfolio.record_realised_pnl(D("25"), now=NOW)
 
-        assert portfolio.ledger == Ledger(realised_pnl=D("0"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(realised_pnl=D("0"), pnl_date=NOW.date(), trades_count=2)
         assert portfolio.ledger is not None
         assert portfolio.realised_today(NOW) == D("0")
 
@@ -774,7 +799,7 @@ class TestPortfolio:
         assert pnl == D("20")  # unchanged: (110 - 100) * 2
         assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
         assert portfolio.realised_today(NOW) == D("20")
-        assert portfolio.ledger == Ledger(realised_pnl=D("20"), pnl_date=NOW.date())
+        assert portfolio.ledger == Ledger(realised_pnl=D("20"), pnl_date=NOW.date(), trades_count=1)
         assert SYMBOL not in portfolio.positions
         assert not portfolio.has_position(SYMBOL)
 
@@ -1179,6 +1204,195 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"))
         with pytest.raises(ValidationError, match="must not be built from a float"):
             portfolio.free_quote = 1000.5  # type: ignore[assignment]
+
+
+class TestTheRollPreservesTheOutgoingDay:
+    """The day roll pushes what it is about to overwrite.
+
+    MEASURED, and it is why this exists: UTC 2026-09-08 accumulated
+    ``-2.8077840000`` across four closes and was destroyed when UTC 09-09's
+    first booking rolled the day. The outgoing total lived only in a local
+    inside ``record_realised_pnl`` and was gone after the assignment.
+
+    **A SEPARATE CLASS RATHER THAN AN EXTENSION OF
+    ``..._accrues_and_resets_on_the_utc_day_boundary``**, deliberately. That
+    test spans a UTC midnight but never ACCRUES past it -- its last assertion is
+    that ``realised_today`` DERIVES the new day *without writing*, which is its
+    whole subject. Accruing there would perform the roll it exists to show is
+    unnecessary for a read, and the two claims would sit in one test
+    contradicting each other.
+
+    **IT SITS AFTER ``TestPortfolio`` ENDS, NOT NEXT TO THAT TEST, AND THE
+    DIFFERENCE COST A DEFECT.** Written first as a class textually beside its
+    subject -- which put it in the MIDDLE of ``TestPortfolio`` and silently
+    REPARENTED the 48 methods below it into this class. MEASURED: ``-k
+    RollPreserves`` selected 54 tests where six were written, and every one of
+    the 54 passed, so no instrument reported it. A class boundary is not a
+    comment: opening one anywhere inside another class ends that class, and
+    Python, pytest and the gate are all content with the result. Adjacency in
+    this file is bought by moving a method, never by opening a class.
+
+    The first-ever accrual -- ``ledger is None``, a roll with nothing outgoing
+    -- is covered where it belongs, in
+    ``test_the_first_accrual_of_a_run_does_not_compare_against_a_missing_day``,
+    rather than duplicated here.
+    """
+
+    def test_two_accruals_spanning_utc_midnight_preserve_the_outgoing_day(self) -> None:
+        """**THE COMMIT'S CENTRAL CLAIM**, and one accrual cannot express it.
+
+        MUTATION: delete the history push from ``record_realised_pnl``.
+
+        A single accrual never rolls, so nothing short of two spanning a UTC
+        midnight can show a day being preserved. The outgoing figures are
+        asserted EXACTLY -- total and count together -- because a push that
+        carried the day but lost its count would satisfy a total-only check.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.record_realised_pnl(D("-120.25"), now=NOW)
+        portfolio.record_realised_pnl(D("-10"), now=NOW + timedelta(hours=11))
+
+        portfolio.record_realised_pnl(D("7.5"), now=NOW + timedelta(hours=13))
+
+        assert portfolio.daily_history == {
+            NOW.date(): DaySummary(realised=D("-130.25"), trades_count=2)
+        }
+        assert portfolio.ledger == Ledger(
+            realised_pnl=D("7.5"),
+            pnl_date=(NOW + timedelta(hours=13)).date(),
+            trades_count=1,
+        )
+
+    def test_the_lifetime_total_is_the_sum_across_a_roll(self) -> None:
+        """MUTATION: assign the outgoing total instead of adding to it.
+
+        Two rolls, so the accumulator has to ACCUMULATE rather than merely be
+        set -- one roll cannot tell assignment from addition. The three days'
+        figures differ in sign and magnitude, so a wrong combination cannot land
+        on the right answer by coincidence.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.record_realised_pnl(D("-2.8077840000"), now=NOW)
+        portfolio.record_realised_pnl(D("2.2781952000"), now=NOW + timedelta(days=1))
+
+        assert portfolio.lifetime_realised == D("-2.8077840000")
+
+        portfolio.record_realised_pnl(D("1.5"), now=NOW + timedelta(days=2))
+
+        assert portfolio.lifetime_realised == D("-0.5295888000")
+        assert portfolio.daily_history[NOW.date()].realised == D("-2.8077840000")
+        assert portfolio.daily_history[(NOW + timedelta(days=1)).date()].realised == D(
+            "2.2781952000"
+        )
+
+    def test_a_same_day_accrual_adds_no_history_entry(self) -> None:
+        """MUTATION: push on every accrual rather than only on a roll.
+
+        Under it every booking writes a history entry for the day still in
+        progress -- a day recorded as finished while it is still accruing, and
+        overwritten by the next booking. Asserted on the count too, because a
+        push that overwrote the same key would leave the length at 1 and look
+        correct.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.record_realised_pnl(D("-5"), now=NOW)
+        portfolio.record_realised_pnl(D("-5"), now=NOW + timedelta(hours=1))
+
+        assert portfolio.daily_history == {}
+        assert portfolio.lifetime_realised is None
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.trades_count == 2
+
+    def test_a_backwards_now_preserves_no_day_because_it_does_not_roll(self) -> None:
+        """A ``now`` that moved backwards accrues into the day already covered.
+
+        MUTATION: guard the push on ``today != ledger.pnl_date`` instead of on
+        ``rolled``.
+
+        ``_ledger_is_stale`` is deliberately "strictly later", not "different",
+        so an NTP correction does not roll. A push guarded on inequality would
+        file the CURRENT day into history and then keep accruing into it.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+
+        portfolio.record_realised_pnl(D("-10"), now=NOW - timedelta(hours=13))
+
+        assert portfolio.daily_history == {}
+        assert portfolio.lifetime_realised is None
+
+    def test_the_prune_drops_the_oldest_by_date_not_by_insertion_order(self) -> None:
+        """**THE FIXTURE IS BUILT NON-CHRONOLOGICALLY, and that is the test.**
+
+        MUTATION: drop the FIRST key instead of sorting -- ``next(iter(...))``.
+
+        A dict preserves insertion order and dropping its first item is the
+        obvious implementation. Here the history is inserted NEWEST-FIRST, so
+        the first inserted is the newest day and the oldest is last. A
+        by-insertion prune therefore drops a day it should keep and keeps the
+        one it should drop, and both assertions below catch it -- where a
+        chronologically-built fixture would pass under either implementation.
+
+        Restored history really can arrive in any order: it comes back from a
+        JSON object, and a hand-edited file has no reliable key order at all.
+
+        **THE LEDGER'S OWN DAY IS DELIBERATELY ABSENT FROM ``daily_history``,
+        and a fixture that includes it tests nothing.** History holds COMPLETED
+        days and the ledger covers the CURRENT one, so the two are disjoint by
+        construction. Seed the ledger's day into history as well and the roll's
+        push REPLACES that key instead of adding one -- the mapping never
+        reaches 401, the prune never runs, and the test passes under every
+        implementation of it. Measured: written that way, this test failed on
+        the surviving oldest day rather than on the prune's ordering.
+        """
+        oldest = NOW.date()
+        days = [oldest + timedelta(days=n) for n in range(MAX_DAILY_HISTORY)]
+        newest_first = {day: DaySummary(realised=D("0"), trades_count=0) for day in reversed(days)}
+        assert next(iter(newest_first)) == days[-1], "fixture must not be chronological"
+
+        # The day the ledger covers -- one past the newest COMPLETED day.
+        current = days[-1] + timedelta(days=1)
+        portfolio = Portfolio(
+            free_quote=D("1000"),
+            daily_history=newest_first,
+            ledger=Ledger(realised_pnl=D("3"), pnl_date=current, trades_count=1),
+        )
+
+        # `current` rolls in, taking the mapping to 401 before the prune.
+        portfolio.record_realised_pnl(
+            D("1"), now=datetime.combine(current + timedelta(days=1), time(12, 0), timezone.utc)
+        )
+
+        assert len(portfolio.daily_history) == MAX_DAILY_HISTORY
+        assert oldest not in portfolio.daily_history  # the OLDEST went
+        assert days[-1] in portfolio.daily_history  # the fixture's newest stayed
+        assert current in portfolio.daily_history  # and so did the day just pushed
+
+    def test_the_daily_loss_gate_reads_only_the_current_day(self) -> None:
+        """**RULING 4: the risk path is unchanged, asserted rather than claimed.**
+
+        MUTATION: make ``realised_today`` fall back to ``lifetime_realised``, or
+        sum ``daily_history`` into it.
+
+        The figures are chosen so history and today disagree about the halt: a
+        limit of 5% on 10000 is -500, which yesterday's -450 plus today's -60
+        would breach at -510 while today alone does not. So a gate that leaked
+        history would halt here and the correct one does not. Both methods are
+        asserted, because they are the two the risk path actually calls.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        portfolio.record_realised_pnl(D("-450"), now=NOW)
+        tomorrow = NOW + timedelta(days=1)
+
+        portfolio.record_realised_pnl(D("-60"), now=tomorrow)
+
+        assert portfolio.realised_today(tomorrow) == D("-60")
+        assert not portfolio.daily_loss_exceeded(
+            limit_percent=D("5.0"), equity=D("10000"), now=tomorrow, committed=D("0")
+        )
+        # And the preserved day is genuinely there, so the test is not passing
+        # because the push failed.
+        assert portfolio.daily_history[NOW.date()].realised == D("-450")
 
 
 # --------------------------------------------------------------------------
