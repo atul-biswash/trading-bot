@@ -2390,16 +2390,14 @@ class TestTheStoreIsReadAtBoot:
         resolution would therefore not merely change a value here; it would
         raise out of ``__aenter__``. The fixture is the assertion.
 
-        **TWO PAIRS, because one would now REFUSE THE BOOT.** R5 makes a symbol
-        carrying a restored pending record non-tradeable, so a single-pair bot
-        whose only pair has one has nothing left and stops. That refusal is the
-        subject of ``TestTheBootGateSeesPending``; here it is only in the way,
-        and a second enabled pair keeps this test on the property it exists to
-        pin -- that the record reaches the executor field for field.
+        **ONE PAIR, RESTORED.** It briefly took two: R5 made every restored
+        pending record disqualify its symbol, so this single-pair boot refused
+        and a second pair was added to step around it. Narrowing that exclusion
+        to CLOSES gave the original shape back, because the record here is a
+        PLACEMENT and a placement no longer excludes -- which is the ruling
+        working, not a coincidence to be preserved by leaving the workaround in.
         """
-        settings = write_settings(
-            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
-        )
+        settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
         # The isolation is asserted, not assumed: this is what proves the module
         # fixture redirected the read away from the repository's own `data/`.
@@ -2719,14 +2717,11 @@ class TestTheStoreIsReadAtBoot:
         resolve the record correctly and then erase it from disk on the next
         write, reintroducing the crash window the restore exists to close.
 
-        **TWO PAIRS, for the reason
-        ``test_a_restored_record_reaches_the_executor_field_for_field`` states:**
-        R5 makes a symbol with a restored pending record non-tradeable, so one
-        pair alone would refuse the boot before this test reached its subject.
+        **ONE PAIR, RESTORED**, for the reason
+        ``test_a_restored_record_reaches_the_executor_field_for_field`` states:
+        the record is a PLACEMENT, and the boot gate excludes closes only.
         """
-        settings = write_settings(
-            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
-        )
+        settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
@@ -3259,3 +3254,76 @@ class TestTheBootGateSeesPending:
         assert "a close this bot started is UNRESOLVED" in message
         assert f"  {SYMBOL}: " in message
         assert "  ETHUSDT: " in message
+
+    async def test_the_only_pair_holding_a_pending_placement_still_boots(
+        self, tmp_path: Path
+    ) -> None:
+        """**THE DEADLOCK THE NARROWING PREVENTS, and it is the whole ruling.**
+
+        MUTATION: drop `if record.kind == "close"` from the set passed to
+        `_require_something_tradeable`, restoring R5's behaviour.
+
+        Under it this boot REFUSES. That looks like the same safety the close
+        case buys and is its opposite: a restored placement is resolved against
+        the venue by `OrderExecutor.__call__` on the first candle and released,
+        so refusing to boot prevents the very tick that would clear it. The bot
+        refuses, restarts, refuses again, and the state causing it can never be
+        reached -- an unrecoverable loop produced by the check meant to stop an
+        unproductive one. A close has no such path, which is why it still
+        refuses; see the test above.
+
+        ONE pair, deliberately: two would boot under the mutation as well, and
+        the test would pin nothing.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED,)))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            # It booted -- and the record is still held, which is the point:
+            # the lock survives, and the first candle is what resolves it.
+            assert list(system.executor._pending) == [SYMBOL]
+            assert system.portfolio.blocked_symbols == {}
+
+    async def test_a_placement_and_a_close_exclude_only_the_close(self, tmp_path: Path) -> None:
+        """Both kinds coexist in one `_pending`, and the boot survives it.
+
+        MUTATION: drop the kind filter -- both kinds exclude, so both pairs go
+        and the boot refuses.
+
+        **WHAT THIS DOES NOT CATCH, declared rather than discovered.** It does
+        NOT catch the filter being INVERTED. Exactly one symbol is excluded
+        either way, so the boot succeeds under both, and the two assertions
+        below read `_pending` and `blocked_symbols` -- neither of which the boot
+        gate writes. An earlier draft of this docstring claimed the inversion
+        was caught here; it is not, and the claim was removed rather than the
+        test being stretched to justify it.
+
+        The inversion is caught by the SINGLE-PAIR pair above:
+        `..._pending_close_refuses_the_boot` and
+        `..._pending_placement_still_boots` differ in outcome under it, because
+        with one pair the exclusion count decides the boot. A mixed set cannot,
+        which is exactly why both single-pair tests exist.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        store.save(
+            store.PersistedState(
+                pending=(
+                    _STORED,  # BTCUSDT: a placement -- resolvable, does not exclude
+                    store.PendingCloseRecord(
+                        kind="close",
+                        symbol="ETHUSDT",
+                        entry_bar_time=_LIST_BAR,
+                        generation=0,
+                        quantity=D("0.72000000"),
+                    ),
+                )
+            )
+        )
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            # Both locks are held; only the close's symbol is non-tradeable, and
+            # that distinction lives in the boot gate rather than in `_pending`.
+            assert set(system.executor._pending) == {SYMBOL, "ETHUSDT"}
+            assert system.portfolio.blocked_symbols == {}

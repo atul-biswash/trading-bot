@@ -1063,8 +1063,8 @@ def _require_something_tradeable(
     caught by the one handler in ``main``, and both leave by the same exit.
 
     **TWO EXCLUSION CAUSES NOW, AND THE SECOND IS A PENDING CLOSE.** ``pending``
-    carries the symbols whose records came back from the store. A restored
-    pending record means this process is holding a lock on that symbol: the
+    carries the symbols whose restored records the caller judged disqualifying.
+    Such a record means this process is holding a lock on that symbol: the
     executor's dispatch guard refuses every entry while one is held, and a
     close's record is not cleared by a restart, because ``Position`` is
     in-process only -- so ``RiskManager`` refuses the CLOSE at
@@ -1072,6 +1072,25 @@ def _require_something_tradeable(
     it. Left to itself that symbol refuses entries for the life of the process
     while looking perfectly healthy, which is the failure shape above reached by
     a second route this check could not previously see.
+
+    **A RESTORED *PLACEMENT* IS NOT IN ``pending``, AND EXCLUDING ONE WOULD
+    DEADLOCK THE BOT.** The two locks look alike and behave oppositely. A
+    placement lock is SELF-HEALING: ``OrderExecutor.__call__`` resolves it
+    against the venue on the first candle and releases it. A close lock is not,
+    for the reason above. So refusing to boot over a placement would prevent the
+    very tick that clears it -- the bot would refuse, restart, refuse again, and
+    the state that caused it could never be reached to resolve. An unrecoverable
+    restart loop, produced by the check meant to stop an unproductive one.
+
+    That asymmetry is the whole of the ruling and it is stated HERE rather than
+    only at the call site, because the filter is one predicate and a later hand
+    widening ``pending`` back to every record would restore the deadlock while
+    making the code look more thorough.
+
+    **WHICH KIND IS THE CALLER'S JUDGEMENT, NOT THIS FUNCTION'S.** The filter is
+    applied where the symbols are derived; the contract here stays "these
+    symbols are not tradeable, and here is why". This function never inspects a
+    record, and it never learns that a union of two kinds exists.
 
     **WHAT A RESOLUTION DOES ABOUT IT IS NOT DECIDED HERE AND IS NOT DESCRIBED
     HERE.** This function observes a restored lock and refuses an unrunnable
@@ -1234,8 +1253,21 @@ async def live_system(
         # mechanisms are established together, so an operator meets both
         # verdicts before anything opens a socket. Still ahead of step 5.
         await _snapshot_live_order_lists(resolved_client, pairs=pairs, portfolio=portfolio)
+        # CLOSES ONLY, and a placement here would DEADLOCK THE BOT. A restored
+        # placement is resolved against the venue by the executor on the first
+        # candle and released; refusing to boot over one would prevent that very
+        # tick, so the bot would refuse, restart and refuse again with the
+        # causing state permanently out of reach. A restored close has no such
+        # path -- see `_require_something_tradeable` for why -- and is the whole
+        # reason that check learned about `_pending` at all.
+        #
+        # Filtered HERE rather than inside the check: which kind disqualifies a
+        # symbol is this root's judgement, and the check's contract stays "these
+        # symbols are not tradeable".
         _require_something_tradeable(
-            pairs, portfolio, pending={record.symbol for record in restored_pending}
+            pairs,
+            portfolio,
+            pending={record.symbol for record in restored_pending if record.kind == "close"},
         )
 
         provider = await BufferedMarketDataProvider.create(
