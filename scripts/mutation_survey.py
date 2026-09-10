@@ -189,6 +189,23 @@ def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
     Output is CAPTURED, never piped through a filter: a pipeline's exit status
     is the LAST stage's, and the status is what decides whether this run
     produced a verdict at all. Capturing keeps both.
+
+    **PARSED FROM THE SHORT SUMMARY SECTION ONLY, AND ``ERROR`` IS WHY.** A
+    first version scanned the whole of stdout for lines beginning ``FAILED ``
+    or ``ERROR ``. ``ERROR`` is AMBIGUOUS in pytest output: it prefixes a
+    collection error in the short summary, and it is also the LEVEL PREFIX on
+    every captured-log line a failing test emits. MEASURED against this tree --
+    the boot path calls ``_log.error("%s is BLOCKED: ...")``, so four
+    mutations that killed tests correctly were reported as ABSTAINED on the
+    strength of the log lines their own failures printed, and the real
+    ``FAILED`` list was computed and discarded. A survey that turns kills into
+    abstentions is worse than no survey: it reports the tests as blind when
+    they bit.
+
+    Two guards, because either alone still admits a mistake. The scan starts
+    after the ``short test summary info`` banner, which is the one section
+    whose lines are all verdicts. And an id must contain ``::``, which every
+    pytest node id does and no log line does.
     """
     proc = subprocess.run(
         [sys.executable, "-m", "pytest"],
@@ -198,9 +215,17 @@ def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
         check=False,
     )
     body = proc.stdout.splitlines()
-    failed = tuple(x.split(" ", 1)[1].strip() for x in body if x.startswith("FAILED "))
-    errored = tuple(x.split(" ", 1)[1].strip() for x in body if x.startswith("ERROR "))
-    return proc.returncode, failed, errored
+    start = next((i for i, line in enumerate(body) if "short test summary info" in line), len(body))
+    summary = body[start:]
+
+    def ids(prefix: str) -> tuple[str, ...]:
+        return tuple(
+            line.split(" ", 1)[1].strip()
+            for line in summary
+            if line.startswith(prefix) and "::" in line
+        )
+
+    return proc.returncode, ids("FAILED "), ids("ERROR ")
 
 
 def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Result | None:
