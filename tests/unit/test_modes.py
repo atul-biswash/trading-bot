@@ -1549,7 +1549,11 @@ class TestUnmanagedHoldings:
         )
         client = FakeRootClient(order_lists_error=ExchangeAPIError("venue unreachable"))
 
-        with pytest.raises(ConfigError, match="every enabled pair is blocked"):
+        # "excluded", not "blocked": R5 gave the refusal a SECOND cause, so a
+        # message asserting every pair is blocked would now be false whenever
+        # one of them is merely pending. The cause is named per symbol in the
+        # body instead -- see `TestTheBootGateSeesPending`.
+        with pytest.raises(ConfigError, match="every enabled pair is excluded"):
             async with live_system(settings, client=client, stream=FakeStream()):
                 pass  # pragma: no cover - the boot refuses before the body runs
 
@@ -2385,8 +2389,17 @@ class TestTheStoreIsReadAtBoot:
         which ``FakeRootClient`` raises ``NotImplementedError`` on. Boot-time
         resolution would therefore not merely change a value here; it would
         raise out of ``__aenter__``. The fixture is the assertion.
+
+        **TWO PAIRS, because one would now REFUSE THE BOOT.** R5 makes a symbol
+        carrying a restored pending record non-tradeable, so a single-pair bot
+        whose only pair has one has nothing left and stops. That refusal is the
+        subject of ``TestTheBootGateSeesPending``; here it is only in the way,
+        and a second enabled pair keeps this test on the property it exists to
+        pin -- that the record reaches the executor field for field.
         """
-        settings = write_settings(tmp_path)
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         store.save(store.PersistedState(pending=(_STORED,)))
         # The isolation is asserted, not assumed: this is what proves the module
         # fixture redirected the read away from the repository's own `data/`.
@@ -2705,8 +2718,15 @@ class TestTheStoreIsReadAtBoot:
         Catches a restore that seeds a SEPARATE collection: the executor would
         resolve the record correctly and then erase it from disk on the next
         write, reintroducing the crash window the restore exists to close.
+
+        **TWO PAIRS, for the reason
+        ``test_a_restored_record_reaches_the_executor_field_for_field`` states:**
+        R5 makes a symbol with a restored pending record non-tradeable, so one
+        pair alone would refuse the boot before this test reached its subject.
         """
-        settings = write_settings(tmp_path)
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         store.save(store.PersistedState(pending=(_STORED,)))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
@@ -3094,3 +3114,148 @@ class TestHistoryAndLifetimeCrossTheRoot:
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
             assert system.portfolio.lifetime_realised == D("-0.5295888000")
             assert str(system.portfolio.lifetime_realised) == "-0.5295888000"
+
+
+#: A restored close, in the store's shape. Its symbol is what makes the boot
+#: gate below fire; the quantity and bar are the run-3 values the rest of this
+#: file uses, so a reader sees the same position throughout.
+_STORED_CLOSE = store.PendingCloseRecord(
+    kind="close",
+    symbol=SYMBOL,
+    entry_bar_time=_LIST_BAR,
+    generation=0,
+    quantity=D("0.02310000"),
+)
+
+
+class TestTheBootGateSeesPending:
+    """R5: a symbol holding a restored pending record is not tradeable.
+
+    **THE ZOMBIE THIS CLOSES, and it was reachable with no boot refusal at
+    all.** A close interrupted by process death leaves a `PendingClose` on
+    disk. `_restore_pending` puts it back into `_pending` at every subsequent
+    boot; the executor's dispatch guard refuses every entry on that symbol; and
+    nothing clears it, because `Position` is in-process only, so `RiskManager`
+    refuses the `CLOSE` at `NOTHING_TO_CLOSE` before anything reaches the path
+    that would release the record. A single-pair bot in that state booted
+    clean, connected, seeded history and refused every signal for ever --
+    `docs/M5_NUMBERS.md`'s "the bot looks healthy while never trading", reached
+    by a route `_require_something_tradeable` could not see because the wedge
+    lives in the executor's `_pending` and the check reads
+    `portfolio.blocked_symbols`.
+
+    **WHAT THESE TESTS DO NOT PIN, said plainly.** Nothing here asserts what a
+    resolution does with the record: that is an open ruling, and no test in
+    this class would change if it were decided either way.
+
+    Placed at the END OF THE FILE, after `TestHistoryAndLifetimeCrossTheRoot`
+    closes. Opening a class inside another ends that class and silently
+    reparents its remaining methods -- measured at C2, where a class placed
+    beside its subject absorbed 48 tests and all of them still passed.
+    """
+
+    async def test_the_only_pair_holding_a_pending_close_refuses_the_boot(
+        self, tmp_path: Path
+    ) -> None:
+        """**R5's subject.** One pair, one restored close, nothing blocked.
+
+        MUTATION: drop `pending` from the exclusion in
+        `_require_something_tradeable`.
+
+        Under it this boots happily and idles for ever, which is the exact
+        state the ruling exists to end. `blocked_symbols` is asserted EMPTY so
+        the refusal cannot be passing for the pre-existing reason.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED_CLOSE,)))
+
+        with pytest.raises(ConfigError, match="every enabled pair is excluded"):
+            async with live_system(settings, client=FakeRootClient(), stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+    async def test_one_pending_pair_of_two_still_boots(self, tmp_path: Path) -> None:
+        """**THE REFUSAL IS EMPTINESS, NOT PRESENCE**, exactly as it is for blocked.
+
+        MUTATION: make the check refuse whenever ANY pair is pending.
+
+        This is V2's own distinction from B1 -- "with two pairs enabled and one
+        blocked it does not fire" -- carried to the second cause. A bot that
+        stopped over one unresolved close while another pair was perfectly
+        tradeable would be strictly worse than the zombie it replaced.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        store.save(store.PersistedState(pending=(_STORED_CLOSE,)))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.portfolio.blocked_symbols == {}
+            assert list(system.executor._pending) == [SYMBOL]
+
+    async def test_the_refusal_names_pending_as_the_cause(self, tmp_path: Path) -> None:
+        """**THE CAUSE, NOT MERELY THE REFUSAL.** A message that reported the
+        wrong reason would be a false marker, and worse than a vague one.
+
+        MUTATION: report the blocked reason for a pending symbol.
+
+        Asserted on the pending wording AND on the ABSENCE of the blocked
+        wording, because the refusal text contains both vocabularies and a
+        substring check for the first alone would pass under a message that
+        said both. Nothing is blocked here, so "still working at the venue"
+        must not appear.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED_CLOSE,)))
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=FakeRootClient(), stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "a close this bot started is UNRESOLVED" in message
+        assert SYMBOL in message
+        assert "still working at the venue" not in message
+
+    async def test_a_blocked_and_a_pending_pair_both_render(self, tmp_path: Path) -> None:
+        """**THE `KeyError` GUARD.** Two pairs, two different causes, none left.
+
+        MUTATION: build the detail line by looking each symbol up in
+        `blocked_symbols`, which is what the code did while that was the only
+        cause.
+
+        Under it the refusal raises `KeyError: 'ETHUSDT'` while trying to
+        render itself -- MEASURED against the pre-change expression -- so the
+        operator gets a traceback naming a dictionary instead of the two things
+        they have to fix. That failure is INVISIBLE to every other test here:
+        each of them excludes both pairs by the SAME cause, which keeps the
+        lookup total by accident. Only a mixed set reaches it.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        # BTCUSDT is blocked by a live list; ETHUSDT is excluded for pending.
+        store.save(
+            store.PersistedState(
+                pending=(
+                    store.PendingCloseRecord(
+                        kind="close",
+                        symbol="ETHUSDT",
+                        entry_bar_time=_LIST_BAR,
+                        generation=0,
+                        quantity=D("0.72000000"),
+                    ),
+                )
+            )
+        )
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL)])
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        # BOTH causes rendered, each against its own symbol.
+        assert "still working at the venue" in message
+        assert "a close this bot started is UNRESOLVED" in message
+        assert f"  {SYMBOL}: " in message
+        assert "  ETHUSDT: " in message

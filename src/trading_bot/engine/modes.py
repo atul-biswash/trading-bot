@@ -171,7 +171,7 @@ from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import AsyncIterator, Mapping, Sequence
+    from collections.abc import AsyncIterator, Collection, Mapping, Sequence
     from datetime import date
 
     from trading_bot.config.settings import Settings
@@ -1036,16 +1036,20 @@ async def _snapshot_live_order_lists(
         )
 
 
-def _require_something_tradeable(pairs: Mapping[str, PairContext], portfolio: Portfolio) -> None:
+def _require_something_tradeable(
+    pairs: Mapping[str, PairContext],
+    portfolio: Portfolio,
+    *,
+    pending: Collection[str],
+) -> None:
     """V2: refuse the boot when nothing is left to trade.
 
     **This is NOT B1.** B1 refuses whenever any live list exists, which would
     stop a two-pair bot over one blocked symbol. This adds no judgement about
-    what to block -- it observes that :func:`_snapshot_live_order_lists` blocked
-    everything and says so. With two pairs enabled and one blocked it does not
-    fire.
+    what to block -- it observes what the boot already excluded and says so.
+    With two pairs enabled and one excluded it does not fire.
 
-    **Why exit rather than idle.** A bot with every symbol blocked connects,
+    **Why exit rather than idle.** A bot with every symbol excluded connects,
     seeds history, evaluates strategies and refuses every signal -- indefinitely
     and quietly, among five hundred boot warnings. That is
     ``docs/M5_NUMBERS.md``'s own failure shape: *"the bot looks healthy while
@@ -1053,20 +1057,66 @@ def _require_something_tradeable(pairs: Mapping[str, PairContext], portfolio: Po
 
     It is the family of the five existing boot refusals -- a ``ConfigError``
     raised before the first socket -- and joins them for the same reason: the
-    honest failure is immediate and names its cause.
+    honest failure is immediate and names its cause. It shares that mechanism
+    with the corrupt-state refusal rather than adding a second: both raise a
+    :class:`~trading_bot.core.exceptions.TradingBotError` subclass, both are
+    caught by the one handler in ``main``, and both leave by the same exit.
+
+    **TWO EXCLUSION CAUSES NOW, AND THE SECOND IS A PENDING CLOSE.** ``pending``
+    carries the symbols whose records came back from the store. A restored
+    pending record means this process is holding a lock on that symbol: the
+    executor's dispatch guard refuses every entry while one is held, and a
+    close's record is not cleared by a restart, because ``Position`` is
+    in-process only -- so ``RiskManager`` refuses the CLOSE at
+    ``NOTHING_TO_CLOSE`` before anything can reach the path that would release
+    it. Left to itself that symbol refuses entries for the life of the process
+    while looking perfectly healthy, which is the failure shape above reached by
+    a second route this check could not previously see.
+
+    **WHAT A RESOLUTION DOES ABOUT IT IS NOT DECIDED HERE AND IS NOT DESCRIBED
+    HERE.** This function observes a restored lock and refuses an unrunnable
+    boot; it makes no claim about what any later code does with the record.
+
+    **``pending`` IS REQUIRED AND KEYWORD-ONLY, WITH NO DEFAULT.** An empty
+    default would be the value most likely to be wrong and least likely to be
+    noticed -- a caller that forgot it would silently restore the old blindness
+    and every test would still pass. The same reasoning ``Position.protection``
+    carries, one notch weaker because no validator enforces it here.
+
+    **``excluded`` MAPS EVERY NON-TRADEABLE SYMBOL TO ITS OWN REASON, and that
+    is what keeps the message renderable.** The reason is taken from the
+    collection that caused the exclusion, so a symbol cannot be excluded without
+    one. Building the detail line by looking each symbol up in
+    ``blocked_symbols`` -- which was correct while that was the ONLY cause --
+    raises ``KeyError`` the moment a symbol is excluded for being pending.
+    MEASURED before this change: the old expression over a blocked-plus-pending
+    set raises ``KeyError: 'ETHUSDT'``, so the refusal could not print itself.
+
+    A symbol that is both blocked and pending reports BLOCKED. Both need the
+    operator, but a working order list is money resting at the venue right now
+    and is the one to act on first.
     """
-    tradeable = [symbol for symbol in pairs if symbol not in portfolio.blocked_symbols]
+    excluded: dict[str, str] = {}
+    for symbol in pairs:
+        if symbol in portfolio.blocked_symbols:
+            excluded[symbol] = portfolio.blocked_symbols[symbol]
+        elif symbol in pending:
+            excluded[symbol] = (
+                "a close this bot started is UNRESOLVED -- a pending close record for this "
+                "symbol was restored from the store, so what happened to the position at the "
+                "venue is unknown. Entries here are refused while that record is held"
+            )
+
+    tradeable = [symbol for symbol in pairs if symbol not in excluded]
     if tradeable:
         return
-    detail = "\n".join(
-        f"  {symbol}: {portfolio.blocked_symbols[symbol]}" for symbol in sorted(pairs)
-    )
+    detail = "\n".join(f"  {symbol}: {excluded[symbol]}" for symbol in sorted(pairs))
     raise ConfigError(
-        "every enabled pair is blocked, so there is nothing this bot can trade. Stopping "
+        "every enabled pair is excluded, so there is nothing this bot can trade. Stopping "
         "rather than running with no reachable action:\n"
         f"{detail}\n"
-        "Cancel the listed order lists at the venue, or enable a pair that is not blocked, "
-        "then restart."
+        "Cancel any order list listed above at the venue, resolve any unresolved close, or "
+        "enable a pair that is not listed, then restart."
     )
 
 
@@ -1116,6 +1166,14 @@ async def live_system(
     # A MISSING STORE IS NOT CORRUPTION -- `load` returns None, which is the
     # ordinary first boot and proceeds normally.
     restored = store.load()
+    # ONE EVALUATION, TWO CONSUMERS. The boot gate below needs the restored
+    # symbols and the executor needs the records themselves, and calling
+    # `_restore_pending` twice would let the gate and the executor disagree
+    # about what came back -- a second source of truth for one file read. It is
+    # pure and takes the already-loaded state, so hoisting it here crosses
+    # nothing: no client exists yet, no lock is held, and a raise would happen
+    # earlier than it does today rather than later.
+    restored_pending = _restore_pending(restored)
 
     # Imported lazily, mirroring BufferedMarketDataProvider.create: keeps
     # python-binance and aiohttp off the import path when a fake client is
@@ -1176,7 +1234,9 @@ async def live_system(
         # mechanisms are established together, so an operator meets both
         # verdicts before anything opens a socket. Still ahead of step 5.
         await _snapshot_live_order_lists(resolved_client, pairs=pairs, portfolio=portfolio)
-        _require_something_tradeable(pairs, portfolio)
+        _require_something_tradeable(
+            pairs, portfolio, pending={record.symbol for record in restored_pending}
+        )
 
         provider = await BufferedMarketDataProvider.create(
             settings, client=resolved_client, stream=stream
@@ -1418,7 +1478,7 @@ async def live_system(
                     # and would duplicate a path that is already written,
                     # already ordered before the engine's own hook, and already
                     # fail-closed on an UNRESOLVED verdict.
-                    restored_pending=_restore_pending(restored),
+                    restored_pending=restored_pending,
                 )
                 engine.on_signal(
                     _build_signal_handler(
