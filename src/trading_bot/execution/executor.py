@@ -1752,6 +1752,14 @@ class OrderExecutor:
     def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
         """Protection is cancelled and the position is not closed. RULING 6.
 
+        **THE OTHER WRITER OF `protection` IN THIS CLASS IS
+        `_retain_position_unprotected`**, which reaches the same state from the
+        RESOLUTION path. Neither can call the other: this one takes a `Signal`
+        and ends in `_refuse(signal, ...)`, and a resolution is candle-driven
+        and has none. Named at both sites so a reader of either knows the other
+        exists -- everything below about what the state costs applies equally to
+        it.
+
         **NO SPECULATIVE RETRY.** A second sell could double-sell if the first
         landed and its answer was lost, and nothing here can tell those apart.
 
@@ -1843,12 +1851,79 @@ class OrderExecutor:
         position found" is not a failure and must never be logged as one.
         """
         symbol = record.symbol
+        # THE CONSERVATIVE DEFAULT, and it is load-bearing rather than tidy.
+        # The `finally` below reads this, so it must be bound before anything
+        # that could fail to bind it -- and the value it defaults to is RETAIN,
+        # which refuses entries. An unbound-local or a crash therefore lands on
+        # the safe branch rather than on the one that lets the bot re-enter.
+        filled = False
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
-            self._log_close_resolved(record, candle, order=order, failure=failure)
+            # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
+            # `_plan_close` already holds this line -- "Section 4b reads
+            # `executedQty`, not merely `status`" -- and the same reasoning
+            # binds here: a CANCELED or EXPIRED order comes back as an `Order`
+            # and sold nothing, so treating any answer as a fill would drop a
+            # position whose base is still at the venue.
+            filled = order is not None and order.filled_quantity > 0
+            self._log_close_resolved(record, candle, order=order, failure=failure, filled=filled)
         finally:
-            self._drop_position_unbooked(symbol)
+            # **THE QUERY NOW DECIDES THE DROP, AND NOTHING ELSE.** One commit
+            # ago it decided nothing at all, and that sentence is worth
+            # correcting rather than quietly outgrowing: the CLEAR and the
+            # CRITICAL below are still unconditional on every answer including
+            # a failed one, and only the choice between dropping and retaining
+            # reads the venue.
+            if filled:
+                # Confirmed flat: the capital is back and nothing is held.
+                self._drop_position_unbooked(symbol)
+            else:
+                self._retain_position_unprotected(symbol)
             self._release_close(symbol)
+
+    def _retain_position_unprotected(self, symbol: str) -> None:
+        """Keep the position and mark its protection UNKNOWN. **P2/P4.**
+
+        **WHY IT IS KEPT.** The sell is unconfirmed, so base inventory may still
+        be sitting at the venue. Dropping it removed the only in-process record
+        of that -- `has_position` went false, `unmanaged_holdings` is a BOOT
+        snapshot and knows nothing of inventory that appeared mid-run, and
+        nothing else refuses -- so the next signal could open a SECOND entry on
+        top of the first. MEASURED before this commit: after a P2/P4 resolution
+        `RiskManager.evaluate` returned `approved=True` and an OTOCO list was
+        actually placed.
+
+        **WHAT KEEPING IT RESTORES, and the second one is the point.**
+        `ALREADY_IN_POSITION` refuses a fresh entry on this symbol, and marking
+        protection UNKNOWN puts it outside `_TRUSTED_PROTECTION`, so
+        `committed_risk` cannot be summed and `COMMITTED_RISK_UNKNOWN` refuses
+        entries PORTFOLIO-WIDE. That breadth is deliberate: an unconfirmed sell
+        means the account's true exposure is unknown, and a limit computed from
+        a number nobody can compute is worse than a refusal.
+
+        **EXITS STAY PERMITTED.** No limit gates a `CLOSE` -- `CLAUDE.md`: a
+        limit that could trap an open position would be a risk rule that
+        creates risk -- so the operator, or the strategy, can still close this.
+
+        **THE SECOND `protection` ASSIGNMENT IN THIS CLASS, and it cannot reuse
+        the first.** `_go_naked` writes the same value for the in-process naked
+        case, but it takes a `Signal` and ends in `_refuse(signal, ...)`; a
+        resolution is candle-driven and HAS no signal, so calling it would mean
+        fabricating one and logging a refusal against a signal nobody sent.
+        Both produce the same state and neither can call the other; each names
+        the other so a reader of one knows the other exists.
+
+        **UNKNOWN RATHER THAN DIVERGED**, matching `_go_naked` for its stated
+        reason: the classifier owns `DIVERGED` and will write it on the next
+        pass anyway. Both are outside `_TRUSTED_PROTECTION`, so the refusal is
+        the same either way.
+
+        Absent is ORDINARY here, not an error: after a restart there is no
+        `Position` to retain, and the boot snapshots cover that case instead.
+        """
+        position = self._portfolio.positions.get(symbol)
+        if position is not None:
+            position.protection = ProtectionState.UNKNOWN
 
     async def _read_close_outcome(
         self, record: PendingClose, *, bounds: CallBounds
@@ -1900,6 +1975,12 @@ class OrderExecutor:
         exchange statement. The proceeds are in the CRITICAL line instead, for
         an operator to enter by hand.
 
+        **NO LONGER UNCONDITIONAL.** It ran on every answer until M5h-321a;
+        it now runs only on a CONFIRMED FILL, where the capital is back and
+        nothing is held. The unconfirmed answers go to
+        `_retain_position_unprotected` instead, because dropping a position
+        whose base may still be at the venue is what let a second entry through.
+
         Absent is the ORDINARY case here, not an error: see `_resolve_close`.
         """
         self._portfolio.positions.pop(symbol, None)
@@ -1911,6 +1992,7 @@ class OrderExecutor:
         *,
         order: Order | None,
         failure: Exception | None,
+        filled: bool,
     ) -> None:
         """One CRITICAL carrying everything the manual accounting needs.
 
@@ -1919,6 +2001,15 @@ class OrderExecutor:
         directly per the money rule; the datetime goes as ``.isoformat()`` and
         the exception as its type and message, because neither is on the
         whitelist that may cross unconverted.
+
+        **THE TWO OUTCOMES MUST BE TELLABLE APART FROM THE LINE ALONE**, and
+        one CRITICAL saying only "resolved" would not manage it. They ask
+        different things of the operator: a confirmed fill means the position
+        is GONE and a trade is missing from the ledger, so the work is
+        bookkeeping; an unconfirmed one means inventory may still be at the
+        venue and the bot has just stopped trading everything, so the work is
+        to look at the account. `outcome` carries the discriminator and
+        `resolution` spells out what follows from it.
         """
         extra: dict[str, object] = {
             "event": _EVENT_CLOSE_RESOLVED,
@@ -1930,13 +2021,23 @@ class OrderExecutor:
                 record.symbol, record.entry_bar_time, generation=record.generation
             ),
             "candle_time": candle.close_time.isoformat(),
+            "outcome": "filled_and_released" if filled else "unconfirmed_position_retained",
             "resolution": (
-                "NOTHING WAS SOLD AND NOTHING WAS BOOKED by this bot. The pending record is "
-                "gone from memory and from the store. If the fill details below show an "
-                "executed quantity, that trade happened and is NOT in the ledger -- enter it "
-                "by hand. If they do not, the position may still be open at the venue: the "
-                "next boot blocks the symbol if a list of ours still works, or records an "
-                "unmanaged holding if free base remains."
+                (
+                    "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
+                    "released and the pending record is gone from memory and from the store. "
+                    "That trade is NOT in the ledger -- enter the executed quantity and quote "
+                    "total below by hand. Trading continues."
+                )
+                if filled
+                else (
+                    "THE SELL IS UNCONFIRMED, so BASE INVENTORY MAY STILL BE AT THE VENUE. "
+                    "Nothing was sold and nothing was booked. The pending record is gone, but "
+                    "the POSITION IS RETAINED with its protection marked UNKNOWN -- so entries "
+                    "on this symbol are refused, AND entries on EVERY symbol are refused while "
+                    "committed risk cannot be summed. Exits are still permitted. Check the "
+                    "account: sell the base by hand if it is there, then restart."
+                )
             ),
         }
         if order is not None:

@@ -1514,6 +1514,7 @@ def _held(
     target: str | None = "110",
     venue_id: int | None = int(VENUE_LIST_ID),
     entry_fill: str | None = "98.00000000",
+    protection: ProtectionState = ProtectionState.UNKNOWN,
 ) -> Portfolio:
     """A portfolio holding the position `close_signal` would close.
 
@@ -1530,6 +1531,14 @@ def _held(
     **`entry_fill` likewise**: booking reads `entry_fill_price` and
     `close_position` refuses without one, so a fixture that omitted it could
     express a sell but never a BOOKED close.
+
+    **`protection` DEFAULTS TO `UNKNOWN` AND IS PARAMETERISED, and the reason
+    is a mutation that could not otherwise be killed.** Every close path here
+    marks or expects `UNKNOWN`, so a fixture fixed at that value cannot express
+    "the mark was never written" -- the mutation removing it changes nothing
+    observable. `ACTIVE` is in `_TRUSTED_PROTECTION`, so a position starting
+    there has computable committed risk, and losing the mark is then the
+    difference between entries refused portfolio-wide and entries permitted.
     """
     return Portfolio(
         free_quote=D("10000"),
@@ -1541,7 +1550,7 @@ def _held(
                 entry_price=D("100"),
                 entry_fill_price=D(entry_fill) if entry_fill is not None else None,
                 entry_bar_time=BAR,
-                protection=ProtectionState.UNKNOWN,
+                protection=protection,
                 order_list_id=CLIENT_LIST_ID,
                 venue_order_list_id=venue_id,
                 stop_loss=D(stop) if stop is not None else None,
@@ -2517,6 +2526,12 @@ class TestTheCloseResolution:
         assert record.error_type == "OrderNotFoundError"
         assert not hasattr(record, "status")
 
+        # **RETAINED, NOT DROPPED** -- M5h-321a. The sell is unconfirmed, so
+        # base inventory may still be at the venue, and the position is the
+        # only in-process record of that.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+
         # THE RULING: no runtime block, no sell, no booking.
         assert portfolio.blocked_symbols == {}
         assert "create_order" not in client.venue_calls
@@ -2556,7 +2571,13 @@ class TestTheCloseResolution:
         assert record.error == "connection reset"
         assert executor._pending == {}
         assert writer.calls
-        assert SYMBOL not in portfolio.positions
+        # **RETAINED, NOT DROPPED.** A failed query is not a fill, and this
+        # assertion inverted at M5h-321a: it read `SYMBOL not in positions`
+        # while the drop was unconditional. An unanswered query is the state
+        # where dropping is least defensible -- nothing is known, so the base
+        # may still be at the venue.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
         # THE PROHIBITIONS HOLD HERE TOO, and they are asserted here rather
         # than only on the not-found branch because an unanswered query is the
         # state in which acting would be least defensible: nothing is known.
@@ -2616,3 +2637,34 @@ class TestTheCloseResolution:
 
         assert "get_all_order_lists" in client.venue_calls
         assert "get_order" not in client.venue_calls
+
+    async def test_a_trusted_position_is_marked_unknown_when_retained(self) -> None:
+        """**THE MARK ITSELF, separated from the retention.**
+
+        MUTATION: retain the position but leave `protection` as it was.
+
+        **THIS TEST EXISTS BECAUSE THE OTHERS CANNOT KILL THAT MUTATION**, and
+        that was established before it was written rather than discovered
+        afterwards. `_held()` builds its position at `UNKNOWN` already, so every
+        other test here asserts a value the fixture supplied -- dropping the
+        mark changes nothing they can see, and the entry refusal they imply
+        would still fire on `ALREADY_IN_POSITION` alone.
+
+        Starting at `ACTIVE` is what separates them. `ACTIVE` is in
+        `_TRUSTED_PROTECTION`, so a position left there has COMPUTABLE
+        committed risk and entries are permitted portfolio-wide; marked
+        `UNKNOWN` it is untrusted, committed risk cannot be summed, and
+        `COMMITTED_RISK_UNKNOWN` refuses every symbol. The mark is the whole
+        difference between a one-symbol guard and a portfolio-wide one.
+        """
+        portfolio = _held(protection=ProtectionState.ACTIVE)
+        executor, _, _ = build(
+            client=_resolving_client(OrderNotFoundError("Order does not exist.")),
+            portfolio=portfolio,
+        )
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert SYMBOL in portfolio.positions
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN

@@ -93,7 +93,7 @@ from trading_bot.engine.modes import (
     live_system,
 )
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
-from trading_bot.execution.executor import PendingPlacement
+from trading_bot.execution.executor import PendingClose, PendingPlacement
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
@@ -3327,3 +3327,130 @@ class TestTheBootGateSeesPending:
             # that distinction lives in the boot gate rather than in `_pending`.
             assert set(system.executor._pending) == {SYMBOL, "ETHUSDT"}
             assert system.portfolio.blocked_symbols == {}
+
+
+class TestAnUnconfirmedCloseStopsTrading:
+    """M5h-321a, end to end: the resolution's retained position refuses entries.
+
+    **THE GAP THIS CLOSES WAS OBSERVED, NOT ARGUED.** Before this, a P2/P4
+    resolution dropped the position, and a probe driving the real executor and
+    then the real `RiskManager` got `approved=True` with the reason *"within all
+    risk limits: 0/3 positions"* -- and `dispatch` placed an OTOCO list. Base
+    inventory could still be at the venue and the bot would enter again on top
+    of it.
+
+    **THE EXECUTOR IS THE ROOT'S, AND THE PORTFOLIO OBJECT IS SHARED.** The
+    resolution runs on `live_system`'s own executor, so the write side is the
+    real one; the verdict comes from a `build_manager` manager reading THE SAME
+    `system.portfolio`. That sharing is the coupling under test -- one component
+    writes `protection`, another reads it -- and it is what a test assembling
+    both by hand would fail to exercise.
+
+    **THE MANAGER IS BUILT SEPARATELY FOR ONE MEASURED REASON: `live_system`'s
+    OWN MANAGER CANNOT PRICE THE POSITION.** `FakeStream` delivers no candles,
+    so the provider holds none, so `_mark_prices` finds no mark and `evaluate`
+    refuses at `NO_MARK_PRICE` before reaching any guard this class is about.
+    `build_manager`'s default `FakeProvider` prices `SYMBOL`, which is the only
+    difference between the two. Stated rather than hidden, because "end to end"
+    would otherwise overclaim.
+
+    This file already carries the tree's one cross-module fixture edge, so both
+    halves are reachable here and nowhere else without adding a second.
+
+    **`FakeRootClient.get_order` RAISES**, so the resolution takes the
+    failed-query branch. That is deliberate rather than convenient: an
+    unanswered query is the state in which retaining matters most, since
+    nothing at all is known about the sell.
+    """
+
+    @staticmethod
+    def _wedged(system: LiveSystem) -> None:
+        """Put the system into the state a P2/P4 resolution leaves behind."""
+        # ACTIVE, so committed risk is COMPUTABLE before the resolution. The
+        # refusal below must be produced by the resolution, not inherited from
+        # a fixture that was already untrusted.
+        system.portfolio.positions[SYMBOL] = long_position(
+            protection=ProtectionState.ACTIVE, stop_loss=D("95")
+        )
+        system.executor._pending[SYMBOL] = PendingClose(
+            symbol=SYMBOL, entry_bar_time=NOW, generation=0, quantity=D("1")
+        )
+
+    async def test_an_entry_is_refused_after_an_unconfirmed_close(self, tmp_path: Path) -> None:
+        """**THE TEST THIS COMMIT EXISTS FOR.**
+
+        MUTATION: drop the position on the unconfirmed branch, as the code did
+        before M5h-321a.
+
+        Asserted on the STAGE, not merely on nothing being placed: a test that
+        checked only for an absent order would pass if the entry were refused
+        for any unrelated reason -- an exhausted budget, a stale ledger -- and
+        would keep passing after the guard it exists to pin was removed.
+
+        **THE ENTRY IS TRIED ON A DIFFERENT SYMBOL, AND IT HAS TO BE.**
+        `ALREADY_IN_POSITION` refuses the resolved symbol whether or not this
+        commit exists, so probing that one would pass on the retention alone
+        and say nothing about the mark. MEASURED while writing this: the
+        same-symbol version could not even establish its own "before" baseline,
+        because the position is present from the start. Only a second symbol
+        reaches the PORTFOLIO-WIDE guard, which is the half the mark buys.
+
+        The stage is `COMMITTED_RISK_UNKNOWN` rather than a limit rule, because
+        `evaluate` checks forward risk it cannot price BEFORE the limits.
+        """
+        settings = write_settings(tmp_path)
+        other = "ETHUSDT"
+        manager, _ = build_manager(
+            pairs=multi_pairs(SYMBOL, other),
+            provider=FakeProvider(
+                frames={SYMBOL: ohlcv(50), other: ohlcv(50)},
+                candles={SYMBOL: candle(), other: candle()},
+            ),
+        )
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            self._wedged(system)
+            # BEFORE: trusted protection, so committed risk is computable and
+            # an entry ELSEWHERE is permitted. Without this the test could not
+            # tell a guard that fired from a fixture refusing all along.
+            assert manager.evaluate(buy(symbol=other), portfolio=system.portfolio).approved
+
+            await system.executor(candle())  # the P2/P4 resolution
+
+            assert SYMBOL in system.portfolio.positions
+            assert system.portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+            assert system.executor._pending == {}  # the lock still cleared
+
+            verdict = manager.evaluate(buy(symbol=other), portfolio=system.portfolio)
+            assert not verdict.approved
+            assert verdict.stage is RefusalStage.COMMITTED_RISK_UNKNOWN
+
+    async def test_an_exit_is_still_permitted_after_an_unconfirmed_close(
+        self, tmp_path: Path
+    ) -> None:
+        """**EXITS ARE NEVER TRAPPED**, and the whole ruling rests on it.
+
+        MUTATION: route `SignalAction.CLOSE` through the committed-risk gate.
+
+        Retaining the position refuses entries deliberately. If it refused
+        EXITS too, the guard would have trapped the very position it exists to
+        protect -- `CLAUDE.md`: a limit that could trap an open position would
+        be a risk rule that creates risk. `evaluate` dispatches CLOSE before
+        `_mark_prices` and before the committed-risk check, so an exit never
+        reaches either; nothing pinned that until now.
+        """
+        settings = write_settings(tmp_path)
+
+        exit_manager, _ = build_manager()
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            self._wedged(system)
+            await system.executor(candle())
+
+            closing = Signal(
+                symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW
+            )
+            verdict = exit_manager.evaluate(closing, portfolio=system.portfolio)
+
+            assert verdict.approved, verdict.reason
+            assert verdict.stage is None
