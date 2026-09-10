@@ -200,6 +200,13 @@ _EVENT_CLOSE_ABANDONED = "close_abandoned_after_cancel"
 _EVENT_CLOSE_BOOKED = "close_booked"
 _EVENT_CLOSE_BOOK_FAILED = "close_book_failed"
 _EVENT_CLOSE_NAKED = "close_position_naked"
+#: A restored close record was resolved: the venue was asked what became of the
+#: sell, the answer was LOGGED, and the record was dropped. Its own event rather
+#: than reusing `close_position_naked`, because that one describes a position
+#: this process still holds and re-observes every pass, and this one describes a
+#: record this process is letting go of. An operator filtering for the first and
+#: finding the second would look for a position that is not there.
+_EVENT_CLOSE_RESOLVED = "close_record_resolved"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -520,54 +527,48 @@ class OrderExecutor:
         now = utc_now()
         started_at = now
         for symbol, record in list(self._pending.items()):
-            if record.kind != "placement":
-                # A PENDING CLOSE IS NOT RESOLVABLE HERE, and skipping is the
-                # honest answer rather than a gap.
-                #
-                # REACHABLE. `_execute_close` constructs a `PendingClose` and
-                # writes it into `_pending`, so this branch runs in production.
-                # It read "UNREACHABLE TODAY: nothing constructs a
-                # `PendingClose`" until that path landed: the GUARD was right
-                # and the sentence under it went stale, which is the harder
-                # failure to see because nothing tests a comment.
-                #
-                # THE SKIP IS CORRECT, AND THE THREE ANSWERS ARE MEASURED.
-                # `resolve_placement` derives the `listClientOrderId` of the
-                # ENTRY's order list, which is a DIFFERENT id from the close
-                # sell's -- that one carries the `CL` suffix -- so it answers
-                # about the entry and never about the close. Driven against
-                # the real function with close-shaped arguments it gives three
-                # answers, none of them about the sell:
-                #
-                #   * `NOT_PLACED`, when no list is enumerated;
-                #   * `PLACED_TERMINAL`, reasoning "no position was opened",
-                #     when the cancelled entry list is still enumerable;
-                #   * `PLACED_LIVE`, when the cancel has not landed yet.
-                #
-                # The last is the worst: `PLACED_LIVE` reaches the branch
-                # below that RECORDS A POSITION -- for a symbol being closed.
-                # So this is not one wrong answer but three, two of them
-                # confident assertions about a different order.
-                #
-                # WITHIN ONE PROCESS THE RECORD SELF-HEALS. The position is
-                # still in `portfolio.positions`, so a later `CLOSE` reaches
-                # `_plan_close`, `_execute_close` and `_release_close`.
-                #
-                # ACROSS A RESTART NOTHING CLEARS IT. `Position` is in-process
-                # only and boot reconstructs none, so `RiskManager` refuses
-                # the `CLOSE` at `NOTHING_TO_CLOSE` before `_plan_close` runs,
-                # while the record is restored into `_pending` on every boot.
-                # `dispatch`'s pending guard then refuses every entry on that
-                # symbol. Only an operator clears it.
-                #
-                # The record survives to the next bar untouched, which is the
-                # same thing an exhausted budget does to it.
-                continue
+            # BOUNDS FIRST, BECAUSE BOTH KINDS NOW MAKE A VENUE CALL. This sat
+            # BELOW the kind guard while a close did nothing, so the close
+            # branch had no bounds to spend and none to be refused by. Hoisting
+            # it puts both resolutions under one budget and preserves the skip
+            # rule: a record that cannot BEGIN survives to the next bar, which
+            # is the same thing an exhausted budget has always done to it.
             bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
             if bounds is None:
                 # Out of budget this bar. The record survives to the next one --
                 # that is the whole point of holding it.
                 break
+            if record.kind != "placement":
+                # A CLOSE IS RESOLVED BY A DIFFERENT INSTRUMENT, and this
+                # branch used to say so and then do nothing.
+                #
+                # `resolve_placement` cannot answer for one. It derives the
+                # `listClientOrderId` of the ENTRY's order list -- a DIFFERENT
+                # id from the close sell's, which carries the `CL` suffix -- so
+                # it answers about the entry throughout. MEASURED against the
+                # real function with close-shaped arguments: three answers,
+                # none about the sell. `NOT_PLACED` when no list is enumerated;
+                # `PLACED_TERMINAL` reasoning "no position was opened" when the
+                # cancelled entry list is still enumerable; and `PLACED_LIVE`
+                # when the cancel has not landed, which reaches the branch
+                # below that RECORDS A POSITION -- for a symbol being closed.
+                #
+                # `_resolve_close` asks the right question instead: a
+                # `get_order` against the derived close id. What it does with
+                # the answer is LOG it. The action -- clear the lock, drop the
+                # position unbooked, escalate -- is the same whatever comes
+                # back, including nothing.
+                #
+                # WRAPPED LIKE THE PLACEMENT CALL BELOW, and for the same
+                # reason: this method is a `CandleHandler` and NEVER RAISES.
+                # `_resolve_close` is written not to, but it is one `finally`
+                # deep and the promise belongs to this loop rather than to the
+                # method it calls.
+                try:
+                    await self._resolve_close(record, candle, bounds=bounds)
+                except Exception as exc:  # never raises; see the module docstring
+                    self._log_failure("resolve-close", symbol, exc)
+                continue
             try:
                 verdict = await resolve_placement(
                     self._client,
@@ -1704,6 +1705,14 @@ class OrderExecutor:
         `close_position`, which deletes the symbol, and
         `reconcile_open_positions` builds its work list from `open_positions` --
         so whichever books first makes the other structurally blind.
+
+        **THIS IS THE BOOKING DELETION. THE OTHER ONE DOES NOT BOOK.**
+        `_drop_position_unbooked` also removes from `portfolio.positions`, and
+        credits nothing: it is the C5c resolution letting go of a record whose
+        cost basis no longer exists. Named at both sites rather than at one,
+        because a second way to remove from a collection is the second-source-
+        of-truth shape `CLAUDE.md` warns about, and a reader who opens only one
+        of them would not know the other was there.
         """
         try:
             realised = self._portfolio.close_position(
@@ -1799,6 +1808,150 @@ class OrderExecutor:
         """
         self._pending.pop(symbol, None)
         self._persist_after_removal(symbol)
+
+    async def _resolve_close(
+        self, record: PendingClose, candle: Candle, *, bounds: CallBounds
+    ) -> None:
+        """Ask the venue what became of a restored close, report it, let it go.
+
+        **THE ACTION IS INVARIANT AND THE QUERY DECIDES NOTHING.** Whatever the
+        venue says -- FILLED, absent, or nothing at all because the call raised
+        -- this clears the lock from memory and from disk, drops any local
+        position UNBOOKED, and emits one CRITICAL carrying what was learned.
+        The query enriches the log for an operator doing the accounting by hand;
+        it does not select a branch. That is the ruling, and it is what makes
+        the escalation safe: there is no answer this code can get wrong.
+
+        **NOTHING IS SOLD AND NOTHING IS BOOKED.** No `create_order`, no
+        `close_position`, no `record_realised_pnl`. A position still open at the
+        venue is left to the BOOT SNAPSHOTS -- a live order list blocks the
+        symbol, and free base above `min_notional` records an unmanaged holding
+        -- rather than to a runtime write of `blocked_symbols`, which that
+        field's own docstring forbids for the process lifetime.
+
+        **FAIL-SAFE BY CONSTRUCTION, NOT BY CARE.** The clear sits in a
+        ``finally``. No exception path, no early return, and no later edit
+        inside the body can skip it, which is a different guarantee from three
+        call sites each remembering to call it. `_read_close_outcome` already
+        swallows its own failure; the ``finally`` is what makes that belt and
+        braces rather than a single point.
+
+        **TWO POSITION CASES, AND NEITHER IS AN ERROR.** After a restart there
+        is no `Position` at all -- it is in-process only and boot reconstructs
+        none -- so the drop finds nothing and that is the ORDINARY case. Within
+        one process the position is present and is dropped unbooked. "No
+        position found" is not a failure and must never be logged as one.
+        """
+        symbol = record.symbol
+        try:
+            order, failure = await self._read_close_outcome(record, bounds=bounds)
+            self._log_close_resolved(record, candle, order=order, failure=failure)
+        finally:
+            self._drop_position_unbooked(symbol)
+            self._release_close(symbol)
+
+    async def _read_close_outcome(
+        self, record: PendingClose, *, bounds: CallBounds
+    ) -> tuple[Order | None, Exception | None]:
+        """The venue's word on the close sell, or the reason there is none.
+
+        The same call `_requery_sell_total` makes, by the same derived id: the
+        close ID is pure computation over ``(symbol, entry_bar_time,
+        generation)``, which is precisely what lets it run after the process
+        that sent the order is gone.
+
+        Returns a pair rather than raising, because BOTH halves reach the log
+        and neither changes what happens. Never raises.
+        """
+        try:
+            order = await self._client.get_order(
+                record.symbol,
+                client_order_id=close_client_order_id(
+                    record.symbol, record.entry_bar_time, generation=record.generation
+                ),
+                timeout_s=bounds.timeout_s,
+                attempts=bounds.attempts,
+            )
+        except Exception as exc:  # never raises; the caller acts regardless
+            return None, exc
+        return order, None
+
+    def _drop_position_unbooked(self, symbol: str) -> None:
+        """Forget a position WITHOUT booking it. **The second deletion path.**
+
+        **`close_position` BOOKS AND THIS ONE DOES NOT**, and that is the whole
+        distinction between the two sites that delete from
+        `portfolio.positions`:
+
+        * `_book_close` -> `Portfolio.close_position` -- credits the proceeds,
+          accrues realised P&L, then deletes. Every ordinary exit.
+        * here -- deletes and credits NOTHING.
+
+        A second way to remove from a collection is the "second source of truth"
+        shape `CLAUDE.md` warns about, so it is named at both sites rather than
+        left for a reader to infer from which one they happened to open.
+
+        **IT CANNOT BOOK, AND THAT IS STRUCTURAL RATHER THAN CHOSEN.**
+        `close_position` computes realised P&L from the position's entry price;
+        after a restart there is no position and `PendingCloseRecord` carries no
+        `entry_price`, so the figure is not merely unknown, it is
+        unreconstructable. Booking half of it -- proceeds without a cost basis
+        -- would put a wrong number in a ledger whose whole value is matching an
+        exchange statement. The proceeds are in the CRITICAL line instead, for
+        an operator to enter by hand.
+
+        Absent is the ORDINARY case here, not an error: see `_resolve_close`.
+        """
+        self._portfolio.positions.pop(symbol, None)
+
+    def _log_close_resolved(
+        self,
+        record: PendingClose,
+        candle: Candle,
+        *,
+        order: Order | None,
+        failure: Exception | None,
+    ) -> None:
+        """One CRITICAL carrying everything the manual accounting needs.
+
+        CRITICAL rather than WARNING: the bot is dropping a record of money it
+        moved, and no later pass will revisit it. `Decimal` crosses ``extra=``
+        directly per the money rule; the datetime goes as ``.isoformat()`` and
+        the exception as its type and message, because neither is on the
+        whitelist that may cross unconverted.
+        """
+        extra: dict[str, object] = {
+            "event": _EVENT_CLOSE_RESOLVED,
+            "symbol": record.symbol,
+            "quantity": record.quantity,
+            "entry_bar_time": record.entry_bar_time.isoformat(),
+            "generation": record.generation,
+            "close_client_order_id": close_client_order_id(
+                record.symbol, record.entry_bar_time, generation=record.generation
+            ),
+            "candle_time": candle.close_time.isoformat(),
+            "resolution": (
+                "NOTHING WAS SOLD AND NOTHING WAS BOOKED by this bot. The pending record is "
+                "gone from memory and from the store. If the fill details below show an "
+                "executed quantity, that trade happened and is NOT in the ledger -- enter it "
+                "by hand. If they do not, the position may still be open at the venue: the "
+                "next boot blocks the symbol if a list of ours still works, or records an "
+                "unmanaged holding if free base remains."
+            ),
+        }
+        if order is not None:
+            extra["status"] = order.status.value
+            extra["executed_qty"] = order.filled_quantity
+            extra["quote_total"] = order.filled_quote_quantity
+        if failure is not None:
+            extra["error_type"] = type(failure).__name__
+            extra["error"] = str(failure)
+        _log.critical(
+            "%s: a restored close record was resolved and DROPPED UNBOOKED; the venue's "
+            "answer is recorded for manual accounting",
+            record.symbol,
+            extra=extra,
+        )
 
     async def _confirm_protective_legs(
         self, position: Position, *, started_at: datetime

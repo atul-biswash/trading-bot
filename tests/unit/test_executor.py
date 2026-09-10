@@ -1423,16 +1423,25 @@ class TestThePendingUnion:
         The three assertions below pin the INTENDED behaviour, which is worth
         pinning on its own terms: no venue call, no failure logged, record
         preserved.
+
+        **SUPERSEDED BY `TestTheCloseResolution` BELOW.** All three assertions
+        inverted when the branch stopped doing nothing: the query IS made, a
+        CRITICAL IS logged, and the record is deliberately NOT preserved. What
+        survives from this test is its subject -- `resolve_placement` must not
+        be the instrument -- and the replacement pins that by asserting the
+        derived id the query actually carries.
         """
-        executor, client, _ = build()
+        executor, client, _ = build(client=_resolving_client())
         executor._pending[SYMBOL] = _close()
 
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.CRITICAL):
             await executor(candle())
 
-        assert _records(caplog, "collaborator_failed") == []
-        assert client.venue_calls == []
-        assert executor._pending[SYMBOL] == _close()
+        # `resolve_placement`'s instrument is `get_all_order_lists`; the close
+        # resolution's is `get_order`. Asserting which call was made is what
+        # keeps this test on its original subject.
+        assert "get_all_order_lists" not in client.venue_calls
+        assert client.venue_calls == ["get_order"]
 
     async def test_a_restored_close_reaches_the_pending_set(self) -> None:
         """The restore door, which is how a close survives a process death.
@@ -2388,3 +2397,222 @@ class TestTheCloseExecutes:
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
         assert executor._pending == {}
+
+
+def _sold(executed: str = "0.5", quote: str = "1810.57726950") -> Order:
+    """The venue's answer for a close sell that FILLED."""
+    return Order(
+        order_id="77",
+        symbol=SYMBOL,
+        side=OrderSide.SELL,
+        type=OrderType.MARKET,
+        status=OrderStatus.FILLED,
+        quantity=D("0.5"),
+        filled_quantity=D(executed),
+        filled_quote_quantity=D(quote),
+    )
+
+
+def _resolving_client(answer: Order | Exception | None = None) -> FakeClient:
+    """A fake that answers the CLOSE id's point query and nothing else.
+
+    Keyed on the `CL` leg suffix, so a test states its answer in the vocabulary
+    the code DERIVES rather than restating a 36-character id -- and a resolution
+    that queried some other id would raise `KeyError` here rather than quietly
+    getting an answer meant for a different order.
+    """
+    return FakeClient(leg_answers={"CL": answer if answer is not None else _sold()})
+
+
+class TestTheCloseResolution:
+    """A restored close is resolved: asked about, reported, and let go.
+
+    **THE ACTION IS INVARIANT AND THE QUERY DECIDES NOTHING**, which is the
+    ruling and is what these tests are shaped around. Whatever the venue says --
+    filled, absent, or nothing at all because the call raised -- the lock is
+    cleared from memory AND disk, any local position is dropped UNBOOKED, and
+    one CRITICAL carries what was learned. So the tests differ in what they
+    assert about the LOG and agree on everything they assert about the ACTION.
+
+    **EVERY TEST DRIVES `await executor(candle())` END TO END.** Not `dispatch`,
+    and not a direct `_pending` assignment as the assertion path. The pending
+    union's older tests reach `_pending` by assignment and assert `dispatch`,
+    which insulates them from how the record is consumed -- exactly the
+    blindness that let `test_a_pending_close_is_skipped_by_placement_resolution`
+    pin an absence nothing could disturb.
+
+    **WHAT IS ASSERTED BY ABSENCE, and why that needs saying.** Three of the
+    rulings are prohibitions -- no sell, no booking, no runtime
+    `blocked_symbols` write -- so the tests for them count calls that must be
+    zero and inspect a dict that must be empty. An absence is invisible to every
+    instrument that searches for a presence, so the mutation survey is the only
+    thing that confirms these bite; its verdict is in the commit message.
+    """
+
+    async def test_a_filled_close_is_reported_and_dropped_unbooked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**6a.** The venue says FILLED: log it, drop it, book NOTHING.
+
+        MUTATION: route the position drop through `close_position`.
+
+        The fill details must reach the log because they are the only record an
+        operator has -- the ledger will never carry this trade. `realised_pnl`
+        is asserted UNMOVED, which is what separates "reported" from "booked".
+        """
+        writer = RecordingWriter()
+        portfolio = _held()
+        executor, client, _ = build(client=_resolving_client(), portfolio=portfolio, persist=writer)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.levelno == logging.CRITICAL
+        assert record.status == "FILLED"
+        assert record.executed_qty == D("0.5")
+        assert record.quote_total == D("1810.57726950")
+        assert record.close_client_order_id.endswith("-CL")
+        # The id is DERIVED, and the query carried it.
+        assert client.order_queries == [record.close_client_order_id]
+
+        # Nothing was sold and nothing was booked.
+        assert "create_order" not in client.venue_calls
+        assert portfolio.ledger is None
+        assert SYMBOL not in portfolio.positions
+
+        # 6e: the lock is gone from memory AND from what reached disk.
+        assert executor._pending == {}
+        assert writer.calls, "the durable set was never rewritten"
+        assert all(r.symbol != SYMBOL for r in writer.calls[-1])
+
+    async def test_a_position_still_open_clears_without_blocking_the_symbol(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**6b.** P2/P4: the sell never happened, and NOTHING is blocked here.
+
+        MUTATION: write `blocked_symbols[symbol]` on this branch.
+
+        The ruling routes a still-open position to the BOOT SNAPSHOTS -- a live
+        order list blocks the symbol, free base above `min_notional` records an
+        unmanaged holding -- rather than to a runtime write, which
+        `blocked_symbols`' own docstring forbids for the process lifetime.
+        `blocked_symbols == {}` is therefore the assertion that pins the ruling,
+        and it pins an ABSENCE: only a mutation adding the write can confirm it.
+        """
+        writer = RecordingWriter()
+        portfolio = _held()
+        executor, client, _ = build(
+            client=_resolving_client(OrderNotFoundError("Order does not exist.")),
+            portfolio=portfolio,
+            persist=writer,
+        )
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.error_type == "OrderNotFoundError"
+        assert not hasattr(record, "status")
+
+        # THE RULING: no runtime block, no sell, no booking.
+        assert portfolio.blocked_symbols == {}
+        assert "create_order" not in client.venue_calls
+        assert portfolio.ledger is None
+
+        assert executor._pending == {}
+        assert writer.calls
+        assert all(r.symbol != SYMBOL for r in writer.calls[-1])
+
+    async def test_a_failed_query_still_clears_and_still_escalates(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**6c.** THE `finally` IS THE SUBJECT, and this is the test for it.
+
+        MUTATION: move the clear out of `finally` into the `try` body.
+
+        Under it a raising query skips the clear, the record survives, and the
+        symbol stays locked for ever -- the wedge this whole sequence exists to
+        end, reintroduced through the one path nobody drives by hand. The query
+        failing is not an exceptional case here: it is the case in which the
+        action must be provably unconditional.
+        """
+        writer = RecordingWriter()
+        portfolio = _held()
+        executor, client, _ = build(
+            client=_resolving_client(TimeoutError("connection reset")),
+            portfolio=portfolio,
+            persist=writer,
+        )
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.error_type == "TimeoutError"
+        assert record.error == "connection reset"
+        assert executor._pending == {}
+        assert writer.calls
+        assert SYMBOL not in portfolio.positions
+        # THE PROHIBITIONS HOLD HERE TOO, and they are asserted here rather
+        # than only on the not-found branch because an unanswered query is the
+        # state in which acting would be least defensible: nothing is known.
+        assert "create_order" not in client.venue_calls
+        assert portfolio.blocked_symbols == {}
+        assert portfolio.ledger is None
+
+    async def test_no_position_present_is_ordinary_and_logs_no_failure(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**6d.** THE RESTART CASE, which is the one this path exists for.
+
+        MUTATION: treat a missing position as an error.
+
+        `Position` is in-process only and boot reconstructs none, so a record
+        restored from the store ALWAYS resolves against an empty
+        `portfolio.positions`. That is the ordinary case, not a degraded one,
+        and logging it as a failure would put a `collaborator_failed` line on
+        every clean recovery -- training an operator to ignore the level that
+        carries the real ones.
+        """
+        writer = RecordingWriter()
+        # `build()`'s default portfolio holds NOTHING -- the restart shape.
+        executor, _, portfolio = build(client=_resolving_client(), persist=writer)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG):
+            await executor(candle())
+
+        assert _records(caplog, "collaborator_failed") == []
+        assert len(_records(caplog, "close_record_resolved")) == 1
+        assert executor._pending == {}
+        assert portfolio.positions == {}
+
+    async def test_a_pending_placement_still_resolves_as_a_placement(self) -> None:
+        """**6f.** The close branch must not have captured the other kind.
+
+        MUTATION: make the kind guard admit both -- `if True:`.
+
+        Under it a placement reaches `_resolve_close`, which queries a CLOSE id
+        for an order that was never a close, and the placement's own resolution
+        never runs. The two instruments are asserted apart: a placement's is
+        `get_all_order_lists`, a close's is `get_order`.
+        """
+        executor, client, _ = build()
+        executor._pending[SYMBOL] = PendingPlacement(
+            symbol=SYMBOL,
+            entry_bar_time=BAR,
+            generation=0,
+            quantity=D("0.5"),
+            entry_limit=D("100"),
+            stop_loss=D("95"),
+            take_profit=D("110"),
+        )
+
+        await executor(candle())
+
+        assert "get_all_order_lists" in client.venue_calls
+        assert "get_order" not in client.venue_calls
