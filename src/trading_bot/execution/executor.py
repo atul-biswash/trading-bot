@@ -522,20 +522,46 @@ class OrderExecutor:
         for symbol, record in list(self._pending.items()):
             if record.kind != "placement":
                 # A PENDING CLOSE IS NOT RESOLVABLE HERE, and skipping is the
-                # honest answer rather than a gap. `resolve_placement` asks
-                # `get_all_order_lists` whether a LIST bearing our
-                # `listClientOrderId` rests; a discretionary close is a
-                # standalone MARKET sell and is not a list, so that query would
-                # answer NOT_PLACED for one whatever actually happened -- a
-                # wrong answer, confidently given, on the fail-closed path.
-                # Q-C section 4b's close resolution is a `get_order` against
-                # `close_client_order_id`, and it belongs to the commit that
-                # dispatches one.
+                # honest answer rather than a gap.
                 #
-                # UNREACHABLE TODAY: nothing constructs a `PendingClose`, so
-                # `_pending` holds only placements. The record survives to the
-                # next bar untouched, which is the same thing an exhausted
-                # budget does to it.
+                # REACHABLE. `_execute_close` constructs a `PendingClose` and
+                # writes it into `_pending`, so this branch runs in production.
+                # It read "UNREACHABLE TODAY: nothing constructs a
+                # `PendingClose`" until that path landed: the GUARD was right
+                # and the sentence under it went stale, which is the harder
+                # failure to see because nothing tests a comment.
+                #
+                # THE SKIP IS CORRECT, AND THE THREE ANSWERS ARE MEASURED.
+                # `resolve_placement` derives the `listClientOrderId` of the
+                # ENTRY's order list, which is a DIFFERENT id from the close
+                # sell's -- that one carries the `CL` suffix -- so it answers
+                # about the entry and never about the close. Driven against
+                # the real function with close-shaped arguments it gives three
+                # answers, none of them about the sell:
+                #
+                #   * `NOT_PLACED`, when no list is enumerated;
+                #   * `PLACED_TERMINAL`, reasoning "no position was opened",
+                #     when the cancelled entry list is still enumerable;
+                #   * `PLACED_LIVE`, when the cancel has not landed yet.
+                #
+                # The last is the worst: `PLACED_LIVE` reaches the branch
+                # below that RECORDS A POSITION -- for a symbol being closed.
+                # So this is not one wrong answer but three, two of them
+                # confident assertions about a different order.
+                #
+                # WITHIN ONE PROCESS THE RECORD SELF-HEALS. The position is
+                # still in `portfolio.positions`, so a later `CLOSE` reaches
+                # `_plan_close`, `_execute_close` and `_release_close`.
+                #
+                # ACROSS A RESTART NOTHING CLEARS IT. `Position` is in-process
+                # only and boot reconstructs none, so `RiskManager` refuses
+                # the `CLOSE` at `NOTHING_TO_CLOSE` before `_plan_close` runs,
+                # while the record is restored into `_pending` on every boot.
+                # `dispatch`'s pending guard then refuses every entry on that
+                # symbol. Only an operator clears it.
+                #
+                # The record survives to the next bar untouched, which is the
+                # same thing an exhausted budget does to it.
                 continue
             bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
             if bounds is None:

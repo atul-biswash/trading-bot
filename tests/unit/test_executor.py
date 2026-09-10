@@ -1301,10 +1301,18 @@ def _close(symbol: str = SYMBOL) -> PendingClose:
 class TestThePendingUnion:
     """Both kinds share ``_pending``, and the existing guards still bind.
 
-    **NOTHING IN ``src/`` CONSTRUCTS A ``PendingClose``** -- the dispatch path
-    that would is Q-C section 4b's, and the executor still refuses ``CLOSE``.
-    These tests reach the shape through ``restored_pending``, which is the only
-    door into ``_pending`` that does not go through dispatch.
+    **THERE ARE TWO DOORS INTO ``_pending`` FOR A CLOSE, AND THIS DOCSTRING
+    USED TO CLAIM THERE WERE NONE.** It read *"NOTHING IN ``src/`` CONSTRUCTS
+    A ``PendingClose``"*, and that the tests reach the shape through
+    ``restored_pending``, *"the only door into ``_pending`` that does not go
+    through dispatch"*. Both were true when written and both went stale when
+    the close path landed: ``_execute_close`` constructs a ``PendingClose``
+    and writes it into ``_pending``, so it is a second door and a production
+    one.
+
+    What the tests below do is unchanged -- they still reach the shape through
+    ``restored_pending``, which is still the cheapest door for a unit test.
+    Only the claim that it is the ONLY one is struck.
     """
 
     def test_both_kinds_carry_a_tag_and_the_tags_differ(self) -> None:
