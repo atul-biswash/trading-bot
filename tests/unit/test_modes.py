@@ -1320,7 +1320,13 @@ class TestTheBootReadsBalancesOnce:
     async def test_the_boot_reads_balances_exactly_once(self, tmp_path: Path) -> None:
         """Arity. `FakeRootClient` journals every call, so a second read is
         visible as a second entry rather than inferred from a counter."""
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         journal: list[str] = []
         client = FakeRootClient(
             balances=[
@@ -1402,7 +1408,13 @@ class TestTheBootReadsBalancesOnce:
         monkeypatch.setattr(modes, "_seed_portfolio", recording_seed)
         monkeypatch.setattr(modes, "_snapshot_unmanaged_holdings", recording_snapshot)
 
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         client = FakeRootClient(
             balances=[
                 Balance(asset="USDT", free=D("5000"), locked=D("0")),
@@ -1426,7 +1438,13 @@ class TestUnmanagedHoldings:
         """Adopting would manufacture the stopless state at every boot and would
         eventually have the bot sell an asset a human bought. Ignoring it would
         let a BUY pass ALREADY_IN_POSITION and pyramid onto it."""
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         client = FakeRootClient(
             balances=[
                 Balance(asset="USDT", free=D("5000"), locked=D("0")),
@@ -1445,7 +1463,13 @@ class TestUnmanagedHoldings:
     ) -> None:
         """Locked base is owned. Excluding it understates the denominator every
         sizing decision divides by."""
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         client = FakeRootClient(
             balances=[
                 Balance(asset="USDT", free=D("5000"), locked=D("0")),
@@ -1859,7 +1883,13 @@ class TestUnmanagedHoldings:
         """An unmanaged holding is an ordinary state of a shared account and will
         be true on many boots. At CRITICAL it would train an operator to skim the
         level that carries the one condition nothing can resolve."""
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         client = FakeRootClient(
             balances=[
                 Balance(asset="USDT", free=D("5000"), locked=D("0")),
@@ -1882,7 +1912,13 @@ class TestUnmanagedHoldings:
         buffers are empty until `start()`, and `start()` runs after this context
         manager has yielded -- so `last_candle` has nothing to give at boot.
         """
-        settings = write_settings(tmp_path)
+        # A SECOND ENABLED PAIR, because the holding below now EXCLUDES its
+        # own pair from the boot gate (M5h-321b). This test is about the
+        # recording, not the refusal; one pair alone would stop the boot
+        # before it reached its subject. "ETHUSDT" carries no holding.
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
         journal: list[str] = []
         stream = FakeStream(journal=journal)
         client = FakeRootClient(
@@ -3454,3 +3490,191 @@ class TestAnUnconfirmedCloseStopsTrading:
 
             assert verdict.approved, verdict.reason
             assert verdict.stage is None
+
+
+def _holding(asset: str = "BTC", free: str = "0.5") -> FakeRootClient:
+    """A client whose account holds material base the bot did not open."""
+    return FakeRootClient(
+        balances=[
+            Balance(asset="USDT", free=D("5000"), locked=D("0")),
+            Balance(asset=asset, free=D(free), locked=D("0")),
+        ]
+    )
+
+
+class TestTheBootGateHasThreeCauses:
+    """M5h-321b: untracked inventory is the third thing that stops a symbol.
+
+    **THE ISOLATION TESTS BELOW EXIST BECAUSE A REFUSAL PROVES NOTHING ABOUT
+    ITS CAUSE.** With three exclusions available, a boot that stops tells you
+    only that SOMETHING excluded every pair. If a test arranges two of them at
+    once, removing either leaves the refusal intact and the test cannot show
+    the one it names did any work -- the masking that cost R3 its verdict one
+    commit ago, moved to the boot gate. So each of the three tests here
+    arranges exactly ONE cause and asserts on the wording that cause produces.
+
+    **`unmanaged_holdings` IS READ AND NEVER WRITTEN**, here or anywhere in
+    this commit: it stays the boot snapshot taken before any `Position` exists.
+    """
+
+    async def test_only_a_blocked_symbol_refuses_and_names_the_list(self, tmp_path: Path) -> None:
+        """ISOLATION 1: a live order list, and nothing else.
+
+        MUTATION: drop `blocked_symbols` from the exclusion.
+
+        No holding and no pending record, so the live list is the only thing
+        that can stop this boot.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(order_lists=[_live_list_for(SYMBOL)])
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "still working at the venue" in message
+        assert "a close this bot started is UNRESOLVED" not in message
+        assert "the base asset that this bot did not open" not in message
+
+    async def test_only_a_pending_close_refuses_and_names_the_record(self, tmp_path: Path) -> None:
+        """ISOLATION 2: a restored close, and nothing else.
+
+        MUTATION: drop `pending` from the exclusion.
+
+        The default client holds only USDT, so no holding is recorded, and no
+        list is live.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED_CLOSE,)))
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=FakeRootClient(), stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "a close this bot started is UNRESOLVED" in message
+        assert "still working at the venue" not in message
+        assert "the base asset that this bot did not open" not in message
+
+    async def test_only_an_unmanaged_holding_refuses_and_names_the_inventory(
+        self, tmp_path: Path
+    ) -> None:
+        """**ISOLATION 3, and the cause this commit adds.**
+
+        MUTATION: drop `unmanaged_holdings` from the exclusion.
+
+        Under it this boots clean, connects, seeds history and refuses every
+        signal for ever at `RefusalStage.UNMANAGED_HOLDING` -- the risk layer
+        was refusing those entries all along while the gate could not see them.
+        No list is live and no record is restored, so the holding is the only
+        thing that can stop this boot: the mutation cannot be carried by
+        another cause.
+        """
+        settings = write_settings(tmp_path)
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=_holding(), stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "the base asset that this bot did not open" in message
+        assert "0.5" in message  # the quantity, so an operator knows what to sell
+        assert "still working at the venue" not in message
+        assert "a close this bot started is UNRESOLVED" not in message
+
+    async def test_a_blocked_and_an_unmanaged_pair_both_render(self, tmp_path: Path) -> None:
+        """MULTI-CAUSE: two symbols, two different causes, none left.
+
+        MUTATION: build the detail line from one collection only.
+
+        The `KeyError` guard from R5, extended to the third cause: a symbol
+        excluded for holding inventory is absent from `blocked_symbols`, so a
+        message that looked every symbol up there could not render itself.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        # BTCUSDT blocked by a live list; ETHUSDT excluded for holding ETH.
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="ETH", free=D("2"), locked=D("0")),
+            ],
+            order_lists=[_live_list_for(SYMBOL)],
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "still working at the venue" in message
+        assert "the base asset that this bot did not open" in message
+        assert f"  {SYMBOL}: " in message
+        assert "  ETHUSDT: " in message
+
+    async def test_a_symbol_with_two_causes_reports_the_more_immediate_one(
+        self, tmp_path: Path
+    ) -> None:
+        """PRECEDENCE, asserted rather than left to the reader.
+
+        MUTATION: reorder the branches so the holding wins.
+
+        One symbol, BOTH blocked and holding inventory. The documented order is
+        blocked > pending > unmanaged, by how immediately the venue is
+        committed: a working order list is money in a live order right now, and
+        it is the action to take first. The other cause is deliberately NOT
+        reported -- the line names one action, and this asserts which.
+        """
+        settings = write_settings(tmp_path)
+        client = FakeRootClient(
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ],
+            order_lists=[_live_list_for(SYMBOL)],
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot refuses before the body runs
+
+        message = str(excinfo.value)
+        assert "still working at the venue" in message
+        assert "the base asset that this bot did not open" not in message
+
+    async def test_one_unmanaged_pair_of_two_still_boots(self, tmp_path: Path) -> None:
+        """BOUNDARY: the refusal is emptiness, not presence.
+
+        MUTATION: refuse whenever ANY pair carries a holding.
+
+        V2's own distinction from B1 -- "with two pairs enabled and one excluded
+        it does not fire" -- carried to the third cause.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+
+        async with live_system(settings, client=_holding(), stream=FakeStream()) as system:
+            assert system.portfolio.has_unmanaged_holding(SYMBOL)
+            assert not system.portfolio.has_unmanaged_holding("ETHUSDT")
+
+    async def test_a_restored_placement_still_boots_on_one_pair(self, tmp_path: Path) -> None:
+        """**M5h-314's RULING, RE-PINNED AT THE THIRD GATE CHANGE.**
+
+        MUTATION: add a placement back as a cause.
+
+        A placement lock is SELF-HEALING -- the executor resolves it against
+        the venue on the first candle -- so refusing to boot over one prevents
+        the very tick that clears it: refuse, restart, refuse again. This is
+        the property most likely to be lost to a defensive edit while the gate
+        is being extended, which is why it is asserted again here rather than
+        left to the class that introduced it.
+        """
+        settings = write_settings(tmp_path)
+        store.save(store.PersistedState(pending=(_STORED,)))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert list(system.executor._pending) == [SYMBOL]
+            assert system.portfolio.blocked_symbols == {}

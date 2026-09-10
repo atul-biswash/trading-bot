@@ -1111,9 +1111,43 @@ def _require_something_tradeable(
     MEASURED before this change: the old expression over a blocked-plus-pending
     set raises ``KeyError: 'ETHUSDT'``, so the refusal could not print itself.
 
-    A symbol that is both blocked and pending reports BLOCKED. Both need the
-    operator, but a working order list is money resting at the venue right now
-    and is the one to act on first.
+    **THREE CAUSES, AND EACH IS A DIFFERENT WAY THE SYMBOL IS SPOKEN FOR.**
+
+    * ``blocked_symbols`` -- an order list of OURS is still working at the
+      venue. Money is committed to a resting order this process does not track.
+    * ``pending`` -- a close this bot started is unresolved, so what happened at
+      the venue is unknown and the executor holds a lock on the symbol.
+    * ``unmanaged_holdings`` -- the account holds base the bot did not open.
+      Untracked inventory, counted toward equity and never sold by this bot,
+      which ``RiskManager`` refuses entries against at
+      ``RefusalStage.UNMANAGED_HOLDING``.
+
+    The third arrived last and was the longest blind: the risk layer refused
+    those entries all along, while this gate could not see them, so a
+    single-pair bot holding untracked base booted clean and refused every
+    signal for ever. Same failure shape as the pending case, by a third route.
+
+    **``unmanaged_holdings`` IS READ HERE AND NEVER WRITTEN.** It stays a BOOT
+    snapshot, taken once before any ``Position`` exists, and that timing is its
+    own correctness argument -- see the field. Reading it costs nothing;
+    writing it at runtime was considered and rejected, because ``equity`` sums
+    it and ``NO_MARK_PRICE`` refuses portfolio-wide on anything it cannot price.
+
+    **A RESTORED PLACEMENT IS STILL NOT A CAUSE**, and that ruling survives
+    this rewrite deliberately. A placement lock is SELF-HEALING --
+    ``OrderExecutor.__call__`` resolves it against the venue on the first
+    candle and releases it -- so refusing to boot over one would prevent the
+    very tick that clears it: refuse, restart, refuse again, with the causing
+    state permanently out of reach. Only a CLOSE reaches ``pending`` above.
+
+    **A SYMBOL WITH MORE THAN ONE CAUSE REPORTS THE FIRST OF
+    blocked > pending > unmanaged**, and the order is by how immediately the
+    venue is committed rather than by severity. A working order list is money in
+    a live order right now; an unresolved close is a lock over an unknown venue
+    state; untracked inventory is an asset sitting still. Each names a different
+    action -- cancel it, resolve it, sell or move it -- and the operator should
+    be sent to the most immediate one. Reporting all three would make the common
+    single-cause line harder to read for a case that needs one action anyway.
     """
     excluded: dict[str, str] = {}
     for symbol in pairs:
@@ -1125,6 +1159,12 @@ def _require_something_tradeable(
                 "symbol was restored from the store, so what happened to the position at the "
                 "venue is unknown. Entries here are refused while that record is held"
             )
+        elif symbol in portfolio.unmanaged_holdings:
+            excluded[symbol] = (
+                f"the account holds {portfolio.unmanaged_holdings[symbol]} of the base asset "
+                "that this bot did not open. It is counted toward equity and the bot will "
+                "not trade or sell it; entries here are excluded while it remains"
+            )
 
     tradeable = [symbol for symbol in pairs if symbol not in excluded]
     if tradeable:
@@ -1134,8 +1174,9 @@ def _require_something_tradeable(
         "every enabled pair is excluded, so there is nothing this bot can trade. Stopping "
         "rather than running with no reachable action:\n"
         f"{detail}\n"
-        "Cancel any order list listed above at the venue, resolve any unresolved close, or "
-        "enable a pair that is not listed, then restart."
+        "Cancel any order list listed above at the venue, resolve any unresolved close, sell "
+        "or move any untracked base holding, or enable a pair that is not listed, then "
+        "restart."
     )
 
 
