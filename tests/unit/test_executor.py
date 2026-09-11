@@ -1516,6 +1516,7 @@ def _held(
     venue_id: int | None = int(VENUE_LIST_ID),
     entry_fill: str | None = "98.00000000",
     protection: ProtectionState = ProtectionState.UNKNOWN,
+    quantity: Decimal = CLOSE_QTY,
 ) -> Portfolio:
     """A portfolio holding the position `close_signal` would close.
 
@@ -1547,7 +1548,7 @@ def _held(
             SYMBOL: Position(
                 symbol=SYMBOL,
                 side=PositionSide.LONG,
-                quantity=CLOSE_QTY,
+                quantity=quantity,
                 entry_price=D("100"),
                 entry_fill_price=D(entry_fill) if entry_fill is not None else None,
                 entry_bar_time=BAR,
@@ -2484,16 +2485,27 @@ class TestTheCloseResolution:
     thing that confirms these bite; its verdict is in the commit message.
     """
 
-    async def test_a_filled_close_is_reported_and_dropped_unbooked(
+    async def test_a_filled_close_in_process_is_reported_and_booked(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**6a.** The venue says FILLED: log it, drop it, book NOTHING.
+        """**6a, REVERSED BY RULING 5.** The venue says FILLED and we BOOK it.
 
-        MUTATION: route the position drop through `close_position`.
+        MUTATION: drop unbooked here; or book from a derived figure.
 
-        The fill details must reach the log because they are the only record an
-        operator has -- the ledger will never carry this trade. `realised_pnl`
-        is asserted UNMOVED, which is what separates "reported" from "booked".
+        **THIS TEST'S ASSERTION FLIPPED AND ITS SUBJECT DID NOT.** It read
+        *"log it, drop it, book NOTHING"*, with `realised_pnl` asserted UNMOVED
+        as what separated "reported" from "booked", and its stated mutation was
+        *"route the position drop through `close_position`"* -- which is now the
+        REQUIRED behaviour. It was correct under R2, whose grounds were that the
+        figure is unreconstructable after a restart. In process it is not: the
+        `Position` and its `entry_fill_price` are both here. So the test is
+        rewritten rather than deleted, and the ledger assertion flips from
+        unmoved to moved-by-the-venue's-own-number.
+
+        The fill details still reach the log, and they are still the record an
+        operator reads -- but now to CHECK the booking rather than to perform it.
+        The restart case keeps the old behaviour and is pinned by
+        `test_no_position_present_is_ordinary_and_logs_no_failure` beside it.
         """
         writer = RecordingWriter()
         portfolio = _held()
@@ -2512,10 +2524,21 @@ class TestTheCloseResolution:
         # The id is DERIVED, and the query carried it.
         assert client.order_queries == [record.close_client_order_id]
 
-        # Nothing was sold and nothing was booked.
+        # Nothing was SOLD -- the resolution never dispatches, R1 is untouched.
         assert "create_order" not in client.venue_calls
-        assert portfolio.ledger is None
+        # But the trade is now IN THE LEDGER, priced by the venue's own total.
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == _EXPECTED_RESOLVED_PNL
+        assert portfolio.ledger.trades_count == 1
+        # MEASURED: `lifetime_realised` stays `None` after a same-day accrual --
+        # it accumulates on the DAY ROLL, and the day has not rolled. Asserted
+        # rather than omitted so the absence is deliberate; ABSENT IS NOT ZERO.
+        assert portfolio.lifetime_realised is None
+        assert portfolio.daily_history == {}
         assert SYMBOL not in portfolio.positions
+        # The operator is told NOT to enter it by hand.
+        assert record.outcome == "filled_and_booked"
+        assert "DO NOT enter this trade by hand" in record.resolution
 
         # 6e: the lock is gone from memory AND from what reached disk.
         assert executor._pending == {}
@@ -2864,7 +2887,11 @@ class TestAnUnconfirmedSellIsRetained:
 
         resolved = _records(caplog, "close_record_resolved")
         assert [r.levelno for r in resolved] == [logging.CRITICAL]
-        assert resolved[0].outcome == "filled_and_released"  # type: ignore[attr-defined]
+        # `filled_and_BOOKED` since ruling 5: this fixture holds the position in
+        # memory, so the confirmed fill is priced and accrued rather than
+        # dropped. It read `filled_and_released` at B1, when the resolution
+        # booked nothing; the restart case still carries that label.
+        assert resolved[0].outcome == "filled_and_booked"  # type: ignore[attr-defined]
 
     async def test_retention_is_single_shot_on_every_resolution_branch(self) -> None:
         """**Retention must not be able to wedge a symbol.**
@@ -2895,3 +2922,243 @@ class TestAnUnconfirmedSellIsRetained:
 
             assert executor._pending == {}, f"memory still locked after {answer!r}"
             assert SYMBOL not in writer.symbols(-1), f"disk still locked after {answer!r}"
+
+
+#: Realised P&L for the DEFAULT resolution fixture, computed the way
+#: `close_position` computes it: the venue's own quote total minus the cost
+#: basis. `1810.57726950 - (98.00000000 x 0.5)`. Written out rather than
+#: derived in the test, so a test that agreed with a broken derivation by
+#: sharing it cannot pass.
+_EXPECTED_RESOLVED_PNL = D("1761.577269500")
+
+#: A fixture whose quotient does NOT round-trip, for the money rule.
+#: `100.00000000 / 0.3` is `333.3333333333333333333333333` and multiplying back
+#: gives `99.99999999999999999999999999` -- MEASURED, different from the total.
+#: The DEFAULT fixture round-trips exactly (`1810.57726950 / 0.5 x 0.5` is
+#: itself), so a division-derived figure is INVISIBLE there: a test using it
+#: could not express the mutation at all. This is the fixture-expressiveness
+#: rule applied before predicting rather than after.
+_LOSSY_QTY = D("0.3")
+_LOSSY_TOTAL = "100.00000000"
+#: `100.00000000 - (98.00000000 x 0.3)`.
+_EXPECTED_LOSSY_PNL = D("70.600000000")
+
+
+class TestAResolvedFillIsBooked:
+    """Ruling 5: a confirmed fill against an in-memory position reaches the ledger.
+
+    **THIS REVERSES A STANDING PROPERTY AND THE SUITE SAYS SO.** Every C5c
+    ruling rested on the resolution path moving no figure -- R1 no sell, R2 no
+    booking, the query decides nothing. R2's grounds were that after a restart
+    there is no `Position` and `PendingCloseRecord` carries no `entry_price`, so
+    the figure was UNRECONSTRUCTABLE. That is an engineering constraint, not a
+    policy of forfeiting valid accounting, and it does not hold in process.
+
+    So the split is by what is KNOWABLE, not by what happened: position in
+    memory and a whole fill priced by the venue means book; anything else means
+    drop unbooked, exactly as before. The restart case is unchanged, and the
+    tests below pin both sides.
+    """
+
+    async def test_an_unconfirmed_sell_confirmed_next_bar_moves_the_ledger(self) -> None:
+        """**5a, END TO END from B1's retention.** The whole point of retaining.
+
+        MUTATION: drop unbooked on the confirmed-fill branch.
+
+        Driven through the real sequence -- the sell times out, the record is
+        retained, the next candle asks the venue and gets a fill -- rather than
+        by seeding `_pending`, because the claim is that B1's retention and B2's
+        booking compose. A test that seeded the record would pass with the two
+        halves wired to nothing.
+
+        The FIGURE is asserted, not merely that something was written: a booking
+        that credited zero would satisfy "the ledger moved".
+        """
+        client = _selling_client(
+            sell_answer=ExchangeConnectionError("reset"),
+            leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": _sold()},
+        )
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        assert portfolio.ledger is None, "nothing may be booked before the venue answers"
+        await executor(candle())
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == _EXPECTED_RESOLVED_PNL
+        assert portfolio.ledger.trades_count == 1
+        assert SYMBOL not in portfolio.positions
+        # The proceeds reached the balance too -- 10000 + 1810.57726950.
+        assert portfolio.free_quote == D("11810.57726950")
+
+    async def test_the_booked_figure_is_the_venues_total_and_never_a_quotient(self) -> None:
+        """**5d. THE MONEY RULE, on a fixture that can express its violation.**
+
+        MUTATION: derive the total as `quote_total / filled_qty x quantity`.
+
+        `CLAUDE.md` records an exit booked from a derived price under-reporting
+        137.36 of 241.15 USDT across three exits, and `filled_quote_quantity` is
+        `cummulativeQuoteQty` carried verbatim precisely so nothing re-derives
+        it. The default fixture CANNOT catch a re-derivation -- `1810.57726950 /
+        0.5 x 0.5` is exactly itself -- so this one uses `100.00000000 / 0.3`,
+        whose quotient is non-terminating and whose round trip is
+        `99.99999999999999999999999999`.
+
+        Asserted with `==` on `Decimal`, never a tolerance: a figure that is
+        merely close is the bug, and a tolerant assertion could not see it.
+        """
+        portfolio = _held(quantity=_LOSSY_QTY)
+        client = _resolving_client(_sold(executed=str(_LOSSY_QTY), quote=_LOSSY_TOTAL))
+        executor, _, _ = build(client=client, portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == _EXPECTED_LOSSY_PNL
+        # The credit is the venue's total EXACTLY, to the last place.
+        assert portfolio.free_quote == D("10000") + D(_LOSSY_TOTAL)
+
+    async def test_no_position_in_memory_drops_unbooked_and_leaves_the_ledger_absent(
+        self,
+    ) -> None:
+        """**5b. THE RESTART CASE, whose behaviour is deliberately UNCHANGED.**
+
+        MUTATION: book when the position is absent.
+
+        `Position` is in-process only and boot reconstructs none, so a record
+        restored from the store always resolves against an empty
+        `portfolio.positions`. There is no cost basis and `PendingCloseRecord`
+        carries no `entry_price`, so the figure is unreconstructable -- R2's
+        original grounds, still holding here and only here.
+
+        **ABSENT IS NOT ZERO**, which is why `ledger is None` is asserted rather
+        than `realised_pnl == 0`. A ledger that exists carrying zero would say
+        the bot booked a flat trade; `None` says it booked nothing at all, and
+        the two are different facts about the day.
+        """
+        # `build()`'s default portfolio holds NOTHING -- the restart shape.
+        executor, _, portfolio = build(client=_resolving_client())
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        assert portfolio.positions == {}
+
+    async def test_a_partial_fill_books_nothing_here_as_it_does_on_the_live_path(
+        self,
+    ) -> None:
+        """**5c. FAIL CLOSED, and for the reason ruling 5 fails closed.**
+
+        MUTATION: book the partial's total.
+
+        `close_position` deletes the WHOLE entry and credits one total; there is
+        no partial-close path and no way to express "0.2 of 0.5 sold". Booking
+        it would delete a position whose base is still at the venue and credit
+        proceeds for it -- a corrupted ledger in the direction nobody notices.
+        `_sell_and_book` already fails closed on exactly this and the resolution
+        path now agrees with it rather than having its own opinion.
+
+        The DROP is unchanged and pre-existing: a partial has counted as
+        `filled` since `M5h-321a` and went to `_drop_position_unbooked` then
+        too. This commit does not touch that; it only refuses to BOOK it.
+        """
+        portfolio = _held()
+        client = _resolving_client(_sold(executed="0.2"))
+        executor, _, _ = build(client=client, portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+
+    async def test_a_fill_with_no_quote_total_reported_books_nothing(self) -> None:
+        """A fill the venue priced for nobody. **No total, no booking.**
+
+        MUTATION: fall back to a derived figure when the total is absent.
+
+        `filled_quote_quantity` is `Money | None` and that field's own docstring
+        keeps the two apart: `None` means THE VENUE DID NOT REPORT IT, where
+        zero means it reported nothing filled. There is no fallback by design --
+        `close_position` would have to be handed a number this process invented.
+
+        Unreachable through `_sold()`, which always carries a total, so the
+        `Order` is built here directly. That is the point: the branch exists for
+        a venue response shape the happy-path fixture cannot produce.
+        """
+        portfolio = _held()
+        unpriced = Order(
+            order_id="78",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            status=OrderStatus.FILLED,
+            quantity=CLOSE_QTY,
+            filled_quantity=CLOSE_QTY,
+            filled_quote_quantity=None,
+        )
+        executor, _, _ = build(client=_resolving_client(unpriced), portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        # Still dropped -- the fill is confirmed, only its price is not.
+        assert SYMBOL not in portfolio.positions
+
+    async def test_booking_deletes_through_close_position_not_a_third_path(self) -> None:
+        """**There are TWO deletion paths and this commit adds none.**
+
+        MUTATION: replace `close_position` with a bare `positions.pop`.
+
+        A bare delete would remove the position and leave the ledger untouched,
+        which is `_drop_position_unbooked`'s behaviour reached by a third route
+        -- the "second source of truth" shape `CLAUDE.md` warns about. The
+        assertion that separates them is the LEDGER, not the position: both
+        routes end with the symbol gone.
+        """
+        portfolio = _held()
+        executor, _, _ = build(client=_resolving_client(), portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.ledger is not None, "a bare delete would leave this None"
+        assert portfolio.ledger.realised_pnl == _EXPECTED_RESOLVED_PNL
+
+    async def test_b1s_retention_and_wording_still_hold(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**5e. Booking must not have unpicked B1.**
+
+        MUTATION: release on the unconfirmed branch; or restore the manual-sell
+        wording.
+
+        Narrow on purpose -- B1's own suite pins these in detail. What this adds
+        is that they survive ALONGSIDE booking, since B2 rewrote the resolution
+        branch they depend on and the log they share.
+        """
+        client = _selling_client(
+            sell_answer=ExchangeConnectionError("reset"),
+            leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": _sold()},
+        )
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+            # RETAINED, and the wording does not tell anyone to sell anything.
+            assert SYMBOL in executor._pending
+            (unconfirmed,) = _records(caplog, "close_sell_unconfirmed")
+            assert "DO NOT SELL THIS BASE BY HAND" in unconfirmed.resolution
+            assert "manually" not in unconfirmed.resolution
+
+            await executor(candle())
+
+        # SINGLE-SHOT: one bar, then gone, even though this one booked.
+        assert executor._pending == {}

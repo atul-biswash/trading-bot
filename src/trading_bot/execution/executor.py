@@ -1971,8 +1971,23 @@ class OrderExecutor:
         **TWO POSITION CASES, AND NEITHER IS AN ERROR.** After a restart there
         is no `Position` at all -- it is in-process only and boot reconstructs
         none -- so the drop finds nothing and that is the ORDINARY case. Within
-        one process the position is present and is dropped unbooked. "No
-        position found" is not a failure and must never be logged as one.
+        one process the position is present. "No position found" is not a
+        failure and must never be logged as one.
+
+        **THE ACTION IS NO LONGER INVARIANT ON THE CONFIRMED-FILL BRANCH, AND
+        THAT IS A DELIBERATE REVERSAL. Ruling 5.** This docstring used to say
+        the query decides nothing, and for R1 (no sell) and the retain branch it
+        still decides nothing. A confirmed fill against a position still in
+        memory now BOOKS: `_book_resolved_close` credits the proceeds and
+        accrues the realised P&L through `Portfolio.close_position`.
+
+        **R2 IS NOT CONTRADICTED, because R2 rested on a constraint that does
+        not hold here.** Its grounds were that after a restart there is no
+        `Position` and `PendingCloseRecord` carries no `entry_price`, so the
+        figure was UNRECONSTRUCTABLE -- an engineering limit, never a policy of
+        forfeiting valid accounting. In-process both are present, so the figure
+        is computable and the venue's own quote total is the input. The restart
+        case is unchanged and still drops unbooked.
         """
         symbol = record.symbol
         # THE CONSERVATIVE DEFAULT, and it is load-bearing rather than tidy.
@@ -1981,6 +1996,10 @@ class OrderExecutor:
         # which refuses entries. An unbound-local or a crash therefore lands on
         # the safe branch rather than on the one that lets the bot re-enter.
         filled = False
+        # Bound with `filled`, and for the same reason: the `finally` reads it,
+        # so it must exist before anything that could fail to bind it. `None`
+        # is the conservative value -- it books nothing.
+        total: Money | None = None
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
             # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
@@ -1990,16 +2009,29 @@ class OrderExecutor:
             # and sold nothing, so treating any answer as a fill would drop a
             # position whose base is still at the venue.
             filled = order is not None and order.filled_quantity > 0
-            self._log_close_resolved(record, candle, order=order, failure=failure, filled=filled)
-        finally:
-            # **THE QUERY NOW DECIDES THE DROP, AND NOTHING ELSE.** One commit
-            # ago it decided nothing at all, and that sentence is worth
-            # correcting rather than quietly outgrowing: the CLEAR and the
-            # CRITICAL below are still unconditional on every answer including
-            # a failed one, and only the choice between dropping and retaining
-            # reads the venue.
             if filled:
-                # Confirmed flat: the capital is back and nothing is held.
+                total = self._bookable_total(symbol, order)
+            self._log_close_resolved(
+                record,
+                candle,
+                order=order,
+                failure=failure,
+                filled=filled,
+                booked=total is not None,
+            )
+        finally:
+            # **THE QUERY NOW DECIDES THE DROP AND, ON ONE BRANCH, A LEDGER
+            # WRITE.** Two commits ago it decided nothing at all. The CLEAR and
+            # the CRITICAL are still unconditional on every answer including a
+            # failed one; what reads the venue is the choice between booking,
+            # dropping and retaining.
+            if total is not None:
+                # Confirmed flat, in process, priced by the venue: the capital
+                # is back and the trade belongs in the ledger.
+                self._book_resolved_close(symbol, candle, total=total)
+            elif filled:
+                # Confirmed flat but not bookable -- no position to price it
+                # against, a partial, or no quote total reported.
                 self._drop_position_unbooked(symbol)
             else:
                 self._retain_position_unprotected(symbol)
@@ -2075,6 +2107,103 @@ class OrderExecutor:
             return None, exc
         return order, None
 
+    def _bookable_total(self, symbol: str, order: Order | None) -> Money | None:
+        """The venue's quote total, or ``None`` when this fill must not be booked.
+
+        Three conditions, and each is a refusal to invent a figure.
+
+        **THE POSITION MUST BE IN MEMORY**, because it carries the cost basis.
+        `close_position` prices realised P&L off `entry_fill_price`, and after a
+        restart there is no `Position` and `PendingCloseRecord` carries none --
+        so the figure is unreconstructable rather than merely unknown. That is
+        the restart case and it still drops unbooked.
+
+        **THE FILL MUST BE WHOLE.** `close_position` deletes the entire entry
+        and credits one total; there is no partial-close path and no way to say
+        "0.3 of 0.5 sold". Booking a partial would delete a position whose base
+        is still at the venue and credit proceeds for it -- a corrupted ledger
+        in the direction nobody notices. Ruling 5 in `_sell_and_book` fails
+        closed on exactly this and so does this path.
+
+        **THE VENUE MUST HAVE REPORTED THE TOTAL.** `filled_quote_quantity` is
+        `cummulativeQuoteQty` carried verbatim, and `None` there means the venue
+        did not report it -- kept distinct from a genuine zero by that field's
+        own design. There is no fallback: deriving a total by multiplying
+        `average_price` reintroduces the quotient error the exchange's own
+        accounting does not have, and `CLAUDE.md` records a stop booked at its
+        trigger under-reporting 137.36 of 241.15 USDT across three exits.
+        **The booked figure is the venue's or there is no booked figure.**
+        """
+        if order is None or order.filled_quote_quantity is None:
+            return None
+        position = self._portfolio.positions.get(symbol)
+        if position is None or order.filled_quantity != position.quantity:
+            return None
+        return order.filled_quote_quantity
+
+    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money) -> None:
+        """Book a resolved close. **Ruling 5, and the R2 reversal lives here.**
+
+        **THIS IS THE ONE PLACE THE RESOLUTION PATH MOVES A FIGURE**, and it does
+        not contradict R2 -- it retires the constraint R2 rested on. R2 said the
+        resolution books nothing *because the figure was unreconstructable*:
+        after a restart there is no `Position` and the record carries no
+        `entry_price`. That is an engineering limit, not a policy of forfeiting
+        valid accounting, and it simply does not hold when the position is in
+        memory. Where it still holds -- the restart case -- nothing changed.
+
+        **NO THIRD DELETION PATH.** This deletes through
+        `Portfolio.close_position`, which is the SAME path `_book_close` uses
+        for the live close, so the tree still has exactly two ways a position
+        leaves `positions`:
+
+        * `close_position` -- credits, accrues, deletes. `_book_close` for the
+          bot's own completed sell, and this for one confirmed a bar later.
+        * `_drop_position_unbooked` -- deletes and credits NOTHING, for a fill
+          that cannot be priced.
+
+        **IT CANNOT REUSE `_book_close`**, for the reason `_retain_position_-
+        unprotected` cannot reuse `_go_naked`: that one takes a `Signal` and
+        logs against it, and a resolution is candle-driven and has none.
+        Fabricating a signal to reach it would log a decision nobody made.
+
+        **THE C12 RESIDUAL IS INHERITED, not introduced.** `close_position`
+        credits `free_quote` before accruing, so an accrual that raises leaves
+        the proceeds credited and the position present -- visible and repeating
+        rather than silent. `_book_close` carries the same residual and says so;
+        this is its second caller. Note the log line has already been emitted by
+        then, claiming the trade was booked, so a failure here is reported by
+        this CRITICAL rather than by that one.
+        """
+        try:
+            realised = self._portfolio.close_position(symbol, exit_quote_total=total, now=utc_now())
+        except Exception as exc:
+            _log.critical(
+                "Booking the resolved close for %s FAILED; the position survives and the "
+                "ledger may be short this trade",
+                symbol,
+                extra={
+                    "event": _EVENT_CLOSE_BOOK_FAILED,
+                    "symbol": symbol,
+                    "quote_total": total,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                    "candle_time": candle.close_time.isoformat(),
+                },
+            )
+            return
+        _log.critical(
+            "Booked the resolved close for %s",
+            symbol,
+            extra={
+                "event": _EVENT_CLOSE_BOOKED,
+                "symbol": symbol,
+                "quote_total": total,
+                "realised": realised,
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+
     def _drop_position_unbooked(self, symbol: str) -> None:
         """Forget a position WITHOUT booking it. **The second deletion path.**
 
@@ -2082,26 +2211,44 @@ class OrderExecutor:
         distinction between the two sites that delete from
         `portfolio.positions`:
 
-        * `_book_close` -> `Portfolio.close_position` -- credits the proceeds,
-          accrues realised P&L, then deletes. Every ordinary exit.
+        * `Portfolio.close_position` -- credits the proceeds, accrues realised
+          P&L, then deletes. Reached from `_book_close` for the bot's own
+          completed sell and from `_book_resolved_close` for one confirmed a bar
+          later. Two callers, ONE deletion path.
         * here -- deletes and credits NOTHING.
 
         A second way to remove from a collection is the "second source of truth"
         shape `CLAUDE.md` warns about, so it is named at both sites rather than
         left for a reader to infer from which one they happened to open.
 
-        **IT CANNOT BOOK, AND THAT IS STRUCTURAL RATHER THAN CHOSEN.**
-        `close_position` computes realised P&L from the position's entry price;
-        after a restart there is no position and `PendingCloseRecord` carries no
-        `entry_price`, so the figure is not merely unknown, it is
-        unreconstructable. Booking half of it -- proceeds without a cost basis
-        -- would put a wrong number in a ledger whose whole value is matching an
-        exchange statement. The proceeds are in the CRITICAL line instead, for
-        an operator to enter by hand.
+        **THIS IS NOW THE UNPRICEABLE-FILL PATH, AND THE JUSTIFICATION BELOW IS
+        REWRITTEN RATHER THAN LEFT STANDING.** It used to read *"IT CANNOT BOOK,
+        AND THAT IS STRUCTURAL RATHER THAN CHOSEN"*, on the grounds that after a
+        restart there is no position and `PendingCloseRecord` carries no
+        `entry_price`. That argument is sound for the restart case and was
+        MEASURED false for the in-process one, where the `Position` and its
+        `entry_fill_price` are both present -- `M5h-364`. Keeping the old prose
+        beside ruling 5's behaviour would ship the stale-justification defect
+        this project keeps finding, so it is corrected in place: it is a claim
+        about the tree, and annotate-never-delete governs findings.
+
+        **WHAT REACHES HERE NOW, all three unbookable and for different
+        reasons**, decided by `_bookable_total`:
+
+        * no `Position` in memory -- the RESTART case, where the cost basis is
+          unreconstructable and the old argument holds exactly as written;
+        * a PARTIAL fill -- `close_position` deletes the whole entry and credits
+          one total, so booking it would credit proceeds for base still held;
+        * the venue reported no `cummulativeQuoteQty` -- and a total is never
+          derived, because a quotient reintroduces the error the exchange's own
+          accounting does not have.
+
+        In all three the proceeds are in the CRITICAL line instead, for an
+        operator to enter by hand.
 
         **NO LONGER UNCONDITIONAL.** It ran on every answer until M5h-321a;
-        it now runs only on a CONFIRMED FILL, where the capital is back and
-        nothing is held. The unconfirmed answers go to
+        it then ran on every CONFIRMED FILL, and from ruling 5 it runs on the
+        confirmed fills that cannot be priced. The unconfirmed answers go to
         `_retain_position_unprotected` instead, because dropping a position
         whose base may still be at the venue is what let a second entry through.
 
@@ -2117,6 +2264,7 @@ class OrderExecutor:
         order: Order | None,
         failure: Exception | None,
         filled: bool,
+        booked: bool,
     ) -> None:
         """One CRITICAL carrying everything the manual accounting needs.
 
@@ -2126,14 +2274,22 @@ class OrderExecutor:
         the exception as its type and message, because neither is on the
         whitelist that may cross unconverted.
 
-        **THE TWO OUTCOMES MUST BE TELLABLE APART FROM THE LINE ALONE**, and
+        **THE THREE OUTCOMES MUST BE TELLABLE APART FROM THE LINE ALONE**, and
         one CRITICAL saying only "resolved" would not manage it. They ask
-        different things of the operator: a confirmed fill means the position
-        is GONE and a trade is missing from the ledger, so the work is
-        bookkeeping; an unconfirmed one means inventory may still be at the
-        venue and the bot has just stopped trading everything, so the work is
-        to look at the account. `outcome` carries the discriminator and
-        `resolution` spells out what follows from it.
+        different things of the operator. A confirmed fill that was BOOKED asks
+        nothing -- the ledger carries the trade and the line is a record. A
+        confirmed fill that was NOT booked means a trade is missing from the
+        ledger, so the work is bookkeeping. An unconfirmed one means inventory
+        may still be at the venue and the bot has just stopped trading
+        everything, so the work is to look at the account. `outcome` carries the
+        discriminator and `resolution` spells out what follows from it.
+
+        **THE BOOKED BRANCH EXISTS BECAUSE THE OLD TEXT BECAME FALSE**, not to
+        add a label. It read *"NOTHING WAS BOOKED by this bot ... enter the
+        executed quantity and quote total below by hand"*, and under ruling 5
+        an operator following that would enter a trade the ledger already holds
+        -- the double-entry counterpart of B1's double-sell, reached the same
+        way, by acting on a line that describes the previous design.
         """
         extra: dict[str, object] = {
             "event": _EVENT_CLOSE_RESOLVED,
@@ -2145,9 +2301,23 @@ class OrderExecutor:
                 record.symbol, record.entry_bar_time, generation=record.generation
             ),
             "candle_time": candle.close_time.isoformat(),
-            "outcome": "filled_and_released" if filled else "unconfirmed_position_retained",
+            "outcome": (
+                "filled_and_booked"
+                if booked
+                else "filled_and_released"
+                if filled
+                else "unconfirmed_position_retained"
+            ),
             "resolution": (
                 (
+                    "THE SELL FILLED and THIS BOT HAS BOOKED IT. The position is closed, the "
+                    "proceeds are credited and the realised P&L is accrued from the VENUE'S "
+                    "own quote total. The pending record is gone from memory and from the "
+                    "store. DO NOT enter this trade by hand -- the ledger already carries it. "
+                    "Trading continues."
+                )
+                if booked
+                else (
                     "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
                     "released and the pending record is gone from memory and from the store. "
                     "That trade is NOT in the ledger -- enter the executed quantity and quote "
