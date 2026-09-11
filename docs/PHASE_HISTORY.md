@@ -2824,3 +2824,210 @@ counts to update.
 
 **M5h's scope was ruled by the project owner. Everything else here was ruled by
 the reviewer under delegation.**
+
+## Phase 5 M5h — the milestone that closed the ledger
+
+M5g ended on a sentence: *"a restart heals the balance sheet and erases the
+income statement."* M5h was scoped to make that false. **53 commits including
+this one — 52 numbered and one of rotation — and 375 findings, every commit
+carrying a block.** The headline is that the income statement now survives a
+restart. The thing worth carrying forward is narrower and less comfortable:
+**almost every path built here has never run against a venue**, and the
+milestone added more of them than it retired.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `4604b25` | Correct two stale counts -- the M5g namespace and the stage table |
+| 2 | `aaa5c2c` | The M5h survey -- what five read-only tasks measured |
+| 3 | `956d8d4` | Run 5, the account after it, and six findings restated |
+| 4 | `c5e54ce` | A read-only probe that asks X1 of both legs, not one |
+| 5 | `c60d38b` | X1 answered, and the decomposition that corrects M5h-039 |
+| 6 | `785cfc5` | Rewrite two stubs that promise SQLAlchemy |
+| 7 | `5db4921` | A crash-survivable store for what the venue cannot answer |
+| 8 | `75d2282` | The wiring that is blocked, and three rulings for it |
+| 9 | `79bf4ed` | Pin that the two pending types carry the same fields |
+| 10 | `f21ccaa` | An extractor that cannot see prose, and a check that counts |
+| 11 | `ae0687b` | What the extractor could not see, and what it never counted |
+| 12 | `864259a` | Four lifecycles recovered, and an account that reconciles to zero |
+| 13 | `6ad9162` | Wire the pending record, with the root as sole owner |
+| 14 | `7642655` | The store gains a reader, and a corrupt one refuses the boot |
+| 15 | `7c0c95f` | A duplicate symbol is corruption, and a docstring catches up |
+| 16 | `bd0c1e7` | The domain carries the venue's own quote total |
+| 17 | `1163111` | The deletion goes last, so a failed accrual can be retried |
+| 18 | `01b4844` | The ledger becomes one value, so a total cannot outrun its day |
+| 19 | `2e23ce3` | The ledger is restored at boot, and its reader finally exists |
+| 20 | `36193ca` | A position records the price it actually filled at |
+| 21 | `8aa66eb` | The working leg's fill price is queried at open |
+| 22 | `31fc12d` | Debit what the venue charged, not what we asked for |
+| 23 | `c33013a` | An expired entry leg opens no position and moves no money |
+| 24 | `b911ce0` | A protective fill is carried back, not discarded |
+| 25 | `e26a304` | The root gains a second writer, for the ledger |
+| 26 | `8744b52` | An exit's worth arrives as a total, not as a quotient |
+| 27 | `4abab15` | A venue fill reaches the ledger, for the first time |
+| 28 | `9588502` | A discretionary close sell becomes addressable by name |
+| 29 | `a1567cf` | A pending close becomes representable, in one keyspace |
+| 30 | `9845aba` | Q-C section 4b's confirming query becomes a pure decision |
+| 31 | `f6ec6d1` | The close is four calls, and there is no per-call share |
+| 32 | `3ef95b7` | A CLOSE is planned and reported, and still refused |
+| 33 | `bae0163` | A position carries the venue's list id, and says which is which |
+| 34 | `ac6d3e2` | A CLOSE cancels, confirms, sells and books |
+| 35 | `919a18b` | A pending write carries the live ledger, not a boot snapshot |
+| 36 | `89aac10` | Every timestamp is UTC, and now says so |
+| 37 | `b7f1624` | The store can hold a day's history and a lifetime total |
+| 38 | `db601be` | The day roll preserves the day it overwrites |
+| 39 | `e1083bf` | The root carries the day history in both directions |
+| 40 | `7b9be6b` | The pending-close skip is reachable, and correct |
+| 41 | `fbe25df` | A mutation survey that proves WHICH mutation ran |
+| 42 | `c820030` | Count the ABC stand-ins mypy cannot see |
+| 43 | `3909a7e` | The survey read log lines as collection errors |
+| 44 | `27b65b9` | The boot gate sees a pending record, not only a blocked one |
+| 45 | `22e2304` | The boot refusal is for a pending CLOSE, not any pending record |
+| 46 | `3452360` | A restored close is resolved, reported and let go |
+| 47 | `b3e5dc7` | An unconfirmed close keeps its position and stops entries |
+| 48 | `a11ed7a` | Untracked inventory is the third thing that stops a symbol |
+| 49 | `21ad51e` | The survey decoded pytest output with the console codepage |
+| 50 | `d77cd60` | The transport timeout is pinned inside the dispatch deadline |
+| 51 | `cf6c807` | An unconfirmed close sell is retained, not declared failed |
+| 52 | `ff9cc66` | A resolved close is booked when the position is in memory |
+
+Rotation: **this commit**, which records the milestone, carries the gate counts
+to all four sites, rewrites `NEXT_MILESTONE.md` for M5i, and annotates Q-C §4b
+and Q-B — one rotation commit rather than M5g's four, because the milestone's
+`src/` work was already settled when it began.
+
+### What was built, and why in that order
+
+**Persistence first, because nothing else could be trusted without it.** A
+crash-survivable store landed before any consumer: a reader that refuses a
+corrupt file at boot rather than starting on a guess, one keyspace shared by the
+pending placement and the pending close, and the ledger carried out and back with
+a day's history and a lifetime total. The order was forced — booking an exit into
+a ledger that could not survive a restart would have produced a figure that
+looked right until the next boot.
+
+**Then the exit booking.** `Portfolio.close_position` had exactly zero callers at
+M5g's close and `record_realised_pnl` had exactly one call site, inside it — so
+the accrual path was structurally dead. It now has **three** live producers: a
+venue-triggered protective fill carried back through reconciliation, the bot's
+own `CLOSE` sequence, and a close confirmed a bar after an ambiguous dispatch.
+
+**Then `SignalAction.CLOSE`.** Q-C §4b's cancel → confirm → sell, built as
+specified: one cancel collapses the list, the confirming query re-reads per leg
+because it must see a leg that filled *during* the cancel, and the sell is
+`MARKET` under a derivable close id so a timed-out sell is resolvable by asking.
+
+### The decisions, and the alternatives rejected
+
+**An exit's worth arrives as the venue's own quote total, never a quotient.**
+Rejected: deriving it from `average_price × quantity`, which is the smallest
+change and reintroduces exactly the error the exchange's own accounting does not
+have. `CLAUDE.md` already recorded a stop booked at its trigger under-reporting
+137.36 of 241.15 USDT; the domain gained `filled_quote_quantity` rather than a
+multiplication.
+
+**A partial fill books nothing and fails closed.** Rejected: booking the partial.
+`close_position` deletes the whole entry and credits one total, so there is no way
+to express "0.3 of 0.5 sold" — booking it would delete a position whose base is
+still at the venue. The residual is named rather than hidden: `Position.quantity`
+is then overstated and this design cannot correct it.
+
+**A timed-out sell RETAINS its record rather than declaring failure.** Rejected:
+the previous behaviour, which released the record and told an operator to sell
+the base by hand. That instruction is destructive when the sell may already have
+filled. The predicate is deliberately WIDE — `ClientRefusalError` releases,
+everything else retains — because retention is single-shot and over-retaining
+costs one query, while under-retaining discards the only handle on a position
+that may be live. Rejected as unavailable: a precise predicate, because
+`ExchangeAPIError` is produced both by a venue rejection and by an unreadable
+2xx, and no type separates them.
+
+**A confirmed fill is BOOKED when the position is still in memory, reversing a
+C5c ruling.** R2 said the resolution books nothing. Its grounds were that after a
+restart there is no `Position` and the record carries no `entry_price`, so the
+figure was *unreconstructable* — an engineering constraint, not a policy of
+forfeiting valid accounting. In process both are present. The restart case is
+unchanged, and `_drop_position_unbooked`'s docstring was rewritten rather than
+left asserting a reason that had become false.
+
+**The transport timeout is documented and pinned, not clamped.** Rejected:
+shortening it to fit the deadline — which would make the abandoned-but-landed
+case *more* likely, not less, since nothing cancels an in-flight request.
+
+### What measurement overturned
+
+**The `MARKET` sell is the only unbounded venue write in `src/`, and the cause is
+the PORT.** `ExchangeClient.create_order` takes a request and nothing else where
+the adapter accepts `timeout_s` and `attempts`, so the sell cannot be handed the
+budget its own call site computes. Three of four venue-writing call sites pass
+bounds; the fourth is the write.
+
+**The `43.5 s` figure carried through this milestone reproduces arithmetically
+and measures the wrong path.** `4 × 10.0 + 3.5` is correct for four consecutive
+rate limits. On a write, retries are narrowed to `RateLimitError`, and a
+connection timeout is `ExchangeConnectionError` — so it takes **one** attempt and
+the real bound is `10.0 s` against `D = 9.0`. The mismatch survives any reduction
+in `retry_attempts`, which the 43.5 framing would have hidden: anyone "fixing" it
+by cutting retries would have left it intact with a 4.3× smaller number to show.
+
+**A per-request `aiohttp` timeout REPLACES the session default rather than
+overlaying it**, so the library's `sock_connect=30` is discarded and the bare
+number becomes the only bound — safe at 10 only because 10 is stricter than the
+30 it displaced.
+
+### The method findings — three, and they are the milestone's durable output
+
+They are stated in full in `CLAUDE.md`; recorded here as what was learned and
+when.
+
+**Reasoning from what a thing is FOR rather than what it REACHES** cost four
+wrong predictions, each a plausible inference from purpose. The narrowing that
+makes it checkable: *when a call site is constrained, the constraint lives in the
+type it calls through.* It also **worked** once applied — B1's U1 was traced from
+6 to 5 before running, by asking whether a fixture could express the mutation
+rather than whether its name matched.
+
+**A string enumerator cannot read assertion polarity**, so a test proving a
+dangerous sentence is *absent* scores as pinning it present. Measured at
+`22e2304`: the AST set over-counts by reaching guards sharing an exception, the
+string set over-counts by ignoring polarity, and `B ⊆ A` was a fact about the
+tree that day rather than a property of either instrument.
+
+**A tool's output is evidence only where a prediction made it falsifiable.** Four
+instrument defects were corrected and **not one was found by reading the tool** —
+each was found because a prediction disagreed with what the tool reported. Three
+err in the same direction, and it is the expensive one: **a false abstention
+reports tests as blind when they bit.**
+
+### What did NOT happen, stated as plainly as what did
+
+**Nothing ran.** No supervised run took place in M5h; the four runs this entry
+reasons about are M5g's. So the close path, the booking, the retention and the
+resolution are exercised by fabricated fixtures only, and the composition risk is
+**larger** at this close than at the last.
+
+Three venue facts remain unobserved after ~25 trades and 33 closes: **no
+take-profit has ever filled**, `ALREADY_CLOSED` and `HALT` have never occurred in
+a real close, and `resolve_placement` has never run. Each is a branch reachable
+only through a fixture, on a path where a fixture models the venue rather than
+observing it.
+
+**One defect is left standing deliberately and is M5i's highest-value item.**
+`_resolve_close` computes its log's `outcome` in the `try` and performs the
+booking in the `finally`, so a `CRITICAL` can report `filled_and_booked` while
+nothing was booked — measured, mutation V2 killed four tests on the ledger and
+none on the label. It is a false marker on a line that now tells an operator
+*not* to enter the trade by hand.
+
+### The historical figures in this entry
+
+**53 commits, 375 findings, and the gate at this commit's parent `ff9cc66` —
+`ruff check` clean, 114 files formatted, mypy clean over 73 source files, 1585
+passed with 1 skipped, credentialed.** These are HISTORICAL and must never move,
+exactly like the `f52f161`, `470b47b`, `4926705` and `4f08741` figures above. A
+later rotation grepping the digits will meet them; they are facts about this
+milestone's close, not counts to update.
+
+**M5h's scope and rulings 1–5 were ruled by the project owner. Everything else
+here was ruled by the reviewer under delegation.**

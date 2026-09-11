@@ -1,241 +1,161 @@
-# Next milestone — M5h
+# Next milestone — M5i
 
-Written at M5g's rotation. This file is the **only task authority** the next
-session has: anything not carried here is lost, and the rotation that rewrites
-it is what destroys it.
-
-**M5g's rotation nearly proved that.** Step C found **four** rules living only
-in this file — the finding-ID scheme, the milestone-paragraph re-tensing
-convention, `M5f-091`'s "a rotation must READ every structural list against the
-tree", and `M5f-094`'s "a check in the same command chain as the action it gates
-is not a gate". Two of them were found only because the audit looked for the
-*general case* rather than for the two items it had been told about. All four
-now live in `CLAUDE.md`.
-
-**So: rules belong in `CLAUDE.md`. This file holds open items and nothing
-else.** If a future rotation finds a rule here, that is the defect, not the
-rewrite.
+Written at M5h's rotation. **This is the single home for live open items.**
+Every item below was verified present in the tree at `ff9cc66`; anything M5h
+closed has been struck rather than carried, and the strikes are listed so the
+removal is auditable rather than silent.
 
 ---
 
-## Before M5h starts — the namespace
+## Before M5i starts — the namespace
 
-**M5h's finding IDs are `M5h-001`, `M5h-002`, …** — the scheme is now stated in
-`CLAUDE.md`'s rotation procedure rather than here, which is why this section is
-three lines instead of fifteen.
+**IDs are `M5i-NNN`: three digits, zero-padded, starting at `M5i-001`.** Not
+letters. `CLAUDE.md` still describes an `M5d-A` scheme it has never used and
+carries an annotation saying so; the digit convention is the real one and this
+line is the only place it is prescribed, which is exactly the `phase_5_` shape
+one step inside the repository. **A rotation that rewrites this file must carry
+this paragraph forward.**
 
-**M5g's namespace is CLOSED at `M5g-144`**, verified over `milestone/M5f..HEAD`:
-144 declarations, 144 unique, `M5g-001`–`M5g-144`, no gap and no duplicate. Do
-not reuse an M5g identifier.
+M5h allocated **375** ids, `M5h-001` through `M5h-375`, with no gap and no
+duplicate — verified at rotation by both documented extractors, which agreed.
+Capacity is not a concern for a digit namespace; the check is still run.
 
 ---
 
 ## THE CENTRAL FACT — read this before anything else
 
-**M5g ran the bot four times. It placed three order lists, one of them filled
-and was closed by the venue's stop-loss, the account realised
-`-35.38691640` USDT — and NOTHING IN `src/` BOOKED IT.**
+M5h opened on a sentence from M5g: *"a restart heals the balance sheet and
+erases the income statement."* **That is no longer true, and the closing
+statement is in `PHASE_HISTORY.md`'s M5h entry.** The ledger now records venue
+fills, the bot's own closes, and closes confirmed a bar after an ambiguous
+dispatch; it survives a restart, and it carries the day's history and a lifetime
+total both ways across the store.
 
-The mechanism, measured:
-
-- `Portfolio.record_realised_pnl` has **exactly one call site**, inside
-  `Portfolio.close_position`.
-- `Portfolio.close_position` has **zero callers** in `src/`.
-- So `realised_pnl`, the `free_quote` credit and the `del positions[...]` are
-  **all unreachable**. The ledger can be opened and never closed.
-- `realised_today` therefore returns `Decimal(0)` permanently, and the
-  daily-loss check's expression is `realised_today(now) + committed`. **Its
-  realised term is structurally dead: no number of stop-outs can move it.** It
-  is a committed-risk limit wearing a daily-loss limit's name.
-
-**The same gap swallows a take-profit fill and a manual exit at the venue** —
-the classifier and `_refine` branch on `status is FILLED or filled_quantity > 0`
-for every non-working leg, so all three land identically.
-
-**What DOES happen** when a fill is seen: the leg classifies `UNKNOWN`, that is
-written to `Position.protection`, a warning is logged, and committed risk
-becomes uncomputable so further entries are refused. The bot halts — by the
-wrong mechanism, for a wrong stated reason, and only in-process. **A restart
-heals the balance sheet and erases the income statement**: equity is re-read
-from the venue at boot, realised P&L is not, because nothing ever wrote it.
+**What replaces it as the thing to be uneasy about:** the ledger is now written
+by three paths and *nothing reconciles the three against an exchange statement*.
+M5g's defect was an absence and was visible as one. Its successor is a
+disagreement, and a disagreement between three writers is not visible from
+inside any of them.
 
 ---
 
-## THE CARRIED RISK — two of eleven, not eleven
+## THE HIGHEST-VALUE OPEN ITEM — `M5h-371`
 
-M5f's entry listed eleven components never exercised in series against a venue.
-Four runs have now exercised **nine**. Re-derived from the log:
+**A CRITICAL can say `filled_and_booked` while nothing was booked.**
 
-| Component | Verdict |
-|---|---|
-| `classify_protection` | RAN — 81 passes `active=1` (run 2), 9 `unknown=1` (run 3) |
-| `reconcile_open_positions` | RAN |
-| `ReconciliationDriver` | RAN |
-| `ACTIVE`'s admission to `_TRUSTED_PROTECTION` | RAN |
-| `build_placement` | RAN — OTOCO, three placements |
-| `DispatchBudget` | RAN |
-| `OrderExecutor` dispatch + `Position` construction | RAN |
-| `resolve_unresolved_legs` | RAN — run 3, 18 point queries |
-| the L-leg reservation | RAN — spent to its exact limit, 2 of 2 |
-| **`resolve_placement` / the executor's Option-4 resolution** | **NEVER RUN** |
-| **`RefusalStage.POSITION_STALE`** | **NEVER RUN** |
+In `_resolve_close`, `outcome` is computed inside the `try` from
+`total is not None`, and the booking happens in the `finally`. The two are
+pinned by *different tests* and **nothing pins that they agree**. MEASURED at
+B2's survey: mutation V2 removed the booking action alone and the log still
+reported `filled_and_booked` — four tests died on the ledger and not one on the
+label.
 
-**What would exercise the remaining two.**
+**Why this ranks above everything else here.** It is a false marker on a
+CRITICAL, and this project has already recorded what a false marker costs:
+*"A field that is accidentally correct is more dangerous than one that is plainly
+wrong, because inspection cannot catch it."* The line now instructs an operator
+**not** to enter the trade by hand. If the write silently failed, that
+instruction converts a recoverable omission into a permanent one — the operator
+is told the ledger has it, and the ledger does not.
 
-- `resolve_placement` needs an **ambiguous placement** — a connection timeout
-  on a write, so the executor cannot tell whether the list landed. Zero
-  `placement_ambiguous` events across four runs. It cannot be provoked without
-  either a fault injection seam or luck.
-- `POSITION_STALE` needs a position whose stamp ages past
-  `max_position_staleness_s` (180 s). Measured over run 2's 81 passes,
-  inter-pass gaps were 60, 61, 119, 120 and 121 s — worst stamp age 121 s
-  against a 180 s threshold. **The reconciler keeps it fresh by design, so the
-  guard only fires when the pass itself stops running**, which no run has done.
+*Arming condition, in caller terms:* **whoever next edits `_resolve_close` or
+`_log_close_resolved`** — the two are one method apart and either edit puts the
+seam in front of them. Nothing else needs to happen first.
 
-*Arming condition, in caller terms:* neither is armed by a caller. Both are
-armed by a **fault** the tree cannot currently produce on demand, and that is
-the honest statement of why four runs did not reach them.
-
----
-
-## What M5g left — the state of the tree
-
-**Four runs, and two of them were nearly sealed out of the milestone.**
-
-| Run | PID | Window | Outcome |
-|---|---|---|---|
-| 1 | *(pre-PID)* | ends 08-27 04:38 | dispatched; 28 passes read `diverged=1` — the D2 defect |
-| 2 | 29608 | 08-27 17:10–19:19 | dispatched, filled, 81 passes `active=1`; exited by hand |
-| 3 | 12008 | 08-27 23:15–23:29 | **dispatched, filled, stop-loss triggered, `-35.38691640` USDT** |
-| 4 | 22484 | 08-28 03:23–03:44 | booted under the collapsed boot line; no dispatch |
-
-Runs 3 and 4 happened between sessions and **no report in the milestone knew of
-them** until a rotation step enumerated the log's pids and got three where it
-expected one. Their entire record was `logs/trading_bot.log`, which is
-gitignored.
-
-**Confirmed by the runs:** D2's fix (81 passes `active=1` against the first
-run's 28 `diverged=1`, which were the identifier-space defect and not
-divergence); B2 and V2; the instance lock and the PID field; and the
-excluded-holdings collapse — 501 boot lines became one, `excluded_count=501`, on
-the same account.
-
-**The account at M5g's close:** 17 order lists, all `ALL_DONE`; zero open
-orders; BTC and ETH dust; USDT `91125.78688060`. Nothing rests.
-
----
-
-## M5H'S SCOPE — ruled by the PROJECT OWNER
-
-**Three pieces, and the ordering is forced rather than preferred.**
-
-### 1. PERSISTENCE, first
-
-`persistence/` is a stub, and it is implicated in **four** separate findings:
-
-- `PendingPlacement` is an in-process dict, so a crash between an ambiguous
-  write and the next candle loses the only record that a list may be resting
-  (M5, below).
-- A `Position` orphaned by a process death is invisible to
-  `reconcile_open_positions`, which iterates `portfolio.open_positions`.
-- B3 adoption is unavailable — nothing can re-adopt what a previous process
-  held.
-- **The unbooked realised loss above**: even a correct booking evaporates on
-  restart without it.
-
-### 2. EXIT BOOKING, on top of it
-
-**Why the order is forced, not preferred:** booking without persistence yields a
-daily-loss halt that resets every time the operator restarts the bot. That is
-worse than no halt, because it **looks like a control**. Run 4 demonstrated the
-amnesia empirically — it booted with the post-loss balance and no knowledge that
-a trade had occurred.
-
-**The first step is a measurement, not code.** See the exit-price item under
-UNMEASURED.
-
-**And the smallest change is wrong.** Booking at the requested trigger price
-needs no measurement and under-reports the loss: run 3's trigger implies
-`36.45` where the account moved `35.39`, and in a gapping market the gap grows.
-A risk control may not err permissively.
-
-### 3. `SignalAction.CLOSE`, after
-
-The executor refuses `CLOSE` by name, so the bot cannot choose to exit. Run 2
-demonstrated the cost: the strategy signalled CLOSE, BUY, CLOSE after entry —
-a full round trip in its own view — while the ledger held one position
-throughout. Strategies are edge-triggered, so those exits are gone rather than
-deferred. Q-C §4b specifies the close path and it is unbuilt.
-
-### Optional and independent
-
-**M2's deliberate measurement** — whether terminated lists count against
-`MAX_NUM_ORDER_LISTS` — on a **throwaway Testnet account**, so the answer is
-bought rather than met at boot on this one. See M2 below.
+*What would close it:* make the label a consequence of the write rather than a
+prediction of it, or assert their agreement directly. The shape is not ruled
+here.
 
 ---
 
 ## UNRULED — reserved to the project owner
 
-None was armed by M5g: every arming condition below names a caller, and M5g
-edited none of them.
+### U0. `_persist_ledger`'s `pending=persisted.pending` — carried, untouched
+
+At `engine/modes.py:1526`, with the reasoning at `:1477`: the ledger closure
+writes the pending set from the **boot snapshot** rather than from live state.
+Untouched through eleven M5h commits that each had occasion to change it, by
+standing instruction.
+
+*Arming condition:* **whoever next changes what either persistence closure
+writes.** M5h did not, deliberately.
 
 ### U1. `NOT_PLACED`: re-place, or drop? — `M5f-061`, `M5f-064`
 
 `CLAUDE.md`'s locked rule says *"Not found ⇒ nothing rests; re-place at the same
 generation."* The executor deletes the record and re-places nothing, so a signal
-reported not-found is dropped — logged at ERROR as `dispatch_missed`, so
-countable, but gone. **`NOT_PLACED` is an INFERENCE**, covering at least three
-venue states the executor cannot distinguish. Strategies are edge-triggered, so
-a dropped signal is gone rather than deferred.
+reported not-found is dropped — logged at ERROR as `dispatch_missed`, countable
+but gone. **`NOT_PLACED` is an INFERENCE** over at least three venue states the
+executor cannot distinguish.
 
-*Arming condition, in caller terms:* **whoever writes the first `CLOSE` dispatch
-or the first live-run change to `OrderExecutor.__call__`.** M5h's piece 3 is
-that caller.
+*Arming condition:* **whoever writes the first live-run change to
+`OrderExecutor.__call__`'s placement branch.** M5h edited `__call__` three times
+and each time only the *close* branch, so this stayed unarmed — narrowly.
 
 ### U2. The venue-refusal half of e3-narrow — `M5f-083`
 
-Client-side refusals create no pending record (`59cf256`). Venue refusals still
-do, and still spend a resolver call next bar rediscovering what the exception
-already said. Unruled because it rests on *"a 429 is rejected pre-acceptance"*,
-which is REASONING rather than measurement.
+Client-side refusals create no pending record. Venue refusals still do.
 
-*Arming condition:* **whoever next edits `dispatch`'s except chain.**
+> **PARTLY SUPERSEDED BY B1, and the surviving half is now sharper.** B1 ruled
+> the *close sell's* `except` on exactly this axis: `ClientRefusalError` releases
+> the record, everything else retains. So the principle is settled and
+> implemented on one path. What remains unruled is the **entry** path's except
+> chain, which still records on a venue refusal.
+
+*Arming condition:* **whoever next edits `dispatch`'s except chain** — B1 edited
+`_sell_and_book`'s, not this one.
 
 ### U3. Whether to consume `orderReports` — `M5f-038`
 
-**The premise is settled and the decision is not.** MEASURED: the placement
-response carries `orderReports` with Q-C §7's complete compare set at no extra
-call. The cost is that `OrderList` would hold two leg representations, or two
-types would exist for one concept.
+MEASURED: the placement response carries Q-C §7's complete compare set at no
+extra call. The cost is `OrderList` holding two leg representations, or two
+types for one concept.
 
 *Arming condition:* **the placement site in `OrderExecutor`**, the only thing
 holding a placement response.
 
 ### U4. The per-call share — `M5f-009`
 
-Measured worst cases are OTOCO **5**, OTO **4**, unprotected **1**,
+Measured worst cases: OTOCO **5**, OTO **4**, unprotected **1**,
 recovery-bearing entry **3**. Whether the confirm step queries all three legs or
 only the two protective ones decides 5 against 4. Annotated at twelve sites;
-**do not annotate it again — a duplicate is permanent.**
+**do not annotate it again — a duplicate is permanent.** M5h's `M5_NUMBERS.md`
+annotation *names* it as still-unruled without re-annotating it, which is the
+distinction to preserve.
 
 *Arming condition:* **whoever first sets `timeout_s`/`attempts` from config**
 rather than passing the derived bounds.
 
-### U5. `BinanceRequestException`'s representation — `M5f-072`
+### U5. `BinanceRequestException`'s representation — `M5f-072`, now `M5h-360`
 
-It carries **no code**, and is raised only AFTER a 2xx when the body will not
+It carries **no code**, and is raised only after a 2xx when the body will not
 parse — so for a placement it leans toward LANDED. `code=None` reads as
 "client-side" to anyone trusting the `:param` line, which is wrong in the
 dangerous direction.
 
-*Arming condition:* **whoever first branches on `ExchangeAPIError.code` in
-production.** Still nothing does.
+> **ITS ARMING CONDITION WAS MIS-SPECIFIED, AND THE ITEM ARMED ANYWAY —
+> `M5h-360`.** It read *"whoever first branches on `ExchangeAPIError.code` in
+> production"*, and **nothing branches on `.code` yet.** But B1 needed exactly
+> this distinction and could not get it: `ExchangeAPIError` is produced BOTH by
+> an unclassified venue rejection AND by `BinanceRequestException`'s unreadable
+> 2xx, and no predicate over the type separates them. B1 adopted a deliberately
+> WIDE predicate and recorded why.
+>
+> **This is failure mode 1 from `CLAUDE.md`'s rotation rules with a twist worth
+> recording: the condition named a real caller that has still not arrived, while
+> a DIFFERENT caller — one that needed the distinction and had to work around
+> its absence — arrived first and was not covered by the wording.** The lesson
+> is not "name a caller" (it did) but that a caller who *routes around* a
+> missing answer is as much an arming event as one who consumes it.
+
+*Corrected arming condition:* **the next caller that must distinguish "the venue
+rejected this" from "the venue may have accepted this".** B1 was the first; it
+is unlikely to be the last.
 
 ### U6. Whether `OrderExecutor` implements the `OrderExecutor` port
 
-`core/interfaces.py` declares a port taking an `OrderRequest`, describing one of
-three placement outcomes. The class does not implement it.
+`core/interfaces.py` declares a port taking an `OrderRequest`. The class does not
+implement it.
 
 *Arming condition:* **whoever needs to substitute the executor** — the paper
 simulator, most likely.
@@ -244,195 +164,162 @@ simulator, most likely.
 
 Dead: one definition, zero readers, and its comment claims a consumer that does
 not exist. It **anchors the `7aa8f59` annotation**, so removing it orphans or
-deletes an annotation, which annotate-never-delete forbids. A precedent
-decision, not a cleanup.
+deletes an annotation. A precedent decision, not a cleanup.
 
 *Arming condition:* **whoever next edits `config/models.py`'s coherence block.**
 
----
-
-## UNMEASURED
-
-### X1. Does a triggered stop carry `average_price`? — `M5g-123`, `M5g-124`
-
-**The first step of M5h's piece 2, and it is one observation.**
-
-`Order` **already carries** `average_price`; `to_order` derives it as
-`cummulativeQuoteQty / executedQty`. It has **zero readers in `src/`**, and
-`_refine` — the one function that sees a protective leg fill — reads `status`
-and `filled_quantity` and discards it.
-
-So the question is narrow: **on a leg the venue TRIGGERED, does it populate
-`cummulativeQuoteQty`, so `average_price` is non-`None`?** DOCUMENTED that
-`GET /api/v3/order` returns the field; never observed here for a triggered leg,
-and run 3 could not answer it because nothing read it.
-
-*Arming condition, in caller terms:* **the next run that fills** — it needs a
-live stop the venue triggers. The question is recorded in `_refine`'s own
-docstring so it survives this file's next rewrite.
-
-### M1. The `allOrderList` default page size — `M5f-066`, `M5f-068`
-
-**UNREACHABLE READ-ONLY. Do not re-attempt a read-only probe.** A `limit` above
-the default returns the same set, so the ceiling cannot be observed without
-exceeding it. Bounded below at >= 17.
-
-### M2. Whether terminated lists count against `MAX_NUM_ORDER_LISTS`
-
-Measured: `MAX_NUM_ORDER_LISTS = 20`. The account now holds **17 lists, all
-terminal**, up from 14 at M5f. **The count moved without anyone deciding to move
-it, and it CANNOT BE REDUCED** — the venue's spot order-list surface is three
-creates, one cancel of a *live* list, and three reads. There is no endpoint that
-deletes history.
-
-**Do not state a headroom figure** (`M5f-067` records a rotation stating "6 of
-20" as fact). If terminal lists count, the boundary is near; if only live ones
-do, it is far. Q-C already names the worse reading: *"one symbol on a 1-minute
-bar reaches 20 in twenty minutes and fails at submission for a reason no code
-path anticipates."*
-
-*Arming condition:* **the next dispatching run**, whether or not anyone intends
-it. This is the only item that arms by inaction. M5h's optional piece buys the
-answer on a throwaway account instead.
-
-### M3. Q-C §8's fourth row — placed, working leg filled, pendings live
-
-**The state occurred TWICE and the row is still unmeasured** — the arming
-condition fired and nothing noticed, which is failure mode 3 of the
-arming-condition rules in `CLAUDE.md`. It is the row in which a re-place opens a
-second unprotected entry, and the grounds for the fail-closed ruling. Obtaining
-it needs a re-place attempted in that state, which no run did.
-
-*Arming condition:* **whoever edits the recovery branch** — the same caller as
-U1.
-
-### M4. S5 — a filled list whose protection has since triggered — `M5f-037`
-
-**Run 3 produced this state, and the reconciler handled it better than M4
-feared.** M4 says separating it from the FOK-expired case *"needs a per-leg
-`executedQty`"*; run 3's resolver produced exactly that, reporting
-`executedQty 0.02257000` on the SL and `EXPIRED` on the TP via point queries.
-
-**What remains unmeasured is narrower:** `resolve_placement`'s
-`PLACED_TERMINAL` path, which has still never run.
-
-### M5. `PendingPlacement` is unpersisted — `M5f-087`
-
-**The one failure fail-closed structurally cannot bound.** A plain in-process
-dict; a process death between an ambiguous write and the next candle loses the
-only record that a list may be resting. **Now inside M5h's piece 1.**
+> **NEARLY ARMED AT M5h AND DELIBERATELY NOT TAKEN.** Commit A added a second
+> validator to that very model and left `_CLOSE_SEQUENCE_CALLS` alone, because
+> the authorisation was for the envelope and this is a precedent decision. Named
+> so the next editor of that block knows the item is sitting there.
 
 ---
 
-## DEFERRED — known, decided not to act, each with why
+## DECLARED TEST WEAKNESSES — known, and none is a defect
 
-- **`ExchangeAPIError`'s docstring enumerates "Two `src/` sites" and there are
-  twenty** — `M5f-071`, `M5f-077`. Verified still saying two. Most of the
-  eighteen are client-side and consistent with its spirit.
-- **`code == 0` is the library's sentinel for an unparseable non-2xx body** —
-  `M5f-078`. `418409f` forwards it as though it were a venue code. Binance has
-  no code 0, and nothing in the tree records that.
-- **`CLAUDE.md` says the mapping targets an order-list request for "three of the
-  four branches"; the code and Q-C §2 both say TWO** — `M5f-020`. **Verified
-  still uncorrected** at M5g's close, having been excluded from three
-  consecutive rotations by their own scoping. It needs a home.
-- **`test_ids.py`'s comment gives a false rationale** — `M5f-073`.
-- **A stale claim propagated into a test docstring** — `M5f-030`.
-- **`_REASON_UNPROTECTED` is emitted from two sites** — `M5f-053`. A redundancy,
-  not a wrong signal.
-- **`_matched_list_id`'s multiplicity guard is pinned by nothing** — `M5f-063`.
-- **`install` and `install-dev` bypass `$(PYTHON)`** — `M5f-033`.
-- **`model_copy(update=...)` skips the model validator of every frozen domain
-  type** — `M5f-002`.
-- **A test passes for a different reason than its name states** — `M5f-088`.
-- **`reconciliation_pass`'s `queries=` field reports budget HEADROOM, not work
-  done** — `M5g-085`, `M5g-116`. It is `max_calls - len(assessments)`, constant
-  at 2 across every pass of both runs. **In run 2 it read 2 while zero queries
-  were made; in run 3 it read 2 while exactly two were made** — accidentally
-  correct, which inspection cannot catch.
-- **The log records no fill price and no balance** — `M5g-087`. `order_placed`
-  logs the LIMIT sent, never the fill. Run 3's realised loss is derivable only
-  from two console readings, not from the artefact.
-- **Testnet charges NO commission** — `M5g-082`. The entry debit was exactly
-  `quantity x price`. `config.yaml` carries `fee_percent: 0.1` for `backtesting`
-  and `paper_trading`; **whoever writes M5h's exit booking cannot validate a fee
-  model here**, and must not read a clean Testnet round trip as evidence it
-  works.
+Each was **declared before the survey that confirmed it**, not discovered after.
+They are listed because an undeclared abstention is indistinguishable from
+coverage, and after the fact nobody re-examines a green test.
 
----
+### W1. Two mutations, one failure set — `M5h-356`, `M5h-370`
 
-## Process debt with no instrument — carried
+Twice this milestone a pair of distinct mutations produced **identical** failure
+sets, so the suite cannot say which of the two broke:
 
-- **A justification going stale because nothing at its site re-checks the fact
-  it rests on** — `M5f-011`. The rule is in `CLAUDE.md`; the debt is that
-  instances keep arriving.
-- **A `src/` docstring outliving its fact** — `M5f-029`, `M5f-086`. Eleven
-  instances across two milestones. **The only systematic finder is the rotation,
-  once a milestone.**
-- **An open item declared in a commit message has no route into the task list**
-  — `M5f-042`. Both of `CLAUDE.md`'s checks read commit messages and run the
-  other direction. **This file is the route, and this rewrite is the only thing
-  that exercises it.**
-- **Nothing reconciles a mid-turn fix against a queued authorisation** —
-  `M5f-056`.
-- **No vocabulary for a measurement that upgrades confidence without moving a
-  number** — `M5f-097`.
-- **NOTHING NOTICES THAT A RUN HAPPENED** — `M5g-108`, `M5g-112`, `M5g-134`.
-  `logs/trading_bot.log` is gitignored, the bot writes nowhere else, and a
-  run's findings reach disk only if somebody looks. Two supervised runs were
-  nearly sealed out of this milestone. The log rotates at `backup_count: 5`, so
-  a longer deployment discards the evidence and any later check reports clean.
-  **Recorded as a drift surface in `CLAUDE.md`; no mechanism is proposed, and
-  that is the project owner's.**
+- `M5h-356`: Commit A's T3 (the tolerance never binds) and T4 (the validator is
+  never registered). Both kill the same three tests.
+- `M5h-370`: Commit B2's V2 (booking never runs) and V5 (booking runs but writes
+  nothing). Both kill the same four.
+
+Acceptable in both cases — each pair is two total failures of one guarantee — but
+**a green suite there says the guard binds somehow, not that it binds for the
+stated reason.**
+
+### W2. A guard conditional on a neighbouring number — `M5h-357`
+
+`test_a_timeout_above_thirty_is_refused_before_it_can_discard_sock_connect`
+pins that the transport envelope catches a >30s timeout **first**, not that the
+discarded `sock_connect` is guarded on its own terms. At any
+`dispatch_deadline_s` above 29.0 a 31s timeout passes the envelope and reaches
+the trap unguarded, and nothing in this tree reads `sock_connect`.
+
+### W3. A test that pins the numbers, not the behaviour — `M5h-354`
+
+`test_the_shipped_values_hold_at_exact_equality` asserts the two shipped values
+are 1.0 apart. It does **not** assert the envelope uses that distance — its
+assertions read config, never `_TRANSPORT_OVERRUN_TOLERANCE_S` — so it abstains
+on both T3 and T4 and bites only the `<=`→`<` mutation.
+
+### W4. An end-state assertion cannot see *when* — `M5h-366`
+
+`test_retention_is_single_shot_on_every_resolution_branch` asserts the lock is
+gone after the next candle. A release at *dispatch* time satisfies that exactly
+as well as a release at *resolution* time, so it abstains on the predicate
+inversion and on the sibling-releases mutation. Expressiveness is a property of
+the input; this input cannot distinguish the two timings.
 
 ---
 
-## Carried from earlier milestones — still open
+## STALE PROSE — `M5h-352`
 
-- **Finding I** — refuse a symbol whose tick is coarse relative to
-  `max_entry_slippage`, at BOOT. *Arming condition:* `_prime_pairs`, which
-  exists — armed now, merely unreachable on BTCUSDT/ETHUSDT.
-- **Finding L** — `Portfolio(realised_pnl=...)` with `pnl_date=None` makes
-  `realised_today` return zero, so a booked loss reads as zero. **Directly
-  relevant to M5h's piece 2**: it is a second route to the same silence the
-  central fact above describes.
-- **Collapse the multi-statement writes** — `advance_trailing_stop` and
-  `record_realised_pnl` each write twice; `CLAUDE.md` makes collapsing them a
-  prerequisite for any `Position` model validator.
-- **The trailing milestone** — `advance_trailing_stop` has zero call sites and
-  is `trailing_stop`'s only writer. The blocking question is unchanged: *does
-  the trailing level rest at the venue, or does it not exist?*
-- **Q-C §7's site-3 defect** — needs a `ProtectionState` member no writer exists
-  for.
-- **Q-B site 4's escalation half** — `M5f-096`. **BLOCKED, not stale.**
-  `CRITICAL` needs a halt flag on `Portfolio` that does not exist; N-cycle
-  promotion needs cross-pass state the driver refused to hold. *Arming
-  condition:* the halt flag's first writer.
-- **The PLACEHOLDER numbers in `M5_NUMBERS.md`** — every mark stands. M5g moved
-  none. Two annotations were added (the slippage observation, the staleness
-  margin) and both explicitly decline to move their mark.
+**One comment invites a misreading this milestone measured to be wrong.** In
+`_sell_and_book`, the comment ending *"43.5s, which EXCEEDS
+`dispatch_deadline_s = 9.0`"* reads as though 43.5s is the bound on the
+timeout path. It is not: `idempotent=False` narrows retries to `RateLimitError`,
+so a connection timeout takes **one** attempt and the bound is **10.0s**. 43.5s
+is reachable only on four consecutive rate limits.
+
+**Cited by content, not by line** — it was at `:1627` when found and is at
+`:1645` now, moved by B1 and B2. That drift inside one milestone is the
+cite-by-content rule earning its place.
+
+`CLAUDE.md` is **not** wrong here and needs no correction: it states 43.5s as the
+worst case for a *write*, names `RateLimitError` as its measurement basis, and
+already observes a write exceeds `D` *"with no retry at all."*
+
+*Arming condition:* **whoever next edits `_sell_and_book`.** It was inside the
+fence of every M5h task that touched the method.
 
 ---
 
-## Where the item numbers went — four test docstrings still cite them
+## UNMEASURED — venue facts nothing in the tree can supply
 
-Unchanged from M5f's rotation and **verified still present in `tests/`**. The
-mapping is repeated because the citations are prose and rot silently.
+**Provenance, stated plainly: these are counts from M5h's own log analysis, not
+re-derived at this rotation.** `logs/trading_bot.log` is gitignored and rotates
+at `backup_count: 5`, so the evidence may already be gone — which is
+`CLAUDE.md`'s fifth drift surface behaving exactly as described.
 
-| Cited as | Where it is now |
-|---|---|
-| `test_binance_client.py` — *"item 9"* | **DISCHARGED** at `cc1feb5`. |
-| `test_reconciliation_pass.py` — *"item 13"*, the last-call reservation | The reservation **RAN** in run 3, spent to its exact limit. Carried above in the carried-risk table. |
-| `test_risk_manager.py` — *"item 14"*, the staleness refusal | The REFUSAL landed at M5e and **has still never fired**. The ESCALATION half is BLOCKED under Q-B site 4. |
-| `test_risk_manager.py` — *"P2"*, no port method may go uncalled | Honoured at M5f. Finding GG's rule, unchanged. |
+### X1. No take-profit has ever filled — ~25 trades
 
-**The lesson is the mechanism, not the mapping**, and `CLAUDE.md` already rules
-that a document is cited by CONTENT for exactly this reason.
+Every completed trade closed by stop-loss or by the bot's own sell. The
+take-profit leg has been *placed* many times and *observed resting*; it has never
+been observed **executing**. So the `TAKE_PROFIT` branch of every consumer —
+classifier, booking, close plan — is exercised only by fabricated fixtures.
+
+### X2. `ALREADY_CLOSED` and `HALT` have never occurred — 33 closes
+
+`plan_close` has three outcomes and 33 real closes produced only `SELL`. The
+other two rows are pinned by unit tests over hand-built leg reports and have
+never been produced by a venue.
+
+### X3. `PLACED_TERMINAL` has never run
+
+`resolve_placement`'s terminal verdict. `resolve_placement` itself has still not
+run after every supervised run to date — it needs an *ambiguous* placement, and
+none has occurred.
+
+**The common shape, and it is the reason these are grouped:** each is a branch
+the tree can only reach through a fixture, on a path where a fixture is a model
+of the venue rather than an observation of it. `CLAUDE.md`'s warning applies
+directly — *"a component that could not have failed was not confirmed."*
+
+---
+
+## BLOCKED — the trailing-stop milestone
+
+**Still blocked, and the block is unchanged.** `advance_trailing_stop` has **zero
+call sites in `src/`** — verified at this rotation, `risk/manager.py:601`, whose
+own comment says so at `:623` — and is `trailing_stop`'s only writer there. So
+what it writes is a level nothing places, amends or cancels at the venue.
+
+The blocking question is unchanged: **does the trailing level rest at the venue,
+or does it not exist?** Q-C §3 fixes the order list at three legs and none is a
+trailing leg. Driving it before that is answered would produce a level no order
+rests on — the client-side protection Q-C §1 rejected outright.
+
+*Arming condition:* **whoever amends Q-C §3's leg set.** Not an event, and not a
+milestone: a document change by the project owner.
+
+---
+
+## STRUCK AT THIS ROTATION — closed by M5h
+
+Listed so the removal is auditable. `CLAUDE.md`'s mode 3 — *the condition fires
+and nothing notices* — is what this section exists to prevent.
+
+- **`M5f-087`: "`PendingPlacement` is unpersisted."** CLOSED. `store.py` carries
+  `PendingRecord` and `PendingCloseRecord` and `StoredState.pending` holds both.
+  This item had read as open *long after persistence landed*, which is mode 3
+  caught by a rotation reading every condition.
+- **`M5g`'s "nothing books a venue fill."** CLOSED at `4abab15`.
+- **`M5g`'s "`close_position` has zero callers."** CLOSED — two now, and both
+  named at each other.
+- **`M5h-364`: `_drop_position_unbooked`'s justification false in-process.**
+  CLOSED at B2, from both ends: the behaviour books where booking is possible,
+  and the prose describes the three cases that now reach it.
+- **`M5h-301`: the documented gate counts are stale.** CLOSED at this rotation —
+  all four sites written from one fresh run.
 
 ---
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 
-`CLAUDE.md` holds the steps, the extraction commands, the tag convention and the
-rules rescued from this file at M5g. Nothing about the procedure is duplicated
-here, deliberately: that duplication is what made the last rewrite dangerous.
+The five steps live in `CLAUDE.md`'s **Git workflow** section and that file is
+the authority. Two things it says that this rotation had to act on, recorded
+here only as a pointer:
+
+- **Step 4 — re-read the contracts under `docs/`** for prose the milestone
+  superseded. It is the step most easily skipped, because the milestone that
+  invalidates a paragraph is always editing a different file.
+- **An arming condition names its CALLER, not an event** — and see U5 above for
+  a case where naming a caller was still not sufficient.

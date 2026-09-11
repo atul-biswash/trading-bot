@@ -39,40 +39,50 @@ Reading this list first will save you time if it is not the tool you want.
 
 ## Build state — read this before running it
 
-**The bot cannot place an order yet.** This is the honest headline.
+**The bot places orders, books what they realise, and has done both against a
+real venue. It has not been run since M5g.** That is the honest headline, and
+both halves matter.
 
 | Area | State |
 |---|---|
 | Config, typed domain, `Decimal`-safe money | ✅ built |
-| Binance Spot REST adapter (balances, symbol info, ticker, klines, orders) | ✅ built |
+| Binance Spot REST adapter (balances, symbol info, ticker, klines, orders, order lists) | ✅ built |
 | WebSocket kline streaming with auto-reconnect | ✅ built |
 | Market-data provider (REST seed + rolling buffer + float64 frame) | ✅ built |
 | Indicators (SMA, EMA, RSI, MACD, Bollinger, ATR) and strategies | ✅ built |
 | Risk: sizing, protective levels, limits, `RiskManager` | ✅ built |
 | Composition root wiring the whole decision path | ✅ built |
-| Reconciler — reads what rests at the venue and records it | ✅ built, **never run against a real position** |
-| **Order execution** | ⛔ **stub — M5 in progress** |
-| Backtesting, paper simulator, persistence, notifications | ⛔ stubs |
+| Reconciler — reads what rests at the venue and records it | ✅ built, **has run against real positions** |
+| Order execution — entry, protection, and the discretionary close | ✅ built |
+| Realised P&L reaching the ledger, and surviving a restart | ✅ built |
+| Crash-survivable store for pending records and the ledger | ✅ built |
+| Backtesting, paper simulator, notifications | ⛔ stubs |
 
-`python -m trading_bot run` connects to Testnet and exercises
-data → strategy → risk end to end. It seeds a portfolio from your balance, primes
-each pair's exchange filters, and logs every signal's outcome as a structured
+`python -m trading_bot run` connects to Testnet and runs
+data → strategy → risk → execution end to end. It seeds a portfolio from your
+balance, primes each pair's exchange filters, restores the ledger and any
+unresolved records from disk, and logs every signal's outcome as a structured
 `risk_refused` or `intent_dispatched` line. **The executor is chained after
-`IntentLogger` and it places orders** — the logger still records every
-assessment, approved or refused, because the executor was chained after it
-rather than replacing it.
+`IntentLogger` rather than replacing it**, so the logger still records every
+assessment, approved or refused.
 
-**A reconciler now runs on every candle, and it has nothing to reconcile.** It
-reads the venue's open orders per symbol, compares them against what each
-position requested, records a verdict, and refuses new entries while the ledger
-is not current. But **nothing constructs a position** — that is the executor's
-job and the executor is a stub — so the pass visits an empty list on every bar.
-It ships before the first order deliberately: with no trusted protection state,
-the first position opened would have refused every entry after it.
+An entry goes out as **one order-list call** carrying the working leg and its
+protection together — there is no client-side/exchange split. A `CLOSE` cancels
+the list, re-queries each leg (because a leg can fill *during* the cancel), sells
+`MARKET`, and books the exit at the venue's own quote total. A sell whose outcome
+is never learned keeps its record and is re-observed on the next candle.
+
+**What has NOT happened is the thing to keep in view.** Four supervised runs took
+one complete trade between them, and every path added since is exercised by test
+fixtures only. After ~25 trades and 33 closes, **no take-profit has ever filled**,
+two of the three close-plan outcomes have never occurred, and the ambiguous-
+placement recovery has never run. See `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
-`paper/simulator`, `persistence/`, `notifications/`, `backtesting/`,
-`data/historical`, `data/repository`. Check before assuming behaviour;
+`paper/simulator`, `persistence/database`, `persistence/models`,
+`notifications/`, `backtesting/`, `data/historical`, `data/repository`. Note
+`persistence/store.py` is **not** among them — it is built and in use; only the
+SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` exits with "not implemented yet".
 
 **Where protective orders will rest has been decided and written down** —
@@ -176,10 +186,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  105 files already formatted
-mypy                                   Success: no issues found in 68 source files
-pytest                                 1270 passed, 3 skipped
-                                       (1273 = 1270 + 3 with Testnet credentials)
+ruff format --check src tests scripts  114 files already formatted
+mypy                                   Success: no issues found in 73 source files
+pytest                                 1582 passed, 4 skipped
+                                       (1585 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -188,10 +198,12 @@ pytest                                 1270 passed, 3 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `1270 passed, 3 skipped` on a machine without
-  them and `1273 passed` on a machine with them. **Both are green.** A fresh clone
-  seeing 1270 is not looking at a regression — quote the count with its condition,
-  never bare.
+  keys. The *same commit* reports `1582 passed, 4 skipped` on a machine without
+  them and `1585 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 1582 is not looking at a regression — quote the count with its
+  condition, never bare. The skipped column never reaches zero: one unit test skips
+  on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
+  credentialed run and the fourth in the uncredentialed one.
 - **Network.** Those three tests make live read-only calls to Testnet and two wait
   on a real 1-minute bar, so a full run takes ~90s longer and can fail for reasons
   unrelated to your change. The unit suite is deterministic; **treat a lone failure

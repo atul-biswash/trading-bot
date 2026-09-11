@@ -223,6 +223,35 @@ act on unknown state, which is what Q-C §4b already mandates in the same breath
 `CLAUDE.md` says so on the bullet itself, because the next reader will land on
 exactly this and read a contradiction.
 
+> **M5h ADDS A PROPERTY THIS DOCUMENT'S MODEL OF `CRITICAL` DOES NOT HAVE: THE
+> WORDING IS PART OF THE CONTROL.** Nothing above is withdrawn — Class E is
+> implemented as specified, the confirming query still decides, and "do not sell
+> on unknown state" is what the close path does.
+>
+> **Q-B §1 defines `CRITICAL` as a log line and a halt flag and nothing else.**
+> That is a statement about MECHANISM, and M5h found it incomplete as a statement
+> about CONSEQUENCE. The close path's `CRITICAL` told an operator the position
+> was unprotected and still open, and instructed them to *"sell the base manually
+> and restart"*. On a timed-out sell that instruction is **destructive**: the
+> sell may already have filled, and following it sells twice.
+>
+> So a `CRITICAL` here is not merely a notification whose presence matters — its
+> TEXT prescribes an irreversible human action, and the text can be wrong in a
+> way the mechanism cannot detect. M5h split the branch in two for exactly this:
+> a sell that PROVABLY did not happen keeps the operator-only wording, and a sell
+> whose outcome is UNKNOWN gets its own event saying *do not intervene, wait for
+> the next candle's verification*. Both polarities are pinned by test — the
+> guidance present AND the manual-sell instruction absent — because a
+> present-only assertion passes with the dangerous sentence sitting beside it.
+>
+> **The transferable part, and it belongs in this document rather than in the
+> executor:** where an escalation's text names an action, the escalation is a
+> control and inherits `CLAUDE.md`'s rule that **a control that errs permissively
+> is worse than no control, because it reports safety.** Q-B's five sites should
+> be read with that question asked of each: does this line tell an operator to
+> DO something, and is that instruction safe in every state that reaches it?
+> This annotation does not answer it for the other four.
+
 ## 4. Clearing a halt
 
 | Category | Cleared by |

@@ -277,6 +277,43 @@ round trip, is entered deliberately, and must be logged on entry and exit with t
 symbol and position identity, so an operator can see it in the record rather than
 infer it.
 
+> **BUILT AT M5h, AND THE PARAGRAPH ABOVE IS TRUE ONLY OF THE PATH WHERE THE
+> SELL ANSWERS.** Annotated rather than corrected: the sequence, its ordering
+> argument and the cancel-failure table are all implemented as specified and are
+> not in question. What is superseded is the WINDOW'S BOUND.
+>
+> **"That window is one round trip" is FALSE when the round trip does not
+> complete.** MEASURED at M5h: nothing cancels an in-flight request — no
+> `wait_for`, no `asyncio.timeout`, no `.cancel()` anywhere in `execution/` or
+> the two exchange modules — so a client-side timeout **merely stops waiting**
+> and the sell may still land at the venue afterwards. The window therefore ends
+> at the *next candle's* resolution query, not at the acknowledgement: **up to
+> one bar, 60 s on the shipped pair list.**
+>
+> **The sell is also the one call in this sequence not bounded by
+> `dispatch_deadline_s`**, and the cause is the port rather than the call site:
+> `ExchangeClient.create_order` takes a request and nothing else, where the
+> adapter's own method accepts `timeout_s` and `attempts`. MEASURED: three of the
+> four venue-writing call sites in `src/` pass bounds and the sell does not, so
+> it runs at `exchange.requests_timeout_s` — **10.0 s against `D = 9.0`**. The
+> 1.0 s overrun is absorbed (`remaining_s` returns negatives deliberately) and is
+> now pinned by a config validator; widening the port is UNRULED and reserved to
+> the project owner, because shortening the client-side abort would make the
+> abandoned-but-landed case MORE likely, not less.
+>
+> **"Logged on entry and exit" is half-satisfiable and is implemented as such.**
+> The entry log exists. There is no exit log on the branch where the position
+> stays naked, because that state does not resolve in-process — recorded at the
+> site rather than quietly dropped.
+>
+> **What §4b did NOT say, and M5h had to rule: what happens when the sell's
+> outcome is unknown.** The record is RETAINED and re-observed on the next
+> candle; nothing is re-sent, because a second sell could double-sell if the
+> first landed. And a confirmed fill found that way is BOOKED when the position
+> is still in memory — which reverses a C5c ruling whose grounds were that the
+> figure was unreconstructable after a restart. In process it is not. See
+> `PHASE_HISTORY.md`'s M5h entry.
+
 ## 5. `Position`
 
 Add `entry_bar_time` (ID seed; `opened_at` is wall-clock and unusable after

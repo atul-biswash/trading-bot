@@ -1444,10 +1444,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  105 files already formatted
-mypy                                   Success: no issues found in 68 source files
-pytest                                 1270 passed, 3 skipped
-                                       (1273 passed with Testnet credentials present)
+ruff format --check src tests scripts  114 files already formatted
+mypy                                   Success: no issues found in 73 source files
+pytest                                 1582 passed, 4 skipped
+                                       (1585 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1456,15 +1456,22 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1273 passed` on a machine with Binance Testnet credentials in `.env`
-- `1270 passed, 3 skipped` on a machine without them
+- `1585 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `1582 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1270 and must not read it as a regression against a documented
-1273. Quote the count with its condition, never bare.
+runner will see 1582 and must not read it as a regression against a documented
+1585. Quote the count with its condition, never bare.
 
-Only the `1273` is measured here; `1270` is `1273` minus the three `skipif`-gated
-integration tests. Say which is which rather than presenting both as observed.
+Only the `1585` is measured here; `1582 passed, 4 skipped` is that run minus the
+three `skipif`-gated integration tests, which move from the passed column to the
+skipped one. Say which is which rather than presenting both as observed.
+
+**The lone skip in the credentialed run is NOT an integration test**, and that is
+worth stating because the arithmetic reads oddly otherwise:
+`tests/unit/test_logger.py` skips one case on Windows because `time.tzset` is
+POSIX-only. So the skipped column never reaches zero on this machine, and a
+reader reconciling 1 against 4 is seeing 3 integration skips added to it.
 
 *Network.* The integration tests make live calls to Binance Testnet and two of
 them wait on a real 1-minute bar, so they can fail for reasons that have nothing
@@ -1523,8 +1530,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 105 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 68 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 114 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 73 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -1892,6 +1899,76 @@ worth the most: **two things each covered, and the seam between them covered by
 nothing.** A prediction that is wrong is the cheapest way this project has
 found to locate such a seam, so the response to one is to ask what the surprise
 implies about coverage — not to adjust the number and move on.
+
+**REASON FROM WHAT A THING REACHES, NEVER FROM WHAT IT IS FOR (M5h).** The
+single most productive error of M5h, four times, and it is not carelessness —
+each instance is a *plausible* inference from purpose that the tree declined to
+honour. A test named for the thing being mutated, a sequence written as one
+budgeted block, a clause whose intent matches its neighbour's: in every case the
+intent was read and the reach was not.
+
+**The four, dated, because the pattern is only visible in the series.**
+`M5h-327` carried a prediction across a test that had been *strengthened* since
+the prediction was made — the intent was unchanged and the reach had grown.
+M5h-321a's Phase 1 over-predicted which tests would move by reasoning from what
+they were *for*. M5h-321b's S3 compared two mutations by purpose when one
+clause's **reach** differed from the other's. And the sell-bound Phase 1
+predicted that the MARKET sell passes the dispatch budget, because the close
+sequence is *written as* one budgeted sequence — it does not, and cannot.
+
+**That last one narrows the rule into something checkable: WHEN A CALL SITE IS
+CONSTRAINED, THE CONSTRAINT LIVES IN THE TYPE IT CALLS THROUGH.** The sell does
+not *decline* to pass bounds; `ExchangeClient.create_order` takes a request and
+nothing else, where the adapter's own method accepts both. No amount of reading
+the close sequence would find that, because the constraint is one layer inward
+in a file the sequence never mentions. So the question to ask of a puzzling call
+site is not "what is this for" but "what does its **type** permit".
+
+**AND IT WORKS WHEN APPLIED, which is why this is a practice and not a warning.**
+B1's U1 was predicted at 6, then traced down to 5 *before running*, by asking
+whether one test's fixture could express the mutation rather than whether its
+name matched. It returned 5. A rule with only violations reads as a caution
+nobody acts on; the value is in the pass that cost one minute and moved a number
+that would otherwise have been wrong.
+
+**A STRING ENUMERATOR CANNOT READ ASSERTION POLARITY (M5h).** Grep a test suite
+for a message substring and a test asserting that phrase is **ABSENT** counts
+identically to one asserting it present — so a safety test written to prove a
+dangerous sentence is *not* emitted is scored as pinning that it *is*. There is
+no flag for this; the instrument is blind by construction, because a substring
+search has no access to the `assert`/`not in` around it.
+
+Measured at `22e2304`, enumerating one guard's tests two ways. **The AST set
+over-counts** by reaching other guards that share an exception type. **The string
+set over-counts** by ignoring polarity. `B ⊆ A` held that day — and **the
+containment was a fact about the tree at that moment, not a property of the two
+instruments**, which is the whole finding: two enumerators agreeing tells you
+nothing about either unless a disagreement was possible, and here one of them
+could not have disagreed for the right reason.
+
+**A TOOL'S OUTPUT IS EVIDENCE ONLY WHERE A PREDICTION MADE IT FALSIFIABLE
+(M5h).** Four instrument defects were corrected this milestone and **not one was
+found by reading the tool.** Each was found because a prediction made *in
+advance* disagreed with what the tool reported, and the disagreement had to be
+explained:
+
+- the byte printer appended a newline the bytes did not contain (`splitlines`
+  without `keepends`), so the mutated region printed was not the region written;
+- the ABC census under-reported **silently** on local-variable bindings and
+  constructor injection — an absence that looked like a count;
+- `3909a7e`: the survey parser read captured **log** lines beginning `ERROR ` as
+  pytest collection errors, turning four real kills into abstentions;
+- `21ad51e`: the survey decoded pytest's stdout with the console codepage and
+  was destroyed by the mutation that failed the most tests.
+
+**The direction is what matters, and three of the four err the same way: a false
+ABSTENTION reports tests as BLIND WHEN THEY BIT.** That is the expensive
+direction — a false kill is investigated and corrected within the hour, while a
+false abstention is filed as coverage that does not exist and nobody revisits a
+green test. Note also the self-selecting hazard in the last: the harder a
+mutation bites, the more output it produces, and the more likely a fragile
+parser is to fail on it. **An instrument most likely to break on the strongest
+evidence is worse than no instrument**, and only a prediction can catch it.
 
 **AN AGREEMENT IS EVIDENCE ONLY WHEN DISAGREEMENT WAS POSSIBLE AND WOULD HAVE
 BEEN NOTICED.** Two independent derivations reaching the same answer tells you
@@ -2979,7 +3056,50 @@ to its exact limit — and the classifier reached `UNKNOWN` on a real divergence
 four runs.**
 
 **Q-A** stays unscheduled, and the reason has changed rather than gone away. It
-needs soak data from `collaborator_failed` lines; the bot has now run four times
-and placed three order lists, and **not one such line has ever been emitted** —
-measured across the whole log. The sample is still empty, so the thresholds are
-still uncalibratable. See `docs/NEXT_MILESTONE.md`.
+needs soak data from `collaborator_failed` lines; the bot had run four times and
+placed three order lists at M5g's close, and **not one such line had ever been
+emitted** — measured across the whole log. The sample is still empty, so the
+thresholds are still uncalibratable. See `docs/NEXT_MILESTONE.md`.
+
+**M5h closed the gap M5g opened, in 51 commits. The income statement survives a
+restart.** At M5g's close `close_position` had zero callers and
+`realised_today` returned `Decimal(0)` for ever; at M5h's it has **two**, the
+store carries the ledger with a day's history and a lifetime total in both
+directions, and a boot restores them. Three paths now write realised P&L: a
+venue-triggered protective fill carried back through reconciliation, the bot's
+own `CLOSE` sequence, and — new at the close — a close confirmed a bar *after* an
+ambiguous dispatch.
+
+*The close path is built, and it is the milestone's weight.* Q-C §4b's
+cancel → confirm → sell runs end to end: one cancel collapses the list, the
+confirming query re-reads per leg because it must see a leg that filled *during*
+the cancel, and the sell is `MARKET` under a derivable close id. An exit's worth
+arrives as the venue's own **quote total**, never a quotient — the domain gained
+the field for it, and a partial fill fails closed because `close_position` has no
+way to express one.
+
+*What M5h learned that was not in any plan.* The `MARKET` sell is the **only
+unbounded venue write in `src/`**, and the cause is the *port*:
+`ExchangeClient.create_order` takes a request and nothing else where the adapter
+accepts bounds, so the sell cannot be handed the budget its own call site
+computes. The `43.5 s` figure carried through the milestone reproduces
+arithmetically and **measures the wrong path** — retries on a write are narrowed
+to `RateLimitError`, so a connection timeout takes one attempt and the real bound
+is `10.0 s` against `D = 9.0`. A 1.0 s overrun, absorbed by design and now
+refused at config load if it grows.
+
+*And a standing property was reversed, deliberately.* Every C5c ruling rested on
+the resolution path moving no figure. It now books one — but only where the
+position is still in memory, because R2's grounds were that the cost basis is
+**unreconstructable** after a restart, and that is an engineering limit rather
+than a policy of forfeiting valid accounting. The restart case is unchanged.
+
+**Nothing has RUN since M5g's four supervised runs.** Every path above is
+exercised by fabricated fixtures only. Three venue facts remain unobserved after
+~25 trades and 33 closes: **no take-profit has ever filled**, `ALREADY_CLOSED`
+and `HALT` have never occurred, and `resolve_placement` has never run. The
+composition risk M5f made reachable and M5g partly retired is **larger again**,
+because M5h added paths to it. See `docs/NEXT_MILESTONE.md`, whose highest-value
+item is `M5h-371`: a `CRITICAL` that can report `filled_and_booked` while nothing
+was booked, because the label is computed in the `try` and the write happens in
+the `finally` and nothing pins that they agree.
