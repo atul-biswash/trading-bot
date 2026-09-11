@@ -11,6 +11,7 @@ from pydantic import ValidationError
 from trading_bot.config.models import (
     AppConfig,
     BacktestConfig,
+    ExchangeConfig,
     PairConfig,
     PositionSizingConfig,
     RiskConfig,
@@ -314,6 +315,7 @@ def _app_config(
     *,
     pairs: list[tuple[str, str]] | None = None,
     risk: RiskConfig | None = None,
+    exchange: ExchangeConfig | None = None,
 ) -> AppConfig:
     """An AppConfig carrying only what the coherence constraint reads."""
     return AppConfig(
@@ -321,7 +323,109 @@ def _app_config(
         backtesting=BacktestConfig(start_date="2024-01-01", end_date="2024-02-01"),
         trading=TradingConfig(pairs=[PairConfig(symbol=s, timeframe=t) for s, t in (pairs or [])]),
         risk=risk or RiskConfig(),
+        exchange=exchange or ExchangeConfig(),
     )
+
+
+class TestTheTransportFitsTheDispatchDeadline:
+    """`exchange.requests_timeout_s <= risk.dispatch_deadline_s + TOLERANCE`.
+
+    **The envelope pins a BREACH, not a margin.** The MARKET sell in the close
+    path is the one venue WRITE that cannot be handed the dispatch budget, so it
+    runs under `requests_timeout_s`; on the shipped values that is 10 s against a
+    9.0 s deadline, an overrun of exactly the tolerance. `remaining_s` absorbs it
+    by charging the next invocation's share, and only while the gap stays this
+    size -- which is what these tests hold still.
+
+    Every case here uses NO pairs, so the sibling pipeline validator is vacuously
+    satisfied and cannot be the thing that raised. That isolation is deliberate:
+    both validators raise `ValidationError`, so a test that let both be reachable
+    could not tell which one fired.
+    """
+
+    def test_a_timeout_past_the_envelope_is_refused(self) -> None:
+        """**4a.** The refusal is asserted by CONTENT, not by type.
+
+        MUTATION: `<=` becomes `>=`, or the tolerance is widened to a value that
+        never binds.
+
+        `ValidationError` alone would be satisfied by any of the four other
+        validators on this model, so the assertions name the two numbers and the
+        remedy. 12 against a 10.0 envelope: past it by 2 s, and chosen above the
+        11 that would sit one integer past the boundary so the failure is not
+        mistaken for an off-by-one in the comparison itself.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(exchange=ExchangeConfig(requests_timeout_s=12))
+        message = str(excinfo.value)
+        assert "exchange.requests_timeout_s = 12s" in message
+        assert "10.0s envelope" in message
+        assert "risk.dispatch_deadline_s = 9.0s" in message
+        assert "1.0s measured overrun" in message
+        assert "Lower exchange.requests_timeout_s" in message
+
+    def test_the_shipped_values_hold_at_exact_equality(self) -> None:
+        """**4b.** The boundary case, pinned deliberately because it has NO headroom.
+
+        MUTATION: `<=` becomes `<`.
+
+        `10 <= 9.0 + 1.0` is a true equality and not a floating-point artefact:
+        both operands are exactly representable in binary64, so `9.0 + 1.0` is
+        exactly `10.0`. A tolerance of `0.1` would NOT have that property, which
+        is why the value is checked here rather than assumed.
+
+        This test is what a `<` mutation kills first, and it is also the reason
+        the envelope cannot be tightened without a decision: there is nothing
+        spare to give back.
+        """
+        config = _app_config()
+        assert config.exchange.requests_timeout_s == 10
+        assert config.risk.dispatch_deadline_s == 9.0
+        assert config.exchange.requests_timeout_s == config.risk.dispatch_deadline_s + 1.0
+
+    def test_a_timeout_above_thirty_is_refused_before_it_can_discard_sock_connect(
+        self,
+    ) -> None:
+        """**4c.** The regression guard for the `aiohttp` trap, and the case where
+        the DISCARDED `sock_connect` would start to matter.
+
+        MUTATION: widen the tolerance so the envelope never binds.
+
+        MEASURED: a bare-number per-request `timeout` is coerced to
+        `ClientTimeout(total=n)`, which REPLACES the session's `DEFAULT_TIMEOUT`
+        wholesale rather than overlaying it -- so the library's `sock_connect=30`
+        is thrown away and `n` becomes the only bound. At 10 that is harmless
+        because 10 is stricter than the 30 it displaced. At 31 it is not: the
+        connect phase becomes LOOSER than it would have been with no per-request
+        timeout at all, silently.
+
+        **The envelope catches it first, and that is the claim this test pins** --
+        not that the trap is guarded on its own terms. Nothing in this tree reads
+        `sock_connect`, and at any deadline above 29.0 a 31 s timeout would pass
+        the envelope and reach the trap unguarded. So this is a guard that holds
+        because of a neighbouring number, and it is written down here rather than
+        trusted.
+        """
+        with pytest.raises(ValidationError, match="requests_timeout_s = 31s"):
+            _app_config(exchange=ExchangeConfig(requests_timeout_s=31))
+
+    def test_the_envelope_tracks_the_deadline_rather_than_a_constant(self) -> None:
+        """A timeout refused at the shipped deadline is ACCEPTED at a larger one.
+
+        MUTATION: compare against a literal 10.0 instead of reading
+        `dispatch_deadline_s`.
+
+        Without this, an envelope hard-coded to the shipped numbers would pass
+        every other test in this class -- all of which use the shipped deadline.
+        """
+        with pytest.raises(ValidationError):
+            _app_config(exchange=ExchangeConfig(requests_timeout_s=20))
+
+        widened = _app_config(
+            exchange=ExchangeConfig(requests_timeout_s=20),
+            risk=RiskConfig(dispatch_deadline_s=19.0),
+        )
+        assert widened.exchange.requests_timeout_s == 20
 
 
 class TestDispatchBudgetCoherence:

@@ -63,6 +63,34 @@ class _Model(BaseModel):
 class ExchangeConfig(_Model):
     name: str = "binance"
     recv_window_ms: int = 5000
+    #: Seconds bounding ONE HTTP round trip, applied by handing
+    #: ``requests_params={"timeout": ...}`` to ``AsyncClient.create``. It binds
+    #: **per attempt**, never per ``_call``: ``base_client._get_request_kwargs``
+    #: merges it into the keyword arguments for a single request.
+    #:
+    #: **IT OVERRUNS ``risk.dispatch_deadline_s`` BY 1.0 s TODAY, DELIBERATELY,
+    #: AND THAT IS PINNED.** The ``MARKET`` sell in the close path is the one
+    #: venue WRITE that cannot be handed the dispatch budget -- the *port's*
+    #: ``create_order`` takes a request and nothing else -- so it runs under this
+    #: value. At ``10`` against ``D = 9.0`` a single attempt overruns by 1.0 s,
+    #: which ``DispatchBudget.remaining_s`` absorbs by charging the next
+    #: invocation's share. The envelope is enforced by
+    #: :meth:`AppConfig._check_transport_fits_the_dispatch_deadline`; see
+    #: :data:`_TRANSPORT_OVERRUN_TOLERANCE_S` for the measurement.
+    #:
+    #: **RAISING THIS DISCARDS A CONNECT BOUND YOU DO NOT KNOW EXISTS.**
+    #: MEASURED against ``aiohttp 3.14.2``: a per-request ``timeout`` that is a
+    #: bare number is coerced by ``ClientSession._request`` to
+    #: ``ClientTimeout(total=<number>)``, which **REPLACES** the session's
+    #: ``DEFAULT_TIMEOUT`` wholesale rather than overlaying it. That default is
+    #: ``ClientTimeout(total=300, connect=None, sock_read=None, sock_connect=30,
+    #: ceil_threshold=5)``, so the library's ``sock_connect=30`` is **thrown
+    #: away** and this value is the only bound left -- covering DNS, connect,
+    #: send and read together. Safe at ``10`` only because 10 is stricter than
+    #: the 30 it displaced. Above 30 the connect phase is silently *looser* than
+    #: it would have been with no per-request timeout at all. The envelope
+    #: validator refuses such a value first, at today's deadline, which is why
+    #: this trap is documented rather than guarded twice.
     requests_timeout_s: int = 10
     rate_limit_safety: float = Field(0.9, gt=0, le=1)
 
@@ -509,6 +537,40 @@ class EngineConfig(_Model):
 #: never sampled. Full provenance and method: ``docs/M5_NUMBERS.md`` section 3.
 _PIPELINE_HEADROOM = 0.5
 
+
+#: Seconds by which ONE transport attempt may exceed ``risk.dispatch_deadline_s``
+#: before the dispatch sequence stops being coherent. Not a config field, for
+#: :data:`_PIPELINE_HEADROOM`'s reason one step further: it is not a margin an
+#: operator may spend but the measured SHAPE of an overrun that already exists.
+#:
+#: **It is named rather than written inline, and that is the point.** A bare
+#: ``1.0`` beside a deadline reads as slack -- a spare second someone may claim --
+#: and this is the opposite: it is the exact size of a known breach, recorded so
+#: that the breach cannot grow unnoticed. This project has caught the same shape
+#: before, in a number that looked like headroom and was a measurement.
+#:
+#: **MEASURED.** The ``MARKET`` sell in the close path is the one venue WRITE that
+#: does not carry the dispatch budget: ``ExchangeClient.create_order`` takes a
+#: request and nothing else -- where the *adapter* method accepts ``timeout_s``
+#: and ``attempts`` -- so the sell cannot be handed the bounds its own call site
+#: computes, and runs under the client's policy at ``requests_timeout_s``.
+#:
+#: On the path this governs -- a connection timeout -- ``idempotent=False``
+#: narrows the retry set to ``RateLimitError`` alone, so exactly ONE attempt is
+#: made and the bound is the transport total: **10.0 s against D = 9.0, an
+#: overrun of 1.0 s.** Note what that means for the older figure: the 43.5 s
+#: worst case (4 x 10 + 3.5) is arithmetically right and describes the
+#: *rate-limit* path, and the mismatch here survives even if ``retry_attempts``
+#: were cut to 1.
+#:
+#: **The overrun is ABSORBED, not ignored**, which is what makes this a tolerance
+#: and not a breach left standing: ``DispatchBudget.remaining_s`` returns
+#: negatives deliberately, so an overrun is charged against the next invocation's
+#: share rather than forgotten. That absorption holds only while the gap stays
+#: this size -- and pinning that is the whole job of
+#: :meth:`AppConfig._check_transport_fits_the_dispatch_deadline`.
+_TRANSPORT_OVERRUN_TOLERANCE_S = 1.0
+
 #: Calls in the longest dispatch sequence -- the discretionary close, which is
 #: cancel, then confirm by query, then sell. Used only to report the derived
 #: per-call share in the refusal message; the configured number is the whole
@@ -563,6 +625,58 @@ class AppConfig(_Model):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
     engine: EngineConfig = Field(default_factory=EngineConfig)
+
+    @model_validator(mode="after")
+    def _check_transport_fits_the_dispatch_deadline(self) -> AppConfig:
+        """Refuse a transport timeout that overruns the dispatch deadline.
+
+        ``exchange.requests_timeout_s <= risk.dispatch_deadline_s +
+        _TRANSPORT_OVERRUN_TOLERANCE_S``.
+
+        **A SECOND VALIDATOR RATHER THAN A CLAUSE IN THE FIRST**, because the two
+        constrain different things and prescribe different remedies. Its sibling
+        asks whether the whole budget fits the *bar*; this asks whether one
+        *transport attempt* fits the budget. Folding them would produce one
+        message naming five terms for two unrelated breaches, and an operator
+        would have to work out which half fired.
+
+        **It lives on :class:`AppConfig` for the structural reason, not by
+        preference:** ``requests_timeout_s`` is ``ExchangeConfig``'s and
+        ``dispatch_deadline_s`` is ``RiskConfig``'s, and neither model can see
+        the other. ``AppConfig`` is the nearest scope holding both.
+
+        **WHAT IT PINS IS A BREACH, NOT A MARGIN.** On the shipped values it
+        holds at EXACT equality -- ``10 <= 9.0 + 1.0`` -- with zero headroom, and
+        that is deliberate: the tolerance is sized to the overrun that exists, so
+        any widening of the gap is a new fact and is refused. A reader who sees
+        the equality and reads it as "just fits" has it backwards.
+
+        Pure, runs at config load, costs no round trip, fails before any client
+        exists -- the same posture as its sibling.
+        """
+        timeout_s = self.exchange.requests_timeout_s
+        envelope = self.risk.dispatch_deadline_s + _TRANSPORT_OVERRUN_TOLERANCE_S
+        if timeout_s <= envelope:
+            return self
+
+        raise ValueError(
+            f"exchange.requests_timeout_s = {timeout_s}s exceeds the "
+            f"{envelope}s envelope allowed by risk.dispatch_deadline_s = "
+            f"{self.risk.dispatch_deadline_s}s plus the "
+            f"{_TRANSPORT_OVERRUN_TOLERANCE_S}s measured overrun of one attempt.\n"
+            "\n"
+            "The MARKET sell in the close path is the one venue WRITE that cannot be\n"
+            "handed the dispatch budget -- the port's create_order takes a request and\n"
+            "nothing else -- so it runs for up to exchange.requests_timeout_s. That\n"
+            "overrun is absorbed by DispatchBudget.remaining_s charging it to the next\n"
+            "invocation's share, and only while it stays within the measured amount.\n"
+            "Raising exchange.requests_timeout_s widens the gap that absorption covers.\n"
+            "\n"
+            "Lower exchange.requests_timeout_s, or raise risk.dispatch_deadline_s --\n"
+            "noting the latter is separately bounded by the pipeline coherence\n"
+            "constraint below. A timeout above 30 additionally discards aiohttp's\n"
+            "sock_connect=30 default; see exchange.requests_timeout_s for why."
+        )
 
     @model_validator(mode="after")
     def _check_dispatch_budget_fits_the_bar(self) -> AppConfig:

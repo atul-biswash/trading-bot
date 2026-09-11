@@ -540,6 +540,75 @@ empirical input.
 > measured that enumeration and point query are different instruments. Ruled by
 > the reviewer under delegation, not by the project owner.
 
+> **ANNOTATED at M5h: `D` IS OVERRUN BY 1.0 s ON EVERY CLOSE, BY DESIGN, AND
+> THE OVERRUN IS NOW PINNED RATHER THAN MERELY KNOWN.** Nothing above is
+> withdrawn — `D = 9.0` is unchanged, its derivation is unchanged, and the
+> per-call share stays UNRULED. What is added is the one call the whole-sequence
+> bound does not reach.
+>
+> **MEASURED: the `MARKET` sell is the only venue WRITE in `src/` that cannot be
+> handed the dispatch budget.** An AST census over `src/` finds four write call
+> sites — two placements, the list cancel, and the sell — and three pass
+> `timeout_s`/`attempts`. The cause is the **port**, not the call site:
+> `ExchangeClient.create_order` takes a request and nothing else, where
+> `BinanceClient.create_order` accepts both. The executor holds the port type, so
+> the bounds its own call site computes cannot be handed over. Exactly two write
+> methods on the port lack bounds and the other, `cancel_order`, has **zero call
+> sites** — so the gap has one live consumer.
+>
+> **The bound that does apply is the transport's, and it is 10.0 s.**
+> `requests_params={"timeout": 10}` reaches `aiohttp` as `ClientTimeout(total=10.0)`.
+> Against `D = 9.0` that is an overrun of **1.0 s**, absorbed because
+> `DispatchBudget.remaining_s` returns negatives deliberately and charges the
+> overrun to the next invocation's share.
+>
+> **THE 43.5 s FIGURE IS ARITHMETICALLY RIGHT AND MEASURES THE WRONG PATH.** It
+> reproduces exactly as `4 x 10.0 + 3.5` — MEASURED, `tenacity 9.1.4` giving
+> waits `[0.5, 1.0, 2.0]` with `max=8.0` never binding. But the sell is placed
+> with `idempotent=False`, which narrows the retry set to `RateLimitError` alone:
+> MEASURED, `asyncio.TimeoutError` translates to `ExchangeConnectionError`, which
+> is **not** in that set. So a connection timeout takes **one** attempt and 43.5
+> is reachable only when the venue returns 429 on four consecutive attempts, each
+> consuming nearly the full 10 s.
+>
+> **Why that distinction is worth the paragraph:** 43.5 implies the hazard is
+> *too many retries*, and it is not — a single attempt already exceeds `D`. Anyone
+> who "fixed" this by cutting `retry_attempts` would have left the mismatch
+> entirely intact with a 4.3x smaller number to show for it. `CLAUDE.md`'s own
+> block is **not** wrong here: it states 43.5 as the worst case *for a write*,
+> names `RateLimitError` as its measurement basis, and already observes that a
+> write exceeds `D` *"with no retry at all"*. No correction is made to it.
+>
+> **WHAT LANDED: an envelope, not a clamp.** `AppConfig` gained
+> `_check_transport_fits_the_dispatch_deadline`, asserting
+> `exchange.requests_timeout_s <= risk.dispatch_deadline_s +
+> _TRANSPORT_OVERRUN_TOLERANCE_S`. On the shipped values it holds at **exact
+> equality with zero headroom** — `10 <= 9.0 + 1.0` — which is the point: the
+> tolerance is sized to the overrun that exists, so any widening is a new fact and
+> is refused at config load. No execution-path code changed and no timeout value
+> moved.
+>
+> **THE TRAP IT ALSO CATCHES, recorded because nothing else in this tree would.**
+> MEASURED against `aiohttp 3.14.2`: a bare-number per-request `timeout` is coerced
+> to `ClientTimeout(total=n)` which **replaces** the session's `DEFAULT_TIMEOUT`
+> wholesale rather than overlaying it, so the library's `sock_connect=30` is
+> **discarded**. At 10 that is harmless because 10 is stricter than the 30 it
+> displaced; above 30 the connect phase is silently *looser* than with no
+> per-request timeout at all. The envelope refuses such a value first at today's
+> deadline — but only because of a neighbouring number, so the guard is
+> conditional and is written down as such rather than trusted.
+>
+> **WHAT IS NOT CLOSED.** A clamp would make this *worse* before better: shortening
+> the client-side abort from 10.0 s to `<= 9.0` widens the window in which an
+> abandoned sell still lands at the venue. MEASURED, by absence — no `wait_for`,
+> no `asyncio.timeout`, no `.cancel()` anywhere in `execution/` or the two exchange
+> modules — nothing cancels an in-flight request, so expiry merely stops waiting.
+> `dispatch_deadline_s` is not a timer at all: it is sampled before a call and
+> never during one. Widening the port is therefore a ruling about
+> `CLAUDE.md`'s *"a budget may refuse to BEGIN work; it must never abandon a write
+> in flight"*, not an implementation detail, and it is **reserved to the project
+> owner**.
+
 ---
 
 ## 6. `risk.reconcile_deadline_s`

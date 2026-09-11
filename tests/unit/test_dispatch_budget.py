@@ -28,6 +28,7 @@ import pytest
 from trading_bot.config.models import (
     AppConfig,
     BacktestConfig,
+    ExchangeConfig,
     RiskConfig,
     StrategyConfig,
     TradingConfig,
@@ -37,14 +38,27 @@ from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 T0 = datetime(2026, 8, 20, 12, 0, 0, tzinfo=timezone.utc)
 NAIVE = datetime(2026, 8, 20, 12, 0, 0)
 DEADLINE = 9.0
+TIMEOUT = 10
 
 
-def _config(*, dispatch_deadline_s: float = DEADLINE) -> AppConfig:
-    """An AppConfig carrying only what the budget reads. No pairs -- see above."""
+def _config(
+    *, dispatch_deadline_s: float = DEADLINE, requests_timeout_s: int = TIMEOUT
+) -> AppConfig:
+    """An AppConfig carrying only what the budget reads. No pairs -- see above.
+
+    **``requests_timeout_s`` is a parameter because the config it builds must be
+    COHERENT, not merely well-typed.** `AppConfig` refuses a transport timeout
+    that overruns `dispatch_deadline_s` by more than the measured overrun, so a
+    deadline of 0.5 s beside the shipped 10 s timeout is no longer a
+    constructible configuration. A fixture must satisfy the invariants of the
+    thing it constructs; this one lowers the timeout in step so the extreme
+    deadline below stays reachable.
+    """
     return AppConfig(
         strategy=StrategyConfig(name="sma_crossover"),
         backtesting=BacktestConfig(start_date="2024-01-01", end_date="2024-02-01"),
         trading=TradingConfig(pairs=[]),
+        exchange=ExchangeConfig(requests_timeout_s=requests_timeout_s),
         risk=RiskConfig(dispatch_deadline_s=dispatch_deadline_s),
     )
 
@@ -65,15 +79,29 @@ class TestDerivingTheBudget:
         """
         assert DispatchBudget.from_config(_config()).deadline_s == DEADLINE
 
-    @pytest.mark.parametrize("configured", [0.5, 9.0, 100.0], ids=["tiny", "shipped", "large"])
-    def test_the_deadline_tracks_the_config_field_not_a_constant(self, configured: float) -> None:
+    @pytest.mark.parametrize(
+        ("configured", "timeout_s"),
+        [(0.5, 1), (9.0, 10), (100.0, 10)],
+        ids=["tiny", "shipped", "large"],
+    )
+    def test_the_deadline_tracks_the_config_field_not_a_constant(
+        self, configured: float, timeout_s: int
+    ) -> None:
         """Three values including the default, because a derivation that returned
         the default as a literal would pass a single-value test and fail this
         one. `risk.dispatch_deadline_s` is PLACEHOLDER -- NOT MEASURED, so the
-        value it happens to carry today is exactly what must not be baked in."""
-        assert DispatchBudget.from_config(_config(dispatch_deadline_s=configured)).deadline_s == (
-            configured
-        )
+        value it happens to carry today is exactly what must not be baked in.
+
+        **Each case carries its own `requests_timeout_s`, and the `tiny` one is
+        why.** `AppConfig` now refuses a transport timeout overrunning the
+        deadline by more than the measured amount, so `0.5` beside the shipped
+        `10` is an incoherent configuration and no longer constructible. The
+        extreme value is KEPT -- it is what proves the derivation reads the field
+        rather than returning a literal -- and the timeout moves with it. The
+        coupling is the envelope's, not this test's subject; it is pinned in
+        `test_config.py`."""
+        config = _config(dispatch_deadline_s=configured, requests_timeout_s=timeout_s)
+        assert DispatchBudget.from_config(config).deadline_s == configured
 
     def test_reading_the_dispatch_field_and_not_the_reconcile_one(self) -> None:
         """Two deadlines live side by side in `RiskConfig` and the shipped values
