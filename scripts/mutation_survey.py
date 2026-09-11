@@ -206,12 +206,32 @@ def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
     after the ``short test summary info`` banner, which is the one section
     whose lines are all verdicts. And an id must contain ``::``, which every
     pytest node id does and no log line does.
+
+    **THE DECODE IS PINNED TO UTF-8 WITH ``errors="replace"``, AND BOTH HALVES
+    ARE LOAD-BEARING.** ``text=True`` alone decodes with the locale encoding,
+    which on this machine is ``cp1252``. MEASURED: a mutation that fails enough
+    tests for pytest to echo captured bytes outside that codepage killed the
+    reader thread with ``UnicodeDecodeError``, leaving ``proc.stdout`` as
+    ``None`` and the harness raising ``AttributeError`` on the next line.
+
+    **The failure mode is what makes this worth pinning rather than patching.**
+    The crash lands AFTER the mutation has been applied and the suite has run,
+    so the run is wasted -- and a crash is an ABSTENTION, never a kill, so a
+    mutation that bit hardest is the one most likely to destroy its own
+    evidence. The restore is unaffected: it runs in a ``finally`` and its md5
+    was verified on the crashing run.
+
+    ``errors="replace"`` rather than ``strict`` because this function reads only
+    ASCII node ids out of the summary section; a mangled byte inside some
+    unrelated test's captured output must not be able to void a survey.
     """
     proc = subprocess.run(
         [sys.executable, "-m", "pytest"],
         cwd=ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=False,
     )
     body = proc.stdout.splitlines()
