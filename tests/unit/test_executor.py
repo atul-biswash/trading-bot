@@ -35,6 +35,7 @@ from trading_bot.core.enums import (
     SignalAction,
 )
 from trading_bot.core.exceptions import (
+    ClientFilterRejectedError,
     ExchangeConnectionError,
     FilterRejectedError,
     OrderNotFoundError,
@@ -2339,23 +2340,35 @@ class TestTheCloseExecutes:
         # THE RESIDUAL, pinned: the position still claims the whole size.
         assert portfolio.positions[SYMBOL].quantity == CLOSE_QTY
 
-    async def test_a_failed_sell_leaves_the_position_naked_and_says_so(
+    async def test_a_client_refused_sell_leaves_the_position_naked_and_says_so(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**RULING 6. Protection is gone and the position is not closed.**
+        """**RULING 6, NOW SCOPED TO A SELL THAT PROVABLY DID NOT HAPPEN.**
 
-        MUTATION: retry the sell, or leave `protection` untouched.
+        MUTATION: retry the sell, or leave `protection` untouched, or send a
+        `ClientRefusalError` down the retaining branch.
 
-        No retry: a second sell could double-sell if the first landed and its
-        answer was lost, and nothing here can tell those apart. `UNKNOWN` is
-        what blocks entries portfolio-wide, which is the only automatic
-        consequence this state has.
+        **THIS TEST'S INPUT CHANGED AT B1 AND ITS SUBJECT DID NOT.** It drove
+        `ExchangeConnectionError` when every exception out of the sell came
+        here; that input now takes the RETAINING branch, because the socket
+        expiring does not mean the venue refused. `ClientFilterRejectedError`
+        carries the `ClientRefusalError` marker -- *no request left this
+        process* -- so the sell provably did not happen, nothing rests, and the
+        self-refreshing operator-only state below is the true one.
+
+        No retry: a second sell could double-sell if the first landed and
+        nothing here can tell those apart. `UNKNOWN` is what blocks entries
+        portfolio-wide, which is the only automatic consequence this state has.
 
         The `resolution` field is asserted because ruling 6 requires the log to
         SAY the state is self-refreshing -- a `CRITICAL` that did not would
-        leave an operator waiting for a reconciler that never resolves it.
+        leave an operator waiting for a reconciler that never resolves it. On
+        THIS branch that instruction is correct, and the sibling test in
+        `TestAnUnconfirmedSellIsRetained` asserts it is absent on the other.
         """
-        client = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        client = _selling_client(
+            sell_answer=ClientFilterRejectedError("off tick", filter_name="PRICE_FILTER")
+        )
         executor, _, portfolio = build(client=client, portfolio=_held())
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
@@ -2363,10 +2376,13 @@ class TestTheCloseExecutes:
 
         naked = _records(caplog, "close_position_naked")
         assert [r.levelno for r in naked] == [logging.CRITICAL]
+        assert naked[0].reason == "close_sell_failed"  # type: ignore[attr-defined]
         assert "SELF-REFRESHING" in naked[0].resolution  # type: ignore[attr-defined]
         assert "restarting" in naked[0].resolution  # type: ignore[attr-defined]
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
         assert portfolio.ledger is None
+        # RELEASED, as before: there is nothing at the venue to ask about.
+        assert executor._pending == {}
 
     async def test_the_unprotected_window_is_logged_on_entry(
         self, caplog: pytest.LogCaptureFixture
@@ -2396,9 +2412,19 @@ class TestTheCloseExecutes:
         MUTATION: leave the record in `_pending`.
 
         The pending guard refuses every later dispatch on a symbol that has one,
-        so a record never released would block the symbol permanently -- and
-        `__call__` deliberately skips a `PendingClose`, so nothing else would
-        clear it either.
+        so a record never released would block the symbol permanently.
+
+        **THE SECOND HALF OF THIS ARGUMENT EXPIRED and is corrected in place
+        rather than annotated, because it is a claim about the tree.** It read
+        *"`__call__` deliberately skips a `PendingClose`, so nothing else would
+        clear it either"*, which was true when written and false since
+        C5c-EXEC: `__call__` hands a close to `_resolve_close`, whose `finally`
+        releases it. So a record left here is cleared one candle later rather
+        than never -- which is exactly what B1's retention relies on, and
+        leaving the opposite claim standing beside it would mislead the next
+        reader of either. What survives is the first half: releasing HERE, on a
+        booked close, is what stops a symbol whose outcome is already known
+        from costing a resolution query at all.
         """
         client = _selling_client()
         executor, _, _ = build(client=client, portfolio=_held())
@@ -2668,3 +2694,204 @@ class TestTheCloseResolution:
 
         assert SYMBOL in portfolio.positions
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+
+
+class TestAnUnconfirmedSellIsRetained:
+    """The sell was SENT and its outcome is unknown. **Rulings 1-3.**
+
+    **THE SUITE EXISTS BECAUSE ONE STATE BECAME TWO.** Until B1 every exception
+    out of the MARKET sell reached `_go_naked`, which tells an operator to sell
+    the base by hand. That instruction is safe only when the sell provably did
+    not happen. When the socket expires -- or a 2xx will not parse -- the sell
+    may already have filled, and following it sells twice. So the branch splits
+    on `ClientRefusalError`, and these tests hold the split still.
+
+    `TestTheCloseExecutes::test_a_client_refused_sell_leaves_the_position_naked_and_says_so`
+    is this class's negative control and lives there rather than here, beside
+    the other close-dispatch tests.
+    """
+
+    async def test_a_timeout_class_failure_retains_the_record_in_memory_and_on_disk(
+        self,
+    ) -> None:
+        """**RULING 1. Both halves, because memory alone is not retention.**
+
+        MUTATION: release on every branch; or drop the durable rewrite.
+
+        A record held only in memory is lost to a restart, and the restart is
+        exactly the case C5c's boot gate and `_resolve_close` were built for --
+        the deterministic close id is what makes the sell resolvable after the
+        process dies. So the durable write is asserted through
+        `RecordingWriter`, which stands in for the composition root's closure,
+        independently of what `_pending` holds.
+        """
+        client = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        writer = RecordingWriter()
+        executor, _, _ = build(client=client, portfolio=_held(), persist=writer)
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        # MEMORY: the lock is held, and it is the close record rather than a
+        # placement -- the two share `_pending` and only one is resolvable here.
+        assert SYMBOL in executor._pending
+        assert executor._pending[SYMBOL].kind == "close"
+        # DISK: the last thing written still carries the symbol. Asserted on the
+        # writer rather than on `_pending` so a change that kept memory and
+        # dropped the rewrite cannot pass.
+        assert SYMBOL in writer.symbols(-1)
+
+    async def test_a_client_refusal_releases_where_a_sent_sell_retains(self) -> None:
+        """**RULING 1's predicate, both directions in one test.**
+
+        MUTATION: invert the predicate; or drop it so everything retains.
+
+        The two arms differ ONLY in the exception class, so nothing but the
+        predicate can explain a difference in outcome. `ClientFilterRejectedError`
+        is a real subclass carrying the marker -- measured in this commit's Step
+        1, along with `ClientOrderError`, as the two classes `_enforce` raises --
+        rather than a hand-rolled stand-in that could drift from the hierarchy
+        the predicate actually reads.
+        """
+        refused = _selling_client(
+            sell_answer=ClientFilterRejectedError("off tick", filter_name="PRICE_FILTER")
+        )
+        executor_a, _, _ = build(client=refused, portfolio=_held())
+        await executor_a.dispatch(close_signal(), exit_assessment(), candle())
+        assert executor_a._pending == {}
+
+        sent = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        executor_b, _, _ = build(client=sent, portfolio=_held())
+        await executor_b.dispatch(close_signal(), exit_assessment(), candle())
+        assert SYMBOL in executor_b._pending
+
+    async def test_protection_is_marked_unknown_on_the_retained_branch(self) -> None:
+        """**RULING 3**, and the fixture starts at ACTIVE deliberately.
+
+        MUTATION: stop marking protection on the retained branch.
+
+        `_held()` defaults to `UNKNOWN`, so a test taking the default CANNOT
+        express this mutation -- the assertion would hold whether or not the
+        code wrote anything. That is the masking `M5h-321a` hit one commit ago,
+        and the fixture is parameterised precisely so it can be avoided here.
+
+        Ruling 3's grounds, pinned by the assertion rather than only described:
+        the order list was cancelled BEFORE the sell, so the asset is physically
+        unprotected whatever the sell did. The mark is independent of the sell's
+        outcome.
+        """
+        client = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        executor, _, portfolio = build(
+            client=client, portfolio=_held(protection=ProtectionState.ACTIVE)
+        )
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+
+    async def test_the_critical_forbids_intervening_and_never_says_sell_by_hand(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE LOG SAFETY TEST. This is what ruling 1 exists for.**
+
+        MUTATION: restore `_go_naked`'s wording on the retained branch; or emit
+        under `close_position_naked`.
+
+        **BOTH POLARITIES ARE ASSERTED, and the absent half is the load-bearing
+        one.** A test that only checked the new guidance was present would pass
+        with the manual-sell instruction sitting beside it, which is the exact
+        failure: an operator reading "sell the base manually" after a sell that
+        already filled sells twice. So the three claims `_go_naked` makes and
+        this branch must not are each asserted ABSENT by name.
+
+        The event name is asserted too, because an operator filtering on
+        `close_position_naked` must not find this record at all.
+        """
+        client = _selling_client(sell_answer=ExchangeConnectionError("reset"))
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        # It is NOT filed under the naked event.
+        assert _records(caplog, "close_position_naked") == []
+
+        unconfirmed = _records(caplog, "close_sell_unconfirmed")
+        assert [r.levelno for r in unconfirmed] == [logging.CRITICAL]
+        resolution = unconfirmed[0].resolution  # type: ignore[attr-defined]
+
+        # PRESENT: the guidance ruling 2 requires.
+        assert "DO NOT INTERVENE" in resolution
+        assert "DO NOT SELL THIS BASE BY HAND" in resolution
+        assert "next candle" in resolution
+        assert "close_record_resolved" in resolution
+
+        # ABSENT: every claim measured false on this branch.
+        assert "manually" not in resolution
+        assert "SELF-REFRESHING" not in resolution
+        assert "restarting" not in resolution
+        assert unconfirmed[0].reason == "close_sell_unconfirmed"  # type: ignore[attr-defined]
+        # "failed" asserts a venue state this client does not possess.
+        assert "failed" not in unconfirmed[0].reason  # type: ignore[attr-defined]
+
+    async def test_the_retained_record_is_resolved_on_the_next_candle(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**RULING 1's point: retention is for ASKING.**
+
+        MUTATION: release on the retained branch, so nothing survives to resolve.
+
+        `__call__`'s loop iterates every record in `_pending` regardless of how
+        it got there, so an in-process retention reaches `_resolve_close` on the
+        next candle exactly as a restored one does. Driven END TO END -- dispatch
+        then `await executor(candle())` -- rather than by asserting the record
+        exists and trusting the loop, because the loop is the claim.
+
+        The `CL` answer is supplied so the point query has something to return;
+        `_resolving_client`'s keying means a resolution that asked for any other
+        id would `KeyError` here rather than quietly getting an answer meant for
+        a different order.
+        """
+        client = _selling_client(
+            sell_answer=ExchangeConnectionError("reset"),
+            leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": _sold()},
+        )
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            assert SYMBOL in executor._pending  # survived the bar that created it
+            await executor(candle())
+
+        resolved = _records(caplog, "close_record_resolved")
+        assert [r.levelno for r in resolved] == [logging.CRITICAL]
+        assert resolved[0].outcome == "filled_and_released"  # type: ignore[attr-defined]
+
+    async def test_retention_is_single_shot_on_every_resolution_branch(self) -> None:
+        """**Retention must not be able to wedge a symbol.**
+
+        MUTATION: make the release conditional on the venue's answer.
+
+        `_resolve_close` clears the lock in a `finally`, so one bar is the whole
+        of what a retained record costs -- on a confirmed fill, on a venue that
+        says nothing, and on a query that raises. All three are driven here
+        because a release placed on the success path only would pass a test of
+        the first alone, and the third is the one that would otherwise hold the
+        symbol for ever.
+
+        Disk is asserted as well as memory: a record cleared from `_pending` but
+        left in the store would be restored by the next boot and block the
+        symbol there instead, which is the same wedge one restart away.
+        """
+        for answer in (_sold(), _leg("0"), ExchangeConnectionError("query down")):
+            client = _selling_client(
+                sell_answer=ExchangeConnectionError("reset"),
+                leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": answer},
+            )
+            writer = RecordingWriter()
+            executor, _, _ = build(client=client, portfolio=_held(), persist=writer)
+
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            await executor(candle())
+
+            assert executor._pending == {}, f"memory still locked after {answer!r}"
+            assert SYMBOL not in writer.symbols(-1), f"disk still locked after {answer!r}"

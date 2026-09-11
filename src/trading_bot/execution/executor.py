@@ -207,6 +207,13 @@ _EVENT_CLOSE_NAKED = "close_position_naked"
 #: record this process is letting go of. An operator filtering for the first and
 #: finding the second would look for a position that is not there.
 _EVENT_CLOSE_RESOLVED = "close_record_resolved"
+#: The sell was dispatched and the client never learned its outcome. Its own
+#: event, and the separation is a SAFETY property rather than tidiness:
+#: `close_position_naked` tells an operator to sell the base by hand, and on
+#: this branch the sell MAY ALREADY HAVE FILLED, so acting on that instruction
+#: would sell twice. An operator filtering for one and finding the other would
+#: take the one action this state cannot survive.
+_EVENT_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -233,7 +240,18 @@ _REASON_CLOSE_NO_POSITION = "close_no_position"
 #: parameter.
 _REASON_CLOSE_NO_VENUE_ID = "close_no_venue_list_id"
 _REASON_CLOSE_CANCEL_FAILED = "close_cancel_failed"
+#: The sell PROVABLY did not happen: this process refused to send it, so no
+#: request left here and nothing can be resting. Its meaning NARROWED at B1 --
+#: it used to cover every exception out of the sell, including the ones where
+#: the venue may have filled. It now names only the class the marker
+#: `ClientRefusalError` identifies, which is the one case where "failed" is a
+#: fact rather than an assumption about a venue we could not reach.
 _REASON_CLOSE_SELL_FAILED = "close_sell_failed"
+#: The sell was SENT and its outcome is unknown. Deliberately NOT
+#: `_REASON_CLOSE_SELL_FAILED`: "failed" asserts a venue state this client does
+#: not possess, and an operator who reads a failure acts as though nothing was
+#: sold. Ruling 2.
+_REASON_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 _REASON_CLOSE_PARTIAL_FILL = "close_partial_fill"
 
 #: One refusal reason per verdict, as a total mapping rather than a chain of
@@ -1633,7 +1651,29 @@ class OrderExecutor:
             order = await self._client.create_order(request)
         except Exception as exc:  # dispatch must never raise
             self._log_failure("close-sell", signal.symbol, exc)
-            self._go_naked(signal, position, candle, _REASON_CLOSE_SELL_FAILED)
+            # **THE PREDICATE IS THE MARKER, AND IT IS DELIBERATELY WIDE.**
+            # `ClientRefusalError` means *no request left this process*, so the
+            # sell provably did not happen: nothing rests, and the naked,
+            # operator-only state `_go_naked` describes is the true one.
+            # EVERYTHING ELSE retains, including outcomes the venue plainly
+            # rejected.
+            #
+            # Wide on purpose, and the asymmetry decides it. Over-retaining
+            # costs ONE query and ONE log line, because retention is
+            # SINGLE-SHOT -- `_resolve_close`'s `finally` releases the record on
+            # every branch, so a record held for an order that does not exist is
+            # gone one bar later. Under-retaining discards the only tracking
+            # handle for a position that MAY BE LIVE, and there is no third
+            # option: `ExchangeAPIError` is produced BOTH by an unclassified
+            # venue rejection AND by `BinanceRequestException`, which the
+            # library raises only after a 2xx whose body will not parse -- the
+            # most ambiguous outcome there is. `translate_binance_error` says so
+            # at its own site and marks the split UNRULED, and `.code` cannot
+            # separate them either.
+            if isinstance(exc, ClientRefusalError):
+                self._go_naked(signal, position, candle, _REASON_CLOSE_SELL_FAILED)
+            else:
+                self._go_naked_retaining(signal, position, candle)
             return
 
         total = order.filled_quote_quantity
@@ -1752,6 +1792,20 @@ class OrderExecutor:
     def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
         """Protection is cancelled and the position is not closed. RULING 6.
 
+        **EVERYTHING BELOW IS SCOPED TO A SELL THAT PROVABLY DID NOT HAPPEN,
+        AND ONE BRANCH NO LONGER COMES HERE.** A sell that was SENT and whose
+        outcome is unknown goes to `_go_naked_retaining` instead. The argument
+        in this docstring -- self-refreshing, operator-only, sell the base by
+        hand -- is FALSE there: a pending record survives, so `_resolve_close`
+        asks the venue on the next candle, and the base may already be sold.
+        The split exists because one method cannot carry both arguments, and
+        the wrong one of the two is the one that loses money.
+
+        The sell's `except` routes on `ClientRefusalError`: marked comes here,
+        unmarked goes to the sibling. Every OTHER caller of this method -- the
+        exhausted budget, the abandoned plan, the partial fill -- is unchanged
+        and correctly described below.
+
         **THE OTHER WRITER OF `protection` IN THIS CLASS IS
         `_retain_position_unprotected`**, which reaches the same state from the
         RESOLUTION path. Neither can call the other: this one takes a `Signal`
@@ -1805,6 +1859,76 @@ class OrderExecutor:
         )
         self._release_close(signal.symbol)
         self._refuse(signal, reason, candle)
+
+    def _go_naked_retaining(self, signal: Signal, position: Position, candle: Candle) -> None:
+        """The sell was SENT and its outcome is unknown. **Rulings 1-3.**
+
+        `_go_naked`'s sibling, and the ONE difference in behaviour is that this
+        does not call `_release_close`: the `PendingClose` written before the
+        cancel stays in memory and on disk, so `__call__`'s resolution loop --
+        which iterates every record regardless of origin -- hands it to
+        `_resolve_close` on the next candle, where a `get_order` against the
+        derived `close_client_order_id` asks the venue what actually happened.
+
+        **A SIBLING RATHER THAN A FLAG ON `_go_naked`, and the reason is its
+        DOCSTRING rather than its code.** The two bodies differ by one line;
+        the arguments they carry are incompatible. `_go_naked` argues at length
+        that the state is self-refreshing, resolves for nobody, and is cleared
+        only by an operator selling the base by hand. Every clause of that is
+        false here. A flag would leave one method asserting both.
+
+        **WHY IT STILL MARKS `UNKNOWN`. Ruling 3.** The order list was cancelled
+        BEFORE the sell was dispatched, so the asset is physically unprotected
+        whatever the sell did -- that fact is independent of the sell's outcome
+        and is not in question. Marking is also what refuses entries
+        portfolio-wide for the one bar until resolution runs, via
+        `_TRUSTED_PROTECTION`, and it costs nothing on either resolution branch:
+        a confirmed fill drops the position, and an unconfirmed one has
+        `_retain_position_unprotected` write the same value again.
+
+        **THE LOG MUST NOT SAY WHAT `_go_naked`'s SAYS, and that is ruling 1's
+        whole point rather than a wording preference.** `close_position_naked`
+        instructs an operator to sell the base manually. On this branch the sell
+        may ALREADY have filled -- the socket expired, or a 2xx would not parse
+        -- so following that instruction sells twice. The three claims it must
+        not make are each MEASURED false here: the state is not self-refreshing
+        (a pending record resolves it), it is not operator-only (the next candle
+        acts), and the position is not known to be open (the sell may have
+        completed). Its own event name keeps an operator filtering for one from
+        finding the other.
+
+        **NO RETRY, unchanged.** Nothing re-sends the sell. The record is a
+        handle for ASKING, never for resending -- `_resolve_close` queries and
+        logs, and Commit B2 rules what it may do with a confirmed fill.
+
+        **SINGLE-SHOT, and that is what stops retention wedging a symbol.**
+        `_resolve_close` releases the record in a `finally` on every branch
+        including a failed query, so this holds the symbol for exactly one bar.
+        """
+        position.protection = ProtectionState.UNKNOWN
+        _log.critical(
+            "%s close sell is UNCONFIRMED -- the order was sent and the outcome is unknown",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_SELL_UNCONFIRMED,
+                "symbol": signal.symbol,
+                "reason": _REASON_CLOSE_SELL_UNCONFIRMED,
+                "quantity": position.quantity,
+                "venue_order_list_id": position.venue_order_list_id,
+                "close_client_order_id": close_client_order_id(
+                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                ),
+                "resolution": (
+                    "DO NOT INTERVENE and DO NOT SELL THIS BASE BY HAND. The sell was sent "
+                    "and may have filled. The pending record is RETAINED, and verification "
+                    "runs on the next candle: the venue is asked for this close order id and "
+                    "the outcome is logged as close_record_resolved. Protection is gone "
+                    "either way, so entries are blocked meanwhile. Wait for that line."
+                ),
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+        self._refuse(signal, _REASON_CLOSE_SELL_UNCONFIRMED, candle)
 
     def _release_close(self, symbol: str) -> None:
         """Drop the pending close now its outcome is known, durably if we can.
