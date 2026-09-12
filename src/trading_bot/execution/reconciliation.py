@@ -652,20 +652,41 @@ def _refine(
 
     THE OPEN MEASUREMENT: DOES A TRIGGERED STOP CARRY ``average_price``?
     ---------------------------------------------------------------------
-    **This function is where a venue-triggered exit is first seen, and it
-    discards the one field that would let the exit be booked.** MEASURED at
-    M5g's run 3: a ``STOP_LOSS`` leg reported ``FILLED`` with ``0.02257000``
-    executed on nine consecutive passes, the account realised ``-35.38691640``
-    USDT, and nothing in ``src/`` recorded any of it -- ``Portfolio``'s only
-    accrual path, :meth:`record_realised_pnl`, is reachable solely from
-    :meth:`close_position`, which has no caller.
+    **THIS SECTION DESCRIBED A TREE THAT NO LONGER EXISTS, AND THE OPEN
+    QUESTION BELOW SURVIVED IT UNCHANGED. ``M5i-023``.** It read *"this
+    function ... discards the one field that would let the exit be booked"*
+    and *"the exit price is already carried and already thrown away"*, on the
+    grounds that ``average_price`` had ZERO readers in ``src/``, that the
+    branch below read ``status`` and ``filled_quantity`` only, and that
+    ``Portfolio.record_realised_pnl`` was reachable solely from
+    ``close_position``, *"which has no caller"*. Every one of those was true at
+    M5g's run 3 and none is true now: this function returns an
+    :class:`~trading_bot.core.models.ExitFill` built by :func:`_exit_fill` --
+    as does :func:`classify_protection`'s own filled-leg branch --
+    ``close_position`` has three callers, and ``average_price`` is read by
+    ``OrderExecutor._entry_fill_price``.
 
-    **The exit price is already carried and already thrown away.**
-    :class:`~trading_bot.core.models.Order` has ``average_price``, which
-    ``to_order`` derives as ``cummulativeQuoteQty / executedQty``; it has ZERO
-    readers in ``src/``, and the branch below reads ``status`` and
-    ``filled_quantity`` only. So the question is not where an exit price would
-    come from. It is narrower and answerable in one observation:
+    **WHY THE PROSE OUTLIVED THE FACT, and it is a MECHANISM rather than an
+    oversight -- ``M5i-025``.** It was written in the tense of a shape arriving
+    before its writer, which this project does deliberately and declares in
+    four docstrings. The writer lands in a later commit, and nothing schedules
+    the sentence that then has to move. Two of those four were stale when
+    surveyed.
+
+    **WHAT RUN 3 MEASURED, kept because it is a venue fact and nothing else
+    holds it.** A ``STOP_LOSS`` leg reported ``FILLED`` with ``0.02257000``
+    executed on nine consecutive passes, the account realised ``-35.38691640``
+    USDT, and nothing in ``src/`` recorded any of it. **That gap is closed.
+    The measurement it motivated is not**, and the rest of this section is
+    unchanged because it was never about the gap.
+
+    **What booking actually reads, which narrows the question rather than
+    retiring it.** ``to_order`` derives ``average_price`` as
+    ``cummulativeQuoteQty / executedQty``, and the booking path deliberately
+    takes the quote TOTAL rather than that quotient -- a division does not
+    round-trip. So the exit price is no longer the missing piece; what is still
+    unknown is whether the venue populates the total at all on a leg IT
+    triggered, rather than one we placed and filled:
 
         **On a TRIGGERED stop-market leg, does the venue populate
         ``cummulativeQuoteQty``, so that ``average_price`` is non-``None``?**

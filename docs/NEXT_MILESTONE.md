@@ -218,6 +218,38 @@ as well as a release at *resolution* time, so it abstains on the predicate
 inversion and on the sibling-releases mutation. Expressiveness is a property of
 the input; this input cannot distinguish the two timings.
 
+### W5. A structural property no behavioural test can hold — `M5i-019`
+
+`_log_close_resolved` selects `outcome`, `resolution` and `message` from ONE
+ternary over `_CloseResolutionText`. Splitting that back into two independent
+reads of `booked`/`filled` is **behaviourally identical and kills ZERO tests** —
+MEASURED at M5i commit 1, where the two real mutations killed 5 and 4 and this
+one kills none.
+
+Only an AST assertion (exactly one `IfExp` in the method) could hold it, and the
+architect DECLINED that test as brittle against legitimate refactoring. The
+property is therefore held by the docstring and by review, deliberately and on
+the record — not by the suite.
+
+**Why it reaches beyond this method:** `M5h-371`'s fix converts that single
+expression. If a later hand splits it first, the fix converts one copy and
+leaves the other — the two-discriminator state commit 1 existed to remove.
+
+### W6. Every format string in `executor.py` is unpinned — `M5i-015`
+
+MEASURED: before M5i commit 1 there was no `getMessage()`, no `.message` and no
+`caplog.text` anywhere in `test_executor.py`. Commit 1 added the first two
+message assertions in the module's history; the other 21 `_log.*` call sites
+remain unpinned by construction.
+
+**Why only one of the 23 could be wrong, and why that is not reassurance.** An
+AST census over all 8 `_log`-bearing modules in `src/` (63 calls) found every
+message is a plain constant — correct everywhere a call site serves ONE outcome.
+`_log_close_resolved` was the only site in `src/` serving three outcomes from one
+call, which is the whole reason it could disagree with itself. **Nothing enforces
+that.** A future logger serving two outcomes from one call inherits the identical
+exposure with no test to catch it.
+
 ---
 
 ## STALE PROSE — `M5h-352`

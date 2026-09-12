@@ -278,10 +278,22 @@ class DayRecord(_Frozen):
     ruling asked for. Named here so the difference reads as a decision rather
     than as drift.
 
-    **NOTHING WRITES ONE YET.** The roll that produces these is
-    ``Portfolio.record_realised_pnl``'s, and it does not push here until the
-    next commit. This is the shape arriving before its writer -- the same order
-    ``PendingClose``, ``persist_pending`` and ``persist_ledger`` each took.
+    **SOMETHING WRITES ONE, AND THIS PARAGRAPH SAID NOTHING DID.
+    ``M5i-024``.** It read *"NOTHING WRITES ONE YET ... it does not push here
+    until the next commit"* -- true when written, false since that commit
+    landed. Two sites build one: ``engine/modes.py``'s ``_to_day_record``, which
+    maps a :class:`~trading_bot.core.portfolio.DaySummary` out through the
+    root's closure, and :func:`load` on the way back in. The roll that
+    produces them is still ``Portfolio.record_realised_pnl``'s, exactly as the
+    struck sentence said.
+
+    **WHY IT WENT STALE IS A MECHANISM -- ``M5i-025``.** It ended *"this is the
+    shape arriving before its writer -- the same order ``PendingClose``,
+    ``persist_pending`` and ``persist_ledger`` each took"*. That pattern is
+    deliberate and declared in four docstrings, and carries nothing that
+    schedules the correction when the writer arrives one commit later. Two of
+    the four were stale when surveyed; this was one, ``PendingClose`` the
+    other.
     """
 
     realised: Money

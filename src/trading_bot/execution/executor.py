@@ -456,10 +456,26 @@ class PendingClose:
     ``executedQty``, a fill price, an order status or an ``orderId``. Those are
     venue facts, and this type is a record of our intent.
 
-    **NOTHING CONSTRUCTS ONE.** The dispatch path that would is Q-C section
-    4b's, and the executor still refuses ``CLOSE`` by name. This is the shape
-    arriving before its writer, as ``persist_pending`` and ``persist_ledger``
-    each did one commit before theirs.
+    **TWO SITES CONSTRUCT ONE, AND THIS PARAGRAPH SAID NONE DID.
+    ``M5i-018``.** It read *"NOTHING CONSTRUCTS ONE. The dispatch path that
+    would is Q-C section 4b's, and the executor still refuses ``CLOSE`` by
+    name"* -- true when written, false since the close path landed. The two
+    doors are :meth:`OrderExecutor._execute_close`, which records the sell it
+    just sent, and ``engine/modes.py``'s boot restore, which rebuilds one from
+    the store. They produce IDENTICAL objects: no field distinguishes them, and
+    :meth:`OrderExecutor._resolve_close` therefore cannot know which door a
+    record came through -- which is why its log line says "a pending close
+    record" and not "a restored" one (``M5i-011``).
+
+    **WHY IT WENT STALE IS A MECHANISM, NOT AN OVERSIGHT -- ``M5i-025``.** The
+    struck sentence ended *"this is the shape arriving before its writer, as
+    ``persist_pending`` and ``persist_ledger`` each did one commit before
+    theirs"*. That pattern is deliberate and is declared in four docstrings
+    here; what it does not carry is anything that schedules the correction when
+    the writer lands. Two of the four were stale when surveyed. The `tests/`
+    side of this one WAS corrected, in ``TestThePendingUnion``'s docstring,
+    and this copy was not -- the commit doing the work edits the test and
+    leaves the type alone.
     """
 
     symbol: str
