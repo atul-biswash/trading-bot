@@ -3162,3 +3162,156 @@ class TestAResolvedFillIsBooked:
 
         # SINGLE-SHOT: one bar, then gone, even though this one booked.
         assert executor._pending == {}
+
+
+class TestTheResolutionLineAgreesWithItself:
+    """`outcome`, `resolution` and `message` say ONE thing. **`M5i-007`.**
+
+    **THE MESSAGE WAS UNCONDITIONAL AND THE OTHER TWO WERE NOT**, so the
+    headline described a design two commits old while the fields beside it
+    described the current one. MEASURED in one record: `outcome` read
+    `filled_and_booked` and `resolution` said *"DO NOT enter this trade by
+    hand"* while the message said *"DROPPED UNBOOKED"* -- the two instructions
+    an operator can act on, pointing opposite ways, in the same CRITICAL.
+
+    **NOTHING IN `tests/` READ A LOG MESSAGE FROM THIS MODULE BEFORE THIS
+    CLASS** (`M5i-015`): no `getMessage()`, no `.message`, no `caplog.text` in
+    this file at all. So every format string in `executor.py` was unpinned by
+    construction, and the mutation that swaps a message between branches killed
+    ZERO tests -- it was not even expressible, since there was one string and no
+    branch to swap it across.
+
+    **`getMessage()` RATHER THAN `.message`**, per `test_live_engine.py`:
+    `logging.Formatter.format` assigns `.message` while rendering, and a
+    captured record has not been rendered. It is populated here only because
+    `caplog`'s handler happens to format, which is the fragile path.
+
+    **WHAT THIS CLASS DOES NOT PIN, said plainly because the line now looks
+    trustworthy.** That the booked branch's claim is TRUE. It asserts the three
+    fields AGREE; whether what they agree on happened is `M5h-371`, and Phase 1b
+    MEASURED the booked `resolution` false when the position carries no
+    `entry_fill_price`. Agreement is not correctness, and no test here reaches
+    the ledger.
+    """
+
+    @pytest.mark.parametrize(
+        ("answer", "held", "outcome", "resolution_says", "message_says", "message_lacks"),
+        [
+            pytest.param(
+                _sold(),
+                True,
+                "filled_and_booked",
+                "DO NOT enter this trade by hand",
+                "the trade is BOOKED",
+                # `M5i-007`: the headline said this on the branch that booked.
+                # `M5i-011`: provenance nothing here can know.
+                ("DROPPED", "restored"),
+                id="booked",
+            ),
+            pytest.param(
+                _sold(),
+                # No position in memory -- the RESTART shape, where the cost
+                # basis is unreconstructable and the fill is released unbooked.
+                False,
+                "filled_and_released",
+                "enter the executed quantity and quote total below by hand",
+                "DROPPED UNBOOKED",
+                ("restored",),
+                id="released",
+            ),
+            pytest.param(
+                OrderNotFoundError("Order does not exist."),
+                True,
+                "unconfirmed_position_retained",
+                "the POSITION IS RETAINED with its protection marked UNKNOWN",
+                "the sell is UNCONFIRMED and the POSITION IS RETAINED",
+                # `M5i-013`: nothing was DROPPED -- the position is retained.
+                # `M5i-012`: the query RAISED, so there is no venue answer to
+                # record, and the headline may not claim one.
+                ("DROPPED", "restored", "the venue's"),
+                id="retained",
+            ),
+        ],
+    )
+    async def test_the_message_agrees_with_the_outcome_on_every_branch(
+        self,
+        caplog: pytest.LogCaptureFixture,
+        answer: Order | Exception,
+        held: bool,
+        outcome: str,
+        resolution_says: str,
+        message_says: str,
+        message_lacks: tuple[str, ...],
+    ) -> None:
+        """All three branches, all three fields. **The agreement is the subject.**
+
+        MUTATION: swap two of the three `_CloseResolutionText` constants in the
+        ternary; or restore the single unconditional message.
+
+        Driven end to end through `await executor(candle())` rather than by
+        calling the logger, because the claim is that the branch SELECTED is the
+        one REPORTED -- a test calling `_log_close_resolved` directly would pass
+        with the selection wired to anything.
+
+        `message_lacks` is the load-bearing half and carries three separate
+        findings; see the ids beside each. A test asserting only what is present
+        would pass with the false phrase sitting beside the true one, which is
+        exactly the state this commit found.
+        """
+        executor, _, _ = build(
+            client=_resolving_client(answer), portfolio=_held() if held else None
+        )
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        message = record.getMessage()
+
+        assert record.outcome == outcome  # type: ignore[attr-defined]
+        assert resolution_says in record.resolution  # type: ignore[attr-defined]
+        assert message_says in message
+        for phrase in message_lacks:
+            assert phrase not in message, f"{phrase!r} survived in: {message!r}"
+
+        # The symbol reached the headline: the message carries its own `%s` so
+        # every branch takes the identical argument list, and a constant that
+        # dropped the placeholder would leave it out silently.
+        assert message.startswith(f"{SYMBOL}: ")
+
+    async def test_a_booked_resolution_never_says_dropped_unbooked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**BOTH POLARITIES, and the absent half is the one that cost money.**
+
+        MUTATION: restore the unconditional message.
+
+        Narrower than the parametrised test above and kept separate on purpose.
+        That one pins the whole mapping; this one pins the single sentence whose
+        presence contradicts the instruction two fields away. An operator reading
+        `DROPPED UNBOOKED` enters the trade by hand, and `resolution` on this
+        branch says the ledger already carries it -- the double-entry counterpart
+        of B1's double-sell, which is the failure `_log_close_resolved`'s own
+        docstring says the booked branch was added to prevent.
+
+        The three fields are asserted TOGETHER rather than the message alone,
+        because the defect was never a wrong string in isolation: it was two
+        fields agreeing and a third dissenting.
+        """
+        executor, _, _ = build(client=_resolving_client(), portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        message = record.getMessage()
+
+        # ABSENT: the sentence that sends an operator to do the bookkeeping.
+        assert "DROPPED UNBOOKED" not in message
+        assert "DROPPED" not in message
+        # PRESENT: what the other two fields already say.
+        assert "the trade is BOOKED" in message
+        assert record.outcome == "filled_and_booked"  # type: ignore[attr-defined]
+        assert "DO NOT enter this trade by hand" in record.resolution  # type: ignore[attr-defined]

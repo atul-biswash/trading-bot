@@ -200,12 +200,20 @@ _EVENT_CLOSE_ABANDONED = "close_abandoned_after_cancel"
 _EVENT_CLOSE_BOOKED = "close_booked"
 _EVENT_CLOSE_BOOK_FAILED = "close_book_failed"
 _EVENT_CLOSE_NAKED = "close_position_naked"
-#: A restored close record was resolved: the venue was asked what became of the
-#: sell, the answer was LOGGED, and the record was dropped. Its own event rather
-#: than reusing `close_position_naked`, because that one describes a position
-#: this process still holds and re-observes every pass, and this one describes a
-#: record this process is letting go of. An operator filtering for the first and
-#: finding the second would look for a position that is not there.
+#: A pending close record was resolved: the venue was asked what became of the
+#: sell and whatever was learned was LOGGED. Its own event rather than reusing
+#: `close_position_naked`, because that one describes a position this process
+#: still holds and re-observes every pass, and this one describes a record this
+#: process is letting go of. An operator filtering for the first and finding the
+#: second would look for a position that is not there.
+#:
+#: **THIS COMMENT SAID "A RESTORED close record" AND "the record was DROPPED",
+#: AND BOTH WERE FALSE** -- `M5i-011` and `M5i-007`, the same two falsehoods the
+#: log message carried, in a second location. Restored: nothing here knows the
+#: provenance. Dropped: under ruling 5 a confirmed fill against an in-memory
+#: position is BOOKED, and on the unconfirmed branch the position is RETAINED.
+#: Corrected in place rather than annotated, because it is a claim about the
+#: tree; see `_log_close_resolved` for the argument.
 _EVENT_CLOSE_RESOLVED = "close_record_resolved"
 #: The sell was dispatched and the client never learned its outcome. Its own
 #: event, and the separation is a SAFETY property rather than tidiness:
@@ -278,6 +286,83 @@ _REASON_CLIENT_REFUSAL = "client_refusal"
 #: operator reading this must be sent to the DISK; reusing another string here
 #: would send them to `dispatch_deadline_s` for a cause that is not there.
 _REASON_STORE_UNWRITABLE = "store_unwritable"
+
+
+@dataclass(frozen=True, slots=True)
+class _CloseResolutionText:
+    """Everything ONE close-resolution outcome says, as ONE value.
+
+    **THE THREE FIELDS ARE ONE FACT AND MUST MOVE TOGETHER.** They are the
+    machine-readable discriminator, the operator's instruction and the log
+    line's human-readable headline -- three renderings of a single question,
+    *what became of this close?* Holding them apart is what let the headline
+    describe a design two commits old while the other two described the
+    current one; see `_log_close_resolved` for what that cost.
+
+    Same argument as `_EntryFill` below, from the other side: that type exists
+    because one value collapsed two facts, this one because three values held
+    one fact. Both are the file's answer to the same hazard.
+
+    `message` carries its own ``%s`` for the symbol, so every branch takes the
+    identical argument list -- which is the constraint that keeps the call site
+    free of a second branch.
+    """
+
+    outcome: str
+    resolution: str
+    message: str
+
+
+#: The sell filled and ruling 5 booked it.
+_RESOLVED_BOOKED: Final = _CloseResolutionText(
+    outcome="filled_and_booked",
+    resolution=(
+        "THE SELL FILLED and THIS BOT HAS BOOKED IT. The position is closed, the "
+        "proceeds are credited and the realised P&L is accrued from the VENUE'S "
+        "own quote total. The pending record is gone from memory and from the "
+        "store. DO NOT enter this trade by hand -- the ledger already carries it. "
+        "Trading continues."
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell FILLED and the trade is "
+        "BOOKED; the venue's figures are recorded below"
+    ),
+)
+
+#: The sell filled and could not be priced, so it is dropped without booking.
+_RESOLVED_RELEASED: Final = _CloseResolutionText(
+    outcome="filled_and_released",
+    resolution=(
+        "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
+        "released and the pending record is gone from memory and from the store. "
+        "That trade is NOT in the ledger -- enter the executed quantity and quote "
+        "total below by hand. Trading continues."
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell FILLED and was DROPPED "
+        "UNBOOKED; the venue's figures are recorded below for manual accounting"
+    ),
+)
+
+#: Nothing confirms the sell. **The message may not claim a venue answer**: this
+#: branch is reached both when the venue answered with nothing filled AND when
+#: the query raised and there is no answer at all -- `M5i-012`. "what is known"
+#: is true of both; "the venue's answer" is false of the second.
+_RESOLVED_RETAINED: Final = _CloseResolutionText(
+    outcome="unconfirmed_position_retained",
+    resolution=(
+        "THE SELL IS UNCONFIRMED, so BASE INVENTORY MAY STILL BE AT THE VENUE. "
+        "Nothing was sold and nothing was booked. The pending record is gone, but "
+        "the POSITION IS RETAINED with its protection marked UNKNOWN -- so entries "
+        "on this symbol are refused, AND entries on EVERY symbol are refused while "
+        "committed risk cannot be summed. Exits are still permitted. Check the "
+        "account: sell the base by hand if it is there, then restart."
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell is UNCONFIRMED and the "
+        "POSITION IS RETAINED; what is known is recorded below"
+    ),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -2290,7 +2375,50 @@ class OrderExecutor:
         an operator following that would enter a trade the ledger already holds
         -- the double-entry counterpart of B1's double-sell, reached the same
         way, by acting on a line that describes the previous design.
+
+        **AND THE COMMIT THAT WROTE THAT PARAGRAPH LEFT THE HEADLINE SAYING THE
+        VERY THING IT CONDEMNS.** `outcome` and `resolution` were corrected;
+        the ``_log.critical`` message was not, and went on reading *"a restored
+        close record was resolved and DROPPED UNBOOKED"* on every branch --
+        including the booked one, where an operator reading the headline would
+        make the entry the resolution forbids two fields away. `M5i-007`,
+        MEASURED: the three were observed disagreeing inside one record.
+
+        **SO THE THREE FIELDS ARE NOW ONE VALUE**, :class:`_CloseResolutionText`,
+        selected by ONE ternary. A branch cannot update two of them and miss the
+        third, because there are no longer three things to update.
+
+        **THAT COLLAPSES TWO DISCRIMINATORS TO ONE, AND THAT IS THE POINT OF
+        DOING IT HERE RATHER THAN LATER.** This method used to evaluate the
+        ``booked``/``filled`` chain TWICE -- once for `outcome`, once for
+        `resolution` -- so it already held two copies before a third was
+        contemplated (`M5i-014`). The eventual fix for `M5h-371` makes the
+        discriminator a CONSEQUENCE of the write rather than a prediction of it;
+        whatever shape that takes, it now has ONE expression to convert in this
+        method instead of two, and cannot convert one and leave the other.
+
+        **WHAT THIS DOES NOT FIX, said here because the line now looks
+        trustworthy.** The booked `resolution` still asserts that the proceeds
+        are credited and the realised P&L accrued. Phase 1b MEASURED that FALSE
+        when the position carries no ``entry_fill_price``: the label is computed
+        before `_book_resolved_close` runs, and that method swallows its own
+        failure. This commit makes the message agree with the label. **The label
+        itself can still lie** -- `M5h-371`, `M5i-001` and `M5i-008` are open.
+
+        **``restored`` WAS DROPPED BECAUSE NOTHING HERE CAN KNOW IT**
+        (`M5i-011`). :class:`PendingClose` carries no provenance field, and the
+        two sites that build one -- ``modes.py``'s boot restore and
+        `_execute_close` -- produce identical objects; ``restored_pending`` is
+        flattened into ``_pending`` with no marker surviving. A string asserting
+        provenance the code cannot determine is a different defect from one
+        asserting an outcome it got wrong, and it was false on all three
+        branches rather than one. The replacement says "a pending close record",
+        which is true of both doors.
         """
+        # THE ONE DISCRIMINATOR. `outcome`, `resolution` and `message` all read
+        # this; see the docstring for why there used to be two of it and why
+        # `M5h-371`'s fix needs there to be one.
+        texts = _RESOLVED_BOOKED if booked else _RESOLVED_RELEASED if filled else _RESOLVED_RETAINED
         extra: dict[str, object] = {
             "event": _EVENT_CLOSE_RESOLVED,
             "symbol": record.symbol,
@@ -2301,38 +2429,8 @@ class OrderExecutor:
                 record.symbol, record.entry_bar_time, generation=record.generation
             ),
             "candle_time": candle.close_time.isoformat(),
-            "outcome": (
-                "filled_and_booked"
-                if booked
-                else "filled_and_released"
-                if filled
-                else "unconfirmed_position_retained"
-            ),
-            "resolution": (
-                (
-                    "THE SELL FILLED and THIS BOT HAS BOOKED IT. The position is closed, the "
-                    "proceeds are credited and the realised P&L is accrued from the VENUE'S "
-                    "own quote total. The pending record is gone from memory and from the "
-                    "store. DO NOT enter this trade by hand -- the ledger already carries it. "
-                    "Trading continues."
-                )
-                if booked
-                else (
-                    "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
-                    "released and the pending record is gone from memory and from the store. "
-                    "That trade is NOT in the ledger -- enter the executed quantity and quote "
-                    "total below by hand. Trading continues."
-                )
-                if filled
-                else (
-                    "THE SELL IS UNCONFIRMED, so BASE INVENTORY MAY STILL BE AT THE VENUE. "
-                    "Nothing was sold and nothing was booked. The pending record is gone, but "
-                    "the POSITION IS RETAINED with its protection marked UNKNOWN -- so entries "
-                    "on this symbol are refused, AND entries on EVERY symbol are refused while "
-                    "committed risk cannot be summed. Exits are still permitted. Check the "
-                    "account: sell the base by hand if it is there, then restart."
-                )
-            ),
+            "outcome": texts.outcome,
+            "resolution": texts.resolution,
         }
         if order is not None:
             extra["status"] = order.status.value
@@ -2341,12 +2439,7 @@ class OrderExecutor:
         if failure is not None:
             extra["error_type"] = type(failure).__name__
             extra["error"] = str(failure)
-        _log.critical(
-            "%s: a restored close record was resolved and DROPPED UNBOOKED; the venue's "
-            "answer is recorded for manual accounting",
-            record.symbol,
-            extra=extra,
-        )
+        _log.critical(texts.message, record.symbol, extra=extra)
 
     async def _confirm_protective_legs(
         self, position: Position, *, started_at: datetime
