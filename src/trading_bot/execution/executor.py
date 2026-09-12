@@ -2211,13 +2211,36 @@ class OrderExecutor:
     def _bookable_total(self, symbol: str, order: Order | None) -> Money | None:
         """The venue's quote total, or ``None`` when this fill must not be booked.
 
-        Three conditions, and each is a refusal to invent a figure.
+        Four conditions, and each is a refusal to invent a figure.
 
         **THE POSITION MUST BE IN MEMORY**, because it carries the cost basis.
         `close_position` prices realised P&L off `entry_fill_price`, and after a
         restart there is no `Position` and `PendingCloseRecord` carries none --
         so the figure is unreconstructable rather than merely unknown. That is
         the restart case and it still drops unbooked.
+
+        **AND THE POSITION MUST CARRY THAT COST BASIS**, which is a SEPARATE
+        condition from being in memory and was missing until M5i. A `Position`
+        is constructed with `entry_fill_price=None` whenever the working-leg
+        query failed or the FOK expired -- `_open_position` says so and calls
+        such a position UNBOOKABLE -- so "in memory" and "priceable" are two
+        facts, and this method checked only the first.
+
+        **WHAT THAT COST, MEASURED at M5i phase 1b.** The fill was judged
+        bookable, `booked=True` reached the log, and the CRITICAL read
+        `filled_and_booked` with *"DO NOT enter this trade by hand -- the
+        ledger already carries it"*. `close_position` then raised `ValueError`
+        from `_realised_from_total` BEFORE crediting anything;
+        `_book_resolved_close` caught it and emitted `close_book_failed`. So
+        the ledger was short a real trade and the operator had been told not to
+        fix it -- a permanent under-report, the one direction a control may not
+        err in. `M5i-001`.
+
+        **IT IS CHECKED HERE RATHER THAN CAUGHT FROM THE RAISE**, matching
+        `reconciliation_driver`'s row 5, which has had this check since M5h and
+        is the reason that path never had the defect. A refusal decided before
+        the call yields the right label; an exception caught after it yields a
+        label already emitted and wrong.
 
         **THE FILL MUST BE WHOLE.** `close_position` deletes the entire entry
         and credits one total; there is no partial-close path and no way to say
@@ -2239,6 +2262,9 @@ class OrderExecutor:
             return None
         position = self._portfolio.positions.get(symbol)
         if position is None or order.filled_quantity != position.quantity:
+            return None
+        if position.entry_fill_price is None:
+            # The fourth condition. Present but unpriceable; see the docstring.
             return None
         return order.filled_quote_quantity
 

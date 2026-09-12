@@ -3163,6 +3163,78 @@ class TestAResolvedFillIsBooked:
         # SINGLE-SHOT: one bar, then gone, even though this one booked.
         assert executor._pending == {}
 
+    async def test_a_position_with_no_cost_basis_is_released_not_booked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE FOURTH EXCLUSION. `M5i-001`, and it is the first test in the
+        tree to reach ANY booking path with an absent cost basis.**
+
+        MUTATION: delete the `entry_fill_price is None` check in
+        `_bookable_total`; or invert it.
+
+        **THE THREE OLD EXCLUSIONS ARE ASSERTED ABSENT, and that is what makes
+        a pass mean anything.** `_bookable_total` returns `None` on four
+        conditions and this fixture must fail exactly one of them. A test
+        asserting only "nothing was booked" would pass whether the NEW check
+        fired or one of the three old ones did -- and `M5i-038` measured that
+        the existing suite cannot tell the difference at all, because no
+        fixture in it reaches this path with `entry_fill_price is None`. So
+        each old exclusion is pinned NOT to have fired:
+
+        * the order is present and FILLED -- `record.status`;
+        * the venue reported a total -- `record.quote_total`, to the last place;
+        * the position is present AND the fill is whole -- `executed_qty`
+          equals the quantity `_held` built, asserted against the fixture's own
+          value rather than a literal.
+
+        Only with all three provably absent does `filled_and_released` mean the
+        cost-basis check bound.
+
+        **WHAT WAS MEASURED BEFORE THE CHECK EXISTED.** This same input emitted
+        `filled_and_booked` and *"DO NOT enter this trade by hand"*, then
+        `close_position` raised and `close_book_failed` followed -- the ledger
+        short a real trade, the operator told not to fix it. Both halves are
+        asserted here: the label is right, and `close_book_failed` is now
+        ABSENT because the raise is no longer reached.
+
+        **SCOPED TO PATH A.** `_sell_and_book`'s own guard is untouched and is
+        pinned to the project owner: a naive widened guard there routes a
+        COMPLETED sell to `_go_naked`, whose CRITICAL instructs a second sale
+        (`M5i-035`). Nothing here should be read as covering that path.
+        """
+        portfolio = _held(entry_fill=None)
+        held_quantity = portfolio.positions[SYMBOL].quantity
+        executor, _, _ = build(client=_resolving_client(), portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+
+        # THE THREE OLD EXCLUSIONS, EACH PINNED ABSENT.
+        assert record.status == "FILLED"  # an order came back
+        assert record.quote_total == D("1810.57726950")  # the venue priced it
+        assert record.executed_qty == held_quantity  # present, and whole
+
+        # ...so only the cost basis can explain the refusal.
+        assert record.outcome == "filled_and_released"  # type: ignore[attr-defined]
+        assert "NOTHING WAS BOOKED by this bot" in record.resolution  # type: ignore[attr-defined]
+        assert "by hand" in record.resolution  # type: ignore[attr-defined]
+
+        # NOT booked, and NOT half-booked: `close_position` is never reached,
+        # so `free_quote` cannot carry the C12 residual either.
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        # Dropped, not retained -- the fill is confirmed, so the base is gone.
+        assert SYMBOL not in portfolio.positions
+        assert executor._pending == {}
+
+        # THE RAISE IS NO LONGER REACHED. Before the check this input emitted
+        # `close_book_failed` from `_book_resolved_close`'s except arm; a
+        # refusal decided BEFORE the call emits nothing at all.
+        assert _records(caplog, "close_book_failed") == []
+
 
 class TestTheResolutionLineAgreesWithItself:
     """`outcome`, `resolution` and `message` say ONE thing. **`M5i-007`.**
