@@ -394,6 +394,44 @@ _RESOLVED_RETAINED: Final = _CloseResolutionText(
     ),
 )
 
+#: The sell filled, booking was ATTEMPTED, and the write FAILED. **The fourth
+#: outcome, and it exists because the label became a CONSEQUENCE** -- `M5i-055`.
+#:
+#: **IT CANNOT REUSE `_RESOLVED_RELEASED`, and the reason is one clause.** That
+#: text opens *"The position is released"*, which is TRUE when booking was never
+#: attempted and FALSE here: `close_position` raised, so the symbol is still in
+#: `positions`. Reusing it would swap a label that lies about the ledger for one
+#: that lies about the position -- the same trade `M5i-007` refused one commit
+#: earlier, in the other direction.
+#:
+#: **AND IT IS THE STATE `M5h-370`/W1 SAYS NOTHING COULD SEPARATE.** V2, booking
+#: never ran, and V5, booking ran and wrote nothing, leave IDENTICAL portfolio
+#: state and were indistinguishable from any assertion over it. They are not the
+#: same fact: V5 may carry the C12 residual, because `close_position` credits
+#: `free_quote` BEFORE it accrues, so the proceeds can land with the P&L
+#: unaccrued. This label is what separates them.
+#:
+#: The wording is the ARCHITECT'S ruling, not the project owner's: it is new
+#: text for a state that has never occurred, and it is reversible in one commit.
+_RESOLVED_BOOK_FAILED: Final = _CloseResolutionText(
+    outcome="filled_and_book_failed",
+    resolution=(
+        "THE SELL FILLED and BOOKING IT FAILED. That is NOT the same as nothing "
+        "being booked: the write was ATTEMPTED, so the ledger may be HALF-APPLIED. "
+        "Booking credits the free quote balance BEFORE it accrues the realised "
+        "P&L, so the proceeds may be credited with the P&L unaccrued. DO NOT "
+        "assume the ledger is untouched, and DO NOT assume it holds this trade. "
+        "THE POSITION IS STILL IN MEMORY while the venue is flat, so this bot's "
+        "book and the account disagree about what is held. Check the free quote "
+        "balance and the realised P&L against the venue before acting; the error "
+        "that caused this is recorded below."
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell FILLED and BOOKING IT "
+        "FAILED; the POSITION SURVIVES and the ledger may be half-applied"
+    ),
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PendingPlacement:
@@ -1903,8 +1941,27 @@ class OrderExecutor:
         *,
         total: Money,
         order: Order,
-    ) -> None:
+    ) -> bool:
         """Credit, accrue and delete -- the bot's own exit reaching the ledger.
+
+        **IT RETURNS WHETHER IT WROTE. Option 3, half (i).** ``True`` only past
+        the write; ``False`` from the ``except``. The verdict is what lets a
+        CALLER report the booking as a CONSEQUENCE rather than predict it, which
+        is `M5h-371`'s fix -- and this method never had that defect, because its
+        own success line already sits past the write (`M5i-010`).
+
+        **SO THIS RETURN IS FOR SYMMETRY AND FOR (ii), NOT FOR A CALLER TODAY.**
+        `_sell_and_book` emits no resolution label and ignores it, so nothing
+        here changes behaviour. It is typed now rather than later because the
+        two booking methods are one contract and a verdict on only one of them
+        is the drift this file keeps finding.
+
+        **A `bool` RATHER THAN A VALUE OBJECT, deliberately.** `CLAUDE.md`
+        requires a frozen object carrying its reason where a refusal has
+        REASONS to carry -- `SizingDecision` is the worked case. This has one:
+        the write landed, or it raised and the exception is already logged at
+        this site with its type and message. A second carrier would duplicate
+        what the CRITICAL beside it holds.
 
         **THE SECOND BOOKING PATH, AND DELETION IS WHAT KEEPS THEM APART.**
         `_book_exits` books venue-triggered fills from a `ProtectionAssessment`;
@@ -1948,7 +2005,7 @@ class OrderExecutor:
                     "error": str(exc),
                 },
             )
-            return
+            return False
 
         _log.info(
             "Closed %s",
@@ -1963,6 +2020,7 @@ class OrderExecutor:
                 "candle_time": candle.close_time.isoformat(),
             },
         )
+        return True
 
     def _sold_unbooked(
         self,
@@ -2228,6 +2286,25 @@ class OrderExecutor:
         memory now BOOKS: `_book_resolved_close` credits the proceeds and
         accrues the realised P&L through `Portfolio.close_position`.
 
+        **AND THE CRITICAL IS NOW EMITTED LAST, FROM THE ``finally``, WHICH IS
+        OPTION 3 HALF (i).** It used to sit in the ``try``, computing its label
+        from ``total is not None`` -- the INTENTION to book -- and running before
+        any of the branches below. `M5h-371`: a booking that then failed left a
+        line already claiming `filled_and_booked`, with a separate
+        `close_book_failed` CRITICAL contradicting it two records later. Each
+        branch now selects its own :class:`_CloseResolutionText` beside its own
+        action, and the booking branch selects between TWO on the verdict
+        `_book_resolved_close` returns. **The label can no longer describe an
+        intention the write did not carry out.**
+
+        **THE LOG IS THE ``finally``'s LAST STATEMENT, AFTER `_release_close`,
+        AND THAT ORDERING IS DELIBERATE** -- `M5i-056`. While the log sat in the
+        ``try``, a raise inside it still reached this ``finally`` and the record
+        was still cleared. Moving it here removes that protection, so it goes
+        after the clear instead: there is nothing left to strand. ``order`` and
+        ``failure`` are pre-bound with ``filled`` and ``total`` for the same
+        reason -- the ``finally`` reads all four now.
+
         **R2 IS NOT CONTRADICTED, because R2 rested on a constraint that does
         not hold here.** Its grounds were that after a restart there is no
         `Position` and `PendingCloseRecord` carries no `entry_price`, so the
@@ -2247,6 +2324,14 @@ class OrderExecutor:
         # so it must exist before anything that could fail to bind it. `None`
         # is the conservative value -- it books nothing.
         total: Money | None = None
+        # **BOUND HERE FROM OPTION 3, AND FOR THE SAME REASON AS THE TWO ABOVE**
+        # -- `M5i-056`. These were bound INSIDE the `try` while the log was
+        # there too. The log is now the `finally`'s last statement, so the
+        # `finally` reads them, and an unbound local there would raise over the
+        # real error instead of reporting it. `_read_close_outcome` is written
+        # never to raise; this does not depend on that remaining true.
+        order: Order | None = None
+        failure: Exception | None = None
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
             # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
@@ -2258,31 +2343,43 @@ class OrderExecutor:
             filled = order is not None and order.filled_quantity > 0
             if filled:
                 total = self._bookable_total(symbol, order)
-            self._log_close_resolved(
-                record,
-                candle,
-                order=order,
-                failure=failure,
-                filled=filled,
-                booked=total is not None,
-            )
         finally:
             # **THE QUERY NOW DECIDES THE DROP AND, ON ONE BRANCH, A LEDGER
             # WRITE.** Two commits ago it decided nothing at all. The CLEAR and
             # the CRITICAL are still unconditional on every answer including a
             # failed one; what reads the venue is the choice between booking,
             # dropping and retaining.
+            #
+            # **EACH BRANCH NOW NAMES ITS OWN TEXT, BESIDE ITS OWN ACTION.**
+            # That is `M5h-371`'s fix and the whole of Option 3 half (i): the
+            # label is SELECTED HERE, where the write happens, so it cannot
+            # describe an intention the write did not carry out. It used to be
+            # computed in the `try` from `total is not None` -- the intention to
+            # book -- and emitted before any of this ran.
             if total is not None:
                 # Confirmed flat, in process, priced by the venue: the capital
-                # is back and the trade belongs in the ledger.
-                self._book_resolved_close(symbol, candle, total=total)
+                # is back and the trade belongs in the ledger. **THE ONLY BRANCH
+                # WITH TWO OUTCOMES**, because it is the only one that writes.
+                texts = (
+                    _RESOLVED_BOOKED
+                    if self._book_resolved_close(symbol, candle, total=total)
+                    else _RESOLVED_BOOK_FAILED
+                )
             elif filled:
                 # Confirmed flat but not bookable -- no position to price it
                 # against, a partial, or no quote total reported.
                 self._drop_position_unbooked(symbol)
+                texts = _RESOLVED_RELEASED
             else:
                 self._retain_position_unprotected(symbol)
+                texts = _RESOLVED_RETAINED
             self._release_close(symbol)
+            # **LAST, AND AFTER THE RELEASE** -- `M5i-056`. Moving the log into
+            # this `finally` removed the protection the `try` used to give it: a
+            # raise in the logger no longer lands on a `finally` that clears the
+            # record. Putting it after `_release_close` restores that -- there
+            # is nothing left to strand.
+            self._log_close_resolved(record, candle, order=order, failure=failure, texts=texts)
 
     def _retain_position_unprotected(self, symbol: str) -> None:
         """Keep the position and mark its protection UNKNOWN. **P2/P4.**
@@ -2414,8 +2511,16 @@ class OrderExecutor:
             return None
         return order.filled_quote_quantity
 
-    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money) -> None:
+    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money) -> bool:
         """Book a resolved close. **Ruling 5, and the R2 reversal lives here.**
+
+        **IT RETURNS WHETHER IT WROTE, AND THAT IS WHAT CLOSES `M5h-371`.**
+        ``True`` only past `close_position`; ``False`` from the ``except``.
+        `_resolve_close` reads it to SELECT the resolution text, so the label is
+        now a consequence of the write rather than a prediction made before it.
+        Two paragraphs down this docstring used to end *"the log line has already
+        been emitted by then, claiming the trade was booked"* -- that is the
+        defect, and it is gone: the log is now emitted AFTER this returns.
 
         **THIS IS THE ONE PLACE THE RESOLUTION PATH MOVES A FIGURE**, and it does
         not contradict R2 -- it retires the constraint R2 rested on. R2 said the
@@ -2444,9 +2549,18 @@ class OrderExecutor:
         credits `free_quote` before accruing, so an accrual that raises leaves
         the proceeds credited and the position present -- visible and repeating
         rather than silent. `_book_close` carries the same residual and says so;
-        this is its second caller. Note the log line has already been emitted by
-        then, claiming the trade was booked, so a failure here is reported by
-        this CRITICAL rather than by that one.
+        this is its second caller.
+
+        **THAT SENTENCE USED TO END DIFFERENTLY, and the change is the commit.**
+        It read *"Note the log line has already been emitted by then, claiming
+        the trade was booked, so a failure here is reported by this CRITICAL
+        rather than by that one."* True when written and false now: the
+        resolution line is emitted after this method returns and reads
+        `_RESOLVED_BOOK_FAILED` on this branch. Corrected in place because it is
+        a claim about the tree. The CRITICAL here still fires -- it carries the
+        exception, which the resolution line does not -- so the failure is
+        reported TWICE and agrees with itself, where before it was reported
+        twice and contradicted itself.
         """
         try:
             realised = self._portfolio.close_position(symbol, exit_quote_total=total, now=utc_now())
@@ -2464,7 +2578,7 @@ class OrderExecutor:
                     "candle_time": candle.close_time.isoformat(),
                 },
             )
-            return
+            return False
         _log.critical(
             "Booked the resolved close for %s",
             symbol,
@@ -2476,6 +2590,7 @@ class OrderExecutor:
                 "candle_time": candle.close_time.isoformat(),
             },
         )
+        return True
 
     def _drop_position_unbooked(self, symbol: str) -> None:
         """Forget a position WITHOUT booking it. **The second deletion path.**
@@ -2552,8 +2667,7 @@ class OrderExecutor:
         *,
         order: Order | None,
         failure: Exception | None,
-        filled: bool,
-        booked: bool,
+        texts: _CloseResolutionText,
     ) -> None:
         """One CRITICAL carrying everything the manual accounting needs.
 
@@ -2601,13 +2715,23 @@ class OrderExecutor:
         whatever shape that takes, it now has ONE expression to convert in this
         method instead of two, and cannot convert one and leave the other.
 
-        **WHAT THIS DOES NOT FIX, said here because the line now looks
-        trustworthy.** The booked `resolution` still asserts that the proceeds
-        are credited and the realised P&L accrued. Phase 1b MEASURED that FALSE
-        when the position carries no ``entry_fill_price``: the label is computed
-        before `_book_resolved_close` runs, and that method swallows its own
-        failure. This commit makes the message agree with the label. **The label
-        itself can still lie** -- `M5h-371`, `M5i-001` and `M5i-008` are open.
+        **THAT FIX IS OPTION 3, IT HAS LANDED, AND THE ONE EXPRESSION MOVED
+        RATHER THAN MULTIPLIED.** This method no longer discriminates at all: it
+        takes a :class:`_CloseResolutionText` and renders it. The selection sits
+        in `_resolve_close`'s ``finally``, beside the write whose answer it
+        reads, because a label computed anywhere else is a PREDICTION -- which
+        is exactly what `M5h-371` was. `M5i-014`'s constraint is honoured by
+        RELOCATION, not by extension: there is still exactly one site that turns
+        state into text, and this method is no longer it.
+
+        **WHAT THIS NO LONGER FAILS TO FIX.** The paragraph here used to warn
+        that *"the label itself can still lie"* -- the booked `resolution`
+        asserting credited proceeds and accrued P&L while `_book_resolved_close`
+        swallowed its own failure. That is closed: the booking returns a verdict
+        and a failed write selects `_RESOLVED_BOOK_FAILED`, which claims neither.
+        Corrected in place because it is a claim about the tree. `M5i-001` and
+        `M5i-008` are closed with it on this path. What remains open is `(ii)`,
+        the shared bookability predicate, which is a different obligation.
 
         **``restored`` WAS DROPPED BECAUSE NOTHING HERE CAN KNOW IT**
         (`M5i-011`). :class:`PendingClose` carries no provenance field, and the
@@ -2618,11 +2742,16 @@ class OrderExecutor:
         asserting an outcome it got wrong, and it was false on all three
         branches rather than one. The replacement says "a pending close record",
         which is true of both doors.
+
+        **FOUR OUTCOMES NOW, NOT THREE**, and the fourth is not a relabelling.
+        `_RESOLVED_BOOK_FAILED` describes a state the other three cannot: the
+        write was ATTEMPTED and failed, so the position SURVIVES and the ledger
+        may be half-applied. `M5h-370`/W1 named that state as one nothing could
+        distinguish -- V2, booking never ran, and V5, booking ran and wrote
+        nothing, leave identical portfolio state. The label is what separates
+        them, and it is the reason this method's three-way ternary could not
+        simply have grown a fourth branch here.
         """
-        # THE ONE DISCRIMINATOR. `outcome`, `resolution` and `message` all read
-        # this; see the docstring for why there used to be two of it and why
-        # `M5h-371`'s fix needs there to be one.
-        texts = _RESOLVED_BOOKED if booked else _RESOLVED_RELEASED if filled else _RESOLVED_RETAINED
         extra: dict[str, object] = {
             "event": _EVENT_CLOSE_RESOLVED,
             "symbol": record.symbol,

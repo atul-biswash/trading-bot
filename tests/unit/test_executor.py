@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import inspect
 import logging
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -2949,6 +2950,230 @@ class TestTheCloseResolution:
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
 
 
+class _RefusingPortfolio(Portfolio):
+    """A real `Portfolio` whose booking write RAISES. **The V5 seam.**
+
+    **IT EXISTS BECAUSE V5 HAD NO FIXTURE AT ALL** -- `M5i-057`. Nothing in the
+    tree forced `close_position` to raise, so the state `M5h-371` names had
+    never been reachable by any test; it was measured once, by hand, at phase
+    1b. A mutation returning a booked verdict from a path that wrote nothing
+    killed ZERO tests before this class existed.
+
+    **A SUBCLASS RATHER THAN A FAKE, and that is the fence.** `portfolio.py` is
+    fenced for this commit, so nothing there is edited and nothing is
+    reimplemented here: this constructs the REAL type, inherits every field,
+    validator and invariant, and overrides ONE method to raise. A hand-built
+    stand-in would be a second implementation of the ledger inside `tests/`,
+    which is the shape that made a mapper test defend a mapper defect at M5d.
+
+    **THE RAISE IS `ValueError`, matching the real failure.** `close_position`'s
+    reachable raise comes from `_realised_from_total` and from `free_quote`'s
+    `ge=0` under `validate_assignment` -- both `ValueError`. Choosing an exotic
+    type would test the `except Exception` breadth rather than the verdict.
+    """
+
+    def close_position(self, *args: Any, **kwargs: Any) -> Decimal:
+        raise ValueError("the ledger write failed")
+
+
+def _refusing(**kwargs: Any) -> _RefusingPortfolio:
+    """`_held()`'s shape, with a booking write that raises."""
+    base = _held(**kwargs)
+    return _RefusingPortfolio(
+        free_quote=base.free_quote,
+        positions=dict(base.positions),
+    )
+
+
+def _no_portfolio() -> None:
+    """The RESTART shape: `build()` is handed no portfolio at all.
+
+    A named function rather than a ``lambda`` so the parametrised case reads as
+    a state with a name, and so a failure names it too.
+    """
+    return None
+
+
+def _resolution_text_selectors() -> set[str]:
+    """Every function in `executor.py` that names a `_RESOLVED_*` constant."""
+    tree = ast.parse(Path(inspect.getfile(OrderExecutor)).read_text(encoding="utf-8"))
+    return {
+        fn.name
+        for fn in ast.walk(tree)
+        if isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef)
+        for node in ast.walk(fn)
+        if isinstance(node, ast.Name) and node.id.startswith("_RESOLVED_")
+    }
+
+
+class TestTheLabelHasExactlyOneSelectionSite:
+    """`M5i-014`'s constraint, held by a number instead of by a docstring.
+
+    **THE HAZARD IS A SECOND CONVERSION POINT, NOT A BIGGER ONE.** Commit 1
+    collapsed `_log_close_resolved`'s two evaluations of the booked/filled chain
+    into one, because two copies of one discriminator are what let the headline
+    describe a design two commits old. Option 3 MOVES that one expression to
+    `_resolve_close`, beside the write whose answer it now reads. It must not
+    leave a copy behind, and it must not grow one.
+
+    **THE INSTRUMENT PHASE 1 PROPOSED DOES NOT WORK, and it is corrected here
+    rather than quietly dropped** -- `M5i-060`. That was *"module-wide
+    `ast.IfExp` count unchanged"*. MEASURED: it went 2 to 1, because a
+    three-way NESTED ternary is two `IfExp` nodes and the two-way verdict
+    ternary replacing it is one. Only a four-way ternary would have held the
+    count -- which would mean a selection structure parallel to the `if/elif/
+    else` that performs the actions, and two structures that must agree is the
+    exact shape commit 1 removed. **The count was the wrong proxy for the
+    thing being protected.**
+    """
+
+    def test_exactly_two_functions_name_a_resolution_text(self) -> None:
+        """MUTATION: leave the ternary in `_log_close_resolved` as well.
+
+        Both failure directions land on one assertion. A DUPLICATED selection
+        makes the set three; a selection LEFT BEHIND puts `_log_close_resolved`
+        back in it. `_sold_unbooked` is the second member and is not a second
+        discriminator -- it reads ONE constant unconditionally, which is what
+        ruling 1's identical-surface requirement asked for at commit 3b.
+        """
+        assert _resolution_text_selectors() == {"_resolve_close", "_sold_unbooked"}
+
+    def test_the_renderer_no_longer_discriminates(self) -> None:
+        """MUTATION: put any conditional expression back in the renderer.
+
+        `_log_close_resolved` now takes a `_CloseResolutionText` and renders it.
+        Zero `IfExp` is the checkable form of *"it no longer chooses"*, and it
+        is asserted separately from the set above because the two catch
+        different things: the set catches a copy anywhere, this catches a
+        conditional HERE even if it selected nothing.
+        """
+        tree = ast.parse(Path(inspect.getfile(OrderExecutor)).read_text(encoding="utf-8"))
+        renderer = next(
+            fn
+            for fn in ast.walk(tree)
+            if isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef)
+            and fn.name == "_log_close_resolved"
+        )
+        assert [n for n in ast.walk(renderer) if isinstance(n, ast.IfExp)] == []
+
+
+class TestTheBookingVerdictDecidesTheLabel:
+    """Option 3, half (i). **`M5h-371` and `M5h-370`/W1.**
+
+    **THE LABEL WAS A PREDICTION AND IS NOW A CONSEQUENCE.** It was computed in
+    `_resolve_close`'s `try` from `total is not None` -- the INTENTION to book --
+    and emitted before the write ran. A booking that then failed left a CRITICAL
+    reading `filled_and_booked` with *"DO NOT enter this trade by hand"*, and a
+    separate `close_book_failed` contradicting it two records later.
+
+    **AND NOTHING COULD SEE IT.** `M5h-370`/W1: V2, booking never ran, and V5,
+    booking ran and wrote nothing, leave IDENTICAL portfolio state, so no
+    assertion over the portfolio separates them. The fourth outcome is what
+    does, and `_RefusingPortfolio` is what makes V5 reachable at all.
+    """
+
+    async def test_a_booking_that_failed_is_not_labelled_booked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**V5. THE MANDATE'S OWN MUTATION MADE KILLABLE.**
+
+        MUTATION: return a booked verdict from `_book_resolved_close`'s
+        `except`; or select the text from `total is not None` again.
+
+        Both are the `M5h-371` regression, and before this test neither killed
+        anything. The assertions are ordered so a pass can only mean the write
+        was ATTEMPTED and FAILED:
+
+        * the booking was reached -- `close_book_failed` is PRESENT, which no
+          other resolution branch emits;
+        * and the label agrees with it -- `filled_and_book_failed`, not
+          `filled_and_booked`.
+
+        Either alone is weak. `close_book_failed` alone was already emitted
+        before this commit, beside a label claiming success; the label alone
+        could be reached by a branch that never called the writer.
+        """
+        portfolio = _refusing()
+        executor, _, _ = build(client=_resolving_client(), portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        # THE WRITE WAS ATTEMPTED, and only this branch reports that.
+        (failure,) = _records(caplog, "close_book_failed")
+        assert failure.error_type == "ValueError"  # type: ignore[attr-defined]
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.outcome == "filled_and_book_failed"  # type: ignore[attr-defined]
+        # ...and it claims NONE of the three things it must not.
+        resolution = record.resolution  # type: ignore[attr-defined]
+        assert "DO NOT enter this trade by hand" not in resolution
+        assert "the ledger already carries it" not in resolution
+        assert "The position is released" not in resolution
+        # What it DOES say, per the architect's ruling on the wording.
+        assert "BOOKING IT FAILED" in resolution
+        assert "HALF-APPLIED" in resolution
+        assert "STILL IN MEMORY" in resolution
+        # Forbidden across the whole close family: no second sale, no partial.
+        assert "selling the base" not in resolution
+        assert "partial" not in resolution
+
+        # THE POSITION SURVIVES -- which is why the released text cannot be
+        # reused, and is the fact the label now carries.
+        assert SYMBOL in portfolio.positions
+        assert executor._pending == {}
+
+    async def test_the_label_distinguishes_a_booking_that_never_ran_from_one_that_failed(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**`M5h-370`/W1 CLOSED, and it is closed by comparison, not assertion.**
+
+        MUTATION: map the failed write to `_RESOLVED_RELEASED`.
+
+        V2 and V5 are driven on one page with the SAME client and the SAME
+        answer; the only difference is whether the write raises. Their portfolio
+        states are then asserted to differ in the one way they can -- the
+        position survives V5 and not V2 -- and their labels to differ at all.
+
+        **THE LABELS ARE COMPARED TO EACH OTHER, NOT TO LITERALS.** A test
+        asserting each against its own string would keep passing if both were
+        mapped to the same text, which is precisely the mutation. Inequality is
+        the subject; the literals are checked in the sibling test above.
+        """
+        # V2: booking never runs, because the cost basis is absent.
+        never_ran = _held(entry_fill=None)
+        executor_a, _, _ = build(client=_resolving_client(), portfolio=never_ran)
+        executor_a._pending[SYMBOL] = _close()
+        with caplog.at_level(logging.CRITICAL):
+            await executor_a(candle())
+        (v2,) = _records(caplog, "close_record_resolved")
+        v2_outcome = v2.outcome  # type: ignore[attr-defined]
+        assert _records(caplog, "close_book_failed") == []  # it never ran
+
+        caplog.clear()
+
+        # V5: booking runs and writes nothing.
+        ran_and_failed = _refusing()
+        executor_b, _, _ = build(client=_resolving_client(), portfolio=ran_and_failed)
+        executor_b._pending[SYMBOL] = _close()
+        with caplog.at_level(logging.CRITICAL):
+            await executor_b(candle())
+        (v5,) = _records(caplog, "close_record_resolved")
+        v5_outcome = v5.outcome  # type: ignore[attr-defined]
+        assert len(_records(caplog, "close_book_failed")) == 1  # it ran
+
+        # THE LEDGER CANNOT TELL THEM APART -- both left it untouched.
+        assert never_ran.ledger is None and ran_and_failed.ledger is None
+        # THE LABEL CAN.
+        assert v2_outcome != v5_outcome
+        assert v2_outcome == "filled_and_released"
+        assert v5_outcome == "filled_and_book_failed"
+        # And the one portfolio fact that does differ agrees with the labels.
+        assert SYMBOL not in never_ran.positions
+        assert SYMBOL in ran_and_failed.positions
+
+
 class TestAnUnconfirmedSellIsRetained:
     """The sell was SENT and its outcome is unknown. **Rulings 1-3.**
 
@@ -3502,11 +3727,18 @@ class TestTheResolutionLineAgreesWithItself:
     """
 
     @pytest.mark.parametrize(
-        ("answer", "held", "outcome", "resolution_says", "message_says", "message_lacks"),
+        (
+            "answer",
+            "make_portfolio",
+            "outcome",
+            "resolution_says",
+            "message_says",
+            "message_lacks",
+        ),
         [
             pytest.param(
                 _sold(),
-                True,
+                _held,
                 "filled_and_booked",
                 "DO NOT enter this trade by hand",
                 "the trade is BOOKED",
@@ -3519,7 +3751,7 @@ class TestTheResolutionLineAgreesWithItself:
                 _sold(),
                 # No position in memory -- the RESTART shape, where the cost
                 # basis is unreconstructable and the fill is released unbooked.
-                False,
+                _no_portfolio,
                 "filled_and_released",
                 "enter the executed quantity and quote total below by hand",
                 "DROPPED UNBOOKED",
@@ -3528,7 +3760,7 @@ class TestTheResolutionLineAgreesWithItself:
             ),
             pytest.param(
                 OrderNotFoundError("Order does not exist."),
-                True,
+                _held,
                 "unconfirmed_position_retained",
                 "the POSITION IS RETAINED with its protection marked UNKNOWN",
                 "the sell is UNCONFIRMED and the POSITION IS RETAINED",
@@ -3538,22 +3770,49 @@ class TestTheResolutionLineAgreesWithItself:
                 ("DROPPED", "restored", "the venue's"),
                 id="retained",
             ),
+            pytest.param(
+                _sold(),
+                _refusing,
+                "filled_and_book_failed",
+                "the write was ATTEMPTED, so the ledger may be HALF-APPLIED",
+                "BOOKING IT FAILED",
+                # THE FOURTH CASE, and every phrase here is a claim it must not
+                # make. `BOOKED`: the write failed, and "BOOKING" does not
+                # contain it, so this bites. `DROPPED`/`released`: the position
+                # SURVIVES -- `M5i-055`, which is why it cannot reuse
+                # `_RESOLVED_RELEASED`. `restored`: `M5i-011`, as on every
+                # branch.
+                ("BOOKED", "DROPPED", "released", "restored"),
+                id="book_failed",
+            ),
         ],
     )
     async def test_the_message_agrees_with_the_outcome_on_every_branch(
         self,
         caplog: pytest.LogCaptureFixture,
         answer: Order | Exception,
-        held: bool,
+        make_portfolio: Callable[[], Portfolio | None],
         outcome: str,
         resolution_says: str,
         message_says: str,
         message_lacks: tuple[str, ...],
     ) -> None:
-        """All three branches, all three fields. **The agreement is the subject.**
+        """All FOUR branches, all three fields. **The agreement is the subject.**
 
-        MUTATION: swap two of the three `_CloseResolutionText` constants in the
-        ternary; or restore the single unconditional message.
+        MUTATION: swap two of the four `_CloseResolutionText` constants at their
+        selection sites; or restore the single unconditional message.
+
+        **THE FOURTH CASE ARRIVED WITH OPTION 3, AND IT IS NOT A RELABELLING.**
+        `book_failed` is the state `M5h-370`/W1 said nothing could distinguish:
+        booking RAN and wrote nothing, where `released` means it never ran. Its
+        portfolio is a `_RefusingPortfolio`, because no other fixture in the
+        tree can reach a failed write -- `M5i-057`.
+
+        **AND THE PORTFOLIO PARAMETER IS NOW A FACTORY, not a `held` flag.** A
+        bool could express two portfolios and this needs three; a prebuilt
+        `Portfolio` in the param list would be MUTABLE STATE SHARED BETWEEN
+        PARAMETRISED ITEMS, constructed once at collection and written by
+        whichever case ran first.
 
         Driven end to end through `await executor(candle())` rather than by
         calling the logger, because the claim is that the branch SELECTED is the
@@ -3565,9 +3824,7 @@ class TestTheResolutionLineAgreesWithItself:
         would pass with the false phrase sitting beside the true one, which is
         exactly the state this commit found.
         """
-        executor, _, _ = build(
-            client=_resolving_client(answer), portfolio=_held() if held else None
-        )
+        executor, _, _ = build(client=_resolving_client(answer), portfolio=make_portfolio())
         executor._pending[SYMBOL] = _close()
 
         with caplog.at_level(logging.CRITICAL):
