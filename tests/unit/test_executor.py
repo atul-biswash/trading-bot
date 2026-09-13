@@ -2435,6 +2435,236 @@ class TestTheCloseExecutes:
         assert executor._pending == {}
 
 
+class TestAnUnbookableSellIsDropped:
+    """B-i. The bot's OWN sell completed and cannot be priced.
+
+    **THIS SUITE REMOVES A LIVE PERMANENT HALT, NOT A LOG-LINE
+    INCONSISTENCY** -- `M5i-045`. MEASURED at `24d0a7c`, before B-i: this exact
+    input emitted `close_book_failed` and LEFT THE POSITION IN MEMORY for base
+    already sold at the venue. Its legs were cancelled, so `classify_protection`
+    answers `DIVERGED` and re-stamps it on every pass -- `POSITION_STALE` never
+    fires, nothing books it, and `UNKNOWN` outside `_TRUSTED_PROTECTION` refuses
+    entries PORTFOLIO-WIDE until a restart. Commit 3a's body called that
+    behaviour *"SAFER than the naive fix"*, which is true and narrower than it
+    reads: safer than routing to `_go_naked`, and not safe.
+
+    **NO EXISTING FIXTURE COULD EXPRESS THIS.** `_held(entry_fill=None)` was
+    read by exactly ONE test in the tree before this class, and it is path A's.
+    So adding the branch alone was invisible to every test that existed, and a
+    green run would have been no evidence whatever -- `M5i-037`/`M5i-038`'s
+    shape a second time, on the second path.
+    """
+
+    async def test_a_sold_position_with_no_cost_basis_is_dropped_unbooked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The branch binds, and the two OLD disjuncts are pinned ABSENT.
+
+        MUTATION: delete the branch; invert its condition.
+
+        `_sell_and_book`'s guard at `:1789` has two disjuncts and BOTH return
+        the same way, into `_go_naked`. So a pass here could mean either fired
+        unless each is excluded, and the exclusions are asserted rather than
+        argued:
+
+        * the sell reached the venue at all -- the full six-call sequence, so no
+          pre-sell refusal fired;
+        * nothing went naked -- which excludes BOTH disjuncts at once, since
+          both route there;
+        * the fill is whole -- `executed_qty` against the fixture's own
+          quantity, not a literal, excluding the partial disjunct positively;
+        * the venue priced it -- `quote_total`, excluding `total is None`.
+
+        Only then does the outcome mean the cost-basis check bound.
+
+        **`close_book_failed` ABSENT IS A REAL DISCRIMINATOR HERE, NOT A VACUOUS
+        ONE.** The pre-B-i tree emitted it on this exact input, MEASURED -- so
+        this assertion distinguishes "the raise is not reached" from "the raise
+        is handled", which is the whole difference between deciding before the
+        call and catching after it.
+        """
+        portfolio = _held(entry_fill=None)
+        held_quantity = portfolio.positions[SYMBOL].quantity
+        client = _selling_client()
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        # THE TWO OLD DISJUNCTS, PINNED ABSENT.
+        assert client.venue_calls == FULL_CLOSE  # the sell really happened
+        assert _records(caplog, "close_position_naked") == []  # neither disjunct
+
+        (record,) = _records(caplog, "close_sold_unbooked")
+        assert record.levelno == logging.CRITICAL
+        assert record.executed_qty == held_quantity  # whole, not partial
+        assert record.quote_total == SELL_TOTAL  # the venue priced it
+
+        # ...so only the absent cost basis can explain the refusal to book.
+        assert record.outcome == "filled_and_released"  # type: ignore[attr-defined]
+        assert "NOTHING WAS BOOKED by this bot" in record.resolution  # type: ignore[attr-defined]
+
+        # DROPPED, not booked and not half-booked.
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        assert executor._pending == {}
+
+        # THE RAISE IS NO LONGER REACHED, where the pre-B-i tree reported it
+        # from `_book_close`'s except arm on this same input.
+        assert _records(caplog, "close_book_failed") == []
+        # The close SUCCEEDED. `_sold_unbooked` must not call `_refuse`.
+        assert _records(caplog, "dispatch_refused") == []
+
+    async def test_the_unbookable_sell_critical_makes_none_of_the_three_forbidden_claims(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """`M5i-035`'s three falsehoods, each asserted absent. **BOTH POLARITIES.**
+
+        MUTATION: route this state to `_go_naked` instead.
+
+        `_go_naked`'s line says the position is *"UNPROTECTED and still open"*,
+        carries `reason=close_partial_fill`, and instructs *"selling the base
+        manually"*. All three are false once a complete sell has filled, and the
+        third is the money bug: the base is already gone, so an operator
+        following it sells twice.
+
+        **A TEST ASSERTING ONLY WHAT IS PRESENT WOULD PASS WITH THE FALSE
+        PHRASE BESIDE THE TRUE ONE**, which is precisely the state `M5i-007`
+        found one commit ago. So the absences are the load-bearing half.
+
+        The `selling the base` anchor is chosen over `manually` deliberately:
+        path A's own message ends *"for manual accounting"*, so the shorter
+        anchor would forbid a phrase that is correct elsewhere in the family and
+        make this test fail for the wrong reason.
+        """
+        portfolio = _held(entry_fill=None)
+        executor, _, _ = build(client=_selling_client(), portfolio=portfolio)
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        (record,) = _records(caplog, "close_sold_unbooked")
+        message = record.getMessage()
+        resolution = record.resolution  # type: ignore[attr-defined]
+
+        # MUST NOT say the position is still open.
+        assert "still open" not in message
+        assert "still open" not in resolution
+        assert "UNPROTECTED" not in message
+        # MUST NOT carry a partial-fill reason.
+        assert getattr(record, "reason", None) != "close_partial_fill"
+        assert "partial" not in message
+        # MUST NOT instruct a second sale of base that is already gone.
+        assert "selling the base" not in resolution
+        assert "SELF-REFRESHING" not in resolution
+
+        # ...and MUST say the three things the operator acts on.
+        assert "FILLED" in message
+        assert "DROPPED UNBOOKED" in message
+        assert "That trade is NOT in the ledger" in resolution
+        assert "enter the executed quantity and quote total below by hand" in resolution
+        # `M5i-042`: the balance sheet, which no line said before commit 3b.
+        assert "free quote balance is NOT credited" in resolution
+
+    async def test_a_partial_fill_with_no_cost_basis_still_goes_naked(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE ORDERING TEST. `M5i-043`, and nothing else in the tree pins it.**
+
+        MUTATION: move B-i's branch ABOVE the `:1789` guard.
+
+        The architect's Phase 1 specified that placement, and a three-state
+        probe falsified it. A partial fill with no cost basis is REACHABLE, and
+        for it `_go_naked` is CORRECT: `0.3` of the base is still at the venue,
+        so *"still open"* is TRUE and the manual sale it instructs is the right
+        action for the remainder. B-i's branch placed above the guard captures
+        this state and tells the operator the base was fully sold and released
+        -- a fresh falsehood in `M5i-035`'s family, pointing the other way.
+
+        **THE FIXTURE VARIES THE ONE AXIS THE ORDERING TURNS ON.** It is the
+        sibling of the test above with `executed` changed and nothing else, so a
+        pass here and there together say the branch discriminates on whole-fill
+        rather than on cost basis alone. Either test alone would be satisfied by
+        a check in the wrong place.
+        """
+        portfolio = _held(entry_fill=None)
+        client = _selling_client(sell_answer=sell_fill(executed=D("0.2")))
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        (naked,) = _records(caplog, "close_position_naked")
+        assert naked.reason == "close_partial_fill"  # type: ignore[attr-defined]
+        assert "still open" in naked.getMessage()
+        assert "selling the base manually" in naked.resolution  # type: ignore[attr-defined]
+
+        # B-i did NOT fire, and the position is KEPT because base remains.
+        assert _records(caplog, "close_sold_unbooked") == []
+        assert SYMBOL in portfolio.positions
+        assert portfolio.ledger is None
+
+
+class TestBothPathsPresentTheIdenticalSurface:
+    """Ruling 1's requirement, made falsifiable instead of documented.
+
+    **THE RULING IS A CONSTRAINT BETWEEN TWO FILES' WORTH OF BEHAVIOUR AND
+    NOTHING ENFORCED IT.** Path A reaches its released branch through
+    `_log_close_resolved`; path B reaches the same physical reality through
+    `_sold_unbooked`, which deliberately does NOT call that method -- widening
+    it would give `M5h-371`'s target a second caller option 3 was not scoped
+    for. Two renderings of one state, in two methods, is exactly where a
+    wording drifts.
+
+    **SO THE TWO READ ONE VALUE.** `_RESOLVED_RELEASED` is the shared
+    `_CloseResolutionText`, and this asserts BYTE-EQUALITY of `outcome` and
+    `resolution` across the two emitted records rather than similarity. A test
+    comparing each against a literal would pass while the two drifted apart
+    from each other, which is the one thing the ruling forbids.
+    """
+
+    async def test_outcome_and_resolution_are_byte_equal_across_both_paths(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """MUTATION: restate either string at one site instead of sharing it.
+
+        **NOT `==` AGAINST A LITERAL.** The subject is the AGREEMENT, so the two
+        records are compared against EACH OTHER. A literal on both sides would
+        turn one test into two independent ones and stop reporting drift the
+        moment either literal was updated alongside its site.
+
+        The headline is deliberately NOT compared: path A says *"a pending close
+        record was resolved"*, which is false of a live sell, and forcing those
+        to match would be the identical-surface requirement misread as identical
+        text.
+        """
+        # PATH A -- a restored record resolved a bar later.
+        portfolio_a = _held(entry_fill=None)
+        executor_a, _, _ = build(client=_resolving_client(), portfolio=portfolio_a)
+        executor_a._pending[SYMBOL] = _close()
+        with caplog.at_level(logging.CRITICAL):
+            await executor_a(candle())
+        (record_a,) = _records(caplog, "close_record_resolved")
+
+        caplog.clear()
+
+        # PATH B -- the bot's own sell, this bar.
+        portfolio_b = _held(entry_fill=None)
+        executor_b, _, _ = build(client=_selling_client(), portfolio=portfolio_b)
+        with caplog.at_level(logging.CRITICAL):
+            await executor_b.dispatch(close_signal(), exit_assessment(), candle())
+        (record_b,) = _records(caplog, "close_sold_unbooked")
+
+        assert record_a.outcome == record_b.outcome  # type: ignore[attr-defined]
+        assert record_a.resolution == record_b.resolution  # type: ignore[attr-defined]
+
+        # The physical reality is identical, so the ledger answer must be too.
+        assert portfolio_a.ledger is None and portfolio_b.ledger is None
+        assert SYMBOL not in portfolio_a.positions
+        assert SYMBOL not in portfolio_b.positions
+
+
 def _sold(executed: str = "0.5", quote: str = "1810.57726950") -> Order:
     """The venue's answer for a close sell that FILLED."""
     return Order(
@@ -3197,10 +3427,15 @@ class TestAResolvedFillIsBooked:
         asserted here: the label is right, and `close_book_failed` is now
         ABSENT because the raise is no longer reached.
 
-        **SCOPED TO PATH A.** `_sell_and_book`'s own guard is untouched and is
-        pinned to the project owner: a naive widened guard there routes a
-        COMPLETED sell to `_go_naked`, whose CRITICAL instructs a second sale
-        (`M5i-035`). Nothing here should be read as covering that path.
+        **STILL SCOPED TO PATH A, AND THE REASON CHANGED AT COMMIT 3b.** It read
+        *"`_sell_and_book`'s own guard is untouched and is pinned to the project
+        owner"*, which was true at 3a and is false now: B-i landed, and path B
+        drops such a sell through `_sold_unbooked`. Corrected in place because
+        it is a claim about the tree. What SURVIVES is the scoping itself and
+        `M5i-035`'s reason for it -- the guard at `:1789` is STILL untouched and
+        B-i sits AFTER it (`M5i-043`), because folding the condition into that
+        guard routes a completed sell to `_go_naked`, whose CRITICAL instructs a
+        second sale. Path B's own coverage is `TestAnUnbookableSellIsDropped`.
         """
         portfolio = _held(entry_fill=None)
         held_quantity = portfolio.positions[SYMBOL].quantity

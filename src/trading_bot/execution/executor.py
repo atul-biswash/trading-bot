@@ -222,6 +222,15 @@ _EVENT_CLOSE_RESOLVED = "close_record_resolved"
 #: would sell twice. An operator filtering for one and finding the other would
 #: take the one action this state cannot survive.
 _EVENT_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
+#: The bot's OWN close sell completed and cannot be priced, so the position is
+#: dropped without booking. **B-i.** Its own event rather than reusing
+#: `close_record_resolved`, on the grounds `_go_naked_retaining` already states
+#: for its own name: that one describes a record RESTORED and resolved a bar
+#: later, this one a sell this process just sent, and an operator filtering for
+#: one must not find the other. What it must NOT reuse is
+#: `close_position_naked` -- that line says the position is still open and
+#: instructs a manual sale, and both are false here because the base is gone.
+_EVENT_CLOSE_SOLD_UNBOOKED = "close_sold_unbooked"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -330,13 +339,34 @@ _RESOLVED_BOOKED: Final = _CloseResolutionText(
 )
 
 #: The sell filled and could not be priced, so it is dropped without booking.
+#:
+#: **READ FROM TWO SITES, AND THAT IS WHY THE BALANCE-SHEET SENTENCE LIVES
+#: HERE.** `_log_close_resolved` renders it for a record resolved a bar later,
+#: and `_sold_unbooked` reads `outcome` and `resolution` off it for the bot's
+#: own completed sell -- ruling 1 requires the two to present the IDENTICAL
+#: operational surface, and sharing the value is what makes that true by
+#: construction rather than by two strings kept in step by hand. So the
+#: sentence is added ONCE. Do not copy it to a second site.
+#:
+#: **THE BALANCE-SHEET SENTENCE IS `M5i-042`, MEASURED at `52.250000000`** on
+#: the close suite's own figures: `51.25000000` of proceeds never credited plus
+#: `1.000000000` of open-time over-debit, the latter fired by this very state
+#: because `_open_position` falls back to the REQUESTED limit when there is no
+#: fill price. Every reader of `free_quote` moves CONSERVATIVELY on it --
+#: affordability refuses, `equity` understates, sizing shrinks and the
+#: daily-loss threshold tightens -- so it costs opportunity, never safety. It
+#: is said anyway: an operator watching entries be refused has nothing else
+#: connecting that to this line.
 _RESOLVED_RELEASED: Final = _CloseResolutionText(
     outcome="filled_and_released",
     resolution=(
         "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
         "released and the pending record is gone from memory and from the store. "
         "That trade is NOT in the ledger -- enter the executed quantity and quote "
-        "total below by hand. Trading continues."
+        "total below by hand. Trading continues. NOTE THE BALANCE SHEET: the free "
+        "quote balance is NOT credited here, so it stays short by those proceeds "
+        "until the next restart re-seeds it from the venue -- entries may be "
+        "refused or under-sized until then."
     ),
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and was DROPPED "
@@ -1719,6 +1749,28 @@ class OrderExecutor:
         `exit_quote_total`, because recovering a price by dividing is MEASURED
         lossy -- run 3's own shape round-trips to a 28-digit residual, and
         `_dump_money` writes such a residual into `data/state.json` verbatim.
+
+        **THE TAIL HAS THREE OUTCOMES, NOT TWO, AND THE ORDER OF THE LAST TWO IS
+        LOAD-BEARING.** A partial or unpriced fill fails closed into
+        `_go_naked`; a COMPLETE, PRICED fill against a position carrying no
+        `entry_fill_price` is dropped UNBOOKED by `_sold_unbooked`; everything
+        else books. The middle one is B-i and it is checked SECOND, after the
+        partial guard -- `M5i-043`. MEASURED, three states driven through the
+        pre-B-i tree: a partial fill with no cost basis reaches `_go_naked` with
+        `close_partial_fill` and that is CORRECT, because base remains at the
+        venue and the manual sale it instructs is the right action for the
+        remainder. Reversing the two would convert that correct line into a
+        claim the position was fully sold.
+
+        **WHAT IT REPLACED WAS NOT A WORDING DEFECT** -- `M5i-045`. Before B-i
+        this state fell through to `_book_close`, where `close_position` raised
+        `ValueError` from `_realised_from_total` and the handler reported
+        `close_book_failed`. MEASURED: the POSITION SURVIVED, in memory, for
+        base already sold. Its legs were cancelled, so the classifier answers
+        `DIVERGED` and re-stamps it every pass -- `POSITION_STALE` never fires,
+        nothing books it, and `UNKNOWN` outside `_TRUSTED_PROTECTION` refuses
+        entries PORTFOLIO-WIDE until a restart. That is `_go_naked`'s
+        self-refreshing trap arriving without `_go_naked` being called.
         """
         bounds = self._budget.bounds_for_next_call(started_at=started_at, now=utc_now())
         if bounds is None:
@@ -1804,6 +1856,21 @@ class OrderExecutor:
             self._go_naked(signal, position, candle, _REASON_CLOSE_PARTIAL_FILL)
             return
 
+        if position.entry_fill_price is None:
+            # B-i. COMPLETE, PRICED and UNPRICEABLE are three separate facts and
+            # only the third fails here. **IT SITS AFTER THE PARTIAL GUARD, NOT
+            # BEFORE IT** -- `M5i-043`. A partial fill with no cost basis is
+            # reachable and leaves base AT THE VENUE, so `_go_naked`'s "still
+            # open" and "sell the base by hand" are TRUE there and false here;
+            # capturing it with this branch would tell an operator the base was
+            # fully sold. And the condition is NOT folded into the guard above:
+            # `M5i-035` measured that doing so routes this complete, confirmed,
+            # priced fill to `_go_naked` and instructs a SECOND sale of an asset
+            # already sold.
+            self._sold_unbooked(signal, position, candle, total=total, order=order)
+            self._release_close(signal.symbol)
+            return
+
         self._book_close(signal, position, candle, total=total, order=order)
         self._release_close(signal.symbol)
 
@@ -1854,6 +1921,13 @@ class OrderExecutor:
         because a second way to remove from a collection is the second-source-
         of-truth shape `CLAUDE.md` warns about, and a reader who opens only one
         of them would not know the other was there.
+
+        **THAT OTHER ONE NOW HAS TWO CALLERS, AND THE SECOND IS ON THIS PATH.**
+        `_sold_unbooked` sits between this method and `_go_naked` in
+        `_sell_and_book`'s tail: a complete, priced sell whose position carries
+        no `entry_fill_price` is dropped there instead of reaching here. So the
+        deletion inventory is unchanged at TWO paths and the caller count is
+        three -- `_book_close`, `_book_resolved_close` and `_sold_unbooked`.
         """
         try:
             realised = self._portfolio.close_position(
@@ -1889,6 +1963,78 @@ class OrderExecutor:
                 "candle_time": candle.close_time.isoformat(),
             },
         )
+
+    def _sold_unbooked(
+        self,
+        signal: Signal,
+        position: Position,
+        candle: Candle,
+        *,
+        total: Money,
+        order: Order,
+    ) -> None:
+        """The sell COMPLETED and cannot be priced. Drop it, say so. **B-i.**
+
+        **RULING 1 REQUIRES THE IDENTICAL OPERATIONAL SURFACE TO PATH A**, and
+        this reads `_RESOLVED_RELEASED` rather than restating it -- the same
+        value `_log_close_resolved` renders for a record resolved a bar later.
+        Sharing the constant is what makes "identical" a property instead of a
+        promise: there is one string, so the two cannot drift, and the
+        `M5i-042` balance-sheet sentence reached both paths in one edit.
+
+        **IT DOES NOT CALL `_log_close_resolved`, DELIBERATELY.** That method is
+        `M5h-371`'s and option 3's territory, and giving it a second caller
+        would widen a scope option 3 has not been written against. Reading a
+        constant is not routing through the method; only `message` is this
+        method's own, and it must be, because path A's headline says *"a pending
+        close record was resolved"* and nothing was restored here.
+
+        **IT DOES NOT CALL `_refuse`.** The close SUCCEEDED -- the position is
+        flat at the venue and the signal got what it asked for. `_go_naked`
+        refuses because the position is still open; emitting `dispatch_refused`
+        here would log a refusal against a `CLOSE` that did exactly its job.
+
+        **AND IT DELETES THROUGH `_drop_position_unbooked`, NEVER A DIRECT
+        `pop`.** `_book_close` above asserts the tree has exactly two ways a
+        position leaves `positions`; a third would be the second-source-of-truth
+        shape `CLAUDE.md` warns about, and this is that method's second call
+        site rather than a new path.
+
+        **THE THIRD COPY OF THE COST-BASIS CRITERION IS UPSTREAM OF HERE, AND
+        IT IS A DEBT.** Ruling 2 authorises it only because option 3 is mandated
+        to deliver one shared bookability predicate consumed by
+        `_bookable_total`, by `_sell_and_book` and by `reconciliation_driver`'s
+        row ladder. `test_bookability_criterion_census.py` holds the count at
+        three so the debt cannot quietly become four.
+        """
+        _log.critical(
+            "%s: the close sell FILLED and was DROPPED UNBOOKED -- this bot has no cost "
+            "basis for the position, so the venue's figures below are the only record",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_SOLD_UNBOOKED,
+                "symbol": signal.symbol,
+                "quantity": position.quantity,
+                "entry_bar_time": position.entry_bar_time.isoformat(),
+                "generation": _CLOSE_GENERATION,
+                "close_client_order_id": close_client_order_id(
+                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                ),
+                "candle_time": candle.close_time.isoformat(),
+                # THE TWO FIELDS RULING 1 BINDS. Read, never restated.
+                "outcome": _RESOLVED_RELEASED.outcome,
+                "resolution": _RESOLVED_RELEASED.resolution,
+                "status": order.status.value,
+                "executed_qty": order.filled_quantity,
+                "quote_total": total,
+                # THE ONE FIELD PATH A CANNOT SUPPLY. `_log_close_resolved`
+                # emits no `order_id` even when it holds an `Order`; here the
+                # sell is ours and its venue id is the handle an operator
+                # reconciles by.
+                "order_id": order.order_id,
+            },
+        )
+        self._drop_position_unbooked(signal.symbol)
 
     def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
         """Protection is cancelled and the position is not closed. RULING 6.
@@ -2342,7 +2488,9 @@ class OrderExecutor:
           P&L, then deletes. Reached from `_book_close` for the bot's own
           completed sell and from `_book_resolved_close` for one confirmed a bar
           later. Two callers, ONE deletion path.
-        * here -- deletes and credits NOTHING.
+        * here -- deletes and credits NOTHING. TWO callers from M5i commit 3b:
+          `_resolve_close`'s `finally`, and `_sold_unbooked` on the live close
+          path. Still ONE deletion path; only the caller count moved.
 
         A second way to remove from a collection is the "second source of truth"
         shape `CLAUDE.md` warns about, so it is named at both sites rather than
@@ -2359,8 +2507,11 @@ class OrderExecutor:
         this project keeps finding, so it is corrected in place: it is a claim
         about the tree, and annotate-never-delete governs findings.
 
-        **WHAT REACHES HERE NOW, all three unbookable and for different
-        reasons**, decided by `_bookable_total`:
+        **WHAT REACHES HERE NOW, all five unbookable and for different
+        reasons.** The first four are `_bookable_total`'s four conditions on the
+        RESOLUTION path; the fifth is B-i on the LIVE close path. A claim about
+        the tree, so it is corrected in place rather than annotated -- the list
+        read "all three" until M5i commit 3a added the fourth and 3b the fifth.
 
         * no `Position` in memory -- the RESTART case, where the cost basis is
           unreconstructable and the old argument holds exactly as written;
@@ -2368,9 +2519,13 @@ class OrderExecutor:
           one total, so booking it would credit proceeds for base still held;
         * the venue reported no `cummulativeQuoteQty` -- and a total is never
           derived, because a quotient reintroduces the error the exchange's own
-          accounting does not have.
+          accounting does not have;
+        * the position is present and carries NO `entry_fill_price`, so it is in
+          memory and still unpriceable -- two facts, `M5i-001`;
+        * and from `_sold_unbooked`, that same absent cost basis on a sell this
+          process just sent and watched complete.
 
-        In all three the proceeds are in the CRITICAL line instead, for an
+        In all five the proceeds are in the CRITICAL line instead, for an
         operator to enter by hand.
 
         **NO LONGER UNCONDITIONAL.** It ran on every answer until M5h-321a;
@@ -2378,8 +2533,15 @@ class OrderExecutor:
         confirmed fills that cannot be priced. The unconfirmed answers go to
         `_retain_position_unprotected` instead, because dropping a position
         whose base may still be at the venue is what let a second entry through.
+        That paragraph describes the RESOLUTION caller and is unchanged by B-i.
 
-        Absent is the ORDINARY case here, not an error: see `_resolve_close`.
+        **ABSENT IS ORDINARY FROM ONE CALLER AND IMPOSSIBLE FROM THE OTHER**, so
+        the tolerance is kept and its scope is now stated. After a restart there
+        is no `Position` to drop and `_resolve_close` reaches here anyway -- see
+        that method. `_sold_unbooked` holds the `Position` it just sold, so a
+        miss there would mean something removed it mid-sequence; the `pop` still
+        tolerates it, because a deletion helper that raises inside a dispatch
+        path buys nothing the enclosing handler would not swallow.
         """
         self._portfolio.positions.pop(symbol, None)
 
