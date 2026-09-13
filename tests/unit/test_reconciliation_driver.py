@@ -730,6 +730,191 @@ async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
     assert "BTCUSDT" in portfolio.positions
 
 
+# --------------------------------------------------------------------------
+# The ladder's ORDER, pinned. `M5i-054`.
+#
+# **THIS IS THE ONE SITE WHERE THE BOOKABILITY CRITERIA'S ORDER IS
+# OBSERVABLE**, because the three refusals carry three distinct operator
+# messages. Everywhere else the criteria are checked the branches are
+# indistinguishable -- `_bookable_total` returns `None` from all four of its
+# exclusions, and `_sell_and_book` maps two reasons onto one action.
+#
+# **AND IT WAS COMPLETELY UNPINNED UNTIL THESE TESTS.** Every driver fixture
+# above varies exactly ONE axis, so no input makes two conditions true at once
+# and a reorder of the ladder passed the entire suite in silence. MEASURED: all
+# three pairwise transpositions killed ZERO tests before this block.
+#
+# **THEY EXIST TO MAKE A REORDER FAIL LOUDLY**, and the reorder is coming.
+# `M5i-053`: the driver's order is the CANONICAL one a shared bookability
+# predicate must adopt, because it is the only order that preserves every
+# caller's observable behaviour -- `_bookable_total` is order-blind and
+# `_sell_and_book` maps a SET of reasons to one action, so the driver's
+# messages are the only thing a canonical order can break. Whoever writes
+# Option 3 half (ii) should find that constraint from a failing test here, not
+# from memory.
+#
+# The order, DRIVEN rather than read off the source: no-quote-total beats
+# partial beats absent-cost-basis. Q > P > C.
+# --------------------------------------------------------------------------
+
+#: A fill smaller than `BOOK_QTY`, so the completeness test fails.
+BOOK_PARTIAL = Decimal("0.01000000")
+
+
+def _two_condition_refusal(
+    caplog: pytest.LogCaptureFixture,
+) -> str:
+    """The single refusal reason emitted by a two-condition pass.
+
+    Asserting there is exactly ONE is part of the pin: a ladder that fell
+    through and refused twice would be a different defect from one that
+    refused in the wrong order, and this separates them.
+    """
+    refusals = [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"]
+    assert len(refusals) == 1, f"expected one refusal, got {len(refusals)}"
+    return str(refusals[0].reason)  # type: ignore[attr-defined]
+
+
+async def test_no_quote_total_beats_a_partial_fill(caplog: pytest.LogCaptureFixture) -> None:
+    """Q + P both true. **Row 2 wins.** `M5i-054`.
+
+    MUTATION: swap rows 2 and 3 in the ladder; or swap rows 2 and 5.
+
+    **THE ABSENT HALF IS THE LOAD-BEARING ONE HERE, and unusually it is the
+    whole test.** A reorder does not stop a refusal happening -- it makes the
+    OTHER message fire -- so an assertion that only checked for a refusal, or
+    only for row 2's presence alongside whatever else came out, would pass
+    under the swap. Only asserting row 3's message ABSENT catches it.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient(
+        {
+            "BTCUSDT": [
+                _filled_leg("BTCUSDT", filled_quantity=BOOK_PARTIAL, filled_quote_quantity=None)
+            ]
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    reason = _two_condition_refusal(caplog)
+    assert "no quote total" in reason
+    assert "partial" not in reason
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+
+
+async def test_a_partial_fill_beats_an_absent_cost_basis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """P + C both true. **Row 3 wins.** `M5i-054`.
+
+    MUTATION: swap rows 3 and 5 in the ladder; or swap rows 2 and 5.
+
+    The pair that matters most operationally: a partial fill means BASE IS
+    STILL AT THE VENUE, where an absent cost basis says only that this bot
+    cannot price what already happened. Reporting the cost basis here would
+    describe a bookkeeping problem to an operator whose position is still
+    half open.
+    """
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quantity=BOOK_PARTIAL)]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    reason = _two_condition_refusal(caplog)
+    assert "partial" in reason
+    assert "entry_fill_price" not in reason
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+
+
+async def test_no_quote_total_beats_an_absent_cost_basis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Q + C both true. **Row 2 wins.** `M5i-054`.
+
+    MUTATION: swap rows 2 and 5 in the ladder.
+
+    The two rows are NOT adjacent, so this is the transposition the other two
+    tests cannot both catch between them -- swapping the ends leaves the middle
+    row in place and every single-axis test green.
+    """
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    reason = _two_condition_refusal(caplog)
+    assert "no quote total" in reason
+    assert "entry_fill_price" not in reason
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+
+
+async def test_all_three_conditions_at_once_report_the_first(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Q + P + C all true. **Row 2 wins.** The whole priority in one input.
+
+    MUTATION: any reorder that does not leave row 2 first.
+
+    The three pairwise tests pin the order by transposition; this pins the
+    WINNER outright, so a rotation -- which is two transpositions and could
+    leave each pair looking locally right -- still fails here.
+    """
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient(
+        {
+            "BTCUSDT": [
+                _filled_leg("BTCUSDT", filled_quantity=BOOK_PARTIAL, filled_quote_quantity=None)
+            ]
+        }
+    )
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    reason = _two_condition_refusal(caplog)
+    assert "no quote total" in reason
+    assert "partial" not in reason
+    assert "entry_fill_price" not in reason
+
+
+async def test_the_absent_cost_basis_refusal_names_the_cost_basis(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Row 5's MESSAGE, which nothing asserted until now. `M5i-054`.
+
+    MUTATION: give row 5 row 2's or row 3's text.
+
+    `test_a_position_with_no_entry_fill_price_refuses_before_it_calls` above
+    asserts only that `exit_book_refused` occurred, because its subject is that
+    the refusal is a DECISION rather than a caught exception. So rows 2 and 3
+    had their reasons pinned and row 5 did not -- and a shared predicate that
+    merged row 5's text into another row's would have passed.
+
+    It also pins what the text must NOT say. The requested `entry_price` is
+    measured wrong by up to 76.65 per unit, so the message names it as not a
+    substitute; a reader told only "cannot be priced" might reach for it.
+    """
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    reason = _two_condition_refusal(caplog)
+    assert "entry_fill_price" in reason
+    assert "not a substitute" in reason
+    # ...and it is NOT either of its neighbours.
+    assert "no quote total" not in reason
+    assert "partial" not in reason
+
+
 async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
     """Row 4 -- the ordinary healthy pass, and the commonest bar there is.
 
