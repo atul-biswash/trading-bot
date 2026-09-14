@@ -40,6 +40,18 @@ that is not coverage."* A pytest run reporting ``ERROR`` lines, or exiting with
 a status that is neither 0 nor 1, is reported as ABSTAINED and its failure count
 is not counted as a kill.
 
+**AND SOURCE THAT WILL NOT PARSE IS NEITHER -- IT ABORTS THE RUN.** The
+mutated file is ``compile``d before pytest is dispatched, and a ``SyntaxError``
+raises :exc:`HarnessAnchorError`. A mutation is a claim about BEHAVIOUR, and
+unparseable source expresses none, so there is nothing to score: it is not a
+kill, not an abstention, and not a row in the summary. This is a NARROWING of
+the paragraph above rather than an exception to it -- a crash at RUNTIME is
+still an abstention, because the mutation was at least valid Python. MEASURED,
+``M5i-086``: before this check such a mutation reached pytest, failed at
+collection, and classified ABSTAINED, which reads as *"the mutation applied and
+nothing noticed"* and is a coverage gap that does not exist. ``CLAUDE.md`` names
+a false abstention as the expensive direction.
+
 **RESTORE IS A BYTE COPY, VERIFIED BY MD5, IN A ``finally``.** Never
 ``read_text``/``write_text``: that round-trips newlines and produces a byte
 mismatch against this LF-pinned tree -- content-identical, checksum-different,
@@ -94,6 +106,38 @@ CONTEXT = 6
 #: read. 0 is all-passed, 1 is tests-failed. Everything else -- interrupted,
 #: internal error, usage error, nothing collected -- means no verdict.
 _READABLE_EXITS = frozenset({0, 1})
+
+
+class HarnessAnchorError(Exception):
+    """The mutated source does not parse, so the anchor was wrong.
+
+    **THIS IS A HARNESS FAULT, NOT A RESULT, AND THE DISTINCTION IS THE WHOLE
+    POINT.** A mutation is a claim about BEHAVIOUR; source that will not compile
+    expresses no behaviour at all, so the experiment did not happen. It is not a
+    kill, not an abstention, and not a scored row -- it aborts the run.
+
+    **WHY NOT AN ABSTENTION, WHICH IS WHERE IT USED TO LAND.** Before this,
+    unparseable source reached ``run_suite``, pytest failed at collection, and
+    the ``ERROR`` lines classified the row ABSTAINED. That reads as *"the
+    mutation applied and no test noticed"* -- a coverage gap that does not
+    exist. ``CLAUDE.md`` names that direction as the expensive one: *"a false
+    ABSTENTION reports tests as BLIND WHEN THEY BIT ... a false abstention is
+    filed as coverage that does not exist and nobody revisits a green test."*
+
+    MEASURED, ``M5i-086``: M9 of the ``bookability`` survey anchored on an
+    f-string's SOURCE text -- the ``f"`` prefix and the closing quote included
+    -- so the replacement left bare tokens. mypy reported *"Invalid syntax.
+    Perhaps you forgot a comma?"* and pytest exited 2 at collection. Re-run with
+    the anchor on the string CONTENT, that mutation killed exactly the one test
+    predicted. An anchor that is one quote character wrong is not an unusual
+    mistake; it is the ordinary one.
+
+    **AND THE REGION PRINT CANNOT CATCH IT.** That print is this harness's
+    proof that the right mutation ran, and it is honest -- but it shows the
+    bytes removed and written, not whether what remains parses. A rewording
+    mutation prints a perfectly convincing region and still leaves a syntax
+    error two characters away. Only the compiler knows.
+    """
 
 
 @dataclass(frozen=True)
@@ -284,6 +328,23 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
     print(f"  --- region AFTER mutation, at line {line_no} ---")
     print_region(mutated, line_no, ">>")
 
+    # DOES WHAT WE JUST WROTE EVEN PARSE? Read back from disk rather than
+    # compiling the buffer, so this speaks for the bytes the suite would have
+    # imported. It runs BEFORE the `--dry-run` return on purpose: checking
+    # anchors cheaply is exactly what that flag is for.
+    try:
+        compile(mutated, str(target), "exec")
+    except SyntaxError as exc:
+        print("  --- ABORTED: the mutated source does not parse ---")
+        print(f"      {type(exc).__name__}: {exc.msg} at line {exc.lineno}")
+        print("      The anchor was wrong, so no experiment was performed.")
+        print("      NOT a kill, NOT an abstention, NOT a scored row.")
+        raise HarnessAnchorError(
+            f"{mutation.id}: mutated source does not parse -- {exc.msg} "
+            f"at line {exc.lineno}. The anchor matched once but produced invalid "
+            f"Python, so the mutation expressed no behaviour to measure."
+        ) from exc
+
     if dry_run:
         print("  (--dry-run: the suite was not run; this is not a survey result)")
         return None
@@ -352,12 +413,19 @@ def main() -> int:
     # would silence any exception in flight (ruff B012), and a restore failure
     # is exactly the moment a real exception is most likely to be travelling.
     dirty = False
+    # Set only by `HarnessAnchorError`. Caught here rather than allowed to
+    # propagate so the run ends with this file's own refusal code and a legible
+    # message, the way every other refusal above does -- a traceback would bury
+    # the one line that says which anchor was wrong.
+    aborted = ""
     try:
         for mutation in mutations:
             try:
                 result = apply_and_report(target, mutation, dry_run=args.dry_run)
                 if result is not None:
                     results.append(result)
+            except HarnessAnchorError as exc:
+                aborted = str(exc)
             finally:
                 shutil.copy2(backup, target)
                 restored = md5(target)
@@ -368,12 +436,22 @@ def main() -> int:
                 else:
                     print("  FAILED TO RESTORE -- THE TREE IS DIRTY. Stopping.")
                     dirty = True
-            if dirty:
+            if dirty or aborted:
                 break
     finally:
         backup.unlink(missing_ok=True)
 
     if dirty:
+        return 2
+
+    if aborted:
+        # NO SUMMARY IS PRINTED. Rows already scored before the bad anchor are
+        # discarded deliberately: a survey is read as a set, and publishing a
+        # partial one invites the reader to treat the gap as an abstention --
+        # which is the exact misreading this check exists to prevent.
+        print(f"\n{'=' * 74}\nRUN ABORTED -- HARNESS FAULT\n{'=' * 74}")
+        print(f"  {aborted}")
+        print(f"  {len(results)} earlier result(s) discarded; fix the anchor and re-run.")
         return 2
 
     if results:
