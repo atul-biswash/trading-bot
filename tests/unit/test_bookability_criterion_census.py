@@ -1,4 +1,4 @@
-"""The cost-basis criterion is copied THREE times. This holds it at three.
+"""Every site testing a cost basis for absence is REGISTERED here, and counted.
 
 **RULING 2'S CONDITION, MADE ENFORCEABLE.** M5i commit 3b was authorised to add
 a THIRD copy of ``entry_fill_price is None`` to ``execution/executor.py`` only
@@ -7,19 +7,21 @@ consumed by all of them. A copy option 3's author cannot find is a copy that
 survives the unification, so the debt is counted here rather than described in a
 docstring nobody greps.
 
-**WHY A TEST AND NOT A COMMENT.** A marker comment cannot fail. This can: a
-fourth predicate site turns the count red and hands the author the complete list
-in the failure message, so nobody has to know the sites exist. It is the shape
-``CLAUDE.md`` already names -- *"a ruling NOT to act is testable exactly when
-the thing has an observable shape"* -- applied to a ruling to act LATER.
+**WHY A TEST AND NOT A COMMENT.** A marker comment cannot fail. This can: an
+unregistered predicate site turns the count red and hands the author the
+complete list in the failure message, so nobody has to know the sites exist. It
+is the shape ``CLAUDE.md`` already names -- *"a ruling NOT to act is testable
+exactly when the thing has an observable shape"* -- applied to a ruling to act
+LATER.
 
 **PREDICATES AND ENFORCERS ARE COUNTED SEPARATELY, because they are different
 obligations.** A predicate REFUSES before the call and yields the right label; an
 enforcer RAISES once an unpriceable position has already reached a pricing call.
 ``M5i-001`` is what happens when a predicate is missing and only the enforcer
 catches it: the label was emitted before the raise and was already wrong. Option
-3 unifies the three predicates; the two enforcers stay, because a last line of
-defence that is deleted once callers are polite is not a defence.
+3 unifies the three call-site predicates into the fourth; the two enforcers
+stay, because a last line of defence that is deleted once callers are polite is
+not a defence.
 """
 
 from __future__ import annotations
@@ -32,6 +34,10 @@ import pytest
 #: Every site where a ``Position``'s cost basis is tested for absence, split by
 #: what the site DOES about it. Stated as data so a failure prints the list.
 EXPECTED_PREDICATES = {
+    # THE SHARED PREDICATE, registered at (ii)a. The three below are the
+    # call-site copies it exists to retire; (ii)b removes them and this set
+    # becomes this line alone.
+    "src/trading_bot/execution/bookability.py::classify_bookability",
     "src/trading_bot/execution/executor.py::_bookable_total",
     "src/trading_bot/execution/executor.py::_sell_and_book",
     "src/trading_bot/execution/reconciliation_driver.py::_book_exits",
@@ -94,21 +100,26 @@ def _census() -> tuple[set[str], set[str]]:
     return predicates, enforcers
 
 
-def test_the_cost_basis_criterion_has_exactly_three_predicate_sites() -> None:
-    """THREE copies, named, and option 3 is what retires them.
+def test_every_cost_basis_predicate_site_is_registered() -> None:
+    """FOUR sites at (ii)a: the shared predicate, plus the three it retires.
 
-    MUTATION: add a fourth copy anywhere in ``src/``; or delete one.
+    MUTATION: add an unregistered copy anywhere in ``src/``; or delete one.
 
-    The three predicates ask the SAME question in THREE different orders, and
-    one of them (``_sell_and_book``) tests only this fact because its other
+    **THE SET IS THE ASSERTION, NOT THE COUNT.** Membership is what makes a
+    failure actionable -- the message names exactly which site appeared or
+    vanished -- and it is also what lets this survive (ii)b, where the same
+    assertion drops to ONE entry without changing shape.
+
+    The three call-site copies ask the SAME question in THREE different orders,
+    and one of them (``_sell_and_book``) tests only this fact because its other
     three are established upstream. That ordering difference is ``M5i-039``
-    across files, and it is the reason option 3's predicate has to take the
-    ordering as a parameter rather than assume one.
+    across files, and it is what the registered predicate's single canonical
+    ladder resolves.
     """
     predicates, _ = _census()
 
     assert predicates == EXPECTED_PREDICATES, (
-        "the bookability criterion's copy count moved. Option 3 must unify "
+        "the bookability criterion's registered site set moved. Option 3 must unify "
         f"EXACTLY these: {sorted(EXPECTED_PREDICATES)}. Found: {sorted(predicates)}"
     )
 
@@ -135,7 +146,7 @@ def test_this_census_is_blind_to_other_spellings(spelling: str) -> None:
     """**THE BLIND SPOT, DECLARED IN THE TEST RATHER THAN DISCOVERED LATER.**
 
     This census anchors on the ``<x>.entry_fill_price is None`` comparison, so a
-    fourth site written ``if not position.entry_fill_price:`` slips past it
+    further site written ``if not position.entry_fill_price:`` slips past it
     entirely -- and so does an inverted ``is not None``. Neither is hypothetical
     housekeeping: the truthiness spelling is SEPARATELY A BUG, because a cost
     basis of ``Decimal(0)`` is falsey and would be read as absent.
@@ -149,4 +160,4 @@ def test_this_census_is_blind_to_other_spellings(spelling: str) -> None:
     found = predicates | enforcers
 
     assert spelling not in found, "unreachable: the census yields site ids, not source text"
-    assert len(found) == 5, "the census reports five sites; other spellings are NOT among them"
+    assert len(found) == 6, "the census reports six sites; other spellings are NOT among them"
