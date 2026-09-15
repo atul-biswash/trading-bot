@@ -915,6 +915,54 @@ async def test_the_absent_cost_basis_refusal_names_the_cost_basis(
     assert "partial" not in reason
 
 
+async def test_each_refusal_states_this_callers_consequence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The half the predicate does NOT supply. **Nothing pinned this before.**
+
+    MUTATION: drop the consequence and emit `verdict.reason` alone; or give
+    both rows the same clause.
+
+    **MEASURED at (ii)b's phase 1: dropping the consequence half killed ZERO
+    of the 15 reason assertions in this module.** Every one of them matches on
+    a FACT substring -- "no quote total", "partial", "entry_fill_price", "not
+    a substitute" -- and all four live in `classify_bookability`. So the whole
+    caller-owned half of every refusal message was unheld, and a rewiring that
+    silently dropped it would have shipped green. This is that hole.
+
+    **BOTH ROWS, BECAUSE THE TWO CLAUSES ARE DIFFERENT OPERATOR FACTS.** Row 2
+    says the position is CLOSED AT THE VENUE; row 3 says it KEEPS ITS
+    UNTRUSTED PROTECTION. Collapsing them onto one clause loses the first
+    entirely, and asserting only one would not catch that.
+    """
+    # Row 2 -- a fill the venue never priced.
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+    no_total = _two_condition_refusal(caplog)
+    assert "no quote total" in no_total, "the FACT half, from the predicate"
+    assert "closed at the venue with nothing booked" in no_total, (
+        "row 2's CONSEQUENCE half, which belongs to this caller and not to the module"
+    )
+
+    caplog.clear()
+
+    # Row 3 -- a partial fill.
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quantity=BOOK_PARTIAL)]})
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+    partial = _two_condition_refusal(caplog)
+    assert "partial" in partial, "the FACT half, from the predicate"
+    assert "keeps its untrusted protection" in partial, (
+        "row 3's CONSEQUENCE half -- TRUE here, and the exact inverse at `_go_naked`"
+    )
+    # ...and the two consequences are NOT interchangeable.
+    assert "closed at the venue" not in partial
+    assert "keeps its untrusted protection" not in no_total
+
+
 async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
     """Row 4 -- the ordinary healthy pass, and the commonest bar there is.
 

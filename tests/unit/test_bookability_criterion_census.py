@@ -19,7 +19,7 @@ obligations.** A predicate REFUSES before the call and yields the right label; a
 enforcer RAISES once an unpriceable position has already reached a pricing call.
 ``M5i-001`` is what happens when a predicate is missing and only the enforcer
 catches it: the label was emitted before the raise and was already wrong. Option
-3 unifies the three call-site predicates into the fourth; the two enforcers
+3 has now unified the three call-site predicates into one; the two enforcers
 stay, because a last line of defence that is deleted once callers are polite is
 not a defence.
 """
@@ -34,13 +34,23 @@ import pytest
 #: Every site where a ``Position``'s cost basis is tested for absence, split by
 #: what the site DOES about it. Stated as data so a failure prints the list.
 EXPECTED_PREDICATES = {
-    # THE SHARED PREDICATE, registered at (ii)a. The three below are the
-    # call-site copies it exists to retire; (ii)b removes them and this set
-    # becomes this line alone.
+    # ONE SITE. (ii)b retired the three call-site copies; this is what Ruling 2
+    # was for. The count went 3 -> 4 at (ii)a, which added the predicate while
+    # leaving the copies, and 4 -> 1 here. Both numbers were fixed by the
+    # project owner BEFORE either commit was written.
     "src/trading_bot/execution/bookability.py::classify_bookability",
-    "src/trading_bot/execution/executor.py::_bookable_total",
-    "src/trading_bot/execution/executor.py::_sell_and_book",
-    "src/trading_bot/execution/reconciliation_driver.py::_book_exits",
+}
+
+#: The three call sites that must CONSUME the predicate. The census above
+#: cannot see this: it counts `entry_fill_price is None` comparisons, and after
+#: (ii)b the call sites have none WHETHER OR NOT they call
+#: `classify_bookability`. So a set of one is reachable by rewiring and equally
+#: by deleting the checks and routing them nowhere, and only this pins which
+#: happened.
+EXPECTED_CONSUMERS = {
+    "_bookable_total",
+    "_sell_and_book",
+    "_book_exits",
 }
 EXPECTED_ENFORCERS = {
     "src/trading_bot/core/models.py::unrealized_pnl",
@@ -101,20 +111,25 @@ def _census() -> tuple[set[str], set[str]]:
 
 
 def test_every_cost_basis_predicate_site_is_registered() -> None:
-    """FOUR sites at (ii)a: the shared predicate, plus the three it retires.
+    """ONE site. The three call-site copies are retired; this is Ruling 2 paid.
 
     MUTATION: add an unregistered copy anywhere in ``src/``; or delete one.
 
-    **THE SET IS THE ASSERTION, NOT THE COUNT.** Membership is what makes a
-    failure actionable -- the message names exactly which site appeared or
-    vanished -- and it is also what lets this survive (ii)b, where the same
-    assertion drops to ONE entry without changing shape.
+    **THE SET IS THE ASSERTION, NOT THE COUNT**, and the shape did not change
+    when the number went 4 to 1 -- membership is what makes a failure
+    actionable, because the message names exactly which site appeared or
+    vanished.
 
-    The three call-site copies ask the SAME question in THREE different orders,
-    and one of them (``_sell_and_book``) tests only this fact because its other
-    three are established upstream. That ordering difference is ``M5i-039``
-    across files, and it is what the registered predicate's single canonical
-    ladder resolves.
+    The three retired copies asked the SAME question in THREE different orders,
+    and one of them (``_sell_and_book``) tested only this fact because its
+    other three were established upstream. That ordering difference was
+    ``M5i-039`` across files, and the predicate's single canonical ladder
+    ``A > Q > P > C`` is what resolved it.
+
+    **A COUNT OF ONE DOES NOT PROVE THE REWIRING** --
+    ``test_all_three_call_sites_consume_the_shared_predicate`` is what does.
+    This census matches comparisons, and a call site that deleted its check and
+    routed nowhere has none either way.
     """
     predicates, _ = _census()
 
@@ -160,4 +175,51 @@ def test_this_census_is_blind_to_other_spellings(spelling: str) -> None:
     found = predicates | enforcers
 
     assert spelling not in found, "unreachable: the census yields site ids, not source text"
-    assert len(found) == 6, "the census reports six sites; other spellings are NOT among them"
+    assert len(found) == 3, "the census reports three sites; other spellings are NOT among them"
+
+
+def _functions_calling(name: str) -> set[str]:
+    """Every function in ``src/`` containing a direct call to ``name``.
+
+    A bare ``Name`` call, not an ``ast.Attribute`` one. The existing
+    close-methods census in ``test_executor.py`` collects ``node.func.attr``
+    and is therefore blind to ``classify_bookability(...)`` entirely -- it
+    could not be reused, so this is written rather than extended.
+    """
+    calling: set[str] = set()
+    for path in sorted(_SRC.rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.Call)
+                    and isinstance(inner.func, ast.Name)
+                    and inner.func.id == name
+                ):
+                    calling.add(node.name)
+    return calling
+
+
+def test_all_three_call_sites_consume_the_shared_predicate() -> None:
+    """The rewiring, pinned. **THE CENSUS ABOVE CANNOT SEE THIS.**
+
+    MUTATION: unwire any site -- return the venue field directly, or
+    reimplement the criterion inline.
+
+    A count of one predicate site is reachable two ways: the three copies were
+    REWIRED onto it, or they were DELETED and routed nowhere. The census
+    counts comparisons, so it scores both identically and reports success for
+    the second. This is the assertion that separates them, and it is why the
+    set above could safely drop to one.
+
+    Names rather than qualified ids, because a rename is a different failure
+    from an unwiring and the census above already pins the file.
+    """
+    consumers = _functions_calling("classify_bookability")
+
+    assert consumers >= EXPECTED_CONSUMERS, (
+        "a call site stopped consuming the shared predicate. Expected all of "
+        f"{sorted(EXPECTED_CONSUMERS)} to call it; found {sorted(consumers)}"
+    )

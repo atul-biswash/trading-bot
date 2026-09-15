@@ -324,6 +324,48 @@ class TestEachRefusalStatesItsOwnFact:
 
         assert verdict.reason == expected
 
+    def test_no_fact_half_carries_a_callers_consequence(self) -> None:
+        """The clauses that belong to a CALLER, absent from every fact.
+
+        MUTATION: fold a driver consequence into any fact half.
+
+        **`M5i-068`, AND ONE OF THESE CLAUSES IS FALSE AT A REAL CALLER.**
+        ``_book_exits`` appends *"the position keeps its untrusted
+        protection"*, which is true there -- ``_refuse_booking`` leaves the
+        position present and untrusted. The same fact at ``_sell_and_book``
+        reaches ``_go_naked``, whose docstring reads *"Protection is cancelled
+        and the position is not closed"*. A module carrying that clause would
+        assert, from shared code, the opposite of what one of its own callers
+        does.
+
+        **ABSENCE IS THE ONLY POLARITY THAT CATCHES AN APPEND.** The
+        exact-string assertions above each speak for ONE string, so a clause
+        added to a different fact slips past all four; and a substring census
+        cannot read the ``not in`` around an assertion. Both halves are why
+        this is a separate test rather than more equalities.
+        """
+        consequences = (
+            # `_book_exits`, via `_BOOK_REFUSAL_CONSEQUENCE`.
+            "keeps its untrusted protection",
+            "closed at the venue with nothing booked",
+            # `_go_naked`, at `_sell_and_book`.
+            "still open",
+            "selling the base",
+        )
+        verdicts = (
+            _classify(position=None),
+            _classify(position=_position(), filled_quote_quantity=None),
+            _classify(position=_position(), filled_quantity=PARTIAL),
+            _classify(position=_position(entry_fill_price=None)),
+            _classify(position=_position()),
+        )
+
+        for verdict in verdicts:
+            for clause in consequences:
+                assert clause not in verdict.reason, (
+                    f"{verdict.outcome.value} states a CALLER's consequence: {clause!r}"
+                )
+
 
 # --------------------------------------------------------------------------
 # T4 / T5 -- the bookable case, and what it carries.

@@ -33,7 +33,7 @@ from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 # A PRIVATE name, imported across modules deliberately. The alternative is a
 # second definition of "which protection states may be trusted", and two
@@ -44,6 +44,7 @@ from typing import TYPE_CHECKING
 # positions automatically, because the line and the refusal are then keyed off
 # the same fact. Making it public is a `core/` decision and is not taken here.
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION
+from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
 from trading_bot.execution.reconciliation import (
     reconcile_open_positions,
     resolve_unresolved_legs,
@@ -86,6 +87,28 @@ _EVENT_PHASE_FAILED = "reconciliation_phase_failed"
 _EVENT_BOOKED = "exit_booked"
 _EVENT_BOOK_REFUSED = "exit_book_refused"
 _EVENT_LEDGER_UNWRITABLE = "ledger_unwritable"
+
+#: What each refusal MEANS HERE, appended to the fact `classify_bookability`
+#: states. `M5i-068`: the fact is shared and the consequence is not. The
+#: partial-fill clause is TRUE at this site -- `_refuse_booking` leaves the
+#: position present and untrusted -- and FALSE at `_sell_and_book`, where
+#: `_go_naked` cancels protection, so a shared module must not carry it.
+#:
+#: A TOTAL MAPPING rather than a chain of ``if``s, the shape `_CLOSE_REFUSALS`
+#: already uses: a member added to `BookabilityOutcome` raises `KeyError` at
+#: this site rather than silently taking a default clause. `BOOKABLE` is absent
+#: because it is not a refusal, and `POSITION_ABSENT` because every pair here
+#: comes from `portfolio.open_positions`; either arriving is a `KeyError` that
+#: names the bug rather than a sentence that hides it.
+_BOOK_REFUSAL_CONSEQUENCE: Final[dict[BookabilityOutcome, str]] = {
+    BookabilityOutcome.NO_QUOTE_TOTAL: (
+        " and the position is closed at the venue with nothing booked"
+    ),
+    BookabilityOutcome.PARTIAL_FILL: (
+        " -- so it is not booked and the position keeps its untrusted protection"
+    ),
+    BookabilityOutcome.NO_COST_BASIS: "",
+}
 
 _PHASE_PASS = "reconciliation_pass"
 _PHASE_RESOLUTION = "leg_resolution"
@@ -464,42 +487,38 @@ class ReconciliationDriver:
                     "portfolio.open_positions, and booking it would silently no-op"
                 )
 
-            if fill.filled_quote_quantity is None:
-                # Row 2. Distinct from row 4 by construction: a leg DID fill and
-                # the venue gave no quote total for it, so a position has closed
-                # and cannot be priced. Escalated rather than skipped.
+            # **ROWS 2, 3 AND 5 ARE NOW ONE CALL.** They asked three of
+            # `classify_bookability`'s four facts in the order it now holds
+            # canonically -- `Q > P > C` beneath `A`, which the five pins at
+            # `61919ce` measured before (ii) could reorder it. Row 4 above is
+            # NOT among them and is not absorbed: `ExitFill` states that
+            # *no leg reported a fill* and *a leg filled and the venue gave no
+            # quote total* are different facts, and collapsing them would lose
+            # the only signal separating "no exit" from "an exit I cannot book".
+            #
+            # `POSITION_ABSENT` cannot arrive here: every pair comes from
+            # `portfolio.open_positions`, and the orphan guard above has already
+            # established this IS the portfolio's own position.
+            verdict = classify_bookability(
+                position=position,
+                filled_quantity=fill.filled_quantity,
+                filled_quote_quantity=fill.filled_quote_quantity,
+            )
+            if verdict.outcome is not BookabilityOutcome.BOOKABLE:
+                # **THE FACT COMES FROM THE PREDICATE; THE CONSEQUENCE IS
+                # OURS** -- `M5i-068`. Each row keeps the clause it already
+                # carried, VERBATIM, because the three are different operator
+                # facts and collapsing them would lose the one row 2 states:
+                # that the position is closed at the venue. The partial-fill
+                # clause is true HERE, where a refusal leaves the position
+                # present and untrusted, and is the exact inverse at
+                # `_sell_and_book`, where `_go_naked` cancels protection -- so
+                # it is appended at the caller and never written into
+                # `execution/bookability.py`.
                 self._refuse_booking(
                     position.symbol,
                     fill.order_id,
-                    "the venue reported a fill with no quote total, so the exit cannot be priced "
-                    "and the position is closed at the venue with nothing booked",
-                )
-                continue
-
-            if fill.filled_quantity != position.quantity:
-                # Row 3. Not booked, and NOT a new refusal state: the position
-                # keeps `UNKNOWN` from the assessment, and the existing
-                # committed-risk interlock refuses entries portfolio-wide. This
-                # commit narrows booking to complete fills; it adds no path.
-                self._refuse_booking(
-                    position.symbol,
-                    fill.order_id,
-                    f"the fill is partial -- {fill.filled_quantity} executed against a position "
-                    f"of {position.quantity} -- so it is not booked and the position keeps its "
-                    "untrusted protection",
-                )
-                continue
-
-            if position.entry_fill_price is None:
-                # Row 5, checked BEFORE the call. `entry_price` is NOT a
-                # substitute -- it is the requested limit, measured wrong by up
-                # to 76.65 per unit, and a ledger is permanent.
-                self._refuse_booking(
-                    position.symbol,
-                    fill.order_id,
-                    "the position has no entry_fill_price, so its cost basis is unknown; the "
-                    "requested entry_price is not a substitute and would write a permanent "
-                    "distortion into the ledger",
+                    verdict.reason + _BOOK_REFUSAL_CONSEQUENCE[verdict.outcome],
                 )
                 continue
 
