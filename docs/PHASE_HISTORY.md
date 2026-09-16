@@ -3031,3 +3031,143 @@ milestone's close, not counts to update.
 
 **M5h's scope and rulings 1–5 were ruled by the project owner. Everything else
 here was ruled by the reviewer under delegation.**
+
+---
+
+## Phase 5 M5i — one criterion, one label, and a harness that means what it says
+
+M5h ended having built a close path nothing had exercised. M5i was scoped to
+retire the debts that path had accumulated rather than to add to it. **16
+commits including this one — 15 numbered and one of rotation — and 130 findings
+declared across `M5i-001`–`M5i-136`, every commit carrying a block.** The
+headline is that three copies of one criterion became one, and that a CRITICAL
+can no longer claim a booking that did not happen. The thing worth carrying
+forward is the same sentence M5h closed on, and it has got worse rather than
+better: **nothing has run, and this milestone added two more emitters to paths
+no venue has ever exercised.**
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `2a9d454` | The close-resolution line's three fields become one value |
+| 2 | `743fb86` | Three docstrings that denied what the code now does |
+| 3 | `24d0a7c` | A position with no cost basis is released, not booked |
+| 4 | `13d96c5` | A completed sell with no cost basis is dropped, not held |
+| 5 | `539f9b2` | The close-resolution label follows the write, not the plan |
+| 6 | `61919ce` | Pin the booking ladder's order before (ii) reorders it |
+| 7 | `08bb4b6` | One bookability predicate, with no callers yet |
+| 8 | `0d90730` | An unparseable mutant aborts the survey, never abstains |
+| 9 | `6669b6f` | The bookability criterion now exists once |
+| 10 | `8a751cc` | The unconfirmed close no longer claims nothing was sold |
+| 11 | `58db482` | A complete fill the venue never priced is not a partial |
+| 12 | `0835213` | The mutation survey refuses a piped stdout |
+| 13 | `d2a9cf3` | The survey tells a kill from a crash, and proves it |
+| 14 | `08711a7` | The gate stops recommending a remedy it refuses |
+| 15 | `812f9b2` | Two comments that outlived what they described |
+
+One rotation commit follows: **this commit**, which writes the gate counts from
+one fresh run, records nine method rules, re-baselines
+`docs/NEXT_MILESTONE.md` for M5j and adds this entry.
+
+### What M5i did
+
+**`M5h-371` is closed, and the fix was structural rather than verbal.**
+`_resolve_close` used to compute its label inside the `try` from
+`total is not None` — the *intention* to book — and emit it after a `finally`
+that might have failed. The label is now selected from `_book_resolved_close`'s
+**return value**, in the `finally`, beside the write. A fourth outcome exists
+because reusing the released text would have swapped a label that lies about the
+ledger for one that lies about the position; commit 5's body records that trade
+being refused.
+
+**One criterion where there were three.** `execution/bookability.py` holds
+`classify_bookability`: a pure predicate over four facts in one canonical order,
+`A > Q > P > C`, returning a frozen verdict that carries its own reason.
+`_bookable_total`, `_sell_and_book` and `reconciliation_driver`'s row ladder each
+ask it. The three retired copies asked the same question in three different
+orders, and that ordering difference was a real defect rather than untidiness —
+a partial fill with no cost basis answers differently depending on which fact is
+tested first.
+
+**The instrument for that unification is two tests, not one, and the reason is
+worth keeping.** A census holds the predicate-site count at ONE; a second test
+holds that all three callers CONSUME it. The census matches
+`entry_fill_price is None` comparisons, so a call site that deleted its check and
+routed nowhere has none either — **a count of one is equally reachable by
+rewiring and by deleting**, and only the second test separates them.
+
+**The log prose now says what the code does.** A complete fill the venue never
+priced is no longer reported as `close_partial_fill` beside an instruction to
+sell base that is already gone — it has its own emitter, its own reason code and
+its own event name, because an operator filtering on the old one must not find
+it. The unconfirmed branch no longer claims "nothing was sold" on a path that
+cannot know it.
+
+**And the mutation harness implements the contract its own docstring stated.**
+It refuses a piped stdout, reusing `check.py`'s decision by import rather than by
+copy. It takes an out-of-tree snapshot before the first byte moves, keeps it when
+a restore fails, and raises rather than returning on a mismatch. And it tells a
+kill from a crash by reading the real exception class through a
+`pytest_runtest_makereport` hookwrapper — because at this repository's node-id
+lengths pytest's short summary is truncated away entirely under capture, and a
+bare `assert x == y` renders with no type name in it at all.
+
+**The harness's acceptance test is the part worth copying.** Its justification is
+that it agrees with classifications a human had already made, so it was run
+against all of them: commit A's D4 reproduced *"2 KILLED (raw FAILED: 4), 2
+CRASHED"* against a hand result of raw 4 / classified 2, and the guard commit's
+two mutations reproduced 4 and 2. Commit A's D4 was **not expressible at HEAD** —
+commit 11 split the fused exit it depended on — so it was run in a `git worktree`
+at `8a751cc` with the new harness copied in. A harness change validated only
+against the current tree cannot be checked against the results that motivated it.
+
+### What M5i did NOT do, stated as plainly as the above
+
+**Nothing has run.** No supervised run took place in M5i. Every path it touched
+is exercised by fabricated fixtures only, exactly as at M5h's close — and M5i
+**added two emitters** (`_sold_unpriced`, and the fourth close-resolution
+outcome) to paths no venue has ever exercised. The composition risk is therefore
+larger at this close than at the last, for the second milestone running.
+
+The three unobserved venue facts stand, unchanged and not re-derived:
+**no take-profit has ever filled**; **`ALREADY_CLOSED` and `HALT` have never
+occurred**; **`resolve_placement` has never run**. Each is a branch the tree can
+reach only through a fixture, on a path where a fixture is a model of the venue
+rather than an observation of it.
+
+The uncomfortable shape, recorded because three milestones have now had it:
+every improvement above is correct as far as anything here can tell, and "as far
+as anything here can tell" is a fixture written by the same hand that wrote the
+branch.
+
+### What the milestone learned about its own instruments
+
+Six instrument defects were corrected, and **not one was found by reading the
+tool** — each was found because a prediction made in advance disagreed with what
+the tool reported. A staged copy of `src/` could not shadow the real one, because
+`pyproject.toml`'s `pythonpath` is prepended ahead of `PYTHONPATH`, and the
+survey measured zero failures while reporting nothing wrong. A no-op mutation
+passed the very verification it was written to break. A hand classifier
+regex-scraped rendered text and reported an exception type of `assert`. A fence
+script reused from the previous commit cried breach on the one file the new
+commit was authorised to edit. A fake stdout served only `fileno` and crashed the
+fixture before its own assertion. And a findings tabulation counted citations as
+declarations, producing a plausible duplicate list from a clean tree.
+
+**The rule that came out of it is the one about arming conditions.**
+`M5h-352`'s read *"whoever next edits `_sell_and_book`"*; eight M5i commits
+edited that file and one rewrote that method, and nothing noticed until the
+rotation. `CLAUDE.md` now requires the audit at COMMIT time.
+
+### The historical figures in this entry
+
+**16 commits, 130 findings, and the gate at this commit's parent `812f9b2` —
+`ruff check` clean, 118 files formatted, mypy clean over 74 source files, 1642
+passed with 1 skipped, credentialed.** These are HISTORICAL and must never move,
+exactly like the `f52f161`, `470b47b`, `4926705`, `4f08741` and `ff9cc66`
+figures above. A later rotation grepping the digits will meet them; they are
+facts about this milestone's close, not counts to update.
+
+**M5i's scope and its rulings were the project owner's. Everything else here was
+ruled by the reviewer under delegation.**

@@ -1273,7 +1273,7 @@ data.
   bytes are the point: `git commit -F <file>` is shell, and the file it names
   was written by the editor.
 
-  > **THE COUNT IS FIVE, AND THE REMEDY THIS SECTION PRESCRIBES HAS BEEN TRIED
+  > **THE COUNT IS SIX, AND THE REMEDY THIS SECTION PRESCRIBES HAS BEEN TRIED
   > AND HAS NOT WORKED.** The paragraph above diagnoses three failures as the
   > `phase_5_` shape — *"the instruction against it had lived only in prompts"* —
   > which implies that writing it into the tree would end them. It was written
@@ -1291,11 +1291,25 @@ data.
   > but it happened under the written rule, with the rule quoted in the
   > instruction being followed.
   >
-  > **The rule is not restated here, deliberately.** A sixth statement of it
-  > would be the same remedy a sixth time. What is recorded instead is the
-  > evidence about the remedy: five occurrences, two of them after the rule
-  > entered the repository, and one that reached disk with the tree's own diff
-  > tool concealing it.
+  > **The rule is not restated here, deliberately.** A further statement of it
+  > would be the same remedy again. What is recorded instead is the evidence
+  > about the remedy: six occurrences, three of them after the rule entered the
+  > repository, and one that reached disk with the tree's own diff tool
+  > concealing it.
+  >
+  > **`M5i-121` is the sixth.** A shell heredoc appending test functions to
+  > `tests/unit/test_mutation_survey.py`, aborted at the bash parser on a nested
+  > quote — no damage, like three of the six. It is recorded because of *when*:
+  > the session's own instruction said **"Write tool, never a heredoc"**, and the
+  > commit being written was the one that mechanises the survey's guards. The
+  > rule was in the active instruction, in the tree, and in the subject matter,
+  > and it still failed.
+  >
+  > **The aggregate above corrects in place; this ledger only ever appends.** The
+  > digit describes the tree now, so leaving it at five would be a stale count
+  > beside a live one. The per-occurrence records beneath it are observations and
+  > nothing in them is altered — which is this file's count-versus-finding rule
+  > applied to a paragraph that contains both.
 - **Text that LEAVES a document to be committed or executed is ASCII. Text that
   stays in the document is house style, em dashes included.** This is a
   **propagation boundary, not a file rule**, which is why the right answer can
@@ -1444,10 +1458,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  114 files already formatted
-mypy                                   Success: no issues found in 73 source files
-pytest                                 1582 passed, 4 skipped
-                                       (1585 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  118 files already formatted
+mypy                                   Success: no issues found in 74 source files
+pytest                                 1639 passed, 4 skipped
+                                       (1642 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1456,16 +1470,18 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1585 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `1582 passed, 4 skipped` on a machine without them
+- `1642 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `1639 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1582 and must not read it as a regression against a documented
-1585. Quote the count with its condition, never bare.
+runner will see 1639 and must not read it as a regression against a documented
+1642. Quote the count with its condition, never bare.
 
-Only the `1585` is measured here; `1582 passed, 4 skipped` is that run minus the
+Only the `1642` is measured here; `1639 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
-skipped one. Say which is which rather than presenting both as observed.
+skipped one. Say which is which rather than presenting both as observed. The
+three were re-counted at M5i's rotation — one per integration module, still
+three — because the subtraction is only as good as that number.
 
 **The lone skip in the credentialed run is NOT an integration test**, and that is
 worth stating because the arithmetic reads oddly otherwise:
@@ -1520,18 +1536,40 @@ never ran.
 
 **This rule has an inverse, and the two must be applied together.** Grepping the
 digits guards against *missing* a site; the inverse guards against *hitting one
-that is not a count*. Both live in `docs/NEXT_MILESTONE.md`'s process section, as
-a pair, because a rule and its inverse kept in separate documents is how one of
-them gets applied alone — which is exactly what nearly happened at M5b's
+that is not a count*. A rule and its inverse kept in separate documents is how
+one of them gets applied alone — which is exactly what nearly happened at M5b's
 rotation.
+
+> **THIS READ "Both live in `docs/NEXT_MILESTONE.md`'s process section" UNTIL
+> M5i, AND THEY DID NOT LIVE THERE.** MEASURED at M5i's rotation: that file
+> contains no such pair and no `grep`, `inverse` or `NUMBER` clause at all. The
+> M5h rotation rewrote it — step 3 rewrites it every time — and the pair went
+> with it, leaving this sentence pointing at nothing.
+>
+> **The third instance of the `phase_5_` shape one step inside the repository**,
+> after the arming-condition rule and the ID scheme, both recorded in this file
+> as exactly the same failure. The remedy is the one those two got: the rule
+> lives HERE, in the file no rotation rewrites, and the paragraph above plus the
+> "left alone" clause before it ARE the pair. Nothing is carried into the next
+> `NEXT_MILESTONE.md`, because that is what lost it.
+>
+> **It was found by rule 3 of the three rescued at M5g** — *a rotation must READ
+> every structural list in this file against the tree* — and it is that rule's
+> first catch of a claim about ANOTHER file. A stale enumeration stops early and
+> no phrase finds it; this one asserted a location, which is worse, because a
+> reader who goes looking concludes the rule was never written.
+>
+> Both halves were exercised at M5i's rotation, which is how the gap surfaced:
+> the digit grep found 18 lines, and the inverse spared a coincidental `118`
+> that is a line-number citation, plus the D3, M4a and M5b historical figures.
 
 **What each gate covers** — one boundary, stated once, and it is now deliberate
 everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 114 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 73 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 118 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 74 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -1610,6 +1648,23 @@ They belong together because they share a failure mode: the tool reports
    `tests/unit/test_risk_manager.py`.** An import-time break in the latter fails
    both files, so a traceback naming `test_modes.py` may have nothing to do with
    it. Nothing else in `tests/` couples two modules this way.
+4. **`pyproject.toml` sets `pythonpath = ["src"]`, and pytest prepends it AHEAD
+   of `PYTHONPATH` — so a staged copy of `src/` cannot shadow the real one**
+   (`M5i-119`). An M5i acceptance run copied `src/` to a temp directory, pointed
+   `PYTHONPATH` at it, mutated the copy and measured **zero** failures: the real
+   `trading_bot` had been imported throughout. This is the section's shape
+   exactly — the tool reported something, nothing looked broken, and the missing
+   part was the entire experiment. **A survey that appears to kill nothing is
+   indistinguishable from one whose mutation never loaded**, and only a
+   prediction of 4 exposed it.
+
+   **So a mutation run against a mirrored or relocated tree needs an UNMUTATED
+   CONTROL ARM.** Relocation has its own side effects — a copied `check.py`
+   computes a different `_SRC` and fails an interpreter test for reasons
+   unrelated to any mutation — and a kill is a failure present under the
+   mutation and ABSENT at baseline. Where the target is under `src/`, the honest
+   run is the one a real survey does: mutate in place through the harness, whose
+   out-of-tree snapshot is what makes that safe.
 
 ---
 
@@ -1695,6 +1750,50 @@ watching the *intended* test fail:
    was never reached; that is not coverage.
 3. **Restore in a `finally`, from a `shutil.copy2` byte copy, and verify by
    md5.**
+
+**WHAT COUNTS AS A KILL IS THREE EXCEPTION TYPES, NOT ONE** — `M5i-115`, and it
+sharpens step 2 rather than replacing it. The obvious reading of *"a wrong
+stage, not an `AttributeError`"* is to credit only `AssertionError`. That is
+wrong, and wrong in the expensive direction. Three pytest constructs are
+assertions and only one of them raises `AssertionError`: a bare `assert`; an
+unmet `pytest.raises`, which raises `Failed`; and `pytest.fail`. Worse, a test
+whose contract is *"this must NOT raise"* fails by letting the exception ESCAPE
+and can never report an `AssertionError` at all. MEASURED: under the narrow rule
+one M5i survey credited 1 of 4 real kills and another 1 of 2 — false
+abstentions, which this file already names as the direction that costs most.
+
+**AND THE FRAME AN EXCEPTION COMES FROM IS NOT THE TEST.** Location is the
+tempting discriminator and it is wrong in both directions: `(record,) = records`
+raises `ValueError` INSIDE the test file and is a crash, while an unmet
+`pytest.raises` raises from inside pytest and is a kill. Only the TYPE separates
+them.
+
+**CONTRACT AGAINST PUBLIC EXCEPTION API.** Name that type as
+`pytest.fail.Exception`, never `from _pytest.outcomes import Failed`. They are
+the SAME OBJECT — measured with `is` — but `pytest.fail` is documented API and
+pytest sets `.Exception` on it, so a reorganisation carries the attribute along;
+a stale private import would silently reclassify every `Failed` as a crash.
+Note `Failed` and `SystemExit` are `BaseException` and not `Exception`, so
+`issubclass` spans both where a bare `except Exception` would not.
+
+**EVERY FILE SUBJECT TO MUTATION IS COMMITTED, OR CLONED TO AN IMMUTABLE
+OUT-OF-TREE SNAPSHOT BEFORE THE FIRST BYTE MOVES** — `M5i-084`. Step 3's byte
+copy says *how* to restore and was silent on *where the copy lives*. It lived
+beside its target, inside `src/`, and was deleted in a `finally` **including on
+the path where the restore had just failed** — which is precisely when a clean
+copy is wanted. It is now a temp file outside the tree, its path printed before
+anything is written, KEPT when a restore fails, and a mismatch raises rather
+than returning. Mechanised in `scripts/mutation_survey.py`, so this is a
+description of what the harness does rather than a discipline to remember.
+
+**A FENCE IS REWRITTEN PER COMMIT** — `M5i-125`. A verification script carried
+from the previous commit encodes *that* commit's allowed set, and the two
+failure directions are not symmetric: reused on a commit that legitimately edits
+a file the old set fenced, it cries FENCE BREACHED and someone investigates;
+reused on a commit that edits a file the old set did not know about, it reports
+FENCE HELD and says nothing. MEASURED both ways in M5i. The cheap error is loud
+and the expensive one is silent, which is the same asymmetry the duplicate-
+annotation rule turns on.
 
 Step 3 is written that emphatically because both halves failed here. A sweep
 script that restored *after* printing crashed mid-run on a console encoding
@@ -1875,6 +1974,20 @@ fixture check has two halves, and passing the first proves nothing about the
 second: *can this input express the mutation*, and *does anything in this test
 read the thing the mutation moves*.
 
+> **A SECOND MEASURED INSTANCE, five milestones on, and it over-predicted rather
+> than under-predicted** — `M5i-095`. A survey predicted 9 kills and observed 6.
+> The three that did not fire reach the mutated point and assert only portfolio
+> state — `ledger is None`, `free_quote`, a record count — **all identical
+> whether booking never ran or ran and failed**, because the write raises before
+> it commits. The input half was checked; the assertion half was not, having
+> been quoted in the same report that skipped it.
+>
+> Recorded as an instance rather than a new rule, because the rule above is
+> already exactly right. What the repetition shows is that the first half is the
+> one people remember: expressiveness is a property of the fixture and is
+> visible while writing it, where "does the assertion look" is a property of the
+> *comparison* and is only visible while reading it.
+
 **SURVEY IN BOTH DIRECTIONS, AND THE SECOND DIRECTION IS DISTINCT FROM
 EXPRESSIVENESS (`M5e-022`).** Expressiveness asks whether a test's input can
 express the mutation. The second direction asks whether the test is
@@ -1945,6 +2058,22 @@ containment was a fact about the tree at that moment, not a property of the two
 instruments**, which is the whole finding: two enumerators agreeing tells you
 nothing about either unless a disagreement was possible, and here one of them
 could not have disagreed for the right reason.
+
+**AND A SUBSTRING ASSERTION PINS WHEREVER ITS ANCHOR OCCURS, NOT THE PART YOU
+MEANT** (`M5i-126`). The sibling failure, one level down: polarity is invisible
+to a string search, and so is *position*. MEASURED — a test named
+`..._names_the_cause_the_remedy_and_the_opt_out` asserts three substrings
+against a whole refusal message, and **all three are satisfied by its opening
+paragraph alone**, because the cause paragraph happens to quote the command and
+the environment variable the remedy also names. Two thirds of what its name
+claims is unheld, and a mutation replacing the entire remedy block killed
+NOTHING.
+
+**The diagnostic is cheap and nobody runs it: split the subject and re-test the
+anchor against the half you did not mean.** It also caught a wrong prediction —
+the prediction reasoned about the block being swapped rather than about the
+string the assertion reads, which is *reason from what a thing reaches* applied
+to an assertion instead of to code.
 
 **A TOOL'S OUTPUT IS EVIDENCE ONLY WHERE A PREDICTION MADE IT FALSIFIABLE
 (M5h).** Four instrument defects were corrected this milestone and **not one was
@@ -2114,10 +2243,36 @@ renames) in **separate commits** from semantic ones. Never mix them.
    decided: never restate current state there, and never renumber past entries.
 2. Update this file **and `README.md` in the same commit** — "Current state", any
    new locked decision, and the baseline numbers taken from a **fresh gate run**
-   (never a remembered count). The counts live in *four* places across the two
+   (never a remembered count). The counts live on **18 lines** across the two
    files, and they are one atomic fact about one gate run: splitting them leaves a
    window in which the repo disagrees with itself, which is the drift the
    "grep for the NUMBER" warning below exists to prevent.
+
+   > **THIS READ "four places" UNTIL M5i, AND IT DISAGREED WITH THIS FILE'S OWN
+   > COUNT-COUPLING SECTION.** That section says `ruff format` and `mypy` each
+   > appear in **three** places; if one figure alone is in three, the counts
+   > together cannot be in four. MEASURED at M5i's rotation, by grepping the
+   > digits: `ruff format` 3, `mypy` 3, credentialed `pytest` 6, uncredentialed
+   > `pytest` 7 — **19 occurrences on 18 LINES**, because one line carries both
+   > `pytest` figures. The count-coupling section was right and this was wrong.
+   >
+   > **STATE THE INSTRUMENT, because 19 and 18 are both correct answers to
+   > different questions** — finding `ZZ`'s shape, and it was committed inside
+   > this very sentence before being caught: an earlier draft listed the four
+   > sub-counts and called their total 18, which is the occurrence count read as
+   > a line count. Eighteen is what a rotation needs, since it edits lines.
+   >
+   > A fourth `118` also exists and is NOT a gate figure: a line-number citation
+   > in the cite-by-content rule further down. It is why this edit was made by
+   > CONTENT and not by substituting digits.
+   >
+   > **Corrected in place, not annotated away, and the direction is why it
+   > mattered.** This is the sentence a rotation reads FIRST, and it understated
+   > the work by a factor of four — wrong in the direction that leaves sites
+   > stale, which is precisely the drift the next paragraph exists to prevent.
+   > A count describes the tree; when the tree moves the old number is simply
+   > wrong. The figure will move again: re-derive it by grepping the digits
+   > rather than trusting this line.
 3. Rewrite `docs/NEXT_MILESTONE.md` for the next milestone, carrying forward any
    open items that are still open. This is the single home for live open items.
 
@@ -2160,6 +2315,37 @@ renames) in **separate commits** from semantic ones. Never mix them.
    satisfaction, and the rotation pass that catches it happens once a milestone.
    What is required is only that the rotation *look* — read every arming
    condition and ask whether it has already fired.
+
+   > **MODE 3 NOW HAS A CHEAPER CHECK THAN THE ROTATION, AND M5i IS WHY IT
+   > EARNED ONE.** `M5h-352`'s condition read *"whoever next edits
+   > `_sell_and_book`"*. **Eight M5i commits edited that file and one rewrote
+   > that method**, adding a branch to it. The comment it named stayed. The
+   > condition did not fail — it fired, eight times, and the only thing that
+   > ever looks ran once at the end of the milestone. The paragraph above is
+   > right that nothing watches; what it did not say is how long "once a
+   > milestone" actually is.
+   >
+   > **AN ARMING CONDITION IS AUDITED AT COMMIT TIME BY ANY COMMIT TOUCHING ITS
+   > NAMED SITE.** Before writing, grep `docs/NEXT_MILESTONE.md` for the symbols
+   > the commit is about to edit; resolve or explicitly REAFFIRM each condition
+   > that names one, in that commit. Reaffirming is a real outcome and must be
+   > stated — an item left carried on purpose is not the same as one nobody
+   > looked at, and mode 3 is exactly the inability to tell those apart.
+   >
+   > **It cost one grep on its first use**, in `812f9b2`, the commit that struck
+   > `M5h-352`: ten conditions in the file, `_sold_unbooked` named in none,
+   > `_sell_and_book` named in exactly one — the item being struck — and a third
+   > mention that was a *different* condition explicitly excluding the method.
+   > That last one is why the audit reads conditions rather than grepping the
+   > file: a symbol appearing near a condition is not a condition naming it.
+   >
+   > **MECHANISING IT WAS CONSIDERED AND DEFERRED TO M5j**, so the next rotation
+   > knows it was weighed rather than missed. A `scripts/` helper taking symbols
+   > and printing the conditions that name them is straightforward; what stopped
+   > it here is that it belongs with its first caller, and this rotation is a
+   > documents commit whose fence is an empty `src/` path list. The manual form
+   > is cheap enough to be worth having immediately, which is the argument for
+   > writing the rule now and the tool later.
 4. **Re-read the contracts under `docs/` for prose this milestone superseded.**
    `QC_PROTECTIVE_ORDERS.md`, `QB_ESCALATION.md` and `M5_NUMBERS.md` are *decided
    documents*, not logs: a later decision can invalidate a paragraph in one of them
@@ -3094,12 +3280,47 @@ position is still in memory, because R2's grounds were that the cost basis is
 **unreconstructable** after a restart, and that is an engineering limit rather
 than a policy of forfeiting valid accounting. The restart case is unchanged.
 
-**Nothing has RUN since M5g's four supervised runs.** Every path above is
-exercised by fabricated fixtures only. Three venue facts remain unobserved after
-~25 trades and 33 closes: **no take-profit has ever filled**, `ALREADY_CLOSED`
-and `HALT` have never occurred, and `resolve_placement` has never run. The
-composition risk M5f made reachable and M5g partly retired is **larger again**,
-because M5h added paths to it. See `docs/NEXT_MILESTONE.md`, whose highest-value
-item is `M5h-371`: a `CRITICAL` that can report `filled_and_booked` while nothing
-was booked, because the label is computed in the `try` and the write happens in
-the `finally` and nothing pins that they agree.
+**Nothing had RUN at M5h's close, and nothing has run since.** Every path built
+there was exercised by fabricated fixtures only, and three venue facts stood
+unobserved after ~25 trades and 33 closes: no take-profit had ever filled,
+`ALREADY_CLOSED` and `HALT` had never occurred, and `resolve_placement` had
+never run. M5h's highest-value open item was `M5h-371` — a `CRITICAL` that could
+report `filled_and_booked` while nothing was booked, because the label was
+computed in the `try` and the write happened in the `finally` with nothing
+pinning that they agree.
+
+**M5i is complete, in 16 commits, and it closed `M5h-371` by making the label a
+CONSEQUENCE of the write.** `_resolve_close` now selects its
+`_CloseResolutionText` from `_book_resolved_close`'s **return value**, in the
+`finally`, beside the action — so a booking that failed cannot be reported as
+one that succeeded. A fourth outcome exists for exactly that state, because
+reusing the released text would have swapped a label that lies about the ledger
+for one that lies about the position.
+
+*One criterion where there were three.* `execution/bookability.py` holds
+`classify_bookability`, a pure predicate over four facts in a canonical order
+`A > Q > P > C`, and `_bookable_total`, `_sell_and_book` and
+`reconciliation_driver`'s row ladder each ask it. The three call-site copies
+asked the same question in three different orders; a census test holds the site
+count at one and a second test pins that the callers CONSUME it, because a count
+of one is equally reachable by deleting the checks and routing nowhere.
+
+*The close-resolution prose now says what the code does.* A complete fill the
+venue never priced is no longer called `close_partial_fill` beside an
+instruction to sell base that is already gone; the unconfirmed branch no longer
+claims "nothing was sold" on a path that cannot know it.
+
+*And the mutation harness implements the contract its own docstring stated.* It
+refuses a piped stdout, takes an out-of-tree snapshot before the first byte
+moves, and tells a kill from a crash by the real exception class rather than by
+parsing pytest's text — which at this repository's node-id lengths is truncated
+away entirely under capture. Its acceptance test is that it reproduces, with no
+human, every classification a human had made by hand.
+
+**NOTHING HAS RUN, and M5i made that worse rather than better.** Every path is
+still exercised by fabricated fixtures, exactly as at M5h's close — and M5i
+added **two emitters** to paths no venue has ever exercised, so the composition
+risk is larger again. The three unobserved venue facts are unchanged: **no
+take-profit has ever filled**, **`ALREADY_CLOSED` and `HALT` have never
+occurred**, **`resolve_placement` has never run**. See
+`docs/NEXT_MILESTONE.md`.
