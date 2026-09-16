@@ -2312,6 +2312,123 @@ class TestTheCloseExecutes:
         assert portfolio.ledger is not None
         assert portfolio.ledger.realised_pnl == D("2.25000000")
 
+    async def test_a_complete_fill_the_venue_never_priced_reaches_the_naked_guard(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**Q AT SITE 2. The PATH and the STATE -- deliberately not the label.**
+
+        MUTATION: route this state to `_sold_unbooked`; drop the position.
+
+        **THE SIBLING OF THE TEST ABOVE WITH ONE AXIS CHANGED.** That one lets
+        the requery ANSWER with a total; this one lets it answer with none. The
+        create-order response is byte-identical between them, so a pass here
+        and there together say the tail discriminates on the POST-REQUERY total
+        rather than on the response's own field -- which is the ordering
+        `_sell_and_book` states and nothing else pins.
+
+        **THE `"CL"` KEY IS PRESENT AND EXPLICIT, AND THAT IS LOAD-BEARING.**
+        `_selling_client` seeds only `SL` and `TP`, and `FakeClient.get_order`
+        subscripts that dict, so omitting `CL` reaches `None` by `KeyError`
+        through `_requery_sell_total`'s bare ``except``. The path would then be
+        driven by a FIXTURE DEFECT rather than by the venue answer the test
+        claims to model -- the fake deciding the result, which is the hazard
+        `FakeRootClient.get_all_order_lists` already records.
+
+        **NOTHING IN THE TREE REACHED THIS BRANCH BEFORE THIS TEST.** MEASURED
+        by instrumenting the three tail exits across the whole module: 15 tests
+        reach the tail, 2 of them go naked, and BOTH arrive via `PARTIAL_FILL`.
+        The `NO_QUOTE_TOTAL` disjunct had zero coverage -- `M5i-098`.
+
+        **IT ASSERTS NO LABEL, ON PURPOSE.** Commit B corrects the reason code
+        and the operator text; this test must survive that untouched, so it
+        pins only what B preserves. Its sibling `..._is_reported_as_partial_-
+        today` pins the label and IS rewritten by B. One instrument, one
+        measurement, kept apart so a failure says which moved.
+        """
+        client = _selling_client(sell_answer=sell_fill(total=None))
+        # The re-read answers, and STILL carries no total -- so the venue
+        # priced this complete fill neither time.
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(total=None),
+        }
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        # THE SELL REALLY HAPPENED, and the fallback really ran.
+        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
+        assert client.order_queries[-1].endswith("-CL")
+
+        # THE GUARD BOUND, and the drop-unbooked branch did not.
+        assert len(_records(caplog, "close_position_naked")) == 1
+        assert _records(caplog, "close_sold_unbooked") == []
+
+        # THE POSITION IS RETAINED, and nothing was booked.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.ledger is None
+
+    async def test_a_complete_fill_the_venue_never_priced_is_reported_as_partial_today(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THIS TEST PINS A STRING THAT IS KNOWN TO BE WRONG.** B6.
+
+        MUTATION: correct the label without correcting this test.
+
+        **SAID IN WORDS SO NOBODY READS IT AS AN ENDORSEMENT.** Every assertion
+        below is a FALSEHOOD about the state it describes. The fill was
+        COMPLETE -- `filled_quantity == position.quantity` -- so `close_partial_-
+        fill` says "partial" of a whole sell, *"still open"* describes base that
+        is gone, and *"selling the base manually"* instructs a SECOND sale of an
+        asset already sold. That last one is `M5i-035`'s measured money bug
+        arriving through the branch B-i was written to keep it out of.
+
+        **IT EXISTS TO BE A BEFORE-MEASUREMENT, AND COMMIT B REPLACES ITS
+        ASSERTIONS.** A fixture written after the change agrees with the code
+        beside it and demonstrates nothing; the diff between this test's
+        assertions and B's is the evidence that the label moved. Its sibling
+        above pins the path and B leaves that one alone.
+
+        **WHY THE LABEL IS WRONG AND THE BRANCH IS NOT.** `NO_QUOTE_TOTAL` and
+        `PARTIAL_FILL` share this exit because there is nothing safe to book
+        either way, and that is correct. What is not correct is that they share
+        a NAME. The predicate has separated the two facts since (ii)b -- this
+        site is the only one in the tree that still collapses them, and
+        `reconciliation_driver`'s `_BOOK_REFUSAL_CONSEQUENCE` already gives
+        `NO_QUOTE_TOTAL` its own consequence at the other caller.
+
+        The record list is asserted NON-EMPTY before it is unpacked, so a
+        mutation that removes the record fails at an assertion rather than at
+        `ValueError` on the unpack -- a crash is not a kill.
+        """
+        client = _selling_client(sell_answer=sell_fill(total=None))
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(total=None),
+        }
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        naked = _records(caplog, "close_position_naked")
+        assert len(naked) == 1, "the naked record is gone; B6 is about its WORDING"
+        record = naked[0]
+
+        # WRONG, PINNED: the fill was whole and this says partial.
+        assert record.reason == "close_partial_fill"  # type: ignore[attr-defined]
+        # WRONG, PINNED: the base is at the venue no longer.
+        assert "still open" in record.getMessage()
+        # WRONG, PINNED, AND THE EXPENSIVE ONE: a second sale of base already gone.
+        assert "selling the base manually" in record.resolution  # type: ignore[attr-defined]
+
+        # The refusal carries the same wrong name onward.
+        (refusal,) = _records(caplog, "dispatch_refused")
+        assert refusal.reason == "close_partial_fill"  # type: ignore[attr-defined]
+
     async def test_a_partial_fill_books_nothing_and_goes_naked(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -3732,6 +3849,7 @@ class TestTheResolutionLineAgreesWithItself:
             "make_portfolio",
             "outcome",
             "resolution_says",
+            "resolution_lacks",
             "message_says",
             "message_lacks",
         ),
@@ -3741,6 +3859,11 @@ class TestTheResolutionLineAgreesWithItself:
                 _held,
                 "filled_and_booked",
                 "DO NOT enter this trade by hand",
+                # `_RESOLVED_RELEASED`'s instruction and `_RESOLVED_BOOK_FAILED`'s
+                # warning, both FALSE here: the ledger carries this trade and the
+                # write completed. Each is verbatim from the sibling that states
+                # it, so a constant swap makes it appear.
+                ("That trade is NOT in the ledger", "HALF-APPLIED"),
                 "the trade is BOOKED",
                 # `M5i-007`: the headline said this on the branch that booked.
                 # `M5i-011`: provenance nothing here can know.
@@ -3754,6 +3877,11 @@ class TestTheResolutionLineAgreesWithItself:
                 _no_portfolio,
                 "filled_and_released",
                 "enter the executed quantity and quote total below by hand",
+                # `_RESOLVED_BOOKED`'s instruction inverts this branch's own --
+                # an operator who reads it leaves a real trade out of the ledger
+                # for ever. `STILL IN MEMORY` is `_RESOLVED_BOOK_FAILED`'s and is
+                # false here: this branch DROPS the position.
+                ("DO NOT enter this trade by hand", "STILL IN MEMORY"),
                 "DROPPED UNBOOKED",
                 ("restored",),
                 id="released",
@@ -3762,7 +3890,23 @@ class TestTheResolutionLineAgreesWithItself:
                 OrderNotFoundError("Order does not exist."),
                 _held,
                 "unconfirmed_position_retained",
-                "the POSITION IS RETAINED with its protection marked UNKNOWN",
+                # **`M5i-020`'s FIX, PINNED.** The string used to say "Nothing
+                # was sold" one sentence after "BASE INVENTORY MAY STILL BE AT
+                # THE VENUE" -- a certainty this branch does not hold, since it
+                # is reached BOTH when the venue reported nothing filled AND
+                # when the query raised and there is no answer at all. Without
+                # this line the correction would ship unpinned: nothing in the
+                # tree read that sentence.
+                "whether anything was SOLD is exactly what is unknown",
+                # **TWO PHRASES, TWO MUTATION CLASSES, and only the second
+                # catches a constant swap.** "Nothing was sold" is carried by no
+                # branch once the fix lands, so no swap can make it appear -- it
+                # is the REVERT pin, and the only thing that fires if the fix is
+                # backed out. "THE SELL FILLED" opens the other three constants
+                # and is exactly the claim this branch may not make, so it
+                # catches the swap. Keeping one would leave a class uncovered --
+                # `M5i-101`.
+                ("Nothing was sold", "THE SELL FILLED"),
                 "the sell is UNCONFIRMED and the POSITION IS RETAINED",
                 # `M5i-013`: nothing was DROPPED -- the position is retained.
                 # `M5i-012`: the query RAISED, so there is no venue answer to
@@ -3775,6 +3919,13 @@ class TestTheResolutionLineAgreesWithItself:
                 _refusing,
                 "filled_and_book_failed",
                 "the write was ATTEMPTED, so the ledger may be HALF-APPLIED",
+                # **DELIBERATELY THE SAME TWO `test_a_booking_that_failed_is_-
+                # not_labelled_booked` ASSERTS, and that duplication is the
+                # file's own convention**: the parametrised test pins the whole
+                # mapping, the narrow test pins one branch. `The position is
+                # released` is the clause `_RESOLVED_BOOK_FAILED`'s own comment
+                # names as the reason it cannot reuse `_RESOLVED_RELEASED`.
+                ("The position is released", "the ledger already carries it"),
                 "BOOKING IT FAILED",
                 # THE FOURTH CASE, and every phrase here is a claim it must not
                 # make. `BOOKED`: the write failed, and "BOOKING" does not
@@ -3794,6 +3945,7 @@ class TestTheResolutionLineAgreesWithItself:
         make_portfolio: Callable[[], Portfolio | None],
         outcome: str,
         resolution_says: str,
+        resolution_lacks: tuple[str, ...],
         message_says: str,
         message_lacks: tuple[str, ...],
     ) -> None:
@@ -3819,10 +3971,18 @@ class TestTheResolutionLineAgreesWithItself:
         one REPORTED -- a test calling `_log_close_resolved` directly would pass
         with the selection wired to anything.
 
-        `message_lacks` is the load-bearing half and carries three separate
-        findings; see the ids beside each. A test asserting only what is present
-        would pass with the false phrase sitting beside the true one, which is
-        exactly the state this commit found.
+        **THE TWO `_lacks` COLUMNS ARE THE LOAD-BEARING HALF**, and there are
+        two of them since `M5i-020`: `message_lacks` carries three separate
+        findings, and `resolution_lacks` was added when the retained branch's
+        `resolution` was found asserting "Nothing was sold" on a path that
+        cannot know it. A test asserting only what is present would pass with
+        the false phrase sitting beside the true one, which is exactly the state
+        this class was opened on.
+
+        Every `resolution_lacks` phrase is VERBATIM from a sibling constant, so
+        a swap at the selection site makes it appear. The one exception is
+        declared where it sits: "Nothing was sold" is carried by no branch and
+        pins the REVERT rather than a swap.
         """
         executor, _, _ = build(client=_resolving_client(answer), portfolio=make_portfolio())
         executor._pending[SYMBOL] = _close()
@@ -3834,7 +3994,10 @@ class TestTheResolutionLineAgreesWithItself:
         message = record.getMessage()
 
         assert record.outcome == outcome  # type: ignore[attr-defined]
-        assert resolution_says in record.resolution  # type: ignore[attr-defined]
+        resolution = record.resolution  # type: ignore[attr-defined]
+        assert resolution_says in resolution
+        for phrase in resolution_lacks:
+            assert phrase not in resolution, f"{phrase!r} survived in: {resolution!r}"
         assert message_says in message
         for phrase in message_lacks:
             assert phrase not in message, f"{phrase!r} survived in: {message!r}"

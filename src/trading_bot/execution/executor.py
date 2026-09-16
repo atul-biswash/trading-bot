@@ -383,7 +383,8 @@ _RESOLVED_RETAINED: Final = _CloseResolutionText(
     outcome="unconfirmed_position_retained",
     resolution=(
         "THE SELL IS UNCONFIRMED, so BASE INVENTORY MAY STILL BE AT THE VENUE. "
-        "Nothing was sold and nothing was booked. The pending record is gone, but "
+        "NOTHING WAS BOOKED, and whether anything was SOLD is exactly what is "
+        "unknown. The pending record is gone, but "
         "the POSITION IS RETAINED with its protection marked UNKNOWN -- so entries "
         "on this symbol are refused, AND entries on EVERY symbol are refused while "
         "committed risk cannot be summed. Exits are still permitted. Check the "
