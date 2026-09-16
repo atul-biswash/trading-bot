@@ -201,6 +201,52 @@ def test_the_refusal_names_the_cause_the_remedy_and_the_opt_out() -> None:
     assert check._ALLOW_PIPE_ENV in refusal
 
 
+def test_the_refusal_does_not_recommend_a_remedy_this_platform_refuses() -> None:
+    """**`M5i-112`. The message sent an operator into a second refusal.**
+
+    MUTATION: restore the unqualified "Or redirect to a file" remedy.
+
+    The old text offered ``python scripts/check.py > gate.log`` as the way out,
+    and on this machine that command is REFUSED BY THE GUARD PRINTING THE
+    ADVICE. PowerShell does not hand a native command a file handle: it reads
+    the child's stdout through an anonymous pipe and writes the file itself, so
+    the descriptor really is a FIFO. MEASURED at HEAD -- PowerShell ``> file``
+    reports ``0o10000`` where cmd.exe and git-bash report ``0o100666``.
+
+    **BOTH POLARITIES, and the absent half is the load-bearing one.** Asserting
+    only that PowerShell is now named would pass with the old sentence sitting
+    beside the new caveat -- the state `M5i-007` found, in a different file. So
+    the superseded sentence is asserted ABSENT by its own words.
+
+    **AND IT WAS PINNED BY NOTHING BEFORE THIS TEST.** Measured before writing
+    it: ``gate.log`` appeared in ``tests/`` twice, both inside
+    ``test_a_regular_file_is_not_refused`` -- once in a docstring and once as a
+    ``tmp_path`` filename -- and neither reads the message. The sibling above
+    asserts ``"python scripts/check.py"``, which matches the bare-run line too,
+    so it is not specific to the remedy. A correction with no reader is the
+    shape `M5i-020` had.
+
+    The predicate is untouched and cannot be refined: nothing at the descriptor
+    level separates PowerShell's ``>`` from ``| tail``. Only the advice can
+    change, which is why this test reads text and asserts nothing about
+    behaviour.
+    """
+    read_fd, write_fd = os.pipe()
+    try:
+        refusal = check.pipe_refusal(os.fstat(write_fd).st_mode, allow_pipe=False)
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+    assert refusal is not None
+    # PRESENT: the platform, and the two shells whose redirect really works.
+    assert "PowerShell" in refusal
+    assert "cmd.exe" in refusal
+    assert "git-bash" in refusal
+    # ABSENT: the superseded remedy, by its own words.
+    assert "Or redirect to a file, which keeps both the exit status and every line" not in refusal
+
+
 def test_require_readable_output_raises_system_exit(monkeypatch: pytest.MonkeyPatch) -> None:
     """The wrapper exits rather than returning, so no step can run past it.
 

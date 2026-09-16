@@ -78,6 +78,11 @@ every one of those, and the first thing it would refuse is a redirect to a file
 -- which launders nothing (the exit status survives) and truncates nothing (the
 file has every byte). A guard that refuses correct usage is one people delete.
 
+The shells are named there rather than generalised, and PowerShell is
+deliberately absent from that list: its ``> gate.log`` is a FIFO and the guard
+refuses it, so it is not an example of a case ``isatty()`` would over-refuse.
+See the table below and ``M5i-112``.
+
 ``stat.S_ISFIFO`` separates the three cases that matter. Measured, because
 Windows is where this runs and its file-type reporting is not something to
 assume::
@@ -86,11 +91,25 @@ assume::
     git-bash ... | tail       st_mode 0o10000    ISFIFO   <- refused
     cmd.exe  ... > file       st_mode 0o100666   ISREG    <- allowed
     git-bash ... > file       st_mode 0o100666   ISREG    <- allowed
+    pwsh     ... > file       st_mode 0o10000    ISFIFO   <- refused
     os.pipe() write end       st_mode 0o10000    ISFIFO
 
 The last row is why the test can be honest: an ``os.pipe()`` write end is
 byte-for-byte the same ``st_mode`` as a real shell pipe here, so the test
 exercises the case rather than a model of it.
+
+**THE POWERSHELL ROW IS THE ONE THAT SURPRISES, AND IT WAS MISSING FOR TWO
+MILESTONES.** PowerShell does not hand a native command a file handle: it reads
+the child's stdout through an ANONYMOUS PIPE and writes the file itself, so
+``> gate.log`` there is indistinguishable from ``| tail`` at the descriptor
+level. The guard is reporting accurately, not misfiring, and the predicate
+CANNOT be refined -- there is no information to separate the two. What was
+wrong was the refusal text, which recommended that exact command as the remedy;
+see ``_UNREAD_OUTPUT``. ``M5i-112``.
+
+Latent rather than newly broken: the table was correct about every row it had,
+and incomplete by one. Nobody redirected the gate from PowerShell until the
+survey's own guard was built and the same measurement was taken there.
 
 **What it cannot do, stated so nobody reads it larger than it is.** Nothing this
 process does can repair ``$?`` -- under ``| tail`` the refusal's own exit status
@@ -178,13 +197,21 @@ _UNREAD_OUTPUT = (
     "in force,\nso `python scripts/check.py | tail` reports tail's success no matter "
     "what the gate did.\nThat has masked a non-zero exit here twice, and both times "
     "the truncation also discarded\nthe diagnostic naming the cause.\n\n"
-    "Run it bare and read its own summary:\n"
-    "    python scripts/check.py\n\n"
-    "Or redirect to a file, which keeps both the exit status and every line:\n"
-    "    python scripts/check.py > gate.log\n\n"
-    "If the caller reads this process's own exit status (CI, a pre-commit hook, an "
-    "editor\ntask), say so explicitly:\n"
-    f"    {_ALLOW_PIPE_ENV}=1 python scripts/check.py | your-consumer\n"
+    "1. RUN IT BARE in the terminal, and read its own summary:\n"
+    "       python scripts/check.py\n\n"
+    "2. Or REDIRECT FROM A SHELL THAT PASSES A GENUINE FILE DESCRIPTOR -- cmd.exe\n"
+    "   or git-bash. A real file keeps both the exit status and every line:\n"
+    "       python scripts/check.py > gate.log\n\n"
+    "   POWERSHELL IS NOT ONE OF THEM, AND THIS GUARD IS NOT MISFIRING. PowerShell\n"
+    "   routes a native command's stdout through an ANONYMOUS PIPE and writes the\n"
+    "   file itself, so the descriptor this process is handed really is a FIFO and\n"
+    "   is indistinguishable from `| tail`. MEASURED on this machine: PowerShell\n"
+    "   `> gate.log` reports st_mode 0o10000 (FIFO) where cmd.exe and git-bash both\n"
+    "   report 0o100666 (regular file). `| Out-Null` is a pipeline too.\n\n"
+    "3. Or, LAST and deliberately, for a PowerShell redirect or a caller that reads\n"
+    "   this process's own exit status (CI, a pre-commit hook, an editor task):\n"
+    f"       $env:{_ALLOW_PIPE_ENV}=1; python scripts/check.py > gate.log\n"
+    f"       {_ALLOW_PIPE_ENV}=1 python scripts/check.py | your-consumer\n"
 )
 
 
@@ -192,8 +219,15 @@ def pipe_refusal(st_mode: int, *, allow_pipe: bool) -> str | None:
     """The refusal message for this stdout, or ``None`` if it may be used.
 
     ``st_mode`` is ``os.fstat(stdout).st_mode``. Only a FIFO is refused: a
-    regular file (``> gate.log``) preserves both the exit status and every line,
-    and a character device is a terminal or ``os.devnull``.
+    regular file preserves both the exit status and every line, and a character
+    device is a terminal or ``os.devnull``.
+
+    **``> gate.log`` USED TO STAND HERE AS THE EXAMPLE OF A REGULAR FILE, AND ON
+    THIS MACHINE IT IS NOT ONE** -- under PowerShell that redirect is a FIFO and
+    this function refuses it. The claim about regular files was always true; the
+    illustration was wrong, which is the harder kind to notice because the
+    sentence around it reads correctly. The shell decides the descriptor, so an
+    example has to name one. ``M5i-112``.
 
     Kept pure and separate from :func:`_require_readable_output` so the decision
     is testable against synthetic and real descriptors alike, mirroring
