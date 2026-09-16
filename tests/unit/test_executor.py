@@ -2363,45 +2363,51 @@ class TestTheCloseExecutes:
         assert client.order_queries[-1].endswith("-CL")
 
         # THE GUARD BOUND, and the drop-unbooked branch did not.
-        assert len(_records(caplog, "close_position_naked")) == 1
+        assert len(_records(caplog, "close_sold_unpriced")) == 1
         assert _records(caplog, "close_sold_unbooked") == []
 
         # THE POSITION IS RETAINED, and nothing was booked.
         assert SYMBOL in portfolio.positions
         assert portfolio.ledger is None
 
-    async def test_a_complete_fill_the_venue_never_priced_is_reported_as_partial_today(
+    async def test_a_complete_fill_the_venue_never_priced_says_so_and_nothing_else(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**THIS TEST PINS A STRING THAT IS KNOWN TO BE WRONG.** B6.
+        """**B6, AND BOTH POLARITIES -- the absent half is the one that cost.**
 
-        MUTATION: correct the label without correcting this test.
+        MUTATION: revert the reason to `close_partial_fill`; restore
+        `_go_naked`'s wording on this branch; emit under
+        `close_position_naked`.
 
-        **SAID IN WORDS SO NOBODY READS IT AS AN ENDORSEMENT.** Every assertion
-        below is a FALSEHOOD about the state it describes. The fill was
-        COMPLETE -- `filled_quantity == position.quantity` -- so `close_partial_-
-        fill` says "partial" of a whole sell, *"still open"* describes base that
-        is gone, and *"selling the base manually"* instructs a SECOND sale of an
-        asset already sold. That last one is `M5i-035`'s measured money bug
-        arriving through the branch B-i was written to keep it out of.
+        **THIS TEST REPLACED ONE THAT ASSERTED THE OPPOSITE, DELIBERATELY.**
+        Commit A shipped this state under `close_partial_fill` and pinned it
+        that way, in a test whose docstring said in words that every assertion
+        in it was a falsehood. That was a BEFORE-measurement: a fixture written
+        after a change agrees with the code beside it and demonstrates nothing,
+        so the diff between that test's assertions and these is the evidence
+        that the label moved. A reader finding both versions in the history is
+        seeing that method, not a reversal.
 
-        **IT EXISTS TO BE A BEFORE-MEASUREMENT, AND COMMIT B REPLACES ITS
-        ASSERTIONS.** A fixture written after the change agrees with the code
-        beside it and demonstrates nothing; the diff between this test's
-        assertions and B's is the evidence that the label moved. Its sibling
-        above pins the path and B leaves that one alone.
+        **THE THREE FALSEHOODS, EACH ASSERTED ABSENT BY NAME.** On a COMPLETE
+        fill `close_partial_fill` says "partial" of a whole sell, *"still
+        open"* describes base that is gone, and *"selling the base manually"*
+        instructs a SECOND sale of an asset already sold -- `M5i-035`'s
+        measured money bug, reached through a second branch. A test asserting
+        only what is present would pass with the false phrase beside the true
+        one, which is the state `M5i-007` found.
 
-        **WHY THE LABEL IS WRONG AND THE BRANCH IS NOT.** `NO_QUOTE_TOTAL` and
-        `PARTIAL_FILL` share this exit because there is nothing safe to book
-        either way, and that is correct. What is not correct is that they share
-        a NAME. The predicate has separated the two facts since (ii)b -- this
-        site is the only one in the tree that still collapses them, and
-        `reconciliation_driver`'s `_BOOK_REFUSAL_CONSEQUENCE` already gives
-        `NO_QUOTE_TOTAL` its own consequence at the other caller.
+        **AND THE EVENT NAME IS ASSERTED TWICE OVER**, because an operator
+        filtering on `close_position_naked` must not find this record and one
+        filtering on `close_sold_unbooked` must not either: that branch DROPS
+        the position and this one keeps it, so the two cannot share a name
+        without sending a reader to look for a position that is or is not
+        there.
 
-        The record list is asserted NON-EMPTY before it is unpacked, so a
-        mutation that removes the record fails at an assertion rather than at
-        `ValueError` on the unpack -- a crash is not a kill.
+        `dispatch_refused` is asserted ABSENT. The close SUCCEEDED -- the venue
+        is flat and the signal got what it asked for -- so a refusal here would
+        be logged against a `CLOSE` that did its job. That is `_sold_unbooked`'s
+        stated discriminator, and `_go_naked_retaining` refuses instead because
+        ITS sell may never have happened.
         """
         client = _selling_client(sell_answer=sell_fill(total=None))
         client._leg_answers = {  # type: ignore[assignment]
@@ -2409,25 +2415,48 @@ class TestTheCloseExecutes:
             "TP": _leg("0"),
             "CL": sell_fill(total=None),
         }
-        executor, _, _ = build(client=client, portfolio=_held())
+        executor, _, portfolio = build(client=client, portfolio=_held())
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        naked = _records(caplog, "close_position_naked")
-        assert len(naked) == 1, "the naked record is gone; B6 is about its WORDING"
-        record = naked[0]
+        records = _records(caplog, "close_sold_unpriced")
+        assert len(records) == 1, "B6's branch did not fire; the Q exit is gone"
+        (record,) = records
+        message = record.getMessage()
+        resolution = record.resolution  # type: ignore[attr-defined]
 
-        # WRONG, PINNED: the fill was whole and this says partial.
-        assert record.reason == "close_partial_fill"  # type: ignore[attr-defined]
-        # WRONG, PINNED: the base is at the venue no longer.
-        assert "still open" in record.getMessage()
-        # WRONG, PINNED, AND THE EXPENSIVE ONE: a second sale of base already gone.
-        assert "selling the base manually" in record.resolution  # type: ignore[attr-defined]
+        assert record.levelno == logging.CRITICAL
+        # ITS OWN NAME. Neither neighbour may claim this record.
+        assert _records(caplog, "close_position_naked") == []
+        assert _records(caplog, "close_sold_unbooked") == []
+        # ...and no refusal, because the close did what it was asked.
+        assert _records(caplog, "dispatch_refused") == []
 
-        # The refusal carries the same wrong name onward.
-        (refusal,) = _records(caplog, "dispatch_refused")
-        assert refusal.reason == "close_partial_fill"  # type: ignore[attr-defined]
+        # MUST NOT call a whole fill partial.
+        assert record.reason == "close_no_quote_total"  # type: ignore[attr-defined]
+        assert "partial" not in message
+        assert "partial" not in resolution
+        # MUST NOT say the position is still open at the venue.
+        assert "still open" not in message
+        assert "still open" not in resolution
+        # MUST NOT instruct a second sale of base already gone. THE EXPENSIVE ONE.
+        assert "selling the base" not in resolution
+        assert "SELF-REFRESHING" not in resolution
+
+        # ...and MUST say what is actually known, which is four things.
+        assert "FILLED" in message
+        assert "NO QUOTE TOTAL" in message
+        assert "NOTHING WAS BOOKED" in resolution
+        assert "DO NOT SELL THIS BASE AGAIN" in resolution
+        assert "trade history" in resolution
+        # The handle an operator reconciles by.
+        assert record.close_client_order_id.endswith("-CL")  # type: ignore[attr-defined]
+
+        # THE POSITION IS KEPT and marked, which is what refuses entries.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+        assert portfolio.ledger is None
 
     async def test_a_partial_fill_books_nothing_and_goes_naked(
         self, caplog: pytest.LogCaptureFixture

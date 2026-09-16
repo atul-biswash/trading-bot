@@ -232,6 +232,17 @@ _EVENT_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 #: `close_position_naked` -- that line says the position is still open and
 #: instructs a manual sale, and both are false here because the base is gone.
 _EVENT_CLOSE_SOLD_UNBOOKED = "close_sold_unbooked"
+#: The bot's OWN close sell COMPLETED and the venue never priced it. **B6.** Its
+#: own event, and it must not reuse either neighbour. Not
+#: `close_position_naked`: that line says the position is still open and
+#: instructs a manual sale, and both are false once a WHOLE fill has executed --
+#: an operator acting on it sells base that is already gone, which is
+#: `M5i-035`'s measured failure reached through a second branch. Not
+#: `close_sold_unbooked` either, and the difference is the position: there the
+#: fill was PRICED and only the cost basis was missing, so the position is
+#: DROPPED; here the figure itself is absent, the exit is unpriceable, and the
+#: position is KEPT.
+_EVENT_CLOSE_SOLD_UNPRICED = "close_sold_unpriced"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -271,6 +282,35 @@ _REASON_CLOSE_SELL_FAILED = "close_sell_failed"
 #: sold. Ruling 2.
 _REASON_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 _REASON_CLOSE_PARTIAL_FILL = "close_partial_fill"
+#: A COMPLETE fill the venue never priced. Deliberately NOT
+#: `_REASON_CLOSE_PARTIAL_FILL`, for the reason `_REASON_CLOSE_SELL_UNCONFIRMED`
+#: is not `_REASON_CLOSE_SELL_FAILED`: the word asserts a state this client does
+#: not possess, and an operator acts on it. "Partial" says base REMAINS at the
+#: venue, so a reader goes looking for a remainder to sell -- and on a whole
+#: fill that is a SECOND sale of an asset already gone.
+#:
+#: **THE TWO SHARED THIS STRING UNTIL B6 BECAUSE ONE GUARD CATCHES BOTH, AND
+#: ONE GUARD IS NOT ONE FACT.** `classify_bookability` has separated them since
+#: (ii)b -- `NO_QUOTE_TOTAL` against `PARTIAL_FILL` -- and
+#: `reconciliation_driver` already gives each its own consequence at the other
+#: caller. `_sell_and_book` was the last site in the tree that collapsed them.
+#: `M5i-098`.
+_REASON_CLOSE_NO_QUOTE_TOTAL = "close_no_quote_total"
+
+#: One reason per verdict at `_sell_and_book`'s unbookable guard, as a total
+#: mapping rather than a ternary at each branch -- so the outcome-to-reason
+#: correspondence lives in ONE place and neither branch can drift from it.
+#:
+#: Exhaustive over what can reach that guard, and the exhaustiveness is a
+#: property of the ladder rather than a hope. `POSITION_ABSENT` cannot arrive:
+#: `position` is a non-optional parameter. `NO_COST_BASIS` and `BOOKABLE` leave
+#: through later branches. A further outcome would raise `KeyError` at the site
+#: rather than falling through to a default, which is the same reason
+#: `_CLOSE_REFUSALS` below has no trailing ``else``.
+_NAKED_SELL_REASON: Final[dict[BookabilityOutcome, str]] = {
+    BookabilityOutcome.NO_QUOTE_TOTAL: _REASON_CLOSE_NO_QUOTE_TOTAL,
+    BookabilityOutcome.PARTIAL_FILL: _REASON_CLOSE_PARTIAL_FILL,
+}
 
 #: One refusal reason per verdict, as a total mapping rather than a chain of
 #: ``if``s. Exhaustive by construction: `CloseAction` has three members and a
@@ -1790,17 +1830,25 @@ class OrderExecutor:
         lossy -- run 3's own shape round-trips to a 28-digit residual, and
         `_dump_money` writes such a residual into `data/state.json` verbatim.
 
-        **THE TAIL HAS THREE OUTCOMES, NOT TWO, AND THE ORDER OF THE LAST TWO IS
-        LOAD-BEARING.** A partial or unpriced fill fails closed into
-        `_go_naked`; a COMPLETE, PRICED fill against a position carrying no
-        `entry_fill_price` is dropped UNBOOKED by `_sold_unbooked`; everything
-        else books. The middle one is B-i and it is checked SECOND, after the
-        partial guard -- `M5i-043`. MEASURED, three states driven through the
-        pre-B-i tree: a partial fill with no cost basis reaches `_go_naked` with
-        `close_partial_fill` and that is CORRECT, because base remains at the
-        venue and the manual sale it instructs is the right action for the
-        remainder. Reversing the two would convert that correct line into a
-        claim the position was fully sold.
+        **THE TAIL HAS FOUR OUTCOMES, AND THE ORDER OF THE MIDDLE TWO IS
+        LOAD-BEARING.** A COMPLETE fill the venue never priced goes to
+        `_sold_unpriced`; a PARTIAL fill fails closed into `_go_naked`; a
+        COMPLETE, PRICED fill against a position carrying no `entry_fill_price`
+        is dropped UNBOOKED by `_sold_unbooked`; everything else books. The
+        third is B-i and it is checked after the partial guard -- `M5i-043`.
+        MEASURED, three states driven through the pre-B-i tree: a partial fill
+        with no cost basis reaches `_go_naked` with `close_partial_fill` and
+        that is CORRECT, because base remains at the venue and the manual sale
+        it instructs is the right action for the remainder. Reversing the two
+        would convert that correct line into a claim the position was fully
+        sold.
+
+        **IT HAD THREE UNTIL B6, AND THE FIRST TWO WERE ONE.** An unpriced whole
+        fill shared the partial's exit, so it inherited a line saying the
+        position was still open and telling an operator to sell base that was
+        already gone. One guard caught both because there is nothing safe to
+        book either way; that is still true, and it was never a reason to give
+        them one NAME. `M5i-098`.
 
         **WHAT IT REPLACED WAS NOT A WORDING DEFECT** -- `M5i-045`. Before B-i
         this state fell through to `_book_close`, where `close_position` raised
@@ -1888,31 +1936,50 @@ class OrderExecutor:
             filled_quote_quantity=total,
         )
 
-        if total is None or verdict.outcome is BookabilityOutcome.PARTIAL_FILL:
-            # RULING 5: A PARTIAL FILL FAILS CLOSED, and it must, because it
+        if total is None:
+            # Q. THE SELL COMPLETED AND THE VENUE NEVER PRICED IT. **B6, and
+            # this branch is what `M5i-098` was deferred to.** Until it existed
+            # this state fell through the partial guard below and was reported
+            # as `close_partial_fill` -- "partial" of a whole sell, beside
+            # `_go_naked`'s "still open" and its instruction to sell the base by
+            # hand. All three false, and the third is `M5i-035`'s money bug
+            # arriving through a second branch.
+            #
+            # **`total is None` COINCIDES EXACTLY WITH `NO_QUOTE_TOTAL`**,
+            # because `Q` precedes `P` in `A > Q > P > C` and `A` cannot fire on
+            # a non-optional `position`. So the mapping lookup below is total
+            # here, and the narrowing mypy needs is the same test -- one
+            # condition serving both, rather than a verdict check mypy cannot
+            # follow through an object.
+            #
+            # RULING 5 IS UNCHANGED AND STILL BINDS BOTH EXITS: there is nothing
+            # safe to book either way. What changes is only what the operator is
+            # TOLD, and the position is KEPT here for the reason
+            # `_sold_unpriced` states -- dropping one whose base may remain
+            # invites a second entry on top of it.
+            self._sold_unpriced(
+                signal,
+                position,
+                candle,
+                order=order,
+                reason=_NAKED_SELL_REASON[verdict.outcome],
+            )
+            return
+
+        if verdict.outcome is BookabilityOutcome.PARTIAL_FILL:
+            # P. RULING 5: A PARTIAL FILL FAILS CLOSED, and it must, because it
             # CANNOT BE REPRESENTED. `close_position` deletes the whole entry
             # and credits one total; there is no partial-close path and no way
             # to express "0.3 of 0.5 sold". Booking it would delete a position
             # that still exists at the venue and credit proceeds for base still
             # held -- a corrupted ledger, in the direction that cannot be
-            # noticed. An unpriceable full fill takes the same branch for the
-            # same reason: there is nothing safe to book.
+            # noticed.
             #
-            # **`total is None` IS A TYPE NARROWING, NOT A SECOND BOOKABILITY
-            # DECISION** -- the same category as `order is None` at
-            # `_bookable_total`, and kept for the same reason. It COINCIDES
-            # exactly with `NO_QUOTE_TOTAL`, because `Q` precedes `P` in
-            # `A > Q > P > C`, so this disjunction is the shipped guard
-            # unchanged. mypy cannot narrow a local through a verdict object,
-            # and `_sold_unbooked` and `_book_close` both take `Money`.
-            #
-            # **`PARTIAL_FILL` AND `NO_QUOTE_TOTAL` SHARE ONE REASON CODE, AND
-            # THAT IS A DEFERRAL RATHER THAN AN ACCIDENT.** The predicate
-            # separates the two facts for the first time; this site still
-            # collapses them onto `close_partial_fill`, which on a COMPLETE
-            # fill the venue never priced says "partial" and is wrong. Ruled
-            # deferred to `M5i-020`. Observable behaviour here is invariant
-            # across (ii)b, which is the mandate.
+            # **`_go_naked` IS CORRECT HERE AND ONLY HERE.** Base remains at the
+            # venue, so "still open" is TRUE and the manual sale it instructs is
+            # the right action for the remainder. That is why this caller is
+            # untouched by B6 while the one above moved -- `M5i-043` measured
+            # the same distinction one branch later.
             #
             # `POSITION_ABSENT` cannot arrive: `position` is a non-optional
             # parameter. It reaches neither branch rather than being given one
@@ -1924,7 +1991,7 @@ class OrderExecutor:
             # design corrects it -- correcting it would need the partial-close
             # path that does not exist. The operator path in `_go_naked` is what
             # resolves it.
-            self._go_naked(signal, position, candle, _REASON_CLOSE_PARTIAL_FILL)
+            self._go_naked(signal, position, candle, _NAKED_SELL_REASON[verdict.outcome])
             return
 
         if verdict.outcome is BookabilityOutcome.NO_COST_BASIS:
@@ -2125,6 +2192,99 @@ class OrderExecutor:
             },
         )
         self._drop_position_unbooked(signal.symbol)
+
+    def _sold_unpriced(
+        self,
+        signal: Signal,
+        position: Position,
+        candle: Candle,
+        *,
+        order: Order,
+        reason: str,
+    ) -> None:
+        """The sell COMPLETED and the venue never priced it. **B6.**
+
+        **THE THIRD MEMBER OF A FAMILY, and each member exists because
+        `_go_naked`'s literals are false for one more state.**
+        `_go_naked_retaining` was split off for a sell that was SENT and whose
+        outcome is unknown; `_sold_unbooked` for one that COMPLETED and was
+        PRICED against a position with no cost basis; this for one that
+        COMPLETED and was never priced at all. The bodies are short and the
+        DOCSTRINGS are why they cannot be one method with a flag -- `_go_naked`
+        argues that the position is still open and that an operator must sell
+        the base by hand, and both are false once a whole fill has executed.
+
+        **WHY THE POSITION IS KEPT, where `_sold_unbooked` DROPS.** That branch
+        holds the venue's own quote total, so the fill is corroborated and
+        dropping is factually right. Here the response carried `executedQty`
+        and no total, and the re-read carried none either -- an answer odd
+        enough that the executed quantity is not independently confirmed. The
+        two errors are not symmetric, and `CLAUDE.md` decides it: take the
+        reading whose wrong answer is REVERSIBLE. Keeping a position whose base
+        is gone costs entries until an operator restarts; dropping one whose
+        base is still there lets the next signal open a SECOND entry on top of
+        it, and no later edit un-places that.
+
+        **IT REUSES `_retain_position_unprotected` RATHER THAN WRITING
+        `protection` ITSELF.** That method's docstring counts the writers of
+        this field, and a third would make its own count false while adding a
+        third source of one truth. It takes a bare symbol, so nothing has to be
+        fabricated to call it from here.
+
+        **IT DOES NOT CALL `_refuse`, and the discriminator is
+        `_sold_unbooked`'s rather than a new one**: the close SUCCEEDED -- the
+        venue is flat and the signal got what it asked for -- so
+        `dispatch_refused` would log a refusal against a `CLOSE` that did its
+        job. `_go_naked_retaining` DOES refuse, and correctly, because there the
+        sell's outcome is unknown and the close may not have happened. The
+        family splits on "did the close happen", not on "is the position gone".
+
+        **IT RELEASES THE CLOSE RECORD.** The venue has been asked twice -- the
+        `create_order` response and the re-read by the derived close id -- and
+        answered both times without a total. A retained record would buy a third
+        query and hold the symbol another bar for it; `_go_naked_retaining`
+        retains because its question is *did the sell happen*, which is
+        unanswered, and here it is answered.
+
+        **WHAT IS LOST, STATED RATHER THAN HIDDEN.** That trade's realised P&L
+        is unrecoverable in-process: the proceeds figure never existed on this
+        client, and `close_position` prices realised P&L from it. The operator
+        path is the venue's own trade history, which is what the resolution
+        text sends them to.
+        """
+        self._retain_position_unprotected(signal.symbol)
+        _log.critical(
+            "%s: the close sell FILLED and the venue reported NO QUOTE TOTAL -- nothing "
+            "could be booked and the position is kept unprotected",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_SOLD_UNPRICED,
+                "symbol": signal.symbol,
+                "reason": reason,
+                "quantity": position.quantity,
+                "entry_bar_time": position.entry_bar_time.isoformat(),
+                "generation": _CLOSE_GENERATION,
+                "close_client_order_id": close_client_order_id(
+                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                ),
+                "venue_order_list_id": position.venue_order_list_id,
+                "status": order.status.value,
+                "executed_qty": order.filled_quantity,
+                "order_id": order.order_id,
+                "resolution": (
+                    "THE SELL FILLED IN FULL and the venue gave no quote total, twice -- "
+                    "on the order response and on the re-read by the close id below. "
+                    "NOTHING WAS BOOKED and no proceeds were credited, so this trade is "
+                    "NOT in the ledger and its realised P&L cannot be reconstructed here. "
+                    "Look the fill up in the venue's trade history by that id and enter it "
+                    "by hand. DO NOT SELL THIS BASE AGAIN -- the whole position executed. "
+                    "The position is KEPT and marked UNKNOWN, so entries are refused on "
+                    "every symbol until an operator clears it by restarting."
+                ),
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
+        self._release_close(signal.symbol)
 
     def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
         """Protection is cancelled and the position is not closed. RULING 6.
