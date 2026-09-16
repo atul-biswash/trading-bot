@@ -1880,10 +1880,23 @@ class OrderExecutor:
             # a request and nothing else -- no `timeout_s`, no `attempts` --
             # where the ADAPTER's own method accepts both. So the bounds
             # computed above cannot be handed to it, and the sell runs under the
-            # client's default policy instead: `idempotent=False`, so retries
-            # only on a rate limit, but up to `retry_attempts` at
-            # `requests_timeout_s` each. `CLAUDE.md` records that worst case as
-            # 43.5s, which EXCEEDS `dispatch_deadline_s = 9.0`.
+            # client's default policy instead.
+            #
+            # **THE BOUND ON THE PATH THAT MATTERS IS 10.0s, NOT 43.5s** --
+            # `M5h-352`. This comment used to end at `CLAUDE.md`'s 43.5s worst
+            # case, which reads as though that figure bounds the TIMEOUT path.
+            # It does not. `idempotent=False` narrows retries to
+            # `RateLimitError`, so a connection timeout takes ONE attempt and
+            # the bound is `requests_timeout_s` = 10.0s -- already over
+            # `dispatch_deadline_s = 9.0`, with no retry at all. 43.5s is
+            # reachable only on FOUR CONSECUTIVE RATE LIMITS, which is a
+            # different path and a rarer one.
+            #
+            # `CLAUDE.md` is not wrong and needs no correction: it states 43.5s
+            # as the worst case for a WRITE, names `RateLimitError` as the
+            # measurement's basis, and already observes that a write exceeds
+            # `D` with no retry at all. What was wrong was quoting its figure
+            # here, where the surrounding sentence is about the timeout.
             #
             # Not widened here: the port change is a separate decision and this
             # commit is authorised for one port method. Named rather than left
@@ -2157,12 +2170,22 @@ class OrderExecutor:
         shape `CLAUDE.md` warns about, and this is that method's second call
         site rather than a new path.
 
-        **THE THIRD COPY OF THE COST-BASIS CRITERION IS UPSTREAM OF HERE, AND
-        IT IS A DEBT.** Ruling 2 authorises it only because option 3 is mandated
-        to deliver one shared bookability predicate consumed by
-        `_bookable_total`, by `_sell_and_book` and by `reconciliation_driver`'s
-        row ladder. `test_bookability_criterion_census.py` holds the count at
-        three so the debt cannot quietly become four.
+        **THE COST-BASIS CRITERION IS UPSTREAM OF HERE AND IT EXISTS ONCE.**
+        Ruling 2 authorised a third copy of it only because option 3 was
+        mandated to retire all three into one shared predicate; option 3 half
+        (ii)b did that, and `execution/bookability.py::classify_bookability` is
+        what `_bookable_total`, `_sell_and_book` and `reconciliation_driver`'s
+        row ladder each now ask. The debt is paid.
+        `test_bookability_criterion_census.py` holds `EXPECTED_PREDICATES` at
+        ONE site.
+
+        **A COUNT OF ONE DOES NOT PROVE THE REWIRING, WHICH IS WHY THERE ARE
+        TWO TESTS.** That census matches `entry_fill_price is None`
+        comparisons, and a call site that DELETED its check and routed nowhere
+        has none either -- so the census scores "rewired" and "deleted" alike.
+        `test_all_three_call_sites_consume_the_shared_predicate` is what
+        separates them, by collecting the functions that actually call the
+        predicate.
         """
         _log.critical(
             "%s: the close sell FILLED and was DROPPED UNBOOKED -- this bot has no cost "
