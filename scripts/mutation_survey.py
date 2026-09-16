@@ -32,13 +32,29 @@ recovery afterwards. Every print here is derived from that offset:
 A deletion is printed exactly as informatively as a replacement, which matters
 because deletions are the majority of every survey this project has run.
 
-**A CRASH IS AN ABSTENTION, NEVER A KILL.** ``CLAUDE.md``: *"Confirm the test
-that fails is the one meant to, and that it reports the wrong value -- a wrong
-stage, not an ``AttributeError`` or a collection error. A crash means the
-mutation broke something else on the way and the assertion was never reached;
-that is not coverage."* A pytest run reporting ``ERROR`` lines, or exiting with
-a status that is neither 0 nor 1, is reported as ABSTAINED and its failure count
-is not counted as a kill.
+**A CRASH IS NEVER A KILL.** ``CLAUDE.md``: *"Confirm the test that fails is
+the one meant to, and that it reports the wrong value -- a wrong stage, not an
+``AttributeError`` or a collection error. A crash means the mutation broke
+something else on the way and the assertion was never reached; that is not
+coverage."*
+
+**THAT SENTENCE USED TO READ "IS AN ABSTENTION", AND THE TWO CASES HAVE NOW
+SEPARATED** -- ``M5i-103``. They are different states and only one of them was
+ever implemented:
+
+* the SUITE produced no verdict -- ``ERROR`` lines, or an exit status that is
+  neither 0 nor 1 -- and the row is ABSTAINED, as before. Nothing ran.
+* a TEST was reached and died somewhere other than an assertion. The suite
+  produced a verdict; that test simply proved nothing. It is scored **0** and
+  reported as a CRASH beside the kills, because it is neither coverage nor an
+  abstention.
+
+Until this commit the second case was counted as a KILL. MEASURED: commit A's
+D4 reported 4 where two were a ``KeyError`` and a ``ValueError`` at unguarded
+unpacks, and only a hand pass separated them. :func:`classify_failure` is what
+separates them now, and the definition of a kill is THREE exception types
+rather than one -- see its constant for why, and why one type was the wrong
+answer in the expensive direction.
 
 **AND SOURCE THAT WILL NOT PARSE IS NEITHER -- IT ABORTS THE RUN.** The
 mutated file is ``compile``d before pytest is dispatched, and a ``SyntaxError``
@@ -52,10 +68,17 @@ collection, and classified ABSTAINED, which reads as *"the mutation applied and
 nothing noticed"* and is a coverage gap that does not exist. ``CLAUDE.md`` names
 a false abstention as the expensive direction.
 
-**RESTORE IS A BYTE COPY, VERIFIED BY MD5, IN A ``finally``.** Never
+**RESTORE IS A BYTE COPY, VERIFIED BY SHA-256, IN A ``finally``.** Never
 ``read_text``/``write_text``: that round-trips newlines and produces a byte
 mismatch against this LF-pinned tree -- content-identical, checksum-different,
 and indistinguishable from real corruption until diffed.
+
+**AND THE BACKUP LIVES OUTSIDE THE TREE.** It sat beside its target until
+``M5i-084`` was mechanised -- inside `src/`, and removed in a ``finally``
+INCLUDING on the path where the restore had just failed, which is precisely
+when a clean copy is wanted. It is now a temp file whose path is printed before
+the first byte moves, and it is KEPT when a restore fails. A mismatch raises
+:exc:`HarnessStateError`.
 
 Usage::
 
@@ -95,9 +118,13 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Final
 
+import pytest
 from check import pipe_refusal
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -109,6 +136,122 @@ CONTEXT = 6
 #: read. 0 is all-passed, 1 is tests-failed. Everything else -- interrupted,
 #: internal error, usage error, nothing collected -- means no verdict.
 _READABLE_EXITS = frozenset({0, 1})
+
+#: **WHAT COUNTS AS A KILL, and it is THREE types rather than one.** `M5i-115`.
+#:
+#: ``CLAUDE.md`` asks whether *"the failing statement is a test assertion"*. The
+#: obvious reading -- credit only ``AssertionError`` -- is WRONG, and wrong in
+#: the expensive direction. Three pytest constructs are assertions and only one
+#: of them raises ``AssertionError``:
+#:
+#: * a bare ``assert x``                     -> ``AssertionError``
+#: * an unmet ``pytest.raises(...)``         -> ``Failed`` ("DID NOT RAISE")
+#: * ``pytest.fail(...)``                    -> ``Failed``
+#:
+#: And a test whose contract is *"this must NOT raise"* fails by letting the
+#: exception ESCAPE, so it can never report an ``AssertionError`` at all --
+#: ``SystemExit`` is the case this repository actually has, in the guard tests.
+#: MEASURED at the guard commit: under an ``AssertionError``-only rule, H3
+#: credited 1 of 4 real kills and H4 credited 1 of 2. Those are FALSE
+#: ABSTENTIONS, which ``CLAUDE.md`` names as the direction that costs most --
+#: coverage that exists, filed as coverage that does not.
+#:
+#: **`pytest.fail.Exception` RATHER THAN `from _pytest.outcomes import
+#: Failed`.** They are the SAME OBJECT -- measured, ``is`` -- but one is public
+#: and one is not. ``pytest.fail`` is documented API and pytest sets
+#: ``.Exception`` on it itself, so a reorganisation of ``_pytest.outcomes``
+#: carries the attribute with it. If pytest ever removed the attribute this
+#: module would raise ``AttributeError`` AT IMPORT, loudly, before any survey
+#: scored anything -- rather than silently reclassifying every `Failed` as a
+#: crash, which is what a stale private import would do.
+#:
+#: Note ``Failed`` and ``SystemExit`` are ``BaseException`` and NOT
+#: ``Exception``; ``issubclass`` spans both, a bare ``except Exception`` would
+#: not.
+_KILL_EXCEPTIONS: Final[tuple[type[BaseException], ...]] = (
+    AssertionError,
+    pytest.fail.Exception,
+    SystemExit,
+)
+
+#: Where the in-subprocess hook writes its verdicts. Set by :func:`run_suite`.
+_VERDICT_ENV = "MUTATION_SURVEY_VERDICTS"
+
+
+def classify_failure(*, when: str, exc_type: type[BaseException]) -> bool:
+    """``True`` when this failure is a KILL rather than a crash.
+
+    Pure, and separate from the hook for the reason :func:`check.pipe_refusal`
+    is separate from its caller: the decision is then testable against
+    synthetic inputs without running pytest at all.
+
+    **``when`` MUST BE ``"call"``.** A failure in ``setup`` or ``teardown`` is
+    a fixture that broke, which pytest reports as ``ERROR`` rather than
+    ``FAILED`` -- the mutation never reached the test body, so nothing was
+    measured. ``CLAUDE.md``: *"A crash means the mutation broke something else
+    on the way and the assertion was never reached; that is not coverage."*
+
+    **THE FRAME THE EXCEPTION COMES FROM IS NOT THE TEST.** Location is the
+    tempting discriminator and it is the wrong one, in both directions.
+    ``(record,) = records`` raises ``ValueError`` INSIDE the test file and is a
+    crash -- `M5i-104` is the measured case. An unmet ``pytest.raises`` raises
+    ``Failed`` from inside pytest, OUTSIDE the test file, and is a kill. Only
+    the TYPE separates them.
+    """
+    return when == "call" and issubclass(exc_type, _KILL_EXCEPTIONS)
+
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_makereport(item: Any, call: Any) -> Any:
+    """Record the real exception CLASS for every failing test.
+
+    **A HOOKWRAPPER BECAUSE ``call.excinfo`` DOES NOT SURVIVE THE REPORT.** The
+    report is built to be serialisable, so the traceback object is discarded
+    and only a rendered string remains. Wrapping ``makereport`` is the one
+    place the live exception is still in hand.
+
+    **AND THE ALTERNATIVE -- PARSING PYTEST'S OUTPUT -- WAS MEASURED AND
+    REJECTED.** At this repository's node-id lengths the short summary's
+    ``- <reason>`` is TRUNCATED AWAY entirely under capture, because the
+    default width is 80 columns when stdout is not a terminal. And even when
+    it survives, a bare ``assert x == y`` renders as ``assert 0 == 1`` with no
+    type name in it at all, so any text discriminator must special-case
+    pytest's assertion rewriting. A class needs no special case.
+
+    This module is loaded into the subprocess as a plugin by :func:`run_suite`;
+    outside that, ``_VERDICT_ENV`` is unset and the hook records nothing, so
+    importing this file has no effect on an ordinary pytest run.
+    """
+    outcome = yield
+    report = outcome.get_result()
+    destination = os.environ.get(_VERDICT_ENV)
+    if destination is None or not report.failed or call.excinfo is None:
+        return
+    exc_type = call.excinfo.type
+    row = {
+        "nodeid": report.nodeid,
+        "when": call.when,
+        "type": exc_type.__name__,
+        "kill": classify_failure(when=call.when, exc_type=exc_type),
+    }
+    with open(destination, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row) + "\n")
+
+
+class HarnessStateError(Exception):
+    """The target was not restored to the bytes the run began with.
+
+    **A HARNESS FAULT OF THE WORST KIND: THE TREE IS DIRTY AND THE SURVEY IS
+    OVER.** Distinct from :exc:`HarnessAnchorError`, which means nothing was
+    measured; this means something was measured and the file under `src/` no
+    longer matches what it was. `M5i-084` is the measured case -- a survey
+    piped through ``head`` left `src/` mutated on disk, and recovery depended
+    on a copy someone had taken by hand.
+
+    The backup is NOT deleted when this raises. Its path is printed at the top
+    of every run precisely so a hard kill, or this, is recoverable by hand.
+    """
+
 
 #: Set to any non-empty value to allow a piped run. **PRESENCE IS THE WHOLE
 #: SIGNAL, so ``SURVEY_ALLOW_PIPE=0`` ALLOWS the pipe.** The spelling invites
@@ -248,10 +391,47 @@ class Result:
     exit_code: int
     abstained: bool
     abstain_cause: str
+    #: Failures at a test ASSERTION. This is the score. `M5i-103`.
+    kills: int = 0
+    #: Failures that reached the test and died elsewhere. Scored 0, printed
+    #: anyway: a crash is a test that was reached and proved nothing, which is
+    #: different from a test that was never reached and from one that passed.
+    crashes: int = 0
 
 
-def md5(path: Path) -> str:
-    return hashlib.md5(path.read_bytes()).hexdigest()
+def sha256(path: Path) -> str:
+    """The target's digest. **SHA-256, and the width is the point.**
+
+    It replaced md5 with the snapshot. Nothing here is adversarial, so md5's
+    weakness was never the objection -- what a wider digest buys is that
+    "restored == baseline" cannot be doubted for the one reason a reader would
+    otherwise have to consider. This runs twice per mutation on one file.
+    """
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@dataclass(frozen=True)
+class SuiteOutcome:
+    """One pytest run, summarised BOTH ways.
+
+    The two halves are deliberately kept side by side rather than collapsed.
+    ``failed``/``errored`` come from the short summary, parsed at column 0, and
+    are unchanged and still correct -- they are the CROSS-CHECK. ``kills`` and
+    ``crashes`` come from the in-process hook and are what the summary cannot
+    carry: a ``FAILED`` line says a test failed and never says whether it
+    failed at an assertion.
+
+    ``total`` is the classified failure count. It should equal ``len(failed)``
+    and a divergence is worth reporting rather than smoothing: it would mean
+    the hook and the summary disagree about what failed.
+    """
+
+    exit_code: int
+    failed: tuple[str, ...]
+    errored: tuple[str, ...]
+    kills: int
+    crashes: int
+    total: int
 
 
 def line_of(data: bytes, offset: int) -> int:
@@ -310,8 +490,14 @@ def load_spec(path: Path) -> tuple[Path, list[Mutation]]:
     return target, mutations
 
 
-def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
-    """Run pytest from the repo root; return exit code, FAILED and ERROR ids.
+def run_suite(*, args: Sequence[str] = ()) -> SuiteOutcome:
+    """Run pytest from the repo root and classify every failure.
+
+    ``args`` are appended to the pytest command line. **THE DEFAULT IS EMPTY,
+    so every existing survey is unchanged** -- it still runs the whole suite
+    from ``testpaths``. The parameter exists because the self-tests cannot: four
+    whole-suite runs inside a unit test is eight minutes, where a throwaway
+    target is under half a second.
 
     Output is CAPTURED, never piped through a filter: a pipeline's exit status
     is the LAST stage's, and the status is what decides whether this run
@@ -352,15 +538,41 @@ def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
     ASCII node ids out of the summary section; a mangled byte inside some
     unrelated test's captured output must not be able to void a survey.
     """
-    proc = subprocess.run(
-        [sys.executable, "-m", "pytest"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        check=False,
+    scratch = Path(tempfile.mkdtemp(prefix="mutation-survey-verdicts-"))
+    verdicts = scratch / "verdicts.jsonl"
+    env = dict(os.environ)
+    env[_VERDICT_ENV] = str(verdicts)
+    # THIS MODULE IS THE PLUGIN. `scripts/` is not a package, so the subprocess
+    # is told where to find it rather than being expected to guess -- the same
+    # path `sys.path[0]` supplies for a direct invocation. Loading the harness
+    # into the runner keeps the hook beside the code that reads its output;
+    # a separate plugin file would be a second thing to keep in step.
+    env["PYTHONPATH"] = os.pathsep.join([str(ROOT / "scripts"), env.get("PYTHONPATH", "")]).rstrip(
+        os.pathsep
     )
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "pytest", "-p", "mutation_survey", *args],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            env=env,
+            check=False,
+        )
+        rows = (
+            [
+                json.loads(line)
+                for line in verdicts.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
+            if verdicts.exists()
+            else []
+        )
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
     body = proc.stdout.splitlines()
     start = next((i for i, line in enumerate(body) if "short test summary info" in line), len(body))
     summary = body[start:]
@@ -372,10 +584,24 @@ def run_suite() -> tuple[int, tuple[str, ...], tuple[str, ...]]:
             if line.startswith(prefix) and "::" in line
         )
 
-    return proc.returncode, ids("FAILED "), ids("ERROR ")
+    kills = sum(1 for row in rows if row["kill"])
+    return SuiteOutcome(
+        exit_code=proc.returncode,
+        failed=ids("FAILED "),
+        errored=ids("ERROR "),
+        kills=kills,
+        crashes=len(rows) - kills,
+        total=len(rows),
+    )
 
 
-def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Result | None:
+def apply_and_report(
+    target: Path,
+    mutation: Mutation,
+    *,
+    dry_run: bool,
+    suite_args: Sequence[str] = (),
+) -> Result | None:
     """Apply one mutation, print it exactly, and run the suite.
 
     Returns ``None`` when the anchor did not match exactly once -- in which case
@@ -407,7 +633,7 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
     target.write_bytes(data[:offset] + mutation.replacement + data[offset + len(mutation.anchor) :])
 
     mutated = target.read_bytes()
-    print(f"  mutated md5   : {md5(target)}")
+    print(f"  mutated sha   : {sha256(target)}")
     print(f"  --- region AFTER mutation, at line {line_no} ---")
     print_region(mutated, line_no, ">>")
 
@@ -432,7 +658,8 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
         print("  (--dry-run: the suite was not run; this is not a survey result)")
         return None
 
-    exit_code, failed, errored = run_suite()
+    outcome = run_suite(args=suite_args)
+    exit_code, failed, errored = outcome.exit_code, outcome.failed, outcome.errored
     abstained = bool(errored) or exit_code not in _READABLE_EXITS
     cause = ""
     if errored:
@@ -447,7 +674,20 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
         for line in errored:
             print(f"      ERROR  {line}")
     else:
-        print(f"  --- {len(failed)} KILLED ---")
+        # **THE CLASSIFIED COUNT IS THE RESULT; `len(failed)` IS THE RAW ONE.**
+        # `M5i-103`: this line read `len(failed)` and scored a crash as a kill.
+        # MEASURED at commit A -- D4 reported 4 where two were a `KeyError` and
+        # a `ValueError` at unguarded unpacks, and only a hand pass separated
+        # them. Both numbers are printed because a DIVERGENCE is the finding:
+        # the crashes are tests that were reached and proved nothing.
+        print(f"  --- {outcome.kills} KILLED ---  (raw FAILED: {len(failed)})")
+        if outcome.crashes:
+            print(f"      {outcome.crashes} CRASHED -- reached, proved nothing, scored 0")
+        if outcome.total != len(failed):
+            print(
+                f"      NOTE: the hook saw {outcome.total} failures and the summary "
+                f"{len(failed)}; they should agree."
+            )
         for line in failed:
             print(f"      FAILED {line}")
     return Result(
@@ -458,7 +698,49 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
         exit_code=exit_code,
         abstained=abstained,
         abstain_cause=cause,
+        kills=outcome.kills,
+        crashes=outcome.crashes,
     )
+
+
+def describe_vcs_state(target: Path) -> str:
+    """Whether the target is tracked and clean. **ADVISORY, NEVER A REFUSAL.**
+
+    **A DIRTY TARGET IS THE NORMAL CASE, not a warning sign.** Commits A and B
+    both surveyed uncommitted edits, and they had to: surveying the committed
+    version would measure the PREVIOUS commit, which is not the thing under
+    review. A harness that refused here would refuse every survey this
+    milestone actually ran.
+
+    So this reports and returns. `M5i-084`'s rule is satisfied by the
+    out-of-tree backup above rather than by interrogating git -- the snapshot
+    exists whatever git says, which is the stronger guarantee. If the owner
+    later rules that an untracked target must be refused, that is one ``if``
+    at the call site and this function already computes the fact.
+
+    Never raises: git may be absent, the tree may not be a checkout, and
+    neither is a reason to abandon a survey.
+    """
+    try:
+        tracked = subprocess.run(
+            ["git", "ls-files", "--error-unmatch", str(target)],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        if tracked.returncode != 0:
+            return "target is UNTRACKED -- the out-of-tree backup is the only copy"
+        dirty = subprocess.run(
+            ["git", "diff", "--quiet", "HEAD", "--", str(target)],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+    except OSError as exc:  # git missing, or not a checkout
+        return f"vcs state unknown ({type(exc).__name__}) -- backup taken regardless"
+    if dirty.returncode == 0:
+        return "target is tracked and clean"
+    return "target has uncommitted edits -- normal for a survey of work in progress"
 
 
 def main() -> int:
@@ -484,16 +766,26 @@ def main() -> int:
         print(f"REFUSED: target {target} does not exist")
         return 2
 
-    baseline = md5(target)
-    backup = target.with_suffix(target.suffix + ".mutation-backup")
+    baseline = sha256(target)
+    # **OUT OF THE TREE, AND THAT IS `M5i-084`'s RULE MECHANISED.** The backup
+    # sat BESIDE its target until now -- inside `src/`, deleted in a `finally`
+    # including on the path where the restore had just FAILED, which is exactly
+    # when it is wanted. A temp directory survives that, survives a hard kill,
+    # and cannot be mistaken for a source file by anything that walks `src/`.
+    backup_dir = Path(tempfile.mkdtemp(prefix="mutation-survey-backup-"))
+    backup = backup_dir / target.name
     print(f"target        : {target.relative_to(ROOT).as_posix()}")
-    print(f"baseline md5  : {baseline}")
+    print(f"baseline sha  : {baseline}")
     print(f"mutations     : {len(mutations)}")
+    # PRINTED BEFORE THE FIRST BYTE MOVES, so a process killed mid-run leaves
+    # an operator a path rather than a puzzle.
+    print(f"backup        : {backup}")
+    print(f"vcs           : {describe_vcs_state(target)}")
 
     shutil.copy2(target, backup)
-    if md5(backup) != baseline:
+    if sha256(backup) != baseline:
         print("REFUSED: the byte copy does not match the original")
-        backup.unlink(missing_ok=True)
+        shutil.rmtree(backup_dir, ignore_errors=True)
         return 2
 
     results: list[Result] = []
@@ -516,21 +808,35 @@ def main() -> int:
                 aborted = str(exc)
             finally:
                 shutil.copy2(backup, target)
-                restored = md5(target)
-                print(f"  original md5  : {baseline}")
-                print(f"  restored md5  : {restored}")
+                restored = sha256(target)
+                print(f"  original sha  : {baseline}")
+                print(f"  restored sha  : {restored}")
                 if restored == baseline:
-                    print("  restore verified by md5")
+                    print("  restore verified by BYTE IDENTITY")
                 else:
                     print("  FAILED TO RESTORE -- THE TREE IS DIRTY. Stopping.")
                     dirty = True
             if dirty or aborted:
                 break
     finally:
-        backup.unlink(missing_ok=True)
+        # **THE BACKUP IS KEPT WHEN THE RESTORE FAILED.** Deleting it there was
+        # the old behaviour and it destroyed the only clean copy at the one
+        # moment it was needed. `M5i-084`.
+        if not dirty:
+            shutil.rmtree(backup_dir, ignore_errors=True)
+        else:
+            print(f"\n  THE BACKUP IS KEPT: {backup}")
+            print("  Copy it back over the target by hand before doing anything else.")
 
     if dirty:
-        return 2
+        # **RAISED AFTER THE LOOP, NEVER FROM INSIDE THE `finally`.** A raise
+        # there replaces whatever exception is in flight, and a restore failure
+        # is precisely when a real one is most likely to be travelling -- the
+        # same reasoning the `dirty` flag already carries for `return`.
+        raise HarnessStateError(
+            f"{target} was not restored: expected {baseline}, found {restored}. "
+            f"A clean copy is at {backup}."
+        )
 
     if aborted:
         # NO SUMMARY IS PRINTED. Rows already scored before the bad anchor are
@@ -549,7 +855,8 @@ def main() -> int:
                 print(f"  {result.id}: ABSTAINED -- {result.abstain_cause}")
             else:
                 names = [f.split("::")[-1] for f in result.failed]
-                print(f"  {result.id}: {len(result.failed)} killed -- {names}")
+                crashed = f", {result.crashes} crashed" if result.crashes else ""
+                print(f"  {result.id}: {result.kills} killed{crashed} -- {names}")
     return 0
 
 
