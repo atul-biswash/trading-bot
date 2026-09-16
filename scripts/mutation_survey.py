@@ -91,11 +91,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from check import pipe_refusal
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -106,6 +109,86 @@ CONTEXT = 6
 #: read. 0 is all-passed, 1 is tests-failed. Everything else -- interrupted,
 #: internal error, usage error, nothing collected -- means no verdict.
 _READABLE_EXITS = frozenset({0, 1})
+
+#: Set to any non-empty value to allow a piped run. **PRESENCE IS THE WHOLE
+#: SIGNAL, so ``SURVEY_ALLOW_PIPE=0`` ALLOWS the pipe.** The spelling invites
+#: the opposite reading and is stated here because nothing reports it: anyone
+#: exporting it as ``0`` believing they have disabled the hatch has enabled it.
+#: The reason is `check.py`'s and is unchanged -- a parser for falsey spellings
+#: would be a second thing to keep true for no gain.
+#:
+#: **DELIBERATELY NOT `CHECK_ALLOW_PIPE`, and the two must not be merged.**
+#: That one exists so a legitimate consumer of the GATE's exit status -- CI, a
+#: pre-commit hook, an editor task -- can pipe it. Those consumers have no
+#: business unlocking a script that REWRITES `src/` in place, and an operator
+#: who exported the gate's name for a CI task would otherwise be silently
+#: unguarded here. One mechanism, two switches: the decision function is
+#: imported from `check.py` rather than copied, so there is one implementation
+#: of what a pipe is, and two independent answers to whether it is allowed.
+_ALLOW_PIPE_ENV = "SURVEY_ALLOW_PIPE"
+
+_UNREAD_SURVEY = (
+    "\nRefusing to run: this survey's output is being piped, so the record of what "
+    "was\nmutated is not the one you will read.\n\n"
+    "  stdout : a pipe (FIFO)\n"
+    f"  set    : {_ALLOW_PIPE_ENV} is unset\n\n"
+    "THIS SCRIPT REWRITES A FILE UNDER `src/` AND RESTORES IT. Its output is the "
+    "only\nrecord of which mutation ran, and a pipeline's exit status is the LAST "
+    "stage's,\nso a truncated run reports success no matter what happened to the "
+    "tree. That has\nalready cost this project a file left MUTATED ON DISK with "
+    "its output destroyed:\nthe survey was piped through `head`, the run could not "
+    "be repeated, and recovery\ndepended on a copy taken by hand beforehand.\n\n"
+    "1. RUN IT BARE in the terminal, and read its own summary:\n"
+    "       python scripts/mutation_survey.py <spec.json>\n\n"
+    "2. Or REDIRECT FROM A SHELL THAT PASSES A GENUINE FILE DESCRIPTOR -- cmd.exe\n"
+    "   or git-bash. A real file keeps both the exit status and every line:\n"
+    "       python scripts/mutation_survey.py <spec.json> > survey.txt\n\n"
+    "   POWERSHELL IS NOT ONE OF THEM, AND THIS GUARD IS NOT MISFIRING. PowerShell\n"
+    "   routes a native command's stdout through an ANONYMOUS PIPE and writes the\n"
+    "   file itself, so the descriptor this process is handed really is a FIFO and\n"
+    "   is indistinguishable from `| head`. MEASURED on this machine: PowerShell\n"
+    "   `> file` reports st_mode 0o10000 (FIFO) where cmd.exe and git-bash both\n"
+    "   report 0o100666 (regular file).\n\n"
+    "3. Or, LAST and deliberately, for a PowerShell redirect or a caller that reads\n"
+    "   this process's own exit status:\n"
+    f"       $env:{_ALLOW_PIPE_ENV}=1; python scripts/mutation_survey.py <spec.json> > survey.txt\n"
+)
+
+
+def _require_readable_output() -> None:
+    """Exit non-zero when stdout is a pipe and no opt-out was given.
+
+    **THE DECISION IS `check.py`'s, IMPORTED RATHER THAN COPIED.**
+    :func:`check.pipe_refusal` is already pure for exactly this reason -- its
+    own docstring says it is kept separate *"so the decision is testable
+    against synthetic and real descriptors alike"* -- and a second copy of
+    "what counts as a pipe" is a second thing to keep true. Only a FIFO is
+    refused: a regular file (``> survey.txt``) preserves both the exit status
+    and every line, and a character device is a terminal or ``os.devnull``.
+    **Every survey in this milestone redirected to a file, and every one still
+    runs.**
+
+    Its RETURN VALUE is used as a predicate and its message is discarded,
+    which is deliberate rather than wasteful: that string names the gate, its
+    remedy and ``CHECK_ALLOW_PIPE``, and none of those is this script's story.
+
+    Degrades to *allow* when stdout cannot be stat'd, matching
+    :func:`check._require_readable_output`: a captured stream with no real
+    descriptor raises on ``fileno()``, and a guard that crashes the survey
+    because it could not inspect a file descriptor is a guard people delete.
+
+    **WHY THIS EXISTS AT ALL.** `M5i-084` and `M5i-097`: four breaches of the
+    no-piping rule in this milestone, against a rule every party could quote,
+    with `check.py` refusing and this script not. The worst left `src/`
+    mutated on disk. A rule that lives only in prose is one this project has
+    now watched fail four times.
+    """
+    try:
+        st_mode = os.fstat(sys.stdout.fileno()).st_mode
+    except (AttributeError, OSError, ValueError):
+        return
+    if pipe_refusal(st_mode, allow_pipe=bool(os.environ.get(_ALLOW_PIPE_ENV))) is not None:
+        raise SystemExit(_UNREAD_SURVEY)
 
 
 class HarnessAnchorError(Exception):
@@ -379,6 +462,11 @@ def apply_and_report(target: Path, mutation: Mutation, *, dry_run: bool) -> Resu
 
 
 def main() -> int:
+    # FIRST, BEFORE THE SPEC IS EVEN PARSED. A refusal must leave the tree
+    # exactly as it found it, and the only way to guarantee that is to refuse
+    # before anything is read, copied or written -- there is no backup to
+    # restore from yet, and no mutation to undo.
+    _require_readable_output()
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
     )
