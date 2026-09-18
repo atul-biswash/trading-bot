@@ -73,11 +73,12 @@ the list, re-queries each leg (because a leg can fill *during* the cancel), sell
 is never learned keeps its record and is re-observed on the next candle.
 
 **What has NOT happened is the thing to keep in view.** Supervised runs have
-taken **62 complete exits** across 82 order lists, and the log that records them
+taken **67 complete exits** across 88 order lists, and the log that records them
 is gitignored — `docs/RUN_LEDGER.md` holds the census, with the command behind
 each figure and the digest of the capture they came from. The paths added since
-M5h have still not run. After 82 placements and 62 closes, **no take-profit has
-ever filled** and **one of the three close-plan outcomes — `HALT` — has never
+M5h have still not run. After 88 placements and 67 closes, **a take-profit has
+filled** — once, on 2026-09-18, found by the reconciler one pass later — and
+**one of the three close-plan outcomes — `HALT` — has never
 occurred**; `ALREADY_CLOSED` occurred once, on 2026-09-15, and the
 ambiguous-placement recovery ran on 2026-08-27. See `docs/NEXT_MILESTONE.md`.
 
@@ -189,10 +190,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  118 files already formatted
-mypy                                   Success: no issues found in 74 source files
-pytest                                 1639 passed, 4 skipped
-                                       (1642 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  122 files already formatted
+mypy                                   Success: no issues found in 76 source files
+pytest                                 1658 passed, 4 skipped
+                                       (1661 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -201,9 +202,9 @@ pytest                                 1639 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `1639 passed, 4 skipped` on a machine without
-  them and `1642 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 1639 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `1658 passed, 4 skipped` on a machine without
+  them and `1661 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 1658 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.

@@ -1486,10 +1486,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  118 files already formatted
-mypy                                   Success: no issues found in 74 source files
-pytest                                 1639 passed, 4 skipped
-                                       (1642 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  122 files already formatted
+mypy                                   Success: no issues found in 76 source files
+pytest                                 1658 passed, 4 skipped
+                                       (1661 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1498,14 +1498,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1642 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `1639 passed, 4 skipped` on a machine without them
+- `1661 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `1658 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1639 and must not read it as a regression against a documented
-1642. Quote the count with its condition, never bare.
+runner will see 1658 and must not read it as a regression against a documented
+1661. Quote the count with its condition, never bare.
 
-Only the `1642` is measured here; `1639 passed, 4 skipped` is that run minus the
+Only the `1661` is measured here; `1658 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -1596,8 +1596,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 118 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 74 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 122 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 76 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -2736,6 +2736,57 @@ whether that answers the question actually asked.** Where the question names a
 past instant and the instrument reads the present, the answer is no, however
 exact the number.
 
+**A CAPTURE-BOUND CLAIM CARRIES ITS DIGEST INLINE, IN THE SENTENCE.** This is
+the operational form of the rule immediately above: an instrument is evidence
+for the instant it read, so a claim derived from a capture is a claim about
+those bytes and about no others. Writing the digest beside the claim is what
+lets a later reader tell a superseded observation from a false one.
+
+**The worked instance is a sentence in this file, and it went stale in three
+days.** An M5j annotation read *"**No take-profit has ever filled** — still
+true, zero `leg TP` fill clauses"*. It was true of the capture it was derived
+from and is false of the next one. Nothing in the sentence said which — *"still
+true"* names no bytes — so a reader meeting it after 2026-09-18 had no way to
+see that it was a past observation rather than a present claim. The sibling
+sentences in the same block that DID name their capture aged into the record
+visibly; that one simply became wrong.
+
+**A header is not enough, and that is the narrow point.** Putting the digest at
+the top of a section leaves every figure beneath it unattributed the moment it
+is quoted elsewhere — and figures are quoted elsewhere, which is how a count
+arrives in a second document with no instrument attached. The digest belongs in
+the sentence that makes the claim, not merely in the document that holds it.
+
+**`venue_time` IS THE VENUE ORDER RECORD'S LIFECYCLE TIMESTAMP, AND IT IS
+NEITHER OF THE TWO THINGS ITS NAME SUGGESTS.** Ruled at R3. `_exit_fill` in
+`execution/reconciliation.py` assigns `venue_time=order.created_at`, and
+`to_order` in `exchange/models.py` derives that as
+`_first_ms(raw, "transactTime", "time", "updateTime")` — the first of those
+keys the venue's own payload carries.
+
+**It is NOT a client-side clock.** Every key it reads is supplied by the venue;
+nothing local contributes, so it is not a receipt or dispatch instant measured
+by this process.
+
+**And it is NOT the matching-engine execution time.** That figure lives in
+`myTrades.time` and does not cross this port at all. On a point-query response
+for a resting protective leg there is no `transactTime`, so what survives is
+`time` — the order's CREATION timestamp.
+
+**The falsifying arithmetic needs no appeal to the code, which is why it is
+worth keeping.** On 2026-09-18 a booking line carried
+`venue_time=2026-09-18T13:29:00.594000+00:00` while this repository's own
+placement line for the same order list is stamped `13:29:02Z`. The value
+**precedes the placement by 1.4 seconds**, and a fill cannot precede the
+placement that created the order. A 1h52m "detection gap" was asserted from that
+field and disproved by a subtraction in the same two lines: the true detection
+window was 119 seconds.
+
+**The field is persisted**, so anything computing a holding period, a detection
+latency or a fill-time ordering from it is wrong by the position's whole
+lifetime. **The rename and the true fill time are scoped to the accounting
+milestone**, with the port widening `M5j-012` describes.
+
 **ARGUE A SILENCE FROM PRESENCE, NOT FROM ABSENCE.** *"I searched and found
 nothing"* is the weakest evidence this project produces, because it is returned
 identically by a true absence, a wrong pattern, a rotated file and an instrument
@@ -3512,3 +3563,29 @@ occurred**, **`resolve_placement` has never run**. See
 > have a value that differs from the name, and a sweep of every emission site in
 > `src/` found the tree itself passes `.value` everywhere — the defect was in
 > the searches, never in the code.
+
+> **ANNOTATED AT R3: X1 IS OBSERVED AND STRUCK. Two sentences above are now
+> false, one in the paragraph and one in the annotation beneath it.**
+>
+> **A TAKE-PROFIT LEG FILLED**, on 2026-09-18. So *"The three unobserved venue
+> facts are unchanged: **no take-profit has ever filled**"* is false, and so is
+> the annotation's own *"**No take-profit has ever filled** — still true"*.
+> MEASURED against a capture whose SHA-256 is
+> `bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182` —
+> 4,180,801 bytes, 21,781 lines, of which the capture behind the block above is
+> a byte-exact prefix: **1** clause naming a filled `TP` leg against **162**
+> naming a filled `SL` leg, the `SL` figure re-measured and unmoved, so this is
+> a new event rather than a re-reading. BTCUSDT, `order_list_id=171948`, booked
+> at `15:21:02Z` for `realised=63.0300952000` GROSS. `docs/RUN_LEDGER.md`
+> section 15 holds the record and `docs/NEXT_MILESTONE.md` strikes the item.
+>
+> **`decision=halt` IS NOW THE SOLE REMAINING UNOBSERVED VENUE FACT.** Of the
+> three this paragraph named, `resolve_placement` ran on 2026-08-27,
+> `ALREADY_CLOSED` occurred on 2026-09-15, and the take-profit filled on
+> 2026-09-18. `decision=halt` is re-measured at **zero** across **69** close
+> plans on the newer capture.
+>
+> **THE SECOND SENTENCE IS THE ONE WORTH THE LESSON.** It said *"still true"*
+> and named no capture, so nothing in it recorded which bytes it was true of —
+> and a claim without its instrument cannot age visibly. The capture-digest
+> rule below is that failure written down.

@@ -53,6 +53,8 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 _log = get_logger(__name__)
 
+_EVENT_STOPPED = "engine_stopped"
+
 _Key = tuple[str, str]
 
 # Default consecutive-failure budget when the engine is built directly rather
@@ -204,13 +206,33 @@ class TradingEngine:
         :meth:`request_stop` *arms* a shutdown and this *performs* one -- so a
         stop issued before the engine ever ran no longer pre-arms the next
         :meth:`run`.
+
+        **THE MESSAGE TEXT IS LOAD-BEARING AND STAYS BYTE-IDENTICAL.**
+        ``test_stop_twice_logs_once`` selects records by the substring
+        "Trading engine stopped", so a reworded message would empty that test's
+        record set and leave it green while pinning nothing -- the shape
+        ``M5i-126`` records. The structured fields are added beside the text
+        rather than in place of it, and no second line is emitted.
+
+        **``clean_shutdown`` reports whether the shutdown was REQUESTED, and it
+        is read before this method sets the flag itself.** :meth:`run` waits on
+        ``_stop_requested`` and calls this from a ``finally``, so the event is
+        already set when the wait returns normally and is NOT set when the wait
+        was interrupted -- a ``KeyboardInterrupt`` on Windows, or a teardown
+        reaching this directly. Reading it after line ``_stop_requested.set()``
+        would report ``True`` unconditionally and describe nothing; the local is
+        what keeps the field a measurement rather than a constant.
         """
         if not self._started:
             return
+        requested = self._stop_requested.is_set()
         self._started = False
         self._stop_requested.set()
         await self._provider.stop()
-        _log.info("Trading engine stopped")
+        _log.info(
+            "Trading engine stopped",
+            extra={"event": _EVENT_STOPPED, "clean_shutdown": requested},
+        )
 
     def request_stop(self) -> None:
         """Ask :meth:`run` to shut down. Safe to call from a signal handler.

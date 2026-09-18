@@ -651,17 +651,33 @@ carried:
 | close plans | **69** | `grep -c 'event=close_planned'` |
 | order lists placed | **88** | `grep -c 'event=order_placed'` |
 | complete exits | **67** (60 `close_booked` + 7 `exit_booked`) | `grep -c` on each |
-| log events DEFINED in `src/` | **33**, re-measured and unmoved | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
-| of those, NEVER emitted | **17**, re-measured and unmoved | `grep -c "event=<name>"` per constant, zero |
+| log events DEFINED in `src/` | **34** | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
+| of those, absent from the capture | **18** | `grep -c "event=<name>"` per constant, zero |
+| of those, NEVER emitted by an exercised path | **17** | the 18 above, less `engine_stopped` |
 | `RefusalStage` members defined | **14**, re-measured and unmoved | the enum body |
 | of those, unobserved | **9**, re-measured and unmoved | `grep -c "stage=<value>"` per member, zero |
 
 The close plans reconcile: `decision=sell` 68 plus `decision=already_closed` 1
 is 69, so of `CloseAction`'s three members exactly one — `HALT` — is unobserved.
 
-**The seventeen never-emitted events are the same seventeen.** A take-profit
-filling moved the `TP` clause count and moved no event into existence, because
-the path it exercised — classify, resolve, book — was already emitting.
+**THE DEFINED TOTAL MOVED TO 34 BECAUSE R3 ADDED ONE: `engine_stopped`.** It is
+the clean-teardown marker on `TradingEngine.stop`, attached to the existing
+emission rather than added as a second line, and it fires on **every** clean
+teardown — so it is not an unexercised branch in the sense the rest of this
+table measures.
+
+**AND THAT IS WHY THE REGISTER SPLITS IN TWO ROWS RATHER THAN ONE.** Measured
+against the capture the absent count is **18**, and it would be honest to stop
+there and wrong to leave it unexplained: the capture was taken on 2026-09-18,
+**before this event existed**, so its absence records the capture's age and not
+an unexercised path. The instrument read the right property at the wrong
+instant, which is the failure the rule in `CLAUDE.md` names — so both numbers
+are printed, with what separates them stated.
+
+**The seventeen genuinely-unexercised events are the same seventeen.** A
+take-profit filling moved the `TP` clause count and moved no event into
+existence, because the path it exercised — classify, resolve, book — was
+already emitting.
 
 **The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE = "e"`,
 `_WS_EVENT_KLINE = "kline"` and `_WS_EVENT_ERROR = "error"` in
