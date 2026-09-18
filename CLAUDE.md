@@ -2189,6 +2189,34 @@ design, not in any measurement it made.** So before concluding from a set of
 arms, ask which states they did **not** vary; and where a claim depends on a
 state, a discrimination run must vary that state.
 
+**AN ENUMERATION DERIVED FROM WHAT THE CODE CAN DO IS BLIND TO WHAT ANOTHER
+ACTOR CAN DO TO THE SAME ACCOUNT.** A bound over a hypothesis set is only as
+complete as the enumeration, and an enumeration built by reading `src/`
+silently assumes this process is the only writer.
+
+M5j's worked example, and it cost a wrong bound rather than a wrong number. An
+order list went terminal with nothing in the log, and the reasoning ran
+*"nothing in the tree cancels a list, so a leg filled"* — true of the tree,
+false of the world. Two hypotheses were enumerated, stop or take-profit, and
+bounded at `-34.34` and `+74.11`. **Both legs were `CANCELED` with
+`executedQty` zero and the base was sold by a `MARKET` order this bot did not
+place; the realised figure was `+9.82569000`, outside both.** The arithmetic was
+sound and the hypothesis space was not.
+
+The check is one question asked out loud: **does this enumeration assume the
+account has one writer?** Where the answer is yes and the account is shared with
+a human, a script or another process, the set is open and the bound is a lower
+bound on uncertainty rather than a bound on the value.
+
+Note what it is NOT covered by. The arm-set rule immediately above is about
+**states of the system under test** and assumes the experimenter controls the
+arms; *reason from what a thing reaches* is about a call site's reach rather
+than its purpose. Both live inside the tree. **Neither contemplates a writer
+outside `src/`**, which is the whole of what this adds.
+
+**Not mechanisable.** Nothing can enumerate the actions of an actor outside the
+tree, which is exactly why the assumption has to be stated rather than detected.
+
 Coverage found this way comes in three kinds, and they are not equivalent: an
 assertion that catches the mutation; an *implication* that makes an ordinary
 case double as the check (where one condition strictly implies another, the
@@ -2350,7 +2378,10 @@ renames) in **separate commits** from semantic ones. Never mix them.
    `QC_PROTECTIVE_ORDERS.md`, `QB_ESCALATION.md` and `M5_NUMBERS.md` are *decided
    documents*, not logs: a later decision can invalidate a paragraph in one of them
    and nothing will prompt a re-read, because the milestone that superseded it was
-   editing different files. **Annotate, never delete** — record what was superseded
+   editing different files. **`RUN_LEDGER.md` is the fourth and is read
+   differently: it is an observation log, and a rotation ADDS to it rather than
+   annotating it — a run that happened does not stop having happened.**
+   **Annotate, never delete** — record what was superseded
    *and what survived*, since the two are rarely the same.
 
    This is the step the M5-0 rotation missed. Q-C §9 still specified
@@ -2882,6 +2913,22 @@ is the gap, its two instances, and the shape of the thing that found them —
 comparing the log's distinct pids against the pids named in committed findings
 blocks.
 
+> **ANNOTATED at M5j: that instrument was run, and `docs/RUN_LEDGER.md` is
+> where its output lives.** It found 47 distinct pids in a frozen capture, **33
+> of them named nowhere in git history**, and the last commit to enumerate a run
+> by pid covers one that began 2026-09-01 — so the practice this paragraph
+> describes existed, worked, and stopped.
+>
+> **A SIXTH SURFACE, MEASURED AT M5j AND WORSE THAN THIS ONE.** This paragraph
+> assumes the bot is the only writer. On 2026-09-17 an order list was cancelled
+> and its base sold by orders this bot did not place, in a window holding **zero
+> log lines** — and the silence is a property of the tree rather than an
+> accident: `cancel_testnet_order_list.py`, `clear_testnet_holdings.py` and
+> `check_testnet.py` each carry **zero** `setup_logging` occurrences, so none of
+> them can write to `logs/trading_bot.log` at all. **The account is not a closed
+> system, and the log is a record of what the BOT did rather than of what
+> HAPPENED.** Who ran what is recorded nowhere in this tree.
+
 ---
 
 ## Current state
@@ -3247,6 +3294,24 @@ placed three order lists at M5g's close, and **not one such line had ever been
 emitted** — measured across the whole log. The sample is still empty, so the
 thresholds are still uncalibratable. See `docs/NEXT_MILESTONE.md`.
 
+> **ANNOTATED at M5j, on three counts in the two paragraphs above, and the
+> Q-A half is UNCHANGED.** `collaborator_failed` is still zero across the whole
+> capture, so the sample is still empty and the thresholds are still
+> uncalibratable — that sentence needed nothing.
+>
+> **`resolve_placement` HAS run**, on 2026-08-27, one `placement_ambiguous`
+> followed a minute later by `placement_resolved outcome=placed_live`.
+> `RefusalStage.POSITION_STALE` has still not fired — `stage=position_stale` is
+> zero — so the two halves of that sentence now part company and are worth
+> reading separately.
+>
+> **"Four runs" is UNMEASURED rather than wrong.** The `pid=` field begins at
+> `2026-08-27 17:10:37` and the M5g window opens ~35 h earlier, so no census can
+> enumerate M5g's runs. The same boundary makes "had run four times and placed
+> three order lists" unverifiable in either direction.
+>
+> See `docs/RUN_LEDGER.md`, which holds the census and states the boundary.
+
 **M5h closed the gap M5g opened, in 51 commits. The income statement survives a
 restart.** At M5g's close `close_position` had zero callers and
 `realised_today` returned `Decimal(0)` for ever; at M5h's it has **two**, the
@@ -3289,6 +3354,25 @@ report `filled_and_booked` while nothing was booked, because the label was
 computed in the `try` and the write happened in the `finally` with nothing
 pinning that they agree.
 
+> **ANNOTATED at M5j: "nothing has run since" was FALSE WHEN WRITTEN, and the
+> first half of that sentence is TRUE and stays standing.** Nothing had run at
+> M5h's close in the sense the paragraph means — no supervised run had exercised
+> the paths M5h built *before* that close. What is false is "since": MEASURED
+> over a frozen capture of `logs/trading_bot.log`, **12 substantial runs fall in
+> the M5h window and 3 in M5i's**, and the close path built at M5h ran in
+> production **27 times** before M5h closed, first at `2026-09-06 06:15:03`.
+>
+> **The three venue facts, re-measured.** No take-profit had ever filled — still
+> true, and still true today. `HALT` had never occurred — still true.
+> **`ALREADY_CLOSED` occurred once**, on `2026-09-15T23:38:02Z`, three days
+> after this close, so it was true here and is false now.
+> **`resolve_placement` had run**, on 2026-08-27, before this close.
+>
+> **"~25 trades and 33 closes" is UNMEASURED and is left standing**: its
+> instrument is unstated. The log's nearest equivalents at this close are **47
+> placements and 30 closes** (27 by the bot's own CLOSE sequence, 3 from
+> venue-triggered protective fills). See `docs/RUN_LEDGER.md`.
+
 **M5i is complete, in 16 commits, and it closed `M5h-371` by making the label a
 CONSEQUENCE of the write.** `_resolve_close` now selects its
 `_CloseResolutionText` from `_book_resolved_close`'s **return value**, in the
@@ -3324,3 +3408,33 @@ risk is larger again. The three unobserved venue facts are unchanged: **no
 take-profit has ever filled**, **`ALREADY_CLOSED` and `HALT` have never
 occurred**, **`resolve_placement` has never run**. See
 `docs/NEXT_MILESTONE.md`.
+
+> **ANNOTATED at M5j. The PREMISE is false and the CONCLUSION survives, which
+> is why the paragraph stays standing rather than being rewritten.**
+>
+> **"NOTHING HAS RUN" is FALSE.** MEASURED over a frozen capture of
+> `logs/trading_bot.log`: **3 substantial runs fall in the M5i window**, and
+> **2 more runs followed M5i's close**, one of them trading for 8 h 40 m and
+> booking 13 trades in a day. The capture is 21,209 lines across 47 distinct
+> pids; `docs/RUN_LEDGER.md` holds the census, the command for each figure, and
+> the digest of the file they came from.
+>
+> **What survives is the part about COMPOSITION.** The paths M5i *added* have
+> still not run, so the risk this paragraph names is real and is unretired; only
+> the sweeping premise was wrong.
+>
+> **The three venue facts, re-measured against that capture, one by one.**
+> **No take-profit has ever filled** — still true, zero `leg TP` fill clauses,
+> and sharpened by a take-profit leg that reached `CANCELED` having executed
+> nothing. **`HALT` has never occurred** — still true, `decision=halt` is zero
+> across 65 close plans. **`ALREADY_CLOSED` occurred once**, on
+> `2026-09-15T23:38:02Z`, inside the M5i window and two days before this close.
+> **`resolve_placement` ran** on 2026-08-27.
+>
+> **The instrument that missed two of those, recorded because it generalises.**
+> The searches that reported them unobserved matched an enum's MEMBER NAME where
+> the log carries its `.value`: `ALREADY_CLOSED` against `already_closed`,
+> `TAKE_PROFIT` against the leg label `TP`. Twelve of this tree's eighteen enums
+> have a value that differs from the name, and a sweep of every emission site in
+> `src/` found the tree itself passes `.value` everywhere — the defect was in
+> the searches, never in the code.

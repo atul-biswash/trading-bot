@@ -2749,6 +2749,16 @@ total WARNING count of 1.
 a caller: one needs an ambiguous placement, the other needs the reconciliation
 pass to stop running.
 
+> **ANNOTATED at M5j.** `resolve_placement` HAS run, and it ran before this
+> entry was written: `placement_ambiguous` at `2026-08-27 04:06:02`, then
+> `placement_resolved outcome=placed_live` a minute later. It reads as
+> unobserved here because the lines carry no `pid=` field — that field begins at
+> `2026-08-27 17:10:37`, and the M5g window opens some 35 hours earlier, so no
+> pid census can enumerate this milestone's runs. **"Four runs" is therefore
+> UNMEASURED rather than wrong**, in either direction, and "the bot ran four
+> times" elsewhere in this entry inherits the same limit.
+> `RefusalStage.POSITION_STALE` has still not fired. See `docs/RUN_LEDGER.md`.
+
 ### The headline, and it is a thing M5g did NOT do
 
 **Run 3 took the project's first complete trade. The venue triggered the
@@ -3013,6 +3023,27 @@ a real close, and `resolve_placement` has never run. Each is a branch reachable
 only through a fixture, on a path where a fixture models the venue rather than
 observing it.
 
+> **ANNOTATED at M5j, and the two paragraphs above are wrong in different ways.**
+>
+> **"Nothing ran" is FALSE.** MEASURED over a frozen capture of
+> `logs/trading_bot.log`: **12 substantial runs fall in the M5h window**, and
+> the close path this milestone built ran in production **27 times before M5h
+> closed**, first at `2026-09-06 06:15:03`. So "the close path, the booking, the
+> retention and the resolution are exercised by fabricated fixtures only" is
+> false of this close, and the composition claim that rests on it does not hold
+> in the form stated.
+>
+> **Of the three venue facts, two were true here and one was not.** No
+> take-profit had ever filled — true then and true now. `ALREADY_CLOSED` and
+> `HALT` had never occurred — **true at this close**, since `ALREADY_CLOSED`
+> first occurred on `2026-09-15T23:38:02Z`, three days later.
+> **`resolve_placement` had run**, on 2026-08-27, before this close.
+>
+> **"~25 trades and 33 closes" is UNMEASURED** — its instrument is unstated. The
+> log's nearest equivalents at this close are **47 placements and 30 closes**,
+> of which 27 were the bot's own CLOSE sequence and 3 were venue-triggered
+> protective fills. See `docs/RUN_LEDGER.md`.
+
 **One defect is left standing deliberately and is M5i's highest-value item.**
 `_resolve_close` computes its log's `outcome` in the `try` and performs the
 booking in the `finally`, so a `CRITICAL` can report `filled_and_booked` while
@@ -3135,6 +3166,41 @@ The three unobserved venue facts stand, unchanged and not re-derived:
 occurred**; **`resolve_placement` has never run**. Each is a branch the tree can
 reach only through a fixture, on a path where a fixture is a model of the venue
 rather than an observation of it.
+
+> **ANNOTATED at M5j. The premise is false; the conclusion about COMPOSITION
+> survives.**
+>
+> **"Nothing has run" is FALSE.** MEASURED: **3 substantial runs fall in the M5i
+> window**, and **2 more followed this close**, one of them trading for 8 h 40 m
+> and booking 13 trades that reconcile to the persisted ledger at full
+> precision. The capture is 21,209 lines across 47 distinct pids;
+> `docs/RUN_LEDGER.md` holds the census, the command behind each figure and the
+> digest of the file they came from.
+>
+> **What survives is the part this entry cared about**: the paths M5i *added* —
+> `_sold_unpriced` and the fourth close-resolution outcome — have still not run,
+> so the composition risk is real and unretired. Only the sweeping premise was
+> wrong.
+>
+> **The three venue facts, re-measured.** No take-profit has ever filled —
+> **carried**, zero fill clauses naming leg `TP` against 162 naming leg `SL`,
+> and sharpened by a take-profit leg that reached `CANCELED` having executed
+> nothing. `HALT` has never occurred — **carried**, zero across 65 close plans.
+> **`ALREADY_CLOSED` occurred once**, on `2026-09-15T23:38:02Z`, **inside this
+> milestone's own window** and two days before this close.
+> **`resolve_placement` ran** on 2026-08-27.
+>
+> **The instrument that missed two of those, because it generalises.** The
+> searches matched an enum's MEMBER NAME where the log carries its `.value` —
+> `ALREADY_CLOSED` against `already_closed`, `TAKE_PROFIT` against the leg label
+> `TP`. Twelve of eighteen enums in this tree carry a value differing from the
+> name, and a sweep of every emission site in `src/` found the tree passes
+> `.value` at every one: the defect was in the searches, never in the code.
+>
+> **The count of findings in this entry is untouched and is correct.** "130
+> findings declared across `M5i-001`–`M5i-136`, every commit carrying a block"
+> matches the documented extractor exactly, and it disagrees with
+> `NEXT_MILESTONE.md`'s "132 ids" — this entry is the one that is right.
 
 The uncomfortable shape, recorded because three milestones have now had it:
 every improvement above is correct as far as anything here can tell, and "as far

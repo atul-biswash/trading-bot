@@ -72,11 +72,14 @@ the list, re-queries each leg (because a leg can fill *during* the cancel), sell
 `MARKET`, and books the exit at the venue's own quote total. A sell whose outcome
 is never learned keeps its record and is re-observed on the next candle.
 
-**What has NOT happened is the thing to keep in view.** Four supervised runs took
-one complete trade between them, and every path added since is exercised by test
-fixtures only. After ~25 trades and 33 closes, **no take-profit has ever filled**,
-two of the three close-plan outcomes have never occurred, and the ambiguous-
-placement recovery has never run. See `docs/NEXT_MILESTONE.md`.
+**What has NOT happened is the thing to keep in view.** Supervised runs have
+taken **62 complete exits** across 82 order lists, and the log that records them
+is gitignored — `docs/RUN_LEDGER.md` holds the census, with the command behind
+each figure and the digest of the capture they came from. The paths added since
+M5h have still not run. After 82 placements and 62 closes, **no take-profit has
+ever filled** and **one of the three close-plan outcomes — `HALT` — has never
+occurred**; `ALREADY_CLOSED` occurred once, on 2026-09-15, and the
+ambiguous-placement recovery ran on 2026-08-27. See `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,

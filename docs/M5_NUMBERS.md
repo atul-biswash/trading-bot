@@ -360,6 +360,29 @@ a warning when it means something.
 > threshold** — 59 s of margin. `RefusalStage.POSITION_STALE` did not fire, and
 > `_stale_positions` remains **unexercised by a run**, exactly as claimed.
 >
+> > **ANNOTATED at M5j, on both halves, and each moves in a different
+> > direction.**
+> >
+> > **The correction above has itself been overtaken in scope.** "Two supervised
+> > runs dispatched on 2026-08-27" was right and is now far short: a frozen
+> > capture of `logs/trading_bot.log` holds **47 distinct pids**, with 12
+> > substantial runs in the M5h window, 3 in M5i's and 2 after M5i's close. See
+> > `docs/RUN_LEDGER.md`.
+> >
+> > **The conclusion is STRENGTHENED rather than weakened.**
+> > `stage=position_stale` is **zero across the whole capture**, not merely
+> > across run 2's 81 passes — so `_stale_positions` remains unexercised by
+> > **every** run to date, on far more evidence than the sentence originally
+> > rested on. MEASURED at M5j-C's census and re-measured at M5j-DOCS.
+> >
+> > One observation sharpens the margin claim without changing it. On
+> > 2026-09-17 a connection-failure cluster left the gap between successful
+> > reconciliation passes at **184 s against the 180 s threshold** — the
+> > condition was satisfied and the guard did not fire, because it lives in
+> > `RiskManager.evaluate` and no signal arrived in that window. The margin is
+> > narrower than run 2 suggested, and what has kept the guard silent is partly
+> > that nothing asked it.
+>
 > **Why annotate a sentence that is still true.** The conclusion now rests on a
 > budget that was never contended rather than on the absence of a run, and the
 > two fail differently: a second enabled pair, a slower venue or a skipped pass

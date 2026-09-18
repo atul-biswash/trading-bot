@@ -36,10 +36,13 @@ bookability criterion into one predicate. It corrected prose that had outlived
 what it described. And it rebuilt the mutation harness so that it now implements
 the contract its own docstring had always stated.
 
-**NONE OF THAT IS THE CENTRAL FACT. This is: nothing has run.**
+**NONE OF THAT IS THE CENTRAL FACT. This is: the paths M5i added have not run,
+and the runs that did happen were recorded only in a gitignored file.** See
+`docs/RUN_LEDGER.md`, which holds the census: 47 distinct pids, 3 substantial
+runs inside the M5i window and 2 more after its close.
 
-Every path M5i touched is exercised by fabricated fixtures, exactly as at M5h's
-close — and **M5i added two emitters to paths no venue has ever exercised**
+Every path M5i **added** is exercised by fabricated fixtures, exactly as at
+M5h's close — and **M5i added two emitters to paths no venue has ever exercised**
 (`_sold_unpriced`, and the fourth close-resolution outcome). The composition
 risk M5f made reachable and M5g partly retired is **larger again**, for the
 second milestone running.
@@ -168,6 +171,66 @@ Carried, unfired. M5i did not touch `config/models.py` at all.
 
 ---
 
+## NEW AT M5j
+
+### A1. `close_position` takes `fee` and all three call sites omit it
+
+The parameter is declared at `core/portfolio.py`, `fee: Decimal = Decimal(0)`,
+and its docstring states **"`fee` is subtracted from the realised P&L"**. Two
+lines consume it:
+
+```python
+            pnl = self._realised_from_total(position, exit_quote_total) - fee
+            proceeds = self.free_quote + exit_quote_total - fee
+```
+
+All three production call sites omit it — `executor.py`'s `_sell_and_book` and
+its close-resolution path, and `reconciliation_driver.py`'s `_book_exits`. So
+`fee` is `Decimal(0)` on every booking the ledger holds.
+
+**Invisible on Testnet and systematic on live money.** MEASURED on the two
+trades of order list `137501`: commission `0.00000000` ETH on the entry and
+`0.00000000` USDT on the exit. Binance Spot live charges a maker/taker fee on
+every fill, so every realised figure would overstate profit and understate loss
+by that fee, on every trade, with nothing reporting it.
+
+*Arming condition:* **whoever writes the first caller that passes a non-zero
+`fee` — which is the first live trade, and therefore whoever prepares this bot
+for live.** The parameter, the subtraction and the docstring already exist; what
+is missing is the value, which arrives on the venue's own fill report.
+
+### A2. A manual action and a venue-triggered fill are indistinguishable
+
+MEASURED by content, not speculated. `reconciliation.py`'s per-leg refinement
+branches in this order:
+
+```python
+    if order.status is OrderStatus.FILLED or order.filled_quantity > 0:
+        return (ProtectionState.UNKNOWN, "... reports {status} with {n} executed ...", _exit_fill(order))
+    if order.status.is_open:
+        return (ProtectionState.UNKNOWN, "... is INSTRUMENT DISAGREEMENT ...", None)
+    return (ProtectionState.DIVERGED, "... was requested and does not rest: the point query reports {status}", None)
+```
+
+A leg that is `CANCELED` with `filled_quantity == 0` fails the first branch (no
+fill), fails the second (`CANCELED` is terminal, so `is_open` is false), and
+falls to the third: **`ProtectionState.DIVERGED`, with `ExitFill` `None`.**
+
+**Had the bot been running on 2026-09-17 at 10:15Z it would have classified that
+position `DIVERGED`, booked nothing** — `exit_fill is None` is `_book_exits`'
+row 4, the silent healthy-pass row — **and kept a `Position` describing base the
+account no longer held**, while `DIVERGED` sat outside `_TRUSTED_PROTECTION` and
+refused every entry portfolio-wide.
+
+The two facts *a protective leg was cancelled by someone else* and *a protective
+leg diverged* present identically, because the only fields the classifier reads
+are status and executed quantity and both are the same in either case.
+
+*Arming condition:* **whoever next writes a classifier branch that reads a leg's
+terminal status, or whoever adds the first non-bot writer to a live account.**
+
+---
+
 ## CARRIED FROM M5i
 
 ### `M5i-065`. The orphan guard raises silently
@@ -272,24 +335,44 @@ single-outcome site, and the exposure is identical to every other.
 
 ## UNMEASURED — venue facts nothing in the tree can supply
 
-**Provenance: these are M5h's counts, re-stated and NOT re-derived at this
-rotation.** `logs/trading_bot.log` is gitignored and rotates at
-`backup_count: 5`, and nothing has run since, so there is no new evidence to
-derive from — which is `CLAUDE.md`'s fifth drift surface behaving exactly as
-described.
+**Provenance: re-derived at M5j from a frozen capture whose digest
+`docs/RUN_LEDGER.md` states.** Runs did occur between rotations; the evidence
+existed and was sitting in the gitignored file — `CLAUDE.md`'s fifth drift
+surface behaving exactly as described, on this paragraph. The counts below are
+from that capture, by the commands the ledger prints.
 
-### X1. No take-profit has ever filled — ~25 trades
+### X1. No take-profit has ever filled — 82 placements, 62 closes
 
-Unchanged.
+**Carried, and sharpened.** MEASURED: zero clauses of either form naming a
+filled `TP` leg, against 162 naming a filled `SL` leg. The instrument reads a
+classifier reason naming leg `TP` and a fill; it returns nothing.
 
-### X2. `ALREADY_CLOSED` and `HALT` have never occurred — 33 closes
+Note what nearly looked like an observation and is not: order list `137501`'s
+take-profit leg reached `CANCELED` with `executedQty 0.00000000` — a
+take-profit terminating **without** filling. That trade is not an X1
+observation.
 
-Unchanged. Note this is what keeps the `_go_naked` fourth-candidate item above
+### X2a. `ALREADY_CLOSED` — OBSERVED once, and this item is STRUCK
+
+`decision=already_closed`, `2026-09-15T23:38:02Z`, `pid=26952`, BTCUSDT: the
+stop leg had executed in full, the close plan refused the sell, and the next
+pass booked the exit. It behaved correctly end to end.
+
+**Why it read as unobserved for two milestones:** the search matched the enum's
+member name `ALREADY_CLOSED` where the log carries its `.value`,
+`already_closed`. A case-sensitive search returns 0 over the whole capture.
+
+### X2b. `HALT` has never occurred — 65 close plans
+
+**Carried.** MEASURED: `decision=halt` is zero across every close plan the
+capture holds. This is what keeps the `_go_naked` fourth-candidate item above
 unmeasured rather than urgent.
 
-### X3. `resolve_placement` has never run
+### X3. `resolve_placement` has never run — STRUCK
 
-Unchanged. It needs an *ambiguous* placement and none has occurred.
+Falsified at M5j-PRE-2 and not re-argued: `placement_ambiguous` at
+`2026-08-27 04:06:02` followed by `placement_resolved outcome=placed_live` a
+minute later.
 
 **The common shape:** each is a branch the tree can only reach through a
 fixture, on a path where a fixture is a model of the venue rather than an

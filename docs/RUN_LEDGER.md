@@ -297,10 +297,19 @@ The loggers present in the preserved half hour were
   backups. The capture is 3.9 MiB and no rotation had occurred by 2026-09-17,
   but a longer deployment discards the oldest records and a census taken then
   would report a clean early history because the evidence had gone.
-- **Bare resting orders on unconfigured symbols.** A venue read on 2026-09-17
-  covered order lists account-wide and open orders for BTCUSDT and ETHUSDT
-  only. A single order resting on one of the other 499 held assets sits outside
-  both instruments.
+- **Bare resting orders on unconfigured symbols — CLOSED at
+  2026-09-17T19:00Z.** A venue read earlier that day covered order lists
+  account-wide and open orders for BTCUSDT and ETHUSDT only, which left a single
+  order resting on one of the other 499 held assets outside both instruments. A
+  later read called `get_open_orders` with the symbol argument omitted — the
+  account-wide form — and it returned **zero** resting orders:
+
+  ```bash
+  # BinanceClient.get_open_orders(symbol=None) omits the symbol parameter
+  resting orders: 0
+  ```
+
+  The gap this bullet recorded was measured shut.
 - **Partially locked assets.** The same read printed `locked` for three named
   assets and for a 20-row alphabetical sample. An asset holding both free and
   locked balance, outside that sample, is invisible to it. The account-wide
