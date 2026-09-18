@@ -16,7 +16,7 @@ line is the only place it is prescribed, which is exactly the `phase_5_` shape
 one step inside the repository. **A rotation that rewrites this file must carry
 this paragraph forward.**
 
-M5i allocated **132** ids, `M5i-001` through `M5i-132`, with gaps at `068`–`073`
+M5i allocated **130** ids, `M5i-001` through `M5i-136`, with gaps at `068`–`073`
 — the project owner's reserved block, and nothing else. No duplicates, and every
 commit in the range carries a findings block. Verified at rotation by both
 documented extractors, which agreed on every field.
@@ -278,15 +278,38 @@ test, and an instrument edited outside its authorisation is `M5i-071`'s shape.
 ### The `_go_naked` family's fourth candidate
 
 `_go_naked`'s message says the position is *"UNPROTECTED and still open"*. That
-is false at the `:1695` caller under `ALREADY_CLOSED`, where the venue closed the
-position for us — the call site's own comment concedes it in those words. Three
-members of this family have already been split off for exactly this reason
-(`_go_naked_retaining`, `_sold_unbooked`, `_sold_unpriced`); this would be the
-fourth.
+is false at the abandoned-after-cancel caller under `ALREADY_CLOSED`, where the
+venue closed the position for us — the call site's own comment concedes it in
+those words. Three members of this family have already been split off for
+exactly this reason (`_go_naked_retaining`, `_sold_unbooked`, `_sold_unpriced`);
+this would be the fourth.
 
-**UNMEASURED, and that is why it is carried rather than fixed.**
-`ALREADY_CLOSED` has never occurred — see X2 — so the false sentence has never
-been emitted.
+**THE FALSE SENTENCE HAS NOT BEEN EMITTED — MEASURED, WHERE THIS WAS PREVIOUSLY
+INFERRED.** Against the frozen capture whose digest section 2 of
+`docs/RUN_LEDGER.md` states, three instruments agree: the rendered message text
+`UNPROTECTED` occurs **0** times, `event=close_naked` — the structured field on
+that same emission — occurs **0** times, and `event=close_abandoned`, the branch
+that reaches it under `ALREADY_CLOSED`, occurs **0** times.
+
+**That is a statement about the past, not a clearance.** The branch remains
+unexercised, the message remains wrong at that caller, and this item stays
+carried. A path that has not run is not a path shown to be correct.
+
+> **THE PREMISE THIS ITEM CARRIED IS FALSE, AND THE CONCLUSION IS UNAFFECTED.**
+> It read *"`ALREADY_CLOSED` has never occurred — see X2 — so the false sentence
+> has never been emitted."* Both clauses failed at M5j. `ALREADY_CLOSED` **did**
+> occur, at `2026-09-15T23:38:02Z`, and **`X2` no longer exists** — M5j split it
+> into X2a and X2b, so the cross-reference dangles.
+>
+> **The occurrence never reached this branch.** It was refused at close-plan
+> time — `event=close_planned decision=already_closed`, then
+> `event=dispatch_refused` with `refused_as=close_already_closed` — so
+> `_execute_close` was never entered and `_go_naked` was never called. The
+> conclusion survived its premise by luck of routing, not by design.
+>
+> **An item whose premise fails while its conclusion holds is the shape most
+> likely to be struck by mistake**, because the obvious reading of a false
+> premise is that the item is spent. It is not.
 
 *Arming condition:* **whoever next edits the abandoned-after-cancel branch in
 `_execute_close`**, which is the only caller that can reach it.

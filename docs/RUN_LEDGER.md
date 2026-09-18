@@ -315,6 +315,25 @@ The loggers present in the preserved half hour were
   locked balance, outside that sample, is invisible to it. The account-wide
   count of fully-locked assets was 0, which bounds the fully-locked case and
   leaves the partial case open.
+
+  **BOUNDED BY THE BULLET ABOVE UNDER ONE UNMEASURED PREMISE, AND NOT CLOSED.**
+  If an asset's `locked` balance arises only from an order resting at the venue,
+  then zero resting orders account-wide at 2026-09-17T19:00Z leaves nothing to
+  reserve a balance, and the partial case is empty at that instant. **That
+  premise is a statement about the venue and is measured nowhere in this tree**,
+  and the reading that closed the bullet above read *orders*, not *balances*.
+  Note also that the read this bullet describes is the earlier one; the
+  account-wide order read came later the same day.
+
+  **AND THE RECORDED CASE IS UNMEASURABLE IN RETROSPECT, WHICH IS STRONGER THAN
+  UNMEASURED.** A `get_balances` read taken at any later date measures `locked`
+  **at that later date**. What this bullet records is a blind spot at
+  2026-09-17T19:00Z, and no present read is evidence about that instant: the
+  balances have moved, and nothing in this tree preserved the per-asset `locked`
+  column as it stood. So the direct instrument would settle the **current**
+  state and cannot settle the **recorded** one. This bullet is not one
+  derivation away from closure; it is closed to measurement altogether, and it
+  stays open as the honest record of that.
 - **Which leg of an order list filled.** Section 12.
 - **What a run intended.** The log records what happened, and a record of why a
   run was started, by whom, and under what configuration exists nowhere the
@@ -720,3 +739,97 @@ pattern that read something adjacent to the question, and each was caught by a
 second derivation that could have disagreed. Four of the six were caught by a
 reconciliation rather than by inspection; two were caught by a prediction that
 the output contradicted. None was caught by reading the command.
+
+---
+
+## 14. Order list 137501 settled: neither leg filled
+
+Section 12 records the leg as unsettled as of 2026-09-17T19:00Z. That sentence
+is true at its stated time and is left exactly as it stands. This section is an
+addition beside it, not a correction of it: a later read-only settlement was
+taken, and what follows is what it observed.
+
+### What the capture shows, and what it cannot
+
+The list is named in **2** of the capture's 21,209 lines — the placement at
+`2026-09-17T00:10:02Z` and the boot block at `2026-09-17T07:53:41Z`, both
+already quoted in section 12. Nothing else in the file names it.
+
+The capture does, however, bracket the interval, and that is new here:
+
+| Observation | Value |
+|---|---|
+| last record of `pid=23348` | `2026-09-17T10:03:55Z`, `Trading engine stopped` |
+| first record of `pid=7296` | `2026-09-17T10:15:46Z` |
+| records stamped between those two | **0** |
+
+**No bot process was running between those stamps.** The silence across the
+interval is therefore not a logging gap within a live run; there was no run.
+OBSERVED.
+
+```bash
+grep -c '^2026-09-17T10:' "$LOG"          # 10
+grep -n  '^2026-09-17T10:' "$LOG"         # 10:03:53, 10:03:55, then 10:15:46 onward
+grep -n  '137501' "$LOG"                  # 2 records
+```
+
+A second, independent capture-side observation bears on the same interval. The
+boot at `2026-09-17T07:53:41Z` emitted `event=boot_symbol_blocked symbol=ETHUSDT
+order_list_id=137501`. The next boot, whose composition root reported ready at
+`2026-09-17T10:15:55Z`, emitted **no** `boot_symbol_blocked` for ETHUSDT. The
+list was no longer live at that second boot. OBSERVED.
+
+### What the settlement read observed
+
+The settlement was a read-only venue query recorded in commit
+`0992fa33fa929c70df3f6a9b502aa8ca8327022c`, whose body is the source for the
+lines below and can be re-read with `git log -1 0992fa3`:
+
+| Observation | Value |
+|---|---|
+| both protective legs | `CANCELED`, `executedQty` zero |
+| cancelled at | `2026-09-17T10:15:06.904Z` |
+| the position's close | a `MARKET` sell, `9.345 s` later |
+| that order's `orderListId` | `-1` — outside any list |
+| that order's client id | outside `exchange/ids.py`'s scheme |
+| commission, both trades | `0.00000000` |
+
+**NEITHER LEG FILLED.** The take-profit leg reached `CANCELED` having executed
+nothing, and so did the stop leg.
+
+### Figures deliberately omitted
+
+The realised figure for this position, the exit order's numeric id, its client
+order id as a string, the entry fill price and both quote totals were observed
+during the settlement read. **They are not restated here, because none of them
+can be re-derived from the capture this file is built on or from any tracked
+file** — the capture holds no record of the interval, and no tracked file holds
+the venue response. Recording a number this file cannot reproduce would break
+the property stated in section 10, that every figure comes from a command
+printed beside it.
+
+### What this bears on
+
+**Section 8's bullet *"Which leg of an order list filled"* is answered for this
+list: neither did.** That bullet is left standing, unedited, as a true record of
+what the census could see — the census still cannot see which leg of a list
+filled, and it took a venue read rather than the log to settle this one.
+
+**The bound stated in finding `M5j-007` is falsified.** That finding bounded the
+list's realised figure at one of two values, on an enumeration with exactly two
+members: the stop leg filled, or the take-profit leg filled. Neither did. The
+outcome fell outside the enumerated set rather than at an unexpected point
+inside it, so the bound fails by its hypothesis space and not by its arithmetic.
+The finding is left exactly as written; this section neither edits nor amends
+it.
+
+**Finding `M5j-008` asked which leg filled and marked itself UNMEASURED.** The
+question carries a false presupposition — that one of the two legs filled — so
+it has no answer rather than an unmeasured one.
+
+### Attribution
+
+**Who ran the cancel and the sell is unrecorded in this tree.** The orders
+carry no identifier this repository issued, and the interval holds no log line
+because no bot process was running. This file names no actor and takes no
+position on which one acted.
