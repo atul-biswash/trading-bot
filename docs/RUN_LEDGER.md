@@ -12,11 +12,14 @@ here as prescriptive. Nothing below tells anyone what to do; the sentences are
 past-tense statements about bytes that existed at a stated time with a stated
 digest.
 
-**This file corrects no sentence.** Several statements in this repository's
+**This file corrects no sentence in an external authority document, and edits no
+prior committed file.** Several statements in this repository's
 other documents bear on the evidence recorded here. Those statements are left
 exactly as they were written, unamended, and the question of what should happen
-to them is reserved to the project owner. This file names none of them and
-edits none of them.
+to them is reserved to the project owner. This file edits none of them. It
+names a finding only where a later section records an observation that bears on
+it, and even there it amends nothing — section 14 is add-only, and the commit
+that added it removed no line.
 
 **A third property worth stating, since it is what keeps the first two
 enforceable:** the measurements here were taken by an assistant under

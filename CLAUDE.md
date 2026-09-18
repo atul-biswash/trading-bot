@@ -85,6 +85,34 @@ Both are single, tested functions using the shortest-repr form — never scatter
 these edges are where a float is *allowed* to become a Decimal; the domain is
 where it is forbidden.
 
+**A MONEY FIGURE CROSSES A DOMAIN BOUNDARY ONLY AS AN AMOUNT PAIRED WITH ITS
+ASSET, NEVER AS A BARE `Decimal`.** Ruled by the project owner. The money rule
+above makes a figure exact; it says nothing about what the figure is
+denominated in, and exactness in the wrong currency is still the wrong number.
+
+**The worked case is a fee.** Binance charges commission per fill in the quote
+asset, the base asset or BNB, and the choice is the venue's rather than ours.
+`Portfolio.close_position` computes `pnl` and `proceeds` by subtracting `fee`
+from quote-denominated terms. Both operands are `Decimal`, so subtracting a BNB
+fee from a USDT P&L **succeeds silently** — no exception, no validation error,
+and a plausible number written to the ledger. **The type system cannot catch
+this**, because `Decimal` encodes precision and not denomination, and this is
+precisely the class of error the `Money` guard was built to prevent one level
+down.
+
+So a fee-aware ledger method **enforces `fee_asset == quote_asset` or routes
+through an explicit converter**, and refuses rather than assuming when it can do
+neither. The same obligation binds any future figure with a currency: a
+conversion rate, a funding charge, a rebate.
+
+**It constrains work not yet written, which is why it is here rather than in a
+docstring.** Nothing in `src/` carries a commission today — `commission` occurs
+zero times there and `commissionAsset` zero times anywhere in the repository —
+so there is no site to attach it to. It was ruled for `M5j-012`, whose item in
+`docs/NEXT_MILESTONE.md` records what the port would have to change; the
+invariant binds whoever does that work, and a bare `Decimal` fee crossing the
+port is the specific thing it forbids.
+
 **The log sink is a third edge, and it is safe.** `JsonFormatter` serialises via
 `json.dumps(payload, default=str)`, so a `Decimal` reaches a JSON log line as a
 **string** — `"50.000"`, exact, never a JSON number and never a float. A bare
@@ -2679,6 +2707,52 @@ concern one level down: `grep -c` counts matching **lines**, while a count of
 nothing added. That is finding ZZ, and it was caught only because the baseline
 happened to be taken twice; re-deriving a number is not sufficient when the
 instrument itself can silently change.
+
+**AN INSTRUMENT IS EVIDENCE ONLY FOR THE INSTANT IT READS, AS WELL AS FOR THE
+PROPERTY IT READS.** A present-tense read is not evidence about a past census,
+and the two failures compose: a command can read the right property at the wrong
+moment and return a number that is correct about today and silent about the
+question actually asked.
+
+**Neither half of that was written down here before M5j**, and the property half
+had been carried in session prose for several milestones as though it were a
+committed rule. It was not; a search of this file, `README.md` and `docs/`
+returned nothing. This paragraph is where both halves first land.
+
+`M5j-018` is the worked instance. A bullet in `docs/RUN_LEDGER.md` records a
+blind spot in a venue read taken at a stated instant. A `get_balances` read
+taken now measures `locked` **now**, and nothing in this tree preserved the
+per-asset `locked` column as it stood at the recorded moment — so that case is
+**UNMEASURABLE IN RETROSPECT** rather than merely unmeasured.
+
+**The distinction decides what to do about it, which is why it is worth a
+name.** An unmeasured case is one derivation away from closure and is worth
+scheduling. An unmeasurable one is closed to measurement altogether and stays
+open as the honest record of that. Treating the second as the first produces a
+task that can never be completed and a reader who assumes it merely has not been.
+
+**The test: ask what the instrument would return if run again tomorrow, and
+whether that answers the question actually asked.** Where the question names a
+past instant and the instrument reads the present, the answer is no, however
+exact the number.
+
+**ARGUE A SILENCE FROM PRESENCE, NOT FROM ABSENCE.** *"I searched and found
+nothing"* is the weakest evidence this project produces, because it is returned
+identically by a true absence, a wrong pattern, a rotated file and an instrument
+that never ran. Where a claim rests on nothing having happened, find a POSITIVE
+record that brackets the interval.
+
+`M5j-019` is the worked instance. The claim was that no log line covers the
+moment an order list went terminal. Stated as an absence it is unfalsifiable and
+weak. Stated from presence it is neither: the last record carrying `pid=23348`
+is at `2026-09-17T10:03:55Z`, the first carrying `pid=7296` is at `10:15:46Z`,
+and **no record between them carries any pid at all**, so the interval is
+bracketed by two positive observations and the event falls inside it.
+
+**That distinguishes "nothing ran" from "something ran and did not log", which
+an absence of matching lines cannot.** The upgrade is usually cheap: a process
+identifier, a sequence number, a heartbeat — any field whose PRESENCE on both
+sides of a gap converts a failure to match into a measurement.
 
 **VERIFY THE TARGET IS PRESENT, BY CONTENT, BEFORE ANNOTATING — a duplicate
 annotation is PERMANENT.** The pair to *"cite a document by content"* two rules

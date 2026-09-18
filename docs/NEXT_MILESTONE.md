@@ -173,31 +173,86 @@ Carried, unfired. M5i did not touch `config/models.py` at all.
 
 ## NEW AT M5j
 
-### A1. `close_position` takes `fee` and all three call sites omit it
+### A1. Commission never reaches the ledger, and the gap is at the port
 
-The parameter is declared at `core/portfolio.py`, `fee: Decimal = Decimal(0)`,
-and its docstring states **"`fee` is subtracted from the realised P&L"**. Two
-lines consume it:
+**The wiring inside `core/portfolio.py` is COMPLETE**, on both limbs. `fee` is
+declared `fee: Decimal = Decimal(0)` and consumed on **four** lines, two per
+limb:
 
 ```python
             pnl = self._realised_from_total(position, exit_quote_total) - fee
             proceeds = self.free_quote + exit_quote_total - fee
 ```
+```python
+            pnl = position.unrealized_pnl(exit_price) - fee
+            proceeds = self.free_quote + position.quantity * exit_price - fee
+```
 
-All three production call sites omit it — `executor.py`'s `_sell_and_book` and
-its close-resolution path, and `reconciliation_driver.py`'s `_book_exits`. So
-`fee` is `Decimal(0)` on every booking the ledger holds.
+Nothing in that file needs to change. **The defect is that no commission figure
+ever arrives to pass.**
 
-**Invisible on Testnet and systematic on live money.** MEASURED on the two
-trades of order list `137501`: commission `0.00000000` ETH on the entry and
-`0.00000000` USDT on the exit. Binance Spot live charges a maker/taker fee on
-every fill, so every realised figure would overstate profit and understate loss
-by that fee, on every trade, with nothing reporting it.
+**COMMISSION DOES NOT CROSS THE PORT.** `commission` occurs **zero** times in
+`src/`; its only occurrence in the whole code tree is an unread wire fixture in
+`tests/unit/test_exchange_mappers.py`. `commissionAsset` occurs **zero** times
+anywhere in the repository. `to_order` in `exchange/models.py` is the sole
+venue-to-domain mapper and reads **16** distinct wire keys — counting the three
+timestamp candidates `_first_ms` tries — and `fills` is not among them. The
+venue's own fee report is discarded at the wire boundary, silently, because a
+dict key nobody reads raises nothing. `Order` carries no commission field,
+`ExitFill` carries four fields and none is a fee, and every port method returns
+`Order`, so nothing fee-shaped can cross by construction.
 
-*Arming condition:* **whoever writes the first caller that passes a non-zero
-`fee` — which is the first live trade, and therefore whoever prepares this bot
-for live.** The parameter, the subtraction and the docstring already exist; what
-is missing is the value, which arrives on the venue's own fill report.
+**The three call sites are `_book_close` and `_book_resolved_close` in
+`executor.py`, and `_book_exits` in `reconciliation_driver.py`.** They are not
+alike: `_book_close` holds the whole `Order`, `_book_resolved_close` holds only
+a `total`, and `_book_exits` holds an `ExitFill`. A single uniform fix does not
+exist across them. `_sell_and_book` is **not** a call site — it is the enclosing
+path that calls `_book_close`, and naming it as one located the defect a layer
+too high.
+
+**WHICH FILES WOULD HAVE TO CHANGE:** `exchange/models.py`, so `to_order` reads
+the fee; `core/models.py`, so `Order` can carry it; `execution/reconciliation.py`,
+overturning `ExitFill`'s stated four-field ruling; and `core/interfaces.py`,
+because the port's contract widens with `Order`. **Two of those are the port.**
+
+**SITE 3 NEEDS A NEW ENDPOINT, NOT A WIDER ONE.** `_book_exits` reads
+`get_order` point queries. In this tree's own fixtures `fills` appears only on
+create-order payloads; the query-shaped fixture carries no `fills` key at all.
+So a fully widened `Order` still leaves that site with nothing to read, and
+reaching a fee there needs `myTrades` — **a new port method**, not a wider one.
+
+**THE DENOMINATION INVARIANT, RULED BY THE PROJECT OWNER: a fee crosses a
+boundary only as an amount paired with its asset, never as a bare `Decimal`.**
+Binance charges commission in the quote asset, the base asset or BNB. Both
+subtractions above are quote-denominated and both operands are `Decimal`, so
+subtracting a BNB fee from a USDT P&L succeeds silently and the type system
+cannot catch it. This tree cannot tell which asset a commission is in, because
+it has never captured the field. See `CLAUDE.md`'s money section, where the
+invariant is stated.
+
+**THE TWO-OF-THREE FIX IS REJECTED, ON LEDGER-COMPARABILITY GROUNDS.** Wiring
+the two sites that could reach a fee and leaving the third would make the ledger
+net of fees on some closes and gross on others, with no reader able to tell
+which without knowing the close path. A ledger whose purpose is to match an
+exchange statement cannot be net in part.
+
+**RECLASSIFIED: this is an architectural accounting item, not a wiring
+omission.** The name it carried — an omission at three call sites — located it
+in the wrong layer and made it look one commit deep.
+
+**THREADING `fee=Decimal(0)` AS AN INTERIM STUB IS FORBIDDEN.** It changes no
+behaviour, passes the gate unchanged, and retires the finding that names the
+defect while leaving the defect exactly where it is.
+
+**Invisible on Testnet and systematic on live money.** Commission was
+`0.00000000` on both trades of order list `137501`. Binance Spot live charges a
+maker/taker fee on every fill, so every realised figure would overstate profit
+and understate loss by that fee, on every trade, with nothing reporting it.
+
+*Arming condition:* **whoever next edits `to_order` in `exchange/models.py`** —
+the single site where the venue's commission is discarded, and the first site
+any fee must cross. No caller downstream of it can be written to pass a fee
+until it does.
 
 ### A2. A manual action and a venue-triggered fill are indistinguishable
 
@@ -228,6 +283,49 @@ are status and executed quantity and both are the same in either case.
 
 *Arming condition:* **whoever next writes a classifier branch that reads a leg's
 terminal status, or whoever adds the first non-bot writer to a live account.**
+
+### A3. Two build-log headlines carry a claim their own annotation corrects
+
+**Reserved to the project owner. No edit is proposed and none should be made
+without a ruling.**
+
+Two entries in `docs/PHASE_HISTORY.md` open on a claim that the same entry
+annotates as false much further down:
+
+* the M5h entry, whose opening reads that **almost every path built there has
+  never run against a venue**, where an annotation in the same entry records
+  that the close path it built ran in production 27 times before that close;
+* the M5i entry, whose opening reads that **nothing has run, and that milestone
+  added two more emitters to paths no venue has ever exercised**, where an
+  annotation in the same entry records 3 substantial runs inside the M5i window
+  and 2 more after its close.
+
+**A reader of either intro alone gets the false version**, because the
+correction is roughly 180 and 90 lines below it and nothing at the headline
+points down to it.
+
+**A SECOND ANNOTATION IS NOT THE REMEDY.** `CLAUDE.md` states it directly:
+
+> **VERIFY THE TARGET IS PRESENT, BY CONTENT, BEFORE ANNOTATING — a duplicate
+> annotation is PERMANENT.**
+
+Both entries already carry an annotation of exactly this claim, so a second one
+could not later be removed and the tree would keep two blocks saying the same
+thing — leaving every future reader to work out whether the duplication means
+two findings or one mistake. **The plausible remedies each cost something a
+build log is supposed to protect**: a forward pointer at the headline edits a
+sentence written in the tense it was decided, and moving the annotation upward
+re-orders an entry. Which cost is acceptable is a judgement about the log's
+purpose, and it is the owner's.
+
+**`docs/PHASE_HISTORY.md` was outside this milestone's fence lift**, so this
+item records the problem rather than acting on it. That is why it is written
+here and not there.
+
+*Arming condition:* **whoever next appends a milestone entry to
+`docs/PHASE_HISTORY.md`** — the rotation's step 1 author, who is the first
+caller that must decide whether a new entry's headline may state a claim the
+entry will later annotate.
 
 ---
 
@@ -400,6 +498,49 @@ minute later.
 **The common shape:** each is a branch the tree can only reach through a
 fixture, on a path where a fixture is a model of the venue rather than an
 observation of it. **M5i added two more such branches.**
+
+### The unobserved surface is far larger than these items, and both numbers belong here
+
+X1 and X2b are the remaining unobserved **venue facts**, and that framing is
+unchanged — they are things the venue would have to do, which nothing in the
+tree can supply. They are **not** the remaining unobserved branches, and reading
+them as such understates the position by an order of magnitude.
+
+Measured against the frozen capture whose digest section 2 of
+`docs/RUN_LEDGER.md` states, with the instrument beside each figure:
+
+| Figure | Value | Instrument |
+|---|---|---|
+| clauses naming a filled leg `TP` | **0** | `grep -cE 'leg TP reports (status )?[A-Z]'`, both classifier forms |
+| clauses naming a filled leg `SL` | **162** | the same pattern for `SL` |
+| `decision=halt` | **0** | `grep -c 'decision=halt'` |
+| close plans | **65** | `grep -c 'event=close_planned'` |
+| log events DEFINED in `src/` | **33** | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
+| of those, NEVER emitted | **17** | `grep -c "event=<name>"` per constant, zero |
+| `RefusalStage` members defined | **14** | the enum body |
+| of those, unobserved | **9** | `grep -c "stage=<value>"` per member, zero |
+
+The close plans reconcile: `decision=sell` 64 plus `decision=already_closed` 1
+is 65, so of `CloseAction`'s three members exactly one — `HALT` — is unobserved.
+
+**The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE = "e"`,
+`_WS_EVENT_KLINE = "kline"` and `_WS_EVENT_ERROR = "error"` in
+`exchange/websocket_client.py` match a pattern looking for `_EVENT_` but are
+**wire-protocol keys of Binance's stream payload, not log events**. Counting
+them inflates the defined total and reports three events as never emitted that
+were never log events at all. A first pass here did exactly that.
+
+**What the 17 contain is the point.** The entire close-failure family has never
+fired — `close_abandoned_after_cancel`, `close_book_failed`, `close_cancel_failed`,
+`close_cancel_already_terminal`, `close_position_naked`, `close_sell_unconfirmed`,
+`close_sold_unbooked`, `close_sold_unpriced`, `close_record_resolved` — along
+with `placement_unresolved`, the fail-closed branch M5f's ruling created, and
+`collaborator_failed`, whose absence is why Q-A stays uncalibratable.
+
+*Arming condition:* **whoever next writes a test asserting that a branch is
+unobserved, or a rotation compiling this section.** Both need the number rather
+than the two items, and both are the first callers that cannot proceed without
+it.
 
 ---
 
