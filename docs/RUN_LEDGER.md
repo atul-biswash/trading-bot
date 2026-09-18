@@ -836,3 +836,108 @@ it has no answer rather than an unmeasured one.
 carry no identifier this repository issued, and the interval holds no log line
 because no bot process was running. This file names no actor and takes no
 position on which one acted.
+
+---
+
+## 15. A take-profit leg filled, on 2026-09-18
+
+Sections 1 to 14 were derived from the capture section 2 identifies. This
+section is derived from a **later, larger capture**, identified here in full,
+and the two are continuous.
+
+### The capture
+
+| Property | Value |
+|---|---|
+| path | `F:\trading bot\files\binance-trading-bot\m5j-evidence\trading_bot.x1-20260918T175500Z.log` |
+| taken | 2026-09-18T17:55Z, **while a writer held the file** |
+| bytes | 4,180,801 |
+| lines | 21,781 |
+| **SHA-256** | **`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182`** |
+
+**The read was share-mode.** The source was opened `FileMode::Open`,
+`FileAccess::Read`, `FileShare::ReadWrite`, so the running writer kept its
+handle throughout; the source was left unmoved, untruncated, unrenamed and
+unlocked. A digest identifies this capture rather than `logs/trading_bot.log`,
+which had already grown by the time the digest was taken.
+
+### Continuity with section 2
+
+The capture section 2 names is a **byte-exact prefix** of this one:
+
+```bash
+head -c 4089853 "$NEW" | sha256sum
+  # 0e6b673e16671152a4e08ca6cc8390e7b72ea8b75c3e7303fa0c16b4e04d223e
+sha256sum "$OLD"
+  # 0e6b673e16671152a4e08ca6cc8390e7b72ea8b75c3e7303fa0c16b4e04d223e
+```
+
+Identical, so no rotation and no truncation intervened, and `logs/` held no
+rotated sibling. This capture adds 90,948 bytes and 572 lines on top of it.
+OBSERVED.
+
+### The lifecycle
+
+| Observation | Value |
+|---|---|
+| placed | `2026-09-18T13:29:02Z` |
+| `order_list_id` | `171948` |
+| `list_client_order_id` | `tb1-BTCUSDT-1789738139999-0-L` |
+| `entry_bar_time` | `2026-09-18T13:28:59.999000+00:00` |
+| quantity | `0.02308000` |
+| entry | `78253.23000000` |
+| stop-loss trigger | `76688.17000000` |
+| discovered | `2026-09-18T15:21:02Z` |
+| exit `order_id` | `3612839` |
+| `quote_total` | `1867.31048000` |
+| `realised` | `63.0300952000` |
+
+The classifier resolved the two protective legs differently in the same pass:
+the `SL` leg reported `EXPIRED` and did not rest, and the `TP` leg reported
+`FILLED` with `0.02308000` executed.
+
+**The leg was this bot's own.** `ProtectionState.ACTIVE` is returned only when
+each leg's client order id equals the one `exchange/ids.py` derives, so the
+passes reporting `active` up to 15:19:03Z establish it, and the point query
+that found the fill was keyed on that same derived id. MEASURED. No actor
+outside this repository is implicated, and none is named.
+
+### The detection window
+
+| Observation | Value |
+|---|---|
+| last pass reporting `active` | `2026-09-18T15:19:03Z` |
+| pass that discovered the fill | `2026-09-18T15:21:02Z` |
+| interval | **119 seconds** |
+
+A leg resting in the open-orders enumeration has not filled, so the fill fell
+inside that interval and was found by the next pass.
+
+### `venue_time` is the leg's creation time
+
+The `exit_booked` line carries `venue_time=2026-09-18T13:29:00.594000+00:00`.
+**That is `order.created_at`, and it is not the fill time.** The arithmetic
+settles it without appeal to the code: the value precedes this repository's own
+placement line at `13:29:02Z` by 1.4 seconds, and a fill cannot precede the
+placement that created the order.
+
+**The fill time is UNMEASURED.** The capture bounds it to the 119-second window
+above and holds nothing finer. An interval computed from `venue_time` to the
+booking measures the position's lifetime rather than any latency.
+
+### The realised figure is GROSS
+
+`realised=63.0300952000` was booked with `fee` at `Decimal(0)`, because the
+venue's commission does not reach the ledger: `to_order` reads 16 distinct wire
+keys and `fills` is not among them, so the figure the venue reported is
+discarded at the mapper. What the commission was on this trade is unmeasured
+here, and no figure for it is stated.
+
+### What this section is
+
+An observation, in the shape of every section above it. Checked against the
+banner in section 1 — *"**This file asserts no rule.** Rules for this project
+live in `CLAUDE.md`, and a reader looking for one is served by going there
+rather than by reading anything here as prescriptive."* Nothing above
+prescribes anything; the sentences are past-tense statements about bytes that
+existed at a stated time with a stated digest.

@@ -327,6 +327,116 @@ here and not there.
 caller that must decide whether a new entry's headline may state a claim the
 entry will later annotate.
 
+### A4. `venue_time` on an `exit_booked` line is the leg's CREATION time
+
+`ExitFill` is built in `execution/reconciliation.py` by `_exit_fill`, whose
+last assignment is:
+
+```python
+        venue_time=order.created_at,
+```
+
+and `created_at` is derived in `exchange/models.py`'s `to_order` as:
+
+```python
+        created_at=_first_ms(raw, "transactTime", "time", "updateTime"),
+```
+
+`_first_ms` returns the first of those keys that is present. A point-query
+response for a resting protective leg carries no `transactTime`, so the value
+that survives is `time` — **the venue's order CREATION timestamp.**
+
+**The falsifying arithmetic needs no appeal to the code.** On 2026-09-18 the
+booking line carried `venue_time=2026-09-18T13:29:00.594000+00:00` while this
+repository's own placement line for the same order list is stamped
+`13:29:02Z`. The value **precedes the placement by 1.4 seconds**, and a fill
+cannot precede the placement that created the order.
+
+**The field is persisted**, so this is not confined to a log line. Anything
+computing a **holding period**, a **detection latency**, or a **fill-time
+ordering** from it is wrong by the position's entire lifetime — on the observed
+trade, by 1 hour 52 minutes against a true detection window of 119 seconds.
+
+**The fill time is not recorded anywhere in this tree.** Closing that needs
+either a field the mapper does not read or a `myTrades` query, which is the
+same port widening A1 describes.
+
+*Arming condition:* **whoever next reads `ExitFill.venue_time` for anything
+other than display** — the first caller that would compute a duration from it,
+and the first that the name misleads.
+
+### A5. `M5j-011`'s DIVERGED branch RAN — OBSERVED-ADJACENT, not observed
+
+**The branch was exercised on 2026-09-18 and the hazard did not fire**, which
+is why this is marked observed-adjacent: what ran is the code `M5j-011` names,
+and what did not happen is the outcome it warns of.
+
+The `SL` leg reported `EXPIRED` and took the third branch of the per-leg
+refinement verbatim:
+
+```python
+    return (
+        ProtectionState.DIVERGED,
+        f"{symbol} leg {leg.value} was requested and does not rest: the point query reports "
+        f"{order.status.value}",
+        None,
+    )
+```
+
+`DIVERGED`, with `ExitFill` **`None`**.
+
+**Booking survived only because the sibling `TP` leg took the first branch and
+carried `_exit_fill(order)`.** Had the take-profit not filled in the same pass,
+the assessment would have reached `_book_exits` with `exit_fill is None`.
+
+**What such a pass does:** it books nothing — `exit_fill is None` is the silent
+healthy-pass row — and the `Position` survives in memory describing base the
+account may no longer hold, while `DIVERGED` sits outside `_TRUSTED_PROTECTION`
+and refuses every entry portfolio-wide until an operator intervenes. Nothing
+reports that the ledger and the account have parted company.
+
+**The hazard is unretired.** This run reached the branch and was rescued by a
+sibling leg rather than by a guard, and a sibling is not a mechanism.
+
+*Arming condition:* **whoever next edits `_book_exits` in
+`reconciliation_driver.py` or the per-leg refinement in `reconciliation.py`** —
+the two callers that would have to agree on what an absent `ExitFill` means.
+
+### A6. Two adjacent lines read as a booking overriding a refusal. **This is not a control defect.**
+
+At `15:21:02Z` a warning and a booking landed one second apart: the first says a
+position carries protection the bot does not trust and that the state *"is
+refused rather than interpreted"*; the second books the exit. Read in sequence
+they suggest a booking proceeded past a refusal.
+
+**Derived from the code, they are two calls, not one decision path.**
+`ReconciliationDriver.__call__` calls `self._report(reported, queries=remainder)`
+and then, separately, `self._book_exits(reported, now=now)`. No value passes
+from the first to the second and no branch joins them. The ordering is
+deliberate and the file states why:
+
+> AFTER `_report`, not before, because `_report` describes what
+> RECONCILIATION observed and booking is the response to it. A pass that
+> saw a filled stop genuinely did see untrusted protection; the warning
+> is true, and the booking line that follows says what was done about it.
+
+**The two "refusals" are different refusals.** The warning refuses to
+*interpret the protection state*, because the fill price is unmeasured — that
+is what writes `UNKNOWN` and blocks further entries. Booking asks a different
+question, and `classify_bookability` answers it from four facts in the order
+`A > Q > P > C`, **none of which is a fill price**. It read a quote total of
+`1867.31048000` against a position of matching quantity with a cost basis
+present, and returned `BOOKABLE` on its own terms.
+
+**The remedy is wording, not control flow.** Recorded because an operator
+reading the log will draw the wrong conclusion, and because the next reader to
+notice it would otherwise spend the same effort re-deriving that the tree is
+correct.
+
+*Arming condition:* **whoever next edits `_report`'s warning text or
+`_book_exits`'s booking line** — the first caller in a position to make the two
+lines say what they mean.
+
 ---
 
 ## CARRIED FROM M5i
@@ -462,16 +572,36 @@ existed and was sitting in the gitignored file — `CLAUDE.md`'s fifth drift
 surface behaving exactly as described, on this paragraph. The counts below are
 from that capture, by the commands the ledger prints.
 
-### X1. No take-profit has ever filled — 82 placements, 62 closes
+### X1. A take-profit HAS filled — OBSERVED once, and this item is STRUCK
 
-**Carried, and sharpened.** MEASURED: zero clauses of either form naming a
-filled `TP` leg, against 162 naming a filled `SL` leg. The instrument reads a
-classifier reason naming leg `TP` and a fill; it returns nothing.
+**Observed on 2026-09-18**, in a capture whose SHA-256 is
+`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182`
+— 4,180,801 bytes, 21,781 lines, of which the capture behind X2a and X2b is a
+byte-exact prefix. `docs/RUN_LEDGER.md` section 15 holds the record.
+
+MEASURED against that capture: **1** clause naming a filled `TP` leg, against
+**162** naming a filled `SL` leg. The `SL` figure is unmoved, so this is a new
+event rather than a re-reading of old lines.
+
+BTCUSDT, `order_list_id=171948`, `list_client_order_id=tb1-BTCUSDT-1789738139999-0-L`,
+placed `13:29:02Z`. The `TP` leg reported `FILLED` with `0.02308000` executed
+while its `SL` sibling reported `EXPIRED`; the exit booked at `15:21:02Z` as
+`order_id=3612839`, `quote_total=1867.31048000`, **`realised=63.0300952000`
+GROSS** — `fee` was `Decimal(0)`, per A1.
+
+**Detection took 119 seconds**, from the last pass reporting `active` at
+`15:19:03Z` to the pass that found the fill at `15:21:02Z`. A leg resting in
+the open-orders enumeration has not filled, so the fill fell inside that
+window. **The take-profit path ran end to end and the reconciler found it in
+one pass.**
 
 Note what nearly looked like an observation and is not: order list `137501`'s
 take-profit leg reached `CANCELED` with `executedQty 0.00000000` — a
-take-profit terminating **without** filling. That trade is not an X1
-observation.
+take-profit terminating **without** filling. That trade was not an X1
+observation, and this one is.
+
+**`decision=halt` is now the only unobserved venue fact.** X2a and X3 were
+struck at M5j; X1 is struck here; X2b stands alone.
 
 ### X2a. `ALREADY_CLOSED` — OBSERVED once, and this item is STRUCK
 
@@ -501,27 +631,37 @@ observation of it. **M5i added two more such branches.**
 
 ### The unobserved surface is far larger than these items, and both numbers belong here
 
-X1 and X2b are the remaining unobserved **venue facts**, and that framing is
-unchanged — they are things the venue would have to do, which nothing in the
-tree can supply. They are **not** the remaining unobserved branches, and reading
-them as such understates the position by an order of magnitude.
+X2b is the one remaining unobserved **venue fact**, and that framing is
+unchanged — it is a thing the venue would have to do, which nothing in the tree
+can supply. It is **not** the remaining unobserved branch, and reading it as
+such understates the position by an order of magnitude.
 
-Measured against the frozen capture whose digest section 2 of
-`docs/RUN_LEDGER.md` states, with the instrument beside each figure:
+**Every figure below was RE-MEASURED against the capture whose SHA-256 is
+`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182`** —
+4,180,801 bytes, 21,781 lines — with the instrument beside each. The digest is
+named here rather than left to a header so the claim carries its own
+instrument, and a figure that has not moved was re-measured rather than
+carried:
 
 | Figure | Value | Instrument |
 |---|---|---|
-| clauses naming a filled leg `TP` | **0** | `grep -cE 'leg TP reports (status )?[A-Z]'`, both classifier forms |
-| clauses naming a filled leg `SL` | **162** | the same pattern for `SL` |
-| `decision=halt` | **0** | `grep -c 'decision=halt'` |
-| close plans | **65** | `grep -c 'event=close_planned'` |
-| log events DEFINED in `src/` | **33** | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
-| of those, NEVER emitted | **17** | `grep -c "event=<name>"` per constant, zero |
-| `RefusalStage` members defined | **14** | the enum body |
-| of those, unobserved | **9** | `grep -c "stage=<value>"` per member, zero |
+| clauses naming a filled leg `TP` | **1** | `grep -cE 'leg TP reports (status )?[A-Z]'`, both classifier forms |
+| clauses naming a filled leg `SL` | **162**, re-measured and unmoved | the same pattern for `SL` |
+| `decision=halt` | **0**, re-measured | `grep -c 'decision=halt'` |
+| close plans | **69** | `grep -c 'event=close_planned'` |
+| order lists placed | **88** | `grep -c 'event=order_placed'` |
+| complete exits | **67** (60 `close_booked` + 7 `exit_booked`) | `grep -c` on each |
+| log events DEFINED in `src/` | **33**, re-measured and unmoved | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
+| of those, NEVER emitted | **17**, re-measured and unmoved | `grep -c "event=<name>"` per constant, zero |
+| `RefusalStage` members defined | **14**, re-measured and unmoved | the enum body |
+| of those, unobserved | **9**, re-measured and unmoved | `grep -c "stage=<value>"` per member, zero |
 
-The close plans reconcile: `decision=sell` 64 plus `decision=already_closed` 1
-is 65, so of `CloseAction`'s three members exactly one — `HALT` — is unobserved.
+The close plans reconcile: `decision=sell` 68 plus `decision=already_closed` 1
+is 69, so of `CloseAction`'s three members exactly one — `HALT` — is unobserved.
+
+**The seventeen never-emitted events are the same seventeen.** A take-profit
+filling moved the `TP` clause count and moved no event into existence, because
+the path it exercised — classify, resolve, book — was already emitting.
 
 **The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE = "e"`,
 `_WS_EVENT_KLINE = "kline"` and `_WS_EVENT_ERROR = "error"` in
