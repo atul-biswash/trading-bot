@@ -113,6 +113,24 @@ so there is no site to attach it to. It was ruled for `M5j-012`, whose item in
 invariant binds whoever does that work, and a bare `Decimal` fee crossing the
 port is the specific thing it forbids.
 
+**A FEE-AWARE LEDGER IS WIRED AT EVERY BOOKING SITE OR AT NONE — THE
+TWO-OF-THREE FIX IS REJECTED.** Ruled by the project owner at M5j. Two of
+`close_position`'s three callers could be handed a fee once the port carries
+one; the third reads `get_order` point queries, whose responses carry no fills
+array, so it needs `myTrades` and therefore a **new port method** rather than a
+wider one. Wiring the reachable two would make the ledger **net of fees on some
+closes and gross on others**, with no reader able to tell which without knowing
+which close path ran. A ledger whose stated purpose is to match an exchange
+statement cannot be net in part, and a partial wiring is worse than none because
+it looks finished.
+
+**AND `fee=Decimal(0)` IS FORBIDDEN AS AN INTERIM STUB.** Threading the
+parameter through with a zero changes no behaviour, passes the gate unchanged,
+and closes the item that names the defect while leaving the defect exactly where
+it is. It is the shape this file warns about elsewhere — a proxy holding while
+the thing it stands for does not — and it is worse than leaving the call sites
+bare, because a bare call site still reads as unfinished.
+
 **The log sink is a third edge, and it is safe.** `JsonFormatter` serialises via
 `json.dumps(payload, default=str)`, so a `Decimal` reaches a JSON log line as a
 **string** — `"50.000"`, exact, never a JSON number and never a float. A bare
@@ -3589,3 +3607,50 @@ occurred**, **`resolve_placement` has never run**. See
 > and named no capture, so nothing in it recorded which bytes it was true of —
 > and a claim without its instrument cannot age visibly. The capture-digest
 > rule below is that failure written down.
+
+**M5j is complete, in 8 commits including this one, and 50 findings declared
+across `M5j-001`–`M5j-050`, every commit carrying a block.** It began by
+testing M5i's closing sentence — *"nothing has run"* — and the sentence was
+false. The milestone's weight is not any one correction: it is that the
+evidence had been sitting in a gitignored file for three milestones and no
+instrument in the repository was pointed at it.
+
+*What the log held.* A frozen capture was taken, given a digest, and
+`docs/RUN_LEDGER.md` created to hold the census. **X3 and X2a were struck
+first** — `resolve_placement` ran on 2026-08-27 and `ALREADY_CLOSED` occurred
+on 2026-09-15, both already true when the milestone opened, and both missed by
+the same defect: the searches matched an enum's MEMBER NAME where the log
+carries its `.value`. **X1 was struck last and was observed rather than
+re-read**: a take-profit leg filled on 2026-09-18, MEASURED against the capture
+whose SHA-256 is
+`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182` — one clause
+naming a filled `TP` leg against 162 naming a filled `SL` leg, the `SL` figure
+re-measured and unmoved.
+
+**`decision=halt` is the sole remaining unobserved venue fact.** Against this
+rotation's capture — SHA-256
+`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d` — it is
+**zero across 75 close plans**, and the denominator is quoted with its capture
+because it moved three times inside one milestone.
+
+*The accounting item.* **`M5j-012` began as "three call sites omit `fee`" and
+ended as an architectural accounting item.** The wiring inside
+`core/portfolio.py` is complete on both limbs; what is missing is any figure to
+pass, because `to_order` reads sixteen wire keys and `fills` is not among them.
+Three rulings are locked above: the denomination invariant, the rejection of
+the two-of-three fix, and the prohibition on `fee=Decimal(0)` as a stub.
+
+*Two tools, and one marker.* `scripts/run_census.py` mechanises the ledger's
+tables and **refuses a path under `logs/` before it reads a byte**;
+`scripts/check_arming_conditions.py` keeps a parsed and an unparsed register
+and **fails closed**, because a tool reporting only what it parsed prints a
+clean run precisely when its parser is most broken. The one `src/` change was
+a clean-shutdown marker attached to `TradingEngine.stop`'s existing emission
+rather than added as a second line.
+
+*And the rotation's own step 4 earned its place.* **It found a sentence in
+`docs/QB_ESCALATION.md` that had been false for three milestones** — *"Nothing
+in `src/` assigns `Position.protection` yet"* — falsified by M5f `8ca878e`, not
+by M5j. Its sibling in `docs/QC_PROTECTIVE_ORDERS.md` said the same thing and
+was annotated at M5h's rotation; this one was missed, because nothing compares
+two documents against each other.

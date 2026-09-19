@@ -73,14 +73,17 @@ the list, re-queries each leg (because a leg can fill *during* the cancel), sell
 is never learned keeps its record and is re-observed on the next candle.
 
 **What has NOT happened is the thing to keep in view.** Supervised runs have
-taken **67 complete exits** across 88 order lists, and the log that records them
+taken **73 complete exits** across 94 order lists, and the log that records them
 is gitignored — `docs/RUN_LEDGER.md` holds the census, with the command behind
 each figure and the digest of the capture they came from. The paths added since
-M5h have still not run. After 88 placements and 67 closes, **a take-profit has
+M5h have still not run. After 94 placements and 73 closes, **a take-profit has
 filled** — once, on 2026-09-18, found by the reconciler one pass later — and
 **one of the three close-plan outcomes — `HALT` — has never
-occurred**; `ALREADY_CLOSED` occurred once, on 2026-09-15, and the
-ambiguous-placement recovery ran on 2026-08-27. See `docs/NEXT_MILESTONE.md`.
+occurred**, zero across 75 close plans; `ALREADY_CLOSED` occurred once, on
+2026-09-15, and the ambiguous-placement recovery ran on 2026-08-27. Those
+figures are measured against a capture whose SHA-256 is
+`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`, and they
+move whenever the bot runs. See `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
