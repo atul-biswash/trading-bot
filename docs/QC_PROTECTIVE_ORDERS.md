@@ -952,6 +952,66 @@ programming error, raise loudly. `-1158` / `-1159` / `-1128` → contract errors
 > success signal and arm 10's measurement stand exactly as written. Only the
 > caller's behaviour when it cannot tell which row applies has changed.
 
+> **ANNOTATED AT M5j's ROTATION: FILLS HAVE OCCURRED, AND NEITHER IS THE FILL
+> ROW FOUR NEEDS. The row is NOT falsified and is NOT struck.**
+>
+> Row four is the only one marked **REASONED, NOT MEASURED**, and the annotation
+> above says *"it needs a fill to settle"*. Two protective legs have since
+> filled in production — a stop on 2026-09-15 and a take-profit on 2026-09-18 —
+> so a reader meeting that phrase now would reasonably conclude the condition is
+> met. **It is not**, and the distance is not small.
+>
+> **WHAT THE ROW ACTUALLY REQUIRES, restated so the gap is legible.** A write
+> that TIMED OUT, leaving the placement's outcome unknown; whose **working** leg
+> filled; while both pending protective legs are still live; followed by a
+> byte-identical re-place. Four conditions, and what has been observed satisfies
+> none of them: both fills were **protective** legs on lists placed cleanly,
+> with no ambiguous write anywhere near them.
+>
+> **AND THE WORKING LEG CANNOT PRODUCE THIS STATE BY RESTING.** Derived from
+> `execution/placement.py` rather than carried: the working leg is built
+> `type=OrderType.LIMIT` with `time_in_force=TimeInForce.FOK`. A fill-or-kill
+> leg fills or dies at placement and never rests, so the window in which it is
+> filled while its siblings are still pending is the width of one submission.
+> That is the same fact the deviation note above records from the other side —
+> arm 10 had to use `GTC` precisely because a `FOK` leg *"cannot rest and so
+> cannot produce a live list without a fill"*.
+>
+> **So the row stands, unmeasured, and the fail-closed ruling that rests on it
+> stands with it.** What this annotation changes is only that *"needs a fill"*
+> can no longer be read as an open invitation: the fills came and went without
+> touching it.
+>
+> **SEPARATELY, AND RE-VERIFIED RATHER THAN ASSUMED: section 7's annotation that
+> "every instance was our bug rather than a venue divergence" SURVIVES.** It was
+> the natural casualty of a milestone in which a protective leg finally filled,
+> so this rotation measured it again rather than trusting it. Against the
+> capture whose SHA-256 is
+> `bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d` —
+> 4,252,169 bytes, 22,127 lines — every `states=` value the reconciler has ever
+> reported:
+>
+> | `states=` | count |
+> |---|---:|
+> | `active=1` | 2849 |
+> | `active=2` | 1261 |
+> | `unknown=1` | 160 |
+> | `diverged=1` | **28** |
+> | `active=1,unknown=1` | 3 |
+>
+> **All 28 `diverged=1` records fall between `2026-08-27 04:07:02` and
+> `04:38:02`. The identifier-space fix `3970968` is authored `2026-08-27
+> 05:47:28Z`, later the same day, and ZERO diverged records follow it.** No
+> position has carried `DIVERGED` in production since.
+>
+> **One sharpening the 2026-09-18 fill supplies, and it cuts the other way.**
+> On that pass the `SL` leg DID take the classifier's `DIVERGED` branch — it
+> reported `EXPIRED` and did not rest — but the **position-level** assessment
+> was `unknown=1`, because the sibling `TP` leg reported a fill and that branch
+> returns first. So the per-leg branch has run in production while the
+> position-level state has not, and the two must not be read as the same
+> observation.
+
 ## 9. Costs
 
 Order-list domain type; `ProtectionState`; three error classes; a reconciler.

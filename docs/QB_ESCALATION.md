@@ -199,6 +199,57 @@ the question left open here.
 > is obviously right. The natural moment to settle it is M5d, when the reconciler
 > that produces the state is written.
 
+> **ANNOTATED AT M5j's ROTATION: THE SENTENCE ABOVE IS FALSE, AND IT WAS
+> FALSIFIED BY M5f RATHER THAN BY THIS MILESTONE.**
+>
+> The clause is *"Nothing in `src/` assigns `Position.protection` yet, so site
+> 3's state cannot arise and the shipped refusal has never seen it."* Its
+> premise no longer holds.
+>
+> **WHAT ASSIGNS IT TODAY, derived by content rather than counted.** `Position`
+> carries two writer methods in `core/models.py` — `record_reconciliation`,
+> which takes a protection state and a timestamp, and
+> `record_partial_reconciliation`, which takes the state alone — and each ends
+> in the same assignment. Three call sites in `execution/reconciliation.py`
+> reach them: the pass writes the classifier's verdict, the partial form writes
+> protection without stamping when legs remain unresolved, and the resolver
+> writes its own verdict after point-querying. Beside those,
+> `execution/executor.py` assigns the field at four sites — once at
+> construction, where every `Position` is built at `ProtectionState.UNKNOWN`,
+> and three times directly on the close paths.
+>
+> **IT IS NOT MERELY REACHABLE BUT ROUTINE.** The frozen capture this rotation
+> was taken against — SHA-256
+> `bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`,
+> 4,252,169 bytes, 22,127 lines — holds **191** `reconciliation_untrusted`
+> records, each one a pass that wrote a protection state the bot declined to
+> trust.
+>
+> **THE PROVENANCE IS THE PART WORTH KEEPING.** `OrderExecutor` has constructed
+> a `Position` since M5f `8ca878e`, so this sentence has been false since that
+> commit — through M5g, M5h and M5i, three rotations, each of which ran step 4
+> over this file. **Its sibling in `QC_PROTECTIVE_ORDERS.md` said the same thing
+> in different words and WAS annotated at M5h's rotation**; this one was missed,
+> and nothing reported the asymmetry because nothing compares two documents
+> against each other.
+>
+> **What found it was step 4 of this rotation**, read as written rather than
+> skimmed: *"a later decision can invalidate a paragraph in one of them and
+> nothing will prompt a re-read, because the milestone that superseded it was
+> editing different files."* That is exactly what happened, and the interval
+> was three milestones.
+>
+> **WHAT SURVIVES, and it is the paragraph's actual subject.** The refusal
+> being scoped by `stop_loss.enabled` is unchanged and still the discriminator
+> any answer will need. The question is unchanged. What expired is only the
+> claim that the state cannot arise — and the block above is right that M5a
+> settled nothing here, which is why this annotation settles nothing either.
+>
+> **Site 3's own status is a separate question and is NOT resolved here.**
+> Whether a position has ever carried `DIVERGED` in operation is answered in
+> `QC_PROTECTIVE_ORDERS.md` §7, where this rotation re-verified it against the
+> same capture.
+
 **Class D — the halt is a ratchet toward flat.** Entries stop, exits continue, so the
 book only shrinks. That is intended, and worth stating so it is not mistaken for a
 bug: a halted bot converges on flat and then idles.

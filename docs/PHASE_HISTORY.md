@@ -3237,3 +3237,184 @@ facts about this milestone's close, not counts to update.
 
 **M5i's scope and its rulings were the project owner's. Everything else here was
 ruled by the reviewer under delegation.**
+
+---
+
+## Phase 5 M5j — the runs that had happened, and the instruments that missed them
+
+M5i closed on the sentence *"nothing has run"*. M5j began by testing it and it
+was false. **7 commits including this one — 6 of documents and tools and this
+one of rotation — and 45 findings declared across `M5j-001`–`M5j-045`, every
+commit carrying a block.** The headline is not any one correction: it is that
+the evidence had been sitting in a gitignored file for three milestones and no
+instrument in the repository was pointed at it.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `97d5239` | A run ledger for the log the repository cannot see |
+| 2 | `0992fa3` | The runs that happened, and the actor the log cannot see |
+| 3 | `e549f58` | The leg settled, and a premise that outlived its conclusion |
+| 4 | `88db57a` | The fee gap is at the port, and a rule never written down |
+| 5 | `3ea87d8` | A take-profit filled, and the timestamp that made it look slow |
+| 6 | `ec3df40` | A census that refuses the live log, and a checker that fails closed |
+| 7 | this commit | Two decided documents annotated, and this entry |
+
+### What was found by looking at the log
+
+**A frozen capture was taken and given a digest, and everything followed from
+that.** The decision worth recording is that a capture is named and hashed
+rather than read live: the bot appends while it runs, so two reads a second
+apart measure two files and a figure from either is attached to nothing a later
+reader can reproduce. `docs/RUN_LEDGER.md` was created to hold the census.
+
+**Three of the four venue facts this project had carried as unobserved were
+already false when the milestone opened**, and two of them were missed by the
+same instrument defect. The searches matched an enum's MEMBER NAME where the
+log carries its `.value` — `ALREADY_CLOSED` against `already_closed`,
+`TAKE_PROFIT` against the leg label `TP`. Twelve of eighteen enums in the tree
+carry a value differing from the name, and a sweep of every emission site found
+the tree passes `.value` everywhere: **the defect was in the searches, never in
+the code.**
+
+**X3 was struck first** — `resolve_placement` ran on 2026-08-27, one
+`placement_ambiguous` followed a minute later by `placement_resolved
+outcome=placed_live`. **X2a was struck next** — `ALREADY_CLOSED` occurred on
+2026-09-15T23:38:02Z, inside M5i's own window and two days before its close.
+**X1 was struck last, and it was observed rather than re-read**: a take-profit
+leg filled on 2026-09-18, MEASURED against the capture whose SHA-256 is
+`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182` — one clause
+naming a filled `TP` leg against 162 naming a filled `SL` leg, the `SL` figure
+re-measured and unmoved, so a new event rather than a re-reading.
+
+**`decision=halt` is the sole remaining unobserved venue fact.** Against the
+capture this rotation was taken with it is zero across **75** close plans —
+`decision=sell` 74 plus `decision=already_closed` 1 — and the denominator is
+stated with its capture because it moved three times inside one milestone.
+
+### The accounting item, and the alternatives rejected
+
+**`M5j-012` began as "`close_position` takes `fee` and three call sites omit
+it" and ended as an architectural accounting item.** The wiring inside
+`core/portfolio.py` is complete on both limbs; what is missing is any figure to
+pass. `to_order` reads sixteen distinct wire keys and `fills` is not among
+them, so the venue's own commission is discarded at the mapper, and `Order`,
+`ExitFill` and every port method are commission-free by construction.
+
+**Three rulings by the project owner, and two rejected alternatives.** The
+denomination invariant: a money figure crosses a domain boundary only as an
+amount paired with its asset, never as a bare `Decimal`, because both operands
+being `Decimal` makes a cross-denomination subtraction succeed silently and the
+type system cannot catch it. **The two-of-three fix was REJECTED on
+ledger-comparability grounds** — wiring the two sites that could reach a fee and
+leaving the third would make the ledger net of fees on some closes and gross on
+others, with no reader able to tell which without knowing the close path, and a
+ledger whose purpose is to match an exchange statement cannot be net in part.
+**Threading `fee=Decimal(0)` as an interim stub was REJECTED outright**: it
+changes no behaviour, passes the gate unchanged, and would retire the finding
+that names the defect while leaving the defect exactly where it is.
+
+### Two tools, and why they are shaped as they are
+
+**`scripts/run_census.py` mechanises the ledger's own tables and refuses the
+live log.** The refusal precedes the is-a-file check, so a path under `logs/`
+is rejected before a byte is read; there is no default argument at all. It
+prints the digest of what it read beside every figure block rather than once in
+a header, because figures are quoted elsewhere and arrive with no instrument
+attached.
+
+**`scripts/check_arming_conditions.py` keeps two registers and fails closed.**
+The conditions were written as prose before anything read them mechanically,
+and measured on the tree at its close: 22 conditions, 16 running past the line
+they begin on, at least four opening grammars, and several naming no backticked
+symbol at all. **A tool reporting only what it parsed would print a clean run
+precisely when its parser was most broken**, so the unparsed register prints
+even when empty and a non-empty one exits non-zero. It exits non-zero today by
+design.
+
+**The `src/` change was one marker and it was attached, not added.**
+`TradingEngine.stop` already emitted its message with no structured field; the
+marker enriches that call rather than emitting a second line, and the message
+text stays byte-identical because an existing test selects records by that
+substring. `clean_shutdown` is read before the method sets the flag itself,
+which is what keeps the field a measurement rather than a constant.
+
+**The gate counts advanced with the two scripts and their two test files, and
+the measured figures belong to step 2 of this rotation rather than here.** A
+prior target of a single-file advance was incompatible with the batch as
+scoped, and that was raised as a halt rather than adjusted quietly.
+
+### The doctrines the milestone earned
+
+**An instrument is evidence only for the INSTANT it reads, as well as for the
+property it reads.** Neither half had been written down. The distinction it
+buys is between unmeasured and **unmeasurable in retrospect** — an unmeasured
+case is one derivation away from closure, an unmeasurable one is closed to
+measurement altogether and stays open as the honest record of that.
+
+**A capture-bound claim carries its digest inline, in the sentence.** The worked
+instance was a sentence written three days earlier that said *"still true"* and
+named no bytes; its siblings in the same block that named their capture aged
+into the record visibly, and that one simply became wrong.
+
+**Argue a silence from PRESENCE, not from absence.** Bracketing an interval by
+the last record of one pid and the first of the next, with no record between
+carrying any pid, distinguishes "nothing ran" from "something ran and did not
+log". An absence of matching lines cannot.
+
+**And `venue_time` is the venue order record's lifecycle timestamp** — neither a
+client-side clock nor the matching-engine execution time. The rename and the
+true fill time were scoped to the accounting milestone rather than taken here.
+
+### The errors this milestone made, recorded because they generalise
+
+**A rule was quoted as settled doctrine for several milestones and had never
+been committed.** *"An instrument is evidence only for the property it literally
+reads"* returned zero hits across `CLAUDE.md`, `README.md` and `docs/`. That is
+the `phase_5_` shape in its purest form: a rule governing work while living only
+outside the repository.
+
+**A 1h52m detection gap was asserted from `venue_time` without being derived,
+and the same two lines disprove it.** The placement stamp sits 1.4 seconds
+after the value, and a fill cannot precede the placement that created the
+order; the true detection window was 119 seconds. Reasoning from a field's NAME
+rather than its CONTENT.
+
+**A long SHA was fabricated past a correct short form.** A closing report gave
+`ec3df4055c7d0b39ff1a3bbb2e13bb3b70e4ef5c` where the commit is
+`ec3df40a5831847bba3ce120dd93eb927006ff1f`. The short prefix was right and
+everything after it was invented. A SHA is taken from `git rev-parse`, never
+from a report.
+
+**And a path set was named in an authorisation without being enumerated**, so a
+phase opened against a file that does not exist. Deriving the true set was made
+the phase's first job rather than a substitution made quietly.
+
+### What this rotation's step 4 found
+
+**Two decided documents carried prose M5j superseded, and one of them had been
+false for three milestones.** `QB_ESCALATION.md` stated that nothing in `src/`
+assigns `Position.protection`; `OrderExecutor` has constructed a `Position`
+since M5f `8ca878e`, and the field is written by two `Position` methods reached
+from three call sites in the reconciler and assigned at four sites in the
+executor. **Its sibling in `QC_PROTECTIVE_ORDERS.md` said the same thing and was
+annotated at M5h's rotation**; this one was missed, and nothing compares two
+documents against each other.
+
+**`QC_PROTECTIVE_ORDERS.md`'s re-place table needed care rather than
+correction.** Its fourth row is marked REASONED, NOT MEASURED and *"needs a
+fill"*; two fills have since occurred and **neither is the fill that row
+needs**, which requires a timed-out write whose working leg filled with pendings
+still live. The working leg is `LIMIT`+`FOK` and cannot rest. The row was
+annotated, not struck.
+
+**And one annotation was re-verified rather than trusted.** Section 7's *"every
+instance was our bug rather than a venue divergence"* was the natural casualty
+of a milestone in which a protective leg finally filled. Measured again: all 28
+`diverged=1` records fall between 04:07:02 and 04:38:02 on 2026-08-27, the
+identifier-space fix is authored 05:47:28Z the same day, and zero follow it.
+**It survives.**
+
+**M5j's scope and its rulings were the project owner's. Everything else here was
+ruled by the reviewer under delegation.**
