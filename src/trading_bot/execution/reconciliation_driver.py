@@ -35,6 +35,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
+from trading_bot.core.enums import ProtectionState
+
 # A PRIVATE name, imported across modules deliberately. The alternative is a
 # second definition of "which protection states may be trusted", and two
 # sources of truth for that is the drift this project guards hardest against --
@@ -87,6 +89,7 @@ _EVENT_PHASE_FAILED = "reconciliation_phase_failed"
 _EVENT_BOOKED = "exit_booked"
 _EVENT_BOOK_REFUSED = "exit_book_refused"
 _EVENT_LEDGER_UNWRITABLE = "ledger_unwritable"
+_EVENT_EXIT_UNBOOKABLE = "exit_unbookable"
 
 #: What each refusal MEANS HERE, appended to the fact `classify_bookability`
 #: states. `M5i-068`: the fact is shared and the consequence is not. The
@@ -415,17 +418,21 @@ class ReconciliationDriver:
         position's absence, and it would go stale the moment anything else
         closed a position.
 
-        **THE FIVE STATES, all decided here.** A fill with a quote total, a
+        **THE SIX STATES, all decided here.** A fill with a quote total, a
         complete quantity and a known cost basis is BOOKED. A fill whose
         ``filled_quote_quantity`` is ``None`` is REFUSED and escalated -- that
         absence means *a leg filled and cannot be priced*, which is a different
         fact from ``exit_fill is None`` and must not pass silently. A PARTIAL
         fill is not booked: it keeps ``UNKNOWN``, which is today's behaviour,
         and the existing ``COMMITTED_RISK_UNKNOWN`` interlock refuses
-        portfolio-wide. No ``exit_fill`` at all is the ordinary healthy pass and
-        says nothing. And a position with no ``entry_fill_price`` is REFUSED --
-        checked HERE rather than caught from ``close_position``, so
-        ``unrealized_pnl``'s raise is never used as control flow.
+        portfolio-wide. No ``exit_fill`` at all on a healthy state is the
+        ordinary pass and says nothing. No ``exit_fill`` at all on
+        ``DIVERGED`` is the sixth: the requested legs are terminal, no leg
+        reported a fill, and the position may describe base the account no
+        longer holds -- see :meth:`_escalate_unbookable_divergence`. And a
+        position with no ``entry_fill_price`` is REFUSED -- checked HERE rather
+        than caught from ``close_position``, so ``unrealized_pnl``'s raise is
+        never used as control flow.
 
         **THE COMPLETENESS TEST IS ``!=``, NOT ``<``.** They differ only on an
         over-fill, which the venue cannot produce: a leg's ``executedQty``
@@ -475,8 +482,8 @@ class ReconciliationDriver:
         for position, assessment in results:
             fill = assessment.exit_fill
             if fill is None:
-                # Row 4: the ordinary healthy pass. Silent, like a pass with
-                # nothing due -- this is most bars on most positions.
+                if assessment.state is ProtectionState.DIVERGED:
+                    self._escalate_unbookable_divergence(position, assessment)
                 continue
 
             if self._portfolio.positions.get(position.symbol) is not position:
@@ -575,7 +582,7 @@ class ReconciliationDriver:
             )
 
     @staticmethod
-    def _refuse_booking(symbol: str, order_id: str, reason: str) -> None:
+    def _refuse_booking(symbol: str, order_id: str | None, reason: str) -> None:
         """One line for a fill that was seen and not booked.
 
         ``WARNING`` rather than ``CRITICAL``: every refusal here leaves the
@@ -592,6 +599,51 @@ class ReconciliationDriver:
                 "symbol": symbol,
                 "order_id": order_id,
                 "reason": reason,
+            },
+        )
+
+    @staticmethod
+    def _escalate_unbookable_divergence(
+        position: Position, assessment: ProtectionAssessment
+    ) -> None:
+        """One line for a position whose requested legs are terminal and unpriced.
+
+        ``CRITICAL`` rather than the ``WARNING`` :meth:`_refuse_booking` uses,
+        and the difference is WHAT IS UNKNOWN rather than how bad it is. A
+        refusal there saw a fill and could not price it, so the position is
+        known to have closed. Here no leg reported a fill at all, so nothing
+        establishes that the position is still held -- the ledger and the
+        account may have parted, and only an operator can say which.
+
+        **Q-B section 1 defines ``CRITICAL`` as a log line AND a halt flag on
+        ``Portfolio``.** No halt flag exists anywhere in ``src/``; this emits
+        the log line alone. That departure is RATIFIED by ruling rather than
+        repaired here, and it is the shape the ten existing ``_log.critical``
+        sites in ``src/`` already take.
+
+        **IT FIRES ON EVERY PASS WHILE THE CONDITION HOLDS.** The
+        transition-only alternative needs a latch and no field can serve as
+        one: the pass re-stamps ``Position.protection`` from the venue in its
+        first phase, before this method is reached, so the previous pass's
+        value is already gone. Q-B site 4's N-cycle promotion is the honest
+        suppression and it is blocked on the halt flag.
+        """
+        _log.critical(
+            "%s has no protection resting and no fill to book; the ledger and the account "
+            "may have parted",
+            position.symbol,
+            extra={
+                "event": _EVENT_EXIT_UNBOOKABLE,
+                "symbol": position.symbol,
+                "state": assessment.state.value,
+                "quantity": position.quantity,
+                "venue_order_list_id": position.venue_order_list_id,
+                "reason": assessment.reason,
+                "resolution": (
+                    "OPERATOR ONLY: no leg reported a fill, so there is nothing to price and "
+                    "nothing is booked. The position is retained and stays untrusted, so "
+                    "entries are refused portfolio-wide until it is reconciled by hand."
+                ),
             },
         )
 

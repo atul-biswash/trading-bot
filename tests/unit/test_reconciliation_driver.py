@@ -964,11 +964,19 @@ async def test_each_refusal_states_this_callers_consequence(
 
 
 async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
-    """Row 4 -- the ordinary healthy pass, and the commonest bar there is.
+    """Row 4 -- no leg reported a fill, so nothing is booked and nothing saved.
 
     MUTATION: book unconditionally, or save once per pass regardless of
     `booked`. The second is the one worth catching: an unconditional save
     fsyncs the file every bar on a bot that is doing nothing.
+
+    **THIS FIXTURE CLASSIFIES `DIVERGED`, NOT HEALTHY, AND ITS NAME SAID
+    OTHERWISE UNTIL `M5k-007`.** `_booking_position` carries `BOOK_QTY`
+    0.02257000 where `_order` rests `QTY` 0.00100000, so the quantity
+    comparison in `classify_protection` diverges. The assertions below are
+    unchanged and still pin what the name says -- both meanings of row 4 have
+    `exit_fill is None` -- but the healthy pass is pinned by
+    `test_a_healthy_active_pass_escalates_nothing`, not here.
     """
     portfolio = _portfolio(_booking_position())
     client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
@@ -979,6 +987,112 @@ async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
     assert portfolio.ledger is None
     assert "BTCUSDT" in portfolio.positions
     assert writer.calls == []
+
+
+async def test_a_diverged_pass_with_no_fill_escalates_at_critical(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Row 4's sixth state -- A5, and the branch that did not exist before it.
+
+    MUTATION: delete the `_escalate_unbookable_divergence` call, or lower the
+    level to WARNING.
+
+    The fixture is the producer-(b) shape: a requested stop absent from the
+    enumeration, which a point query answers `OrderNotFoundError`, so the
+    resolver returns `DIVERGED` carrying no `ExitFill`. Nothing reported a
+    fill, so nothing can be priced and the position may describe base the
+    account no longer holds.
+
+    ABSTENTION DECLARED: this cannot tell a branch keyed on
+    `assessment.state` from one keyed on `exit_fill is None` alone, because
+    both fire here. `test_a_healthy_active_pass_escalates_nothing` is what
+    separates them.
+    """
+    position = _position("BTCUSDT")
+    sl = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    client = _StubClient({"BTCUSDT": []}, orders={sl: OrderNotFoundError("Unknown order sent.")})
+
+    with caplog.at_level(logging.CRITICAL):
+        await _driver(_portfolio(position), client)(_candle())
+
+    escalations = [r for r in caplog.records if getattr(r, "event", None) == "exit_unbookable"]
+    assert len(escalations) == 1
+    assert escalations[0].levelno == logging.CRITICAL
+    assert getattr(escalations[0], "symbol", None) == "BTCUSDT"
+
+
+async def test_a_healthy_active_pass_escalates_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The HARD CONSTRAINT: the branch reads the state, not the absent fill.
+
+    MUTATION: widen the guard to `exit_fill is None` alone.
+
+    Row 4 covers the ordinary healthy pass -- ACTIVE, PENDING,
+    ABSENT_BY_DESIGN -- which is most bars on most positions, so a guard keyed
+    on the absent fill alone would emit CRITICAL every minute on a bot doing
+    nothing. This fixture rests the requested stop at its requested trigger
+    for the requested quantity, which classifies ACTIVE.
+    """
+    position = _position("BTCUSDT")
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+
+    with caplog.at_level(logging.DEBUG):
+        await _driver(_portfolio(position), client)(_candle())
+
+    assert [r for r in caplog.records if getattr(r, "event", None) == "exit_unbookable"] == []
+    assert [r for r in caplog.records if r.levelno >= logging.CRITICAL] == []
+    assert position.protection is ProtectionState.ACTIVE
+
+
+async def test_the_escalation_books_nothing_and_saves_nothing() -> None:
+    """R6: zero venue calls inside `_book_exits`, and the ledger untouched.
+
+    MUTATION: route the diverged case into `close_position`, or save once per
+    pass regardless of `booked`.
+
+    A DIVERGED pass has no fill, so there is no quote total to book and no
+    figure to accrue. The position is RETAINED -- deleting it would assert
+    that the venue closed it, which is the one thing this state does not
+    establish.
+    """
+    position = _position("BTCUSDT")
+    sl = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    client = _StubClient({"BTCUSDT": []}, orders={sl: OrderNotFoundError("Unknown order sent.")})
+    portfolio = _portfolio(position)
+    writer = _RecordingWriter()
+
+    await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert portfolio.ledger is None
+    assert "BTCUSDT" in portfolio.positions
+    assert writer.calls == []
+
+
+async def test_the_escalation_crosses_the_state_as_a_value_not_a_member(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`ProtectionState` is a `str, Enum`, so equality cannot pin this.
+
+    MUTATION: pass `assessment.state` where `assessment.state.value` is sent.
+
+    A member compares EQUAL to its own value, so `record.state == "diverged"`
+    passes under the exact mutation it would be written for. Only the type
+    separates them: `json.dumps` emits the value while `PlainFormatter` calls
+    `str()` and gets `ProtectionState.DIVERGED`, and the two sinks then
+    disagree about one field.
+    """
+    position = _position("BTCUSDT")
+    sl = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    client = _StubClient({"BTCUSDT": []}, orders={sl: OrderNotFoundError("Unknown order sent.")})
+
+    with caplog.at_level(logging.CRITICAL):
+        await _driver(_portfolio(position), client)(_candle())
+
+    (escalation,) = [r for r in caplog.records if getattr(r, "event", None) == "exit_unbookable"]
+    state = escalation.state  # type: ignore[attr-defined]
+    assert type(state) is str
+    assert state == ProtectionState.DIVERGED.value
 
 
 async def test_the_ledger_is_saved_once_per_pass_not_once_per_booking() -> None:
