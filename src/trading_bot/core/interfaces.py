@@ -29,6 +29,7 @@ from trading_bot.core.models import (
     SizingDecision,
     SymbolInfo,
     Ticker,
+    Trade,
 )
 from trading_bot.core.portfolio import Portfolio
 
@@ -128,6 +129,37 @@ class ExchangeClient(ABC):
         :raises ValueError: neither identifier given, or both.
         :raises OrderNotFoundError: the venue has no such order -- which is an
             ANSWER, not a failure, and callers are expected to act on it.
+        """
+        ...
+
+    @abstractmethod
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        """Our executed fills on ``symbol``, oldest first, each with its fee.
+
+        **THE ONLY PORT METHOD THAT CARRIES A FEE, and a wider existing method
+        cannot serve.** ``close_position``'s third caller reads ``get_order``
+        point queries, whose responses carry no fills array at any width, so
+        the figure is unreachable from the order shape.
+
+        **ONE :class:`Trade` PER FILL, NOT PER ORDER.** A caller resolving an
+        order's economics aggregates by :attr:`Trade.order_id`; MEASURED, one
+        order can carry 23 fills at 21 distinct prices. Aggregation is
+        deliberately the caller's, because a weighted average price is a
+        division over money whose exact operands live here -- and that division
+        reaches the 28-digit context precision on 10 of the 11 multi-fill
+        orders measured, so performing it early would round a figure the
+        ledger needs whole.
+
+        ``timeout_s`` and ``attempts`` bound one call, as on
+        :meth:`get_own_open_orders`. ``limit`` bounds how many records the
+        venue returns and ``None`` means its own default. Idempotent.
         """
         ...
 

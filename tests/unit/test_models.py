@@ -8,15 +8,17 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from trading_bot.core.enums import PositionSide, ProtectionState, SignalAction
+from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState, SignalAction
 from trading_bot.core.models import (
     Balance,
+    Fee,
     OtocoOrderListRequest,
     OtoOrderListRequest,
     Position,
     ProtectiveLevels,
     Signal,
     Ticker,
+    Trade,
 )
 
 #: A fixed bar close, so `entry_bar_time` is deterministic across a run.
@@ -651,3 +653,126 @@ def test_an_order_list_request_is_frozen(build: object) -> None:
     request = build()  # type: ignore[operator]
     with pytest.raises(ValidationError):
         request.quantity = Decimal("1")
+
+
+# --------------------------------------------------------------------------
+# Fee and Trade -- the accounting boundary
+# --------------------------------------------------------------------------
+FILL_TIME = datetime(2026, 9, 18, 15, 20, 58, 864000, tzinfo=timezone.utc)
+
+
+def _trade(**overrides: object) -> dict[str, object]:
+    """The keyword set for a well-formed ``Trade``, so a test can remove ONE.
+
+    A test that omits a field by rebuilding the whole call by hand proves only
+    that the hand-built call is wrong. Removing exactly one key from a set
+    known to construct is what isolates the field under test.
+    """
+    base: dict[str, object] = {
+        "trade_id": "1129443",
+        "order_id": "3612839",
+        "symbol": "BTCUSDT",
+        "side": OrderSide.SELL,
+        "quantity": Decimal("0.02308000"),
+        "price": Decimal("80906.00000000"),
+        "quote_quantity": Decimal("1867.31048000"),
+        "fee": Fee(amount=Decimal("0.00000000"), asset="USDT"),
+        "filled_at": FILL_TIME,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_a_fee_refuses_an_empty_asset() -> None:
+    """THE DEGENERATE CASE THE PAIRING WOULD OTHERWISE ADMIT.
+
+    ``asset=""`` satisfies "both fields present" while denominating nothing,
+    which is exactly what the defaulted ``fee_asset: str = ""`` it replaces
+    did. Requiring the field is not enough; it must refuse the empty value.
+
+    NOTE M5i-115: ``pytest.raises`` raises ``Failed``, NOT ``AssertionError``.
+    A survey crediting only ``AssertionError`` scores this as a false
+    abstention -- the expensive direction, because a green test nobody
+    revisits reads as coverage that does not exist.
+
+    FAILS ON: annotating ``asset`` as a bare ``str`` without
+    ``Field(min_length=1)``, which passes every other test in this file.
+    """
+    with pytest.raises(ValidationError):
+        Fee(amount=Decimal("0.001"), asset="")
+
+
+def test_a_fee_refuses_a_float_amount() -> None:
+    """``amount`` is ``Money``, not a bare ``Decimal``, and the guard proves which.
+
+    A fee is money, so it carries the same ``_reject_float`` guard as every
+    price and quantity in the domain. Typing it ``Decimal`` would accept
+    ``0.001`` silently and lose whatever precision the venue sent.
+
+    NOTE M5i-115: this fails by ``Failed``, not ``AssertionError``.
+
+    FAILS ON: declaring ``amount: Decimal``.
+    """
+    with pytest.raises(ValidationError, match="must not be built from a float"):
+        Fee(amount=0.001, asset="USDT")  # type: ignore[arg-type]
+
+
+def test_a_fee_requires_both_halves() -> None:
+    """NEITHER FIELD HAS A DEFAULT, and each absence is checked separately.
+
+    A mutant restoring a default to ONE field passes the other's assertion, so
+    one test asserting "a Fee needs arguments" would not localise it. This is
+    the structural half of the denomination invariant: a charge whose
+    denomination is unknown must be unconstructible, not merely discouraged.
+
+    NOTE M5i-115: both branches fail by ``Failed``, not ``AssertionError``.
+
+    FAILS ON: restoring ``amount: Money = Decimal(0)`` or ``asset: str = ""``.
+    """
+    with pytest.raises(ValidationError):
+        Fee(amount=Decimal("0.001"))  # type: ignore[call-arg]
+    with pytest.raises(ValidationError):
+        Fee(asset="USDT")  # type: ignore[call-arg]
+
+
+def test_a_trade_cannot_be_constructed_without_a_fee() -> None:
+    """THE RULING, PINNED: the fee default is stripped and stays stripped.
+
+    ``CLAUDE.md`` forbids ``fee=Decimal(0)`` as an interim stub by name -- it
+    changes no behaviour, passes the gate, and closes the item that names the
+    defect while leaving the defect where it is. The only way to make that
+    unrepresentable is to give the field no default at all.
+
+    The positive half is asserted too: the full keyword set DOES construct, so
+    a mutant that made ``Trade`` unconstructible for some unrelated reason
+    cannot pass by making the ``pytest.raises`` fire for the wrong cause.
+
+    NOTE M5i-115: the refusal fails by ``Failed``, not ``AssertionError``.
+
+    FAILS ON: restoring any default to ``fee``.
+    """
+    assert Trade(**_trade()).fee.asset == "USDT"  # type: ignore[arg-type]
+
+    without_fee = {k: v for k, v in _trade().items() if k != "fee"}
+    with pytest.raises(ValidationError):
+        Trade(**without_fee)  # type: ignore[arg-type]
+
+
+def test_a_trade_cannot_be_constructed_without_a_fill_time() -> None:
+    """THE THIRD DEFAULT, and it is the same failure class as the fee stub.
+
+    The field this replaces was ``timestamp: datetime =
+    Field(default_factory=_utcnow)`` -- OUR clock standing in for the VENUE's
+    on a field whose whole value is that it is the venue's. It is worse than
+    the fee stub in one way: a zero fee is a suspicious number, where a
+    timestamp a few seconds late is not, so the error is invisible to
+    inspection.
+
+    NOTE M5i-115: fails by ``Failed``, not ``AssertionError``.
+
+    FAILS ON: restoring ``default_factory=_utcnow``, which makes every
+    construction succeed and this assertion the only thing that would notice.
+    """
+    without_time = {k: v for k, v in _trade().items() if k != "filled_at"}
+    with pytest.raises(ValidationError):
+        Trade(**without_time)  # type: ignore[arg-type]

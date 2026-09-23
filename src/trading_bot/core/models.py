@@ -561,18 +561,88 @@ class OrderList(_Frozen):
     orders: tuple[OrderListEntry, ...] = ()
 
 
-class Trade(_Frozen):
-    """A completed fill (or an aggregated round-trip in backtests)."""
+class Fee(_Frozen):
+    """A charge and the asset it is charged in, inseparable by construction.
 
+    **THE PAIRING IS THE POINT, AND IT IS STRUCTURAL RATHER THAN DOCUMENTED.**
+    ``CLAUDE.md`` rules that a money figure crosses a domain boundary only as an
+    amount paired with its asset, never as a bare ``Decimal``, because
+    ``Decimal`` encodes precision and not denomination -- subtracting a BNB fee
+    from a USDT total succeeds silently and writes a plausible wrong number.
+    Both fields are required with no default, so a charge whose denomination is
+    unknown cannot be constructed at all.
+
+    **``asset`` REFUSES THE EMPTY STRING, and that closes the loophole the
+    other half would otherwise leave open.** A ``Fee`` carrying ``asset=""``
+    satisfies "both fields present" while denominating nothing, which is
+    precisely what the defaulted ``fee_asset`` it replaces did.
+
+    **It is a ``str`` and NOT an enum, deliberately.** The venue chooses the
+    commission asset, and MEASURED against a capture of 306 fills it uses at
+    least two on one symbol. An enum would make an asset this tree has not seen
+    unrepresentable, forcing a mapper to guess or drop it -- and what a fee is
+    denominated in is the venue's fact to report, not ours to enumerate.
+
+    **WHAT IT DOES NOT DO, said so it is not over-read.** It cannot check that
+    its asset is the RIGHT one for a given subtraction. Enforcing
+    ``fee.asset == quote_asset``, or routing through a converter, is a LEDGER
+    obligation at the booking site. This type makes the denomination impossible
+    to LOSE; it cannot make it impossible to misuse.
+    """
+
+    amount: Money
+    asset: str = Field(min_length=1)
+
+
+class Trade(_Frozen):
+    """One venue fill, in domain terms. The port's unit of executed business.
+
+    **ONE FILL, NOT ONE ORDER, AND THE MEASUREMENT DECIDED IT.** MEASURED
+    against a capture whose SHA-256 is
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``:
+    11 of 215 distinct order ids carry more than one fill and the worst carries
+    23 across 21 distinct prices. An aggregate would have to publish a weighted
+    average price, and ``quote_quantity / quantity`` reaches the 28-digit
+    context precision on 10 of those 11 -- a non-terminating division, silently
+    rounded. Carrying fills whole means no division happens here at all, and
+    any aggregate stays derivable by whoever owns the ledger.
+
+    **``quote_quantity`` IS GROUND TRUTH AND ``price`` IS THE LOSSY ONE**, the
+    same ordering :attr:`Order.filled_quote_quantity` and
+    ``Portfolio.close_position`` already document. Both are carried exactly as
+    the venue sent them, so neither is re-derived from the other.
+
+    **``fee`` IS REQUIRED AND HAS NO DEFAULT.** It replaces a defaulted
+    ``fee: Money = Decimal(0)`` beside a defaulted ``fee_asset: str = ""`` --
+    two fields that had to agree, each able to drift and each able to default
+    to a value that denominates nothing. ``CLAUDE.md`` forbids
+    ``fee=Decimal(0)`` as an interim stub by name; collapsing the pair into
+    :class:`Fee` makes the stub unrepresentable rather than merely discouraged.
+
+    **``filled_at`` IS THE VENUE'S MATCHING-ENGINE TIME AND HAS NO DEFAULT.**
+    It is ``myTrades.time``. The field it replaces defaulted to the LOCAL
+    clock, which substitutes our instant for the venue's on a field whose whole
+    value is that it is the venue's -- and does it plausibly, which is worse
+    than doing it obviously. It is deliberately NOT named ``venue_time``: R3
+    rules that name onto an ORDER RECORD's lifecycle timestamp, which is a
+    different figure, and reusing it here would attach a name this tree has
+    already ruled misleading to the one value it would be right about.
+
+    ``order_list_id`` is ``None`` for a fill belonging to no list -- the wire's
+    ``-1`` is a sentinel, not an identity.
+    """
+
+    trade_id: str
+    order_id: str
     symbol: str
     side: OrderSide
     quantity: Money
     price: Money
-    fee: Money = Decimal(0)
-    fee_asset: str = ""
-    timestamp: datetime = Field(default_factory=_utcnow)
-    order_id: str | None = None
-    pnl: Money | None = None  # realized P&L when this fill closes exposure
+    quote_quantity: Money
+    fee: Fee
+    filled_at: datetime
+    order_list_id: str | None = None
+    is_maker: bool = False
 
 
 class Position(BaseModel):

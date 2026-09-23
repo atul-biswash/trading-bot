@@ -36,11 +36,11 @@ from trading_bot.core.models import (
     OtoOrderListRequest,
     SymbolInfo,
     Ticker,
+    Trade,
 )
 from trading_bot.exchange.base import BaseExchangeClient, SleepFn
 from trading_bot.exchange.ids import parse_client_order_id
 from trading_bot.exchange.models import (
-    VenueFill,
     enforce_oto_filters,
     enforce_otoco_filters,
     order_request_to_params,
@@ -52,7 +52,7 @@ from trading_bot.exchange.models import (
     to_order_list,
     to_symbol_info,
     to_ticker,
-    to_venue_fills,
+    to_trades,
 )
 from trading_bot.utils.helpers import round_price, round_step_size, utc_now
 from trading_bot.utils.logger import get_logger
@@ -654,7 +654,7 @@ class BinanceClient(BaseExchangeClient):
         limit: int | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
-    ) -> list[VenueFill]:
+    ) -> list[Trade]:
         """Our executed fills on ``symbol``, oldest first, with the venue's fee on each.
 
         **THIS IS THE ONLY ENDPOINT THAT CARRIES A FEE.** ``CLAUDE.md`` records
@@ -692,7 +692,7 @@ class BinanceClient(BaseExchangeClient):
             attempts=attempts,
             **self._with_call_timeout(params, timeout_s),
         )
-        return to_venue_fills(raw)
+        return to_trades(raw)
 
     # -- lifecycle ----------------------------------------------------------
     async def ping(self) -> None:

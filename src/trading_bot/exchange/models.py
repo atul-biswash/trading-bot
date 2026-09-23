@@ -59,6 +59,7 @@ from trading_bot.core.exceptions import (
 from trading_bot.core.models import (
     Balance,
     Candle,
+    Fee,
     MarketLotSize,
     Money,
     Order,
@@ -70,6 +71,7 @@ from trading_bot.core.models import (
     PercentPriceBySide,
     SymbolInfo,
     Ticker,
+    Trade,
 )
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
 from trading_bot.utils.helpers import round_price, round_step_size
@@ -301,6 +303,51 @@ def to_venue_fills(raw: Sequence[dict[str, Any]]) -> list[VenueFill]:
     M5d-053 failure has no foothold here.
     """
     return [to_venue_fill(entry) for entry in raw]
+
+
+def to_trade(fill: VenueFill) -> Trade:
+    """Translate one wire fill into the domain's :class:`Trade`.
+
+    **IT LIVES ON THE ADAPTER SIDE BECAUSE IT MUST.** :class:`VenueFill` is an
+    ``exchange/`` type and :class:`Trade` is a ``core/`` one; ``exchange`` may
+    import from ``core`` and never the reverse, so this module is the only
+    layer that can see both. ``core/interfaces.py`` declares over
+    :class:`Trade` alone and never learns that :class:`VenueFill` exists.
+
+    **NO ARITHMETIC HAPPENS HERE.** Every money figure is carried across
+    unchanged -- no division, no summation, no re-derivation -- so the domain
+    receives exactly what the venue sent. The fee's amount and its asset cross
+    together as a :class:`Fee`, which is what makes the denomination
+    impossible to drop between the two layers.
+
+    ``side`` is the one translation, and it is a vocabulary change rather than
+    a computation: the wire says ``isBuyer``, the domain says
+    :class:`OrderSide`.
+    """
+    return Trade(
+        trade_id=fill.trade_id,
+        order_id=fill.order_id,
+        symbol=fill.symbol,
+        side=OrderSide.BUY if fill.is_buyer else OrderSide.SELL,
+        quantity=fill.quantity,
+        price=fill.price,
+        quote_quantity=fill.quote_quantity,
+        fee=Fee(amount=fill.commission, asset=fill.commission_asset),
+        filled_at=fill.filled_at,
+        order_list_id=fill.order_list_id,
+        is_maker=fill.is_maker,
+    )
+
+
+def to_trades(raw: Sequence[dict[str, Any]]) -> list[Trade]:
+    """Map a ``myTrades`` array straight to the domain, preserving venue order.
+
+    The two steps are kept separate -- :func:`to_venue_fill` parses the wire
+    and :func:`to_trade` translates the layer -- because only the first can
+    refuse a malformed record, and folding them would make the refusal
+    indistinguishable from a translation failure.
+    """
+    return [to_trade(fill) for fill in to_venue_fills(raw)]
 
 
 # --------------------------------------------------------------------------

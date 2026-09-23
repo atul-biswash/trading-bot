@@ -34,6 +34,7 @@ from trading_bot.core.models import (
     OtoOrderListRequest,
     SymbolInfo,
     Ticker,
+    Trade,
 )
 from trading_bot.data.market_data import BufferedMarketDataProvider
 from trading_bot.exchange.models import to_candle, ws_kline_to_candle
@@ -208,6 +209,25 @@ class FakeExchangeClient(ExchangeClient):
         abstract method makes this fake unconstructible. The raise is the point:
         a data-layer test that somehow cancelled a list would fail loudly rather
         than pass quietly.
+        """
+        raise NotImplementedError
+
+    async def get_my_trades(  # pragma: no cover
+        self,
+        symbol: str,
+        *,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        """Raises. **A FEE QUERY, and nothing in this file may reach one.**
+
+        Present only because ``ExchangeClient`` is an ABC and an unimplemented
+        abstract method makes this fake unconstructible -- the same reason
+        ``cancel_order_list`` above exists. mypy would not have caught the
+        omission: it flags a missing abstract method only at a CONSTRUCTION
+        site, and every construction site for this fake is under ``tests/``,
+        which ``files = ["src/trading_bot", "scripts"]`` excludes.
         """
         raise NotImplementedError
 

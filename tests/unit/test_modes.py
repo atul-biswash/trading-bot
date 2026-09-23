@@ -81,6 +81,7 @@ from trading_bot.core.models import (
     Signal,
     SymbolInfo,
     Ticker,
+    Trade,
 )
 from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
@@ -274,6 +275,25 @@ class FakeRootClient(ExchangeClient):
         raise NotImplementedError
 
     async def cancel_order(self, symbol: str, order_id: str) -> Order:  # pragma: no cover
+        raise NotImplementedError
+
+    async def get_my_trades(  # pragma: no cover
+        self,
+        symbol: str,
+        *,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        """Raises. No boot path reads fills, and an unconfigured answer from a
+        venue call is a real classification no test should get by accident.
+
+        Present because ``ExchangeClient`` is an ABC: without it this fake is
+        unconstructible, and MEASURED there are 84 construction sites in this
+        module alone. mypy would have reported ``Success`` throughout -- it
+        flags a missing abstract method only at a construction site, and
+        ``tests/`` is outside ``files``.
+        """
         raise NotImplementedError
 
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]:  # pragma: no cover

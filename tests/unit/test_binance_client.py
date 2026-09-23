@@ -28,7 +28,9 @@ from trading_bot.core.exceptions import (
     OrderError,
     SymbolInfoNotPrimedError,
 )
-from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest
+from trading_bot.core.interfaces import ExchangeClient
+from trading_bot.core.models import OrderRequest, OtocoOrderListRequest, OtoOrderListRequest, Trade
+from trading_bot.exchange import models as m
 from trading_bot.exchange.binance_client import BinanceClient
 from trading_bot.exchange.ids import OrderListLeg, parse_client_order_id
 
@@ -1850,3 +1852,194 @@ async def test_get_my_trades_omits_limit_when_the_caller_states_none() -> None:
     await bc.get_my_trades("BTCUSDT")
 
     client.get_my_trades.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)
+
+
+#: The BUY leg of order list 171948, copied VERBATIM out of the same capture as
+#: ``MY_TRADE`` above. It is the CROSS-DENOMINATION record: its fee is named in
+#: the BASE asset, which MEASURED is what the venue does on every buy.
+MY_TRADE_BUY = {
+    "symbol": "BTCUSDT",
+    "id": 1117403,
+    "orderId": 3612837,
+    "orderListId": 171948,
+    "price": "78175.06000000",
+    "qty": "0.02308000",
+    "quoteQty": "1804.28038480",
+    "commission": "0.00000000",
+    "commissionAsset": "BTC",
+    "time": 1789738140594,
+    "isBuyer": True,
+    "isMaker": False,
+    "isBestMatch": True,
+}
+
+
+def test_the_translation_maps_a_captured_fill_faithfully() -> None:
+    """THE ACCEPTANCE TEST for the wire-to-domain translation.
+
+    MEASURED against the capture whose SHA-256 is
+    `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`.
+
+    It asserts the whole `Trade`, field by field, because the translation's
+    failure mode is a single field sourced from the wrong place -- which every
+    narrower test would step over.
+
+    FAILS ON: mapping any field from the wrong key; dropping one; or letting
+    `order_list_id` cross as an `int`.
+    """
+    trade = m.to_trade(m.to_venue_fill(MY_TRADE))
+
+    assert trade.trade_id == "1129443"
+    assert trade.order_id == "3612839"
+    assert trade.order_list_id == "171948"
+    assert trade.symbol == "BTCUSDT"
+    assert trade.side is OrderSide.SELL
+    assert trade.quantity == Decimal("0.02308000")
+    assert trade.price == Decimal("80906.00000000")
+    assert trade.quote_quantity == Decimal("1867.31048000")
+    assert trade.fee.asset == "USDT"
+    assert trade.is_maker is False
+    assert trade.filled_at == datetime(2026, 9, 18, 15, 20, 58, 864000, tzinfo=timezone.utc)
+
+
+def test_the_translation_carries_a_base_denominated_fee() -> None:
+    """THE HAZARD RECORD, carried faithfully rather than judged.
+
+    MEASURED against the capture
+    `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`: the
+    venue denominates a fee in the asset RECEIVED, so this entry leg's fee is
+    named in `BTC` while the symbol's quote asset is `USDT`. Every entry this
+    bot places is a BUY, so this is the ordinary case rather than an edge.
+
+    **THE MAPPER CARRIES IT; IT DOES NOT REFUSE IT.** Refusing a
+    cross-denominated fee is a LEDGER behaviour at the booking site. A mapper
+    that refused here would discard the very state the ledger must refuse, and
+    the ledger could then never see it.
+
+    FAILS ON: substituting the symbol's quote asset for the reported one --
+    the change that would make the hazard invisible while every other
+    assertion still passed.
+    """
+    trade = m.to_trade(m.to_venue_fill(MY_TRADE_BUY))
+
+    assert trade.fee.asset == "BTC"
+    assert trade.symbol == "BTCUSDT"
+    assert trade.side is OrderSide.BUY
+
+
+def test_the_fee_amount_is_read_and_not_defaulted() -> None:
+    """THE CAPTURE CANNOT PIN THIS BY VALUE, AND MEASURING FIRST IS WHY THIS TEST EXISTS.
+
+    MEASURED over the capture
+    `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`: every
+    one of the 306 commissions is the single value `"0.00000000"`, and
+    `Decimal("0.00000000") == Decimal(0)` is `True`. **So a mutant that
+    hardcodes `amount=Decimal(0)` and never reads `fill.commission` passes
+    every value assertion a captured record can make.**
+
+    Two assertions close it. SCALE discriminates where value cannot: the
+    parsed amount carries exponent -8 and `Decimal(0)` carries 0. And the
+    plumbing is pinned with a captured record whose `commission` is ALTERED to
+    a non-zero value -- **fabricated, and stated as fabricated, because
+    Binance Spot Testnet charged no commission on any fill in the capture and
+    no read of this account could supply one.**
+
+    FAILS ON: hardcoding the amount, which dies on both; or reading
+    `commissionAsset` into the amount, which dies on the second.
+    """
+    trade = m.to_trade(m.to_venue_fill(MY_TRADE))
+
+    assert trade.fee.amount == Decimal(0)
+    assert trade.fee.amount.as_tuple().exponent == -8
+    assert Decimal(0).as_tuple().exponent == 0
+
+    charged = dict(MY_TRADE)
+    charged["commission"] = "0.00012345"
+    assert m.to_trade(m.to_venue_fill(charged)).fee.amount == Decimal("0.00012345")
+
+
+def test_the_side_is_translated_from_is_buyer_in_both_directions() -> None:
+    """BOTH DIRECTIONS, because one cannot catch an inverted ternary.
+
+    A test asserting only the SELL leg passes under
+    `OrderSide.SELL if fill.is_buyer else OrderSide.BUY`. Asserting the pair is
+    what makes the inversion fail.
+
+    FAILS ON: inverting the ternary; or hardcoding either side.
+    """
+    assert m.to_trade(m.to_venue_fill(MY_TRADE)).side is OrderSide.SELL
+    assert m.to_trade(m.to_venue_fill(MY_TRADE_BUY)).side is OrderSide.BUY
+
+
+def test_no_money_figure_is_re_derived_in_the_translation() -> None:
+    """THE TOTAL IS CARRIED WHOLE, and only SCALE can prove it.
+
+    MEASURED over the capture
+    `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`:
+    `quoteQty == price * qty` BY VALUE on 306 of 306 records, so `!=` would
+    assert something false and this test would fail rather than bite. What
+    separates them is scale -- the wire reports 8 decimal places and the
+    product carries 16 -- and the string forms differ on all 306.
+
+    This is the second commit running in which measuring a fixture before
+    writing its assertion caught a planned assertion that could not have held.
+
+    FAILS ON: computing `price * quantity` for `quote_quantity`, which moves
+    the exponent from -8 to -16.
+    """
+    trade = m.to_trade(m.to_venue_fill(MY_TRADE))
+    product = trade.price * trade.quantity
+
+    assert trade.quote_quantity == product
+    assert trade.quote_quantity.as_tuple().exponent == -8
+    assert product.as_tuple().exponent == -16
+    assert str(trade.quote_quantity) != str(product)
+
+
+async def test_the_adapter_returns_domain_trades_not_wire_fills() -> None:
+    """ROUTE 2's WHOLE POINT: the port's type crosses, the wire type does not.
+
+    The adapter is the only layer that can see both `VenueFill` and `Trade`,
+    so it is the only layer where this can go wrong -- and returning the wire
+    type would satisfy every field assertion above, since the two carry the
+    same figures under different names.
+
+    `type(...) is Trade` rather than `isinstance`: an ancestry assertion would
+    keep passing if `VenueFill` ever gained `Trade` as a base, which is
+    exactly the sideways move `CLAUDE.md` records ancestry checks are blind to.
+
+    FAILS ON: returning `to_venue_fills(raw)` from `get_my_trades`.
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = [MY_TRADE_BUY, MY_TRADE]
+    bc = _make(client)
+
+    fills = await bc.get_my_trades("BTCUSDT")
+
+    assert [type(f) is Trade for f in fills] == [True, True]
+    assert [f.trade_id for f in fills] == ["1117403", "1129443"]
+    assert [f.fee.asset for f in fills] == ["BTC", "USDT"]
+
+
+def test_the_adapter_satisfies_the_widened_port() -> None:
+    """THE CONFORMANCE PIN, and it says which instrument proves what.
+
+    `BinanceClient.__abstractmethods__` being empty is the RUNTIME claim: the
+    ABC would refuse to instantiate it otherwise. That is the same enforcement
+    that would break every test double, and it fires at CONSTRUCTION rather
+    than at definition.
+
+    **mypy proves a different thing and does not prove this one.** MEASURED: a
+    wrong return type or a wrong signature is an `[override]` error, so mypy
+    covers the adapter's shape -- but a class that simply OMITS an abstract
+    method is flagged only at a construction site, and every construction site
+    for this port's test doubles is under `tests/`, which mypy's
+    `files = ["src/trading_bot", "scripts"]` excludes. **The fakes are proved
+    constructible by pytest running their 89 existing construction sites, not
+    by any static check.**
+
+    FAILS ON: declaring `get_my_trades` on the port and not implementing it
+    here, which leaves it in `__abstractmethods__`.
+    """
+    assert BinanceClient.__abstractmethods__ == frozenset()
+    assert "get_my_trades" in ExchangeClient.__abstractmethods__
