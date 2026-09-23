@@ -2383,3 +2383,315 @@ class TestFilledQuoteQuantity:
                 quantity=Decimal("1"),
                 filled_quote_quantity=65.05,  # type: ignore[arg-type]
             )
+
+
+# --------------------------------------------------------------------------
+# myTrades fills -- CAPTURED, not fabricated
+# --------------------------------------------------------------------------
+#: Two records copied VERBATIM out of a read-only capture of
+#: ``GET /api/v3/myTrades`` for BTCUSDT against Binance Spot Testnet, whose
+#: SHA-256 is
+#: ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``
+#: -- 106307 bytes, 306 records. They are the two legs of order list 171948.
+#:
+#: **THEY ARE NOT FENCED, and that is a decision rather than an omission.**
+#: ``CLAUDE.md`` fences a fixture only where LAYOUT is the sole carrier of a
+#: correspondence to an external contract -- a positional kline array, a
+#: single-letter websocket schema. A ``myTrades`` record is a flat key/value
+#: object whose keys carry their own meaning, so a fence would spend the
+#: mechanism where it signals nothing.
+#:
+#: **THE SELL LEG IS CORROBORATED BY A RECORD WRITTEN BEFORE THE CAPTURE
+#: EXISTED.** ``CLAUDE.md`` states list 171948's take-profit booked
+#: ``realised=63.0300952000`` GROSS, and ``1867.31048000 - 1804.28038480``
+#: is exactly that. Disagreement was possible and would have been noticed.
+MY_TRADE_SELL = {
+    "symbol": "BTCUSDT",
+    "id": 1129443,
+    "orderId": 3612839,
+    "orderListId": 171948,
+    "price": "80906.00000000",
+    "qty": "0.02308000",
+    "quoteQty": "1867.31048000",
+    "commission": "0.00000000",
+    "commissionAsset": "USDT",
+    "time": 1789744858864,
+    "isBuyer": False,
+    "isMaker": False,
+    "isBestMatch": True,
+}
+
+#: The ENTRY leg of the same list, and the cross-denomination record: its fee
+#: is named in the BASE asset. MEASURED over the capture, the venue denominates
+#: the fee in the asset RECEIVED -- all 128 buy fills carry ``BTC`` and all 178
+#: sell fills carry ``USDT`` -- so every entry this bot places carries a
+#: base-denominated fee.
+MY_TRADE_BUY = {
+    "symbol": "BTCUSDT",
+    "id": 1117403,
+    "orderId": 3612837,
+    "orderListId": 171948,
+    "price": "78175.06000000",
+    "qty": "0.02308000",
+    "quoteQty": "1804.28038480",
+    "commission": "0.00000000",
+    "commissionAsset": "BTC",
+    "time": 1789738140594,
+    "isBuyer": True,
+    "isMaker": False,
+    "isBestMatch": True,
+}
+
+
+def test_a_captured_my_trades_record_maps_every_field() -> None:
+    """THE ACCEPTANCE TEST. The bytes come from the venue, not from a docstring.
+
+    MEASURED against the capture whose SHA-256 is
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``.
+
+    **IT EARNS ITS PLACE BECAUSE THE FABRICATED ALTERNATIVE WAS WRONG.** The
+    pinned library's own ``get_my_trades`` docstring shows a NINE-key record
+    carrying no ``orderId``, no ``orderListId``, no ``quoteQty`` and no
+    ``symbol``. A fixture written from it would have agreed with a model
+    written from it, and the model would have shipped unable to attribute a
+    fill to an order. Only real bytes could contradict that, and they did.
+
+    FAILS ON: reading any key by the wrong name; dropping a field; swapping
+    ``qty`` and ``quoteQty``, which a same-symbol fixture with equal values
+    could not catch and this one can because they differ.
+    """
+    fill = m.to_venue_fill(MY_TRADE_SELL)
+
+    assert fill.trade_id == "1129443"
+    assert fill.order_id == "3612839"
+    assert fill.order_list_id == "171948"
+    assert fill.symbol == "BTCUSDT"
+    assert fill.price == Decimal("80906.00000000")
+    assert fill.quantity == Decimal("0.02308000")
+    assert fill.quote_quantity == Decimal("1867.31048000")
+    assert fill.commission == Decimal("0.00000000")
+    assert fill.commission_asset == "USDT"
+    assert fill.is_buyer is False
+    assert fill.is_maker is False
+    assert fill.filled_at == datetime(2026, 9, 18, 15, 20, 58, 864000, tzinfo=timezone.utc)
+
+
+def test_a_fee_in_the_base_asset_is_carried_with_its_denomination() -> None:
+    """THE CROSS-DENOMINATION RECORD, carried faithfully and NOT judged here.
+
+    MEASURED against the capture
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``: the
+    venue denominates a fee in the asset RECEIVED, so this entry leg's fee is
+    named in ``BTC`` while the symbol's quote asset is ``USDT``. That is the
+    exact state ``CLAUDE.md``'s denomination invariant exists for -- a
+    ``Decimal`` that is exact and in the wrong currency.
+
+    **THIS ASSERTS THE PAIRING SURVIVES, NOT THAT IT IS REFUSED.** Refusing a
+    cross-denominated fee is a LEDGER behaviour and belongs to whoever books
+    one. A wire mapper that refused it would be discarding what the venue
+    actually said, and the ledger could then never see the state it must
+    refuse.
+
+    FAILS ON: dropping ``commission_asset``; defaulting it; or pairing the
+    commission with the symbol's quote asset instead of the reported one,
+    which is the substitution that would make the hazard invisible.
+    """
+    fill = m.to_venue_fill(MY_TRADE_BUY)
+
+    assert fill.commission_asset == "BTC"
+    assert fill.symbol == "BTCUSDT"
+    assert fill.is_buyer is True
+    assert fill.commission == Decimal("0.00000000")
+
+
+def test_the_thirteen_key_record_parses_and_only_is_best_match_is_ignored() -> None:
+    """THE KEY SET, pinned from the capture rather than from any documentation.
+
+    MEASURED: every one of the 306 records in the capture
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``
+    carries the identical THIRTEEN keys, in one order, with one value type
+    each. Twelve are read; ``isBestMatch`` is the one ignored, named here so
+    the omission is a decision on the record rather than an oversight nobody
+    can see.
+
+    **AN UNREAD KEY IS SILENTLY IGNORED IN THIS MODULE**, because no mapper
+    does ``Model(**raw)``. So nothing would report a key quietly going unread,
+    and this test is the only thing that would notice the ignored set growing.
+
+    FAILS ON: reading ``isBestMatch`` into a field, which makes the asserted
+    ignored set wrong; or dropping any of the twelve, which makes the read set
+    wrong.
+    """
+    wire_keys = set(MY_TRADE_SELL)
+    read_keys = {
+        "id",
+        "orderId",
+        "orderListId",
+        "symbol",
+        "price",
+        "qty",
+        "quoteQty",
+        "commission",
+        "commissionAsset",
+        "isBuyer",
+        "isMaker",
+        "time",
+    }
+
+    assert len(wire_keys) == 13
+    assert read_keys < wire_keys
+    assert wire_keys - read_keys == {"isBestMatch"}
+    assert m.to_venue_fill(MY_TRADE_SELL).symbol == "BTCUSDT"
+
+
+def test_the_list_identity_crosses_as_a_string_not_a_number() -> None:
+    """MEASURED: ``orderListId`` arrives as a JSON NUMBER and must leave as a ``str``.
+
+    Every id in this tree is a string in the domain -- ``to_order`` does
+    ``str(raw["orderId"])`` for the same reason. An equality assertion alone
+    cannot pin it, because ``171948 == "171948"`` is ``False`` in Python but a
+    mutant returning the raw int would fail for a reason that reads like a
+    value error rather than a type error. ``type(...) is str`` says which.
+
+    FAILS ON: passing ``raw["orderListId"]`` through unconverted, which yields
+    an ``int``; or ``int(...)``-ing it back after the sentinel check.
+    """
+    fill = m.to_venue_fill(MY_TRADE_SELL)
+
+    assert fill.order_list_id == "171948"
+    assert type(fill.order_list_id) is str
+    assert isinstance(MY_TRADE_SELL["orderListId"], int)
+
+
+def test_a_record_missing_commission_refuses() -> None:
+    """A MISSING FEE REFUSES; IT DOES NOT DEFAULT.
+
+    ``CLAUDE.md`` forbids ``fee=Decimal(0)`` as an interim stub by name: it
+    changes no behaviour, passes the gate, and closes the item that names the
+    defect while leaving the defect where it is. A ``.get("commission", "0")``
+    here would do exactly that, one layer lower and harder to see.
+
+    NOTE M5i-115: ``pytest.raises`` raises ``Failed``, NOT ``AssertionError``.
+    A mutation survey crediting only ``AssertionError`` scores this test as a
+    false abstention -- the direction that costs most, because a green test
+    nobody revisits reads as coverage that does not exist.
+
+    FAILS ON: reading ``commission`` with ``.get`` and any fallback.
+    """
+    broken = {k: v for k, v in MY_TRADE_SELL.items() if k != "commission"}
+
+    with pytest.raises(ExchangeAPIError, match="missing commission"):
+        m.to_venue_fill(broken)
+
+
+def test_a_record_missing_commission_asset_refuses() -> None:
+    """THE SIBLING, and NEITHER TEST IMPLIES THE OTHER.
+
+    A mutant reading ``commissionAsset`` with ``.get("")`` passes the
+    commission test and fails this one. That is the whole denomination
+    invariant: an amount with no currency is not a fee, and an empty string is
+    the currency that compares equal to nothing.
+
+    NOTE M5i-115: this fails by ``Failed``, not ``AssertionError``. See the
+    sibling above.
+
+    FAILS ON: defaulting ``commissionAsset``, or moving either read outside the
+    guard so the failure arrives as a bare ``KeyError`` the caller cannot
+    distinguish from a transport fault.
+    """
+    broken = {k: v for k, v in MY_TRADE_SELL.items() if k != "commissionAsset"}
+
+    with pytest.raises(ExchangeAPIError, match="missing commissionAsset"):
+        m.to_venue_fill(broken)
+
+
+def test_a_float_in_a_money_position_is_rejected() -> None:
+    """THE GUARD IS LIVE ONLY BECAUSE THE RAW STRING REACHES THE FIELD.
+
+    MEASURED: ``_dec(0.1)`` returns ``Decimal('0.1')``, so a money value routed
+    through ``_dec`` arrives at a ``Money`` field as a ``Decimal`` and
+    ``_reject_float`` never sees the float it exists to refuse. This parser
+    hands the venue's raw string to the field instead, which converts exactly
+    AND leaves the guard reachable.
+
+    **WITHOUT THIS TEST THE ``Money`` ANNOTATION IS DECORATIVE.** A mutant
+    writing ``price=_dec(raw["price"])`` passes the acceptance test, passes
+    both refusal tests, and dies only here.
+
+    FAILS ON: routing any money field through ``_dec`` or any other
+    ``Decimal(str(...))`` conversion before the field sees it.
+    """
+    with_float = dict(MY_TRADE_SELL)
+    with_float["price"] = 80906.0
+
+    with pytest.raises(ValidationError, match="must not be built from a float"):
+        m.to_venue_fill(with_float)
+
+
+def test_a_fill_belonging_to_no_list_maps_the_sentinel_to_none() -> None:
+    """``orderListId`` of ``-1`` is a SENTINEL, not an identity.
+
+    MEASURED over the capture
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``: 133
+    of 306 records carry ``-1`` and 173 carry a real id, so both branches are
+    real states rather than one being hypothetical. ``to_order`` maps the same
+    key the same way, and the two must agree on what "no list" looks like.
+
+    FAILS ON: ``str(raw["orderListId"])`` unconditionally, which yields the
+    string ``"-1"`` and makes every unlisted fill appear to belong to list
+    "-1" -- the defect ``to_order``'s docstring records for orders.
+    """
+    unlisted = dict(MY_TRADE_SELL)
+    unlisted["orderListId"] = -1
+
+    assert m.to_venue_fill(unlisted).order_list_id is None
+    assert m.to_venue_fill(MY_TRADE_SELL).order_list_id == "171948"
+
+
+def test_an_empty_trade_array_maps_to_an_empty_list() -> None:
+    """Empty is a real answer for a symbol with no fills, not a malformed payload.
+
+    **DECLARED ABSTENTION.** This test CANNOT catch an M5d-053-style silent
+    zero, and says so rather than letting a future reader assume it does.
+    There is no nested key here to get wrong: the array IS the payload, so the
+    failure mode where a wrong key maps zero legs from a populated response has
+    no foothold. It pins that empty does not raise, and nothing more.
+
+    FAILS ON: raising on an empty sequence.
+    """
+    assert m.to_venue_fills([]) == []
+    assert len(m.to_venue_fills([MY_TRADE_BUY, MY_TRADE_SELL])) == 2
+
+
+def test_the_quote_total_is_carried_whole_and_not_re_derived() -> None:
+    """THE VENUE'S OWN TOTAL, never a product this code computes.
+
+    Same argument as ``Order.filled_quote_quantity``: booking realised P&L
+    needs the amount the exchange itself added up.
+
+    **A VALUE ASSERTION HERE WOULD ABSTAIN, AND MEASURING IS WHAT SHOWED IT.**
+    Over the capture
+    ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``,
+    ``quoteQty == price * qty`` BY VALUE on **306 of 306** records -- not one
+    exception -- so a mutant computing the product yields an equal ``Decimal``
+    and ``==`` cannot tell the two apart. What separates them is SCALE: the
+    wire reports 8 decimal places and the product carries 16, and the string
+    forms differ on 306 of 306. So the assertion reads the exponent, which is
+    the only thing that moves.
+
+    **THE CROSS-CHECK IS THE OTHER HALF.** The two legs' quote totals differ by
+    exactly ``63.03009520``, and ``CLAUDE.md`` records this list's take-profit
+    booked ``realised=63.0300952000`` -- a figure written before the capture
+    existed, so disagreement was possible.
+
+    FAILS ON: computing ``price * qty`` for ``quote_quantity`` instead of
+    reading ``quoteQty``, which moves the exponent from -8 to -16.
+    """
+    sell = m.to_venue_fill(MY_TRADE_SELL)
+    buy = m.to_venue_fill(MY_TRADE_BUY)
+
+    assert sell.quote_quantity - buy.quote_quantity == Decimal("63.03009520")
+    assert buy.quote_quantity == Decimal("1804.28038480")
+    assert buy.quote_quantity.as_tuple().exponent == -8
+    assert (buy.price * buy.quantity).as_tuple().exponent == -16
+    assert str(buy.quote_quantity) != str(buy.price * buy.quantity)

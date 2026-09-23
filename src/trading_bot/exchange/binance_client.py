@@ -40,6 +40,7 @@ from trading_bot.core.models import (
 from trading_bot.exchange.base import BaseExchangeClient, SleepFn
 from trading_bot.exchange.ids import parse_client_order_id
 from trading_bot.exchange.models import (
+    VenueFill,
     enforce_oto_filters,
     enforce_otoco_filters,
     order_request_to_params,
@@ -51,6 +52,7 @@ from trading_bot.exchange.models import (
     to_order_list,
     to_symbol_info,
     to_ticker,
+    to_venue_fills,
 )
 from trading_bot.utils.helpers import round_price, round_step_size, utc_now
 from trading_bot.utils.logger import get_logger
@@ -85,6 +87,7 @@ class _AsyncBinanceAPI(Protocol):
     async def v3_get_order(self, **params: Any) -> dict[str, Any]: ...
     async def v3_get_all_order_list(self, **params: Any) -> list[dict[str, Any]]: ...
     async def get_open_orders(self, **params: Any) -> list[dict[str, Any]]: ...
+    async def get_my_trades(self, **params: Any) -> list[dict[str, Any]]: ...
     async def close_connection(self) -> None: ...
 
 
@@ -643,6 +646,53 @@ class BinanceClient(BaseExchangeClient):
             if parse_client_order_id(order.client_order_id or "") is not None:
                 found.append(order)
         return found
+
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[VenueFill]:
+        """Our executed fills on ``symbol``, oldest first, with the venue's fee on each.
+
+        **THIS IS THE ONLY ENDPOINT THAT CARRIES A FEE.** ``CLAUDE.md`` records
+        why a wider port method cannot serve: ``close_position``'s third caller
+        reads ``get_order`` point queries, "whose responses carry no fills
+        array", so the figure is unreachable from the order shape at any width.
+
+        **Signature matched to :meth:`get_own_open_orders`**: a required
+        positional ``symbol``, because the venue requires it and it is not an
+        option, then keyword-only bounds. It is deliberately not
+        :meth:`get_balances`' shape, which takes no bounds at all and therefore
+        cannot be handed a budget by a caller that has one.
+
+        **``limit`` is taken where :meth:`get_all_order_lists` refused a paging
+        argument**, and the divergence is deliberate: this endpoint defaults to
+        500 records on a symbol whose history already runs to hundreds of
+        fills, so a caller resolving one order's fills needs a way to ask for
+        less. ``fromId``, ``startTime`` and ``endTime`` are still refused --
+        surface with no caller.
+
+        **ONE ORDER IS NOT ONE RECORD.** MEASURED against a capture of 306
+        fills, 11 of 215 distinct order ids carry more than one fill and the
+        worst carries 23, so a caller resolving an order's economics must
+        aggregate by ``order_id`` rather than expect a single row.
+
+        Idempotent -- a read, so ``_call``'s default policy applies and a
+        connection error is retried. See :meth:`create_order` for ``timeout_s``
+        and ``attempts``.
+        """
+        params: dict[str, Any] = {"symbol": symbol, "recvWindow": self._recv_window}
+        if limit is not None:
+            params["limit"] = limit
+        raw = await self._call(
+            self._client.get_my_trades,
+            attempts=attempts,
+            **self._with_call_timeout(params, timeout_s),
+        )
+        return to_venue_fills(raw)
 
     # -- lifecycle ----------------------------------------------------------
     async def ping(self) -> None:

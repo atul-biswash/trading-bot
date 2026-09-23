@@ -37,6 +37,7 @@ from binance.exceptions import (
     BinanceOrderException,
     BinanceRequestException,
 )
+from pydantic import BaseModel, ConfigDict
 
 from trading_bot.core.enums import OrderSide, OrderStatus, OrderType, TimeInForce
 from trading_bot.core.exceptions import (
@@ -59,6 +60,7 @@ from trading_bot.core.models import (
     Balance,
     Candle,
     MarketLotSize,
+    Money,
     Order,
     OrderList,
     OrderListEntry,
@@ -178,6 +180,127 @@ def to_balances(account: dict[str, Any]) -> list[Balance]:
     non-zero balances) is the caller's responsibility.
     """
     return [to_balance(b) for b in account.get("balances", [])]
+
+
+class VenueFill(BaseModel):
+    """One record from ``GET /api/v3/myTrades``: a single fill, as the venue books it.
+
+    **IT TERMINATES AT THE WIRE AND IS NOT A DOMAIN TYPE.** It carries the
+    venue's shape, including fields the domain has no use for, because the
+    adapter's job is to report what arrived rather than to decide what matters.
+    What crosses into ``core/`` is a later ruling, not this one's.
+
+    **THE FEE IS AN AMOUNT PAIRED WITH ITS ASSET, AND NEITHER HALF IS
+    OPTIONAL.** ``CLAUDE.md`` rules that a money figure crosses a boundary only
+    with its denomination, because ``Decimal`` encodes precision and not
+    currency -- subtracting a BNB fee from a USDT total succeeds silently and
+    writes a plausible wrong number. Both fields are required here, so a
+    ``VenueFill`` carrying a fee of unknown denomination cannot be constructed
+    at all. That is the invariant enforced rather than documented, and it is
+    why neither field has a default.
+
+    **THE PAIRING IS CARRIED, NOT JUDGED.** A fee denominated in something
+    other than the quote asset is a normal record and is mapped faithfully:
+    MEASURED against the capture whose SHA-256 is ``111d1c15a3c5fff56148f172
+    bfbcbec85baf5aabe2128f34fb622cafe5463970``, the venue denominates the fee
+    in the asset RECEIVED, so all 128 buy fills carry ``BTC`` and all 178 sell
+    fills carry ``USDT``. Refusing a cross-denominated fee is a LEDGER
+    behaviour and belongs to whoever books one; a wire mapper that refused it
+    would be discarding what the venue actually said.
+
+    **MONEY FIELDS TAKE THE VENUE'S RAW STRING, NOT ``_dec``'s OUTPUT.**
+    MEASURED: ``_dec(0.1)`` returns ``Decimal('0.1')``, so a float routed
+    through it reaches a ``Money`` field as a ``Decimal`` and ``_reject_float``
+    never sees the float it exists to refuse. A string reaches the field
+    unmodified, converts exactly, and leaves the guard live. MEASURED against
+    the same capture: all four money keys arrive as JSON strings on all 306
+    records, so this is correct against the wire rather than against an
+    assumption.
+
+    ``isBestMatch`` is deliberately not carried: it is a matching-engine detail
+    with no consumer here or downstream, and it is ``true`` on every record of
+    the capture, so it discriminates nothing.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    trade_id: str
+    order_id: str
+    order_list_id: str | None
+    symbol: str
+    price: Money
+    quantity: Money
+    quote_quantity: Money
+    commission: Money
+    commission_asset: str
+    is_buyer: bool
+    is_maker: bool
+    filled_at: datetime
+
+
+def to_venue_fill(raw: dict[str, Any]) -> VenueFill:
+    """Map one ``myTrades`` record into :class:`VenueFill`.
+
+    **A MISSING FEE FIELD REFUSES; IT DOES NOT DEFAULT.** ``commission`` and
+    ``commissionAsset`` are read by subscript inside the guard below, in the
+    shape :func:`to_symbol_info` already uses for a mandatory filter. Reading
+    them with ``.get`` and a fallback would book a zero fee in an empty
+    currency, which is the interim stub ``CLAUDE.md`` forbids by name -- and
+    worse here than there, because the call site would look wired.
+
+    **AN UNREAD KEY IS SILENTLY IGNORED, AS EVERYWHERE IN THIS MODULE.** No
+    mapper here does ``Model(**raw)``, so pydantic's ``extra`` setting never
+    engages and a key the venue adds later arrives unnoticed. That is the
+    M5d-053 shape and the reason the acceptance test asserts the full
+    thirteen-key set against captured bytes rather than against a fixture
+    written from documentation.
+
+    ``orderListId`` is ``-1`` for a fill belonging to no list, which is a
+    sentinel rather than an identity -- mapped to ``None`` exactly as
+    :func:`to_order` maps the same key, so the two agree on what "no list"
+    looks like. It arrives as a JSON NUMBER and the identity form is a
+    ``str``, which is :func:`to_order`'s convention for every id it carries.
+
+    :raises ExchangeAPIError: the record omits ``commission`` or
+        ``commissionAsset``.
+    """
+    try:
+        commission = raw["commission"]
+        commission_asset = raw["commissionAsset"]
+    except KeyError as exc:
+        raise ExchangeAPIError(
+            f"Malformed trade record for {raw.get('symbol')!r} "
+            f"trade {raw.get('id')!r}: missing {exc.args[0]}"
+        ) from exc
+
+    raw_list_id = raw.get("orderListId")
+    order_list_id = None if raw_list_id is None or int(raw_list_id) == -1 else str(raw_list_id)
+
+    return VenueFill(
+        trade_id=str(raw["id"]),
+        order_id=str(raw["orderId"]),
+        order_list_id=order_list_id,
+        symbol=raw["symbol"],
+        price=raw["price"],
+        quantity=raw["qty"],
+        quote_quantity=raw["quoteQty"],
+        commission=commission,
+        commission_asset=commission_asset,
+        is_buyer=bool(raw["isBuyer"]),
+        is_maker=bool(raw["isMaker"]),
+        filled_at=_ms_to_dt(raw["time"]),
+    )
+
+
+def to_venue_fills(raw: Sequence[dict[str, Any]]) -> list[VenueFill]:
+    """Map a ``myTrades`` array, preserving the venue's order.
+
+    An empty array maps to an empty list, which is the honest answer for a
+    symbol with no fills rather than a defect. Unlike :func:`to_order_list`,
+    there is no nested key to get wrong: the array IS the payload, so the
+    M5d-053 failure has no foothold here.
+    """
+    return [to_venue_fill(entry) for entry in raw]
 
 
 # --------------------------------------------------------------------------

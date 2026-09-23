@@ -1758,3 +1758,95 @@ async def test_get_all_order_lists_carries_a_per_call_timeout() -> None:
     client.v3_get_all_order_list.assert_awaited_once_with(
         recvWindow=5000, requests_params={"timeout": 2.5}
     )
+
+
+#: One record copied VERBATIM out of the read-only ``myTrades`` capture whose
+#: SHA-256 is
+#: ``111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970``
+#: -- the SELL leg of order list 171948. These tests assert what reaches the
+#: library rather than what comes back, so one real record is enough; the
+#: mapper's own field-for-field acceptance test lives beside the mapper.
+MY_TRADE = {
+    "symbol": "BTCUSDT",
+    "id": 1129443,
+    "orderId": 3612839,
+    "orderListId": 171948,
+    "price": "80906.00000000",
+    "qty": "0.02308000",
+    "quoteQty": "1867.31048000",
+    "commission": "0.00000000",
+    "commissionAsset": "USDT",
+    "time": 1789744858864,
+    "isBuyer": False,
+    "isMaker": False,
+    "isBestMatch": True,
+}
+
+
+async def test_get_my_trades_carries_a_per_call_timeout() -> None:
+    """THE BOUND REACHES THE TRANSPORT, which is what `get_balances` cannot do.
+
+    `get_balances` accepts no bounds at all, so a budgeted caller has nowhere
+    to put one -- the defect this method's shape exists to avoid. Asserting the
+    awaited kwargs is what separates a method that routes its deadline through
+    `_with_call_timeout` from one that accepts `timeout_s` and drops it.
+
+    FAILS ON: passing `**params` directly and ignoring `timeout_s`; or emitting
+    a second key into `requests_params`, which `python-binance` forwards
+    verbatim into aiohttp.
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = [MY_TRADE]
+    bc = _make(client)
+
+    fills = await bc.get_my_trades("BTCUSDT", limit=50, timeout_s=2.5)
+
+    client.get_my_trades.assert_awaited_once_with(
+        symbol="BTCUSDT", recvWindow=5000, limit=50, requests_params={"timeout": 2.5}
+    )
+    assert [f.trade_id for f in fills] == ["1129443"]
+
+
+async def test_a_my_trades_read_is_retried_on_a_connection_error() -> None:
+    """IDEMPOTENT -- the opposite classification from the placement methods.
+
+    Re-reading fills cannot create anything, so a connection error is retried
+    under `_IDEMPOTENT_RETRY`. A write is narrowed to `RateLimitError` because
+    a timed-out write may have landed; that reasoning does not reach a read.
+
+    EXPRESSIVENESS, both halves: the fake raises once then succeeds, so the
+    input can express the mutation, AND the assertion reads `await_count`,
+    which is the thing the classification moves. An assertion reading only the
+    returned value would abstain.
+
+    FAILS ON: passing `idempotent=False`, which leaves the connection error
+    unretried and the await count at 1.
+    """
+    client = AsyncMock()
+    client.get_my_trades.side_effect = [ConnectionError("reset"), [MY_TRADE]]
+    bc = _make(client)
+
+    fills = await bc.get_my_trades("BTCUSDT")
+
+    assert client.get_my_trades.await_count == 2
+    assert len(fills) == 1
+
+
+async def test_get_my_trades_omits_limit_when_the_caller_states_none() -> None:
+    """AN UNSTATED BOUND SENDS NOTHING, rather than sending `None`.
+
+    `_with_call_timeout`'s own docstring records that the params mapping is
+    forwarded to the transport wholesale -- "an arbitrary keyword-argument
+    injection into aiohttp, not a timeout parameter" -- so a `None` riding
+    along is not harmless; it reaches the venue as a parameter.
+
+    FAILS ON: assigning `params["limit"] = limit` unconditionally, which sends
+    `limit=None` on every unbounded read.
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = []
+    bc = _make(client)
+
+    await bc.get_my_trades("BTCUSDT")
+
+    client.get_my_trades.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)
