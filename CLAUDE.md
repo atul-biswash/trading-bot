@@ -1238,6 +1238,38 @@ data.
   that symbol's exits is refusing to act on unknown state, not a limit. The two
   read as a contradiction unless the scope is stated, so it is stated here. See
   `docs/QB_ESCALATION.md`, Class E.
+- **R6: NO SPECULATIVE VENUE QUERY WHEN AN EXIT IS UNBOOKABLE, MISSING OR
+  DIVERGED — AND SETTLING A CONFIRMED FILL IS NOT ONE.** Ruled by the project
+  owner at M5k. R6 forbids a query made to search for an explanation:
+  `get_balances` probing to infer whether base left the account, or hunting
+  for an order that is no longer where it was. It does not forbid
+  `get_my_trades` for an order the venue has CONFIRMED FILLED. That is
+  settlement accounting — the fee and fill time that booking an established
+  fill needs — not a question about whether anything happened.
+
+  **IT SUPERSEDES A5's FLAT FORM, "ZERO VENUE CALLS INSIDE `_book_exits`".**
+  As of `9f3deb1` that form was recorded in two places. The docstring of
+  `test_the_escalation_books_nothing_and_saves_nothing` in
+  `tests/unit/test_reconciliation_driver.py` read *"R6: zero venue calls
+  inside `_book_exits`, and the ledger untouched."* And the signature enforced
+  it: `def _book_exits(` was synchronous and was called as
+  `self._book_exits(reported, now=now)`, with no `await`, so it could not reach
+  the async client at all. The commit that landed A5, `3e444f0`, states a
+  narrower form, for the diverged branch alone: *"NOTHING IS BOOKED AND NO
+  VENUE CALL IS MADE."* Whether `_book_exits` makes a call is from here a
+  property of where a settlement fetch lands, not of R6.
+
+  **TWO CASES THIS RULING DOES NOT SETTLE.** A `PARTIAL_FILL` exit, where the
+  venue confirms an execution short of the position, and a `NO_QUOTE_TOTAL`
+  exit, where the venue confirms the leg FILLED and reports no quote total,
+  each sit on both sides of the line drawn above: unbookable, and confirmed
+  filled. Whether `get_my_trades` for either is settlement or speculation is
+  unruled, and nothing here should be read as deciding it.
+
+  **WHERE A SETTLEMENT FETCH LIVES IS NOT RULED HERE.** It may run in the
+  driver's async `__call__` and hand `_book_exits` what it fetched, leaving
+  `_book_exits` synchronous and call-free; or `_book_exits` may itself become
+  async. This rule holds under either and chooses neither.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -1447,6 +1479,58 @@ data.
 **Config & safety**
 - **Testnet is the default everywhere.** Live trading requires explicit
   confirmation. Every example defaults to Testnet.
+- **LIVE TRADING IS BLOCKED UNTIL ENTRY-FEE DEDUCTION AND BASE-QUANTITY NETTING
+  ARE IMPLEMENTED IN THE SIZING AND PLACEMENT PIPELINE.** Ruled by the project
+  owner at M5k. The bullet above says how live is entered; this one says it may
+  not be entered yet, whatever confirmation is given.
+
+  **MEASURED, from a capture.** In the `myTrades` capture whose SHA-256 is
+  `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`, every BUY
+  fill carries its commission in the BASE asset (128 of 128, `BTC`) and every
+  SELL fill in the quote asset (178 of 178, `USDT`). Every commission in it is
+  `0.00000000`, so it establishes the denomination and no amount.
+
+  **MEASURED, from the tree: each site below is sized from the ORDERED
+  quantity, and none nets a fee out of it.** The position is recorded with
+  `quantity=intent.quantity,` by the dispatch caller of `_open_position`, or
+  `quantity=record.quantity,` by the recovery caller, whose
+  `record = PendingPlacement(` took `quantity=intent.quantity,`. Both
+  protective legs are sent `"pendingQuantity":` from
+  `format_decimal(request.quantity)`, the same figure as `"workingQuantity":`.
+  The exit is sized `quantity=position.quantity,` twice over, in
+  `intent = ExitIntent(` and in the `type=OrderType.MARKET,` sell; the
+  classifier compares resting legs against the same
+  `quantity=position.quantity,`; and the completeness test reads
+  `if filled_quantity != position.quantity:`. The only fee subtraction in
+  `src/` is in `Portfolio.close_position`, whose `fee: Decimal = Decimal(0),`
+  is taken from quote-denominated P&L and proceeds; no site in `src/`
+  subtracts a fee from a quantity.
+
+  **REASONED, not measured.** If the venue deducts a BUY's commission from the
+  base asset received, the account holds the ordered quantity minus that
+  commission while every protective leg and every exit is sized from the
+  ordered quantity, so each of them asks to sell more base than is held.
+
+  **UNMEASURED, and not to be inferred:** what the venue does with a sell or a
+  protective leg larger than the base held; whether paying commission in BNB
+  avoids the base deduction, which nothing here measured and on which this
+  rule does not rest; and any behaviour on a live, fee-charging account. The
+  capture above cannot answer the first, because every commission in it is
+  zero.
+
+  **NOTHING IN `src/` ENFORCES THIS.** MEASURED: no site refuses
+  `TradingMode.LIVE`. `_require_live_connection_mode` admits it, and the one
+  branch that names it on the run path, `if settings.mode is TradingMode.LIVE:`
+  in `_cmd_run`, logs *"LIVE mode uses REAL funds. Ensure you understand the
+  risks."* and continues. `--confirm-live` exists only in
+  `scripts/check_testnet.py`. The block is a ruling, held by whoever reads it.
+
+  *Arming condition:* **whoever next edits the mode resolution in
+  `Settings.__init__` or `_cmd_run`, or authorises a run in
+  `TradingMode.LIVE`.** The first two are where a mode is decided —
+  `self.mode: TradingMode = secrets.bot_mode or config.mode` and
+  `settings.mode = mode_override` — and the third is the member that means
+  real money.
 
 ---
 
