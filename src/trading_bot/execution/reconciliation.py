@@ -124,11 +124,14 @@ class ExitFill(_Frozen):
     absent-versus-zero distinction ``persistence.store`` documents as
     load-bearing for the ledger.
 
-    ``venue_time`` is the exchange's own timestamp for the order, not an
-    observation time. An observation time would be a fact WE synthesised, and
-    this type's line forbids that; booking's ``now`` comes from the driver's
-    clock, which already has one. ``None`` when the payload carried no
-    timestamp.
+    ``order_created_at`` is the exchange's own timestamp for the ORDER RECORD --
+    ``to_order`` derives it from the first of ``transactTime``, ``time`` and
+    ``updateTime`` the payload carries, and on a point query for a resting leg
+    that is ``time``, the order's CREATION. It is neither a client clock nor
+    the fill time. **It was named ``venue_time`` until the fee commit**, a name
+    ruled misleading at R3; the true fill time is ``myTrades.time``, which the
+    booking now fetches and logs as ``filled_at``. ``None`` when the payload
+    carried no timestamp.
     """
 
     #: The venue's numeric order id for the filled leg.
@@ -139,8 +142,9 @@ class ExitFill(_Frozen):
     #: The venue's own quote-currency total. ``None`` is a real, distinct
     #: state -- see the class docstring.
     filled_quote_quantity: Money | None
-    #: The exchange's timestamp for this order, never ours.
-    venue_time: datetime | None = None
+    #: The venue's ORDER-RECORD timestamp (creation, for a resting leg), never
+    #: ours and never the fill time.
+    order_created_at: datetime | None = None
 
 
 class ProtectionAssessment(_Frozen):
@@ -181,7 +185,7 @@ def _exit_fill(order: Order) -> ExitFill:
         order_id=order.order_id,
         filled_quantity=order.filled_quantity,
         filled_quote_quantity=order.filled_quote_quantity,
-        venue_time=order.created_at,
+        order_created_at=order.created_at,
     )
 
 

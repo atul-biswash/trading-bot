@@ -550,8 +550,10 @@ class ReconciliationDriver:
                     "quantity": fill.filled_quantity,
                     "quote_total": fill.filled_quote_quantity,
                     "realised": realised,
-                    "venue_time": (
-                        fill.venue_time.isoformat() if fill.venue_time is not None else None
+                    "order_created_at": (
+                        fill.order_created_at.isoformat()
+                        if fill.order_created_at is not None
+                        else None
                     ),
                 },
             )

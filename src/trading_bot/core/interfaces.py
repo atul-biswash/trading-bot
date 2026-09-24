@@ -137,6 +137,7 @@ class ExchangeClient(ABC):
         self,
         symbol: str,
         *,
+        order_id: str | None = None,
         limit: int | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
@@ -156,6 +157,9 @@ class ExchangeClient(ABC):
         reaches the 28-digit context precision on 10 of the 11 multi-fill
         orders measured, so performing it early would round a figure the
         ledger needs whole.
+
+        ``order_id`` restricts the answer to one order's fills, which is how an
+        exit is settled; ``None`` means every fill on ``symbol``.
 
         ``timeout_s`` and ``attempts`` bound one call, as on
         :meth:`get_own_open_orders`. ``limit`` bounds how many records the

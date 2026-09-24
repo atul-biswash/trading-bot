@@ -651,6 +651,7 @@ class BinanceClient(BaseExchangeClient):
         self,
         symbol: str,
         *,
+        order_id: str | None = None,
         limit: int | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
@@ -680,11 +681,17 @@ class BinanceClient(BaseExchangeClient):
         worst carries 23, so a caller resolving an order's economics must
         aggregate by ``order_id`` rather than expect a single row.
 
+        **``order_id`` IS SENT AS AN INTEGER**, ``orderId``, and only when given:
+        the domain carries venue order ids as ``str``, the wire takes a number,
+        and an unstated bound sends nothing rather than ``None``.
+
         Idempotent -- a read, so ``_call``'s default policy applies and a
         connection error is retried. See :meth:`create_order` for ``timeout_s``
         and ``attempts``.
         """
         params: dict[str, Any] = {"symbol": symbol, "recvWindow": self._recv_window}
+        if order_id is not None:
+            params["orderId"] = int(order_id)
         if limit is not None:
             params["limit"] = limit
         raw = await self._call(

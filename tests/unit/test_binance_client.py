@@ -2043,3 +2043,22 @@ def test_the_adapter_satisfies_the_widened_port() -> None:
     """
     assert BinanceClient.__abstractmethods__ == frozenset()
     assert "get_my_trades" in ExchangeClient.__abstractmethods__
+
+
+async def test_get_my_trades_sends_order_id_as_an_integer() -> None:
+    """R-e: the domain's `str` id crosses the wire as the integer `orderId`.
+
+    FAILS ON: sending the string, omitting it, or naming it `order_id`. Its
+    absence when unstated is pinned by the exact kwargs of
+    `test_get_my_trades_omits_limit_when_the_caller_states_none`.
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = [MY_TRADE]
+    bc = _make(client)
+
+    trades = await bc.get_my_trades("BTCUSDT", order_id="3612839")
+
+    client.get_my_trades.assert_awaited_once_with(
+        symbol="BTCUSDT", orderId=3612839, recvWindow=5000
+    )
+    assert [t.order_id for t in trades] == ["3612839"]

@@ -281,6 +281,7 @@ class FakeRootClient(ExchangeClient):
         self,
         symbol: str,
         *,
+        order_id: str | None = None,
         limit: int | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
