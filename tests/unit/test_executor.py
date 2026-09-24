@@ -4312,6 +4312,77 @@ class TestSettlement:
         assert portfolio.ledger is not None
         assert portfolio.ledger.realised_pnl == D("2.00000000")
 
+    async def test_the_close_booked_line_carries_the_settlement_but_not_the_order_time(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site A's `close_booked`: fee, fee_asset, fills and filled_at -- and NO `order_created_at`.
+
+        Answers `M5k-052` at Site A. TWO fills whose fees and times differ, the
+        later time apart from the candle's, so a line logging one fill's fee,
+        the earliest time, the candle time or a fixed count fails. FABRICATED
+        fees. MUTATION: drop any of the four fields, or take `min` of the times.
+
+        **THE ABSENCE IS PINNED AS FOUND, NOT AS RULED.** The driver's
+        `exit_booked` carries `order_created_at` and this line never has; a
+        ruling that adds it here flips the last assertion.
+        """
+        first = sell_trade(
+            quantity=D("0.3"),
+            quote=D("30.75000000"),
+            fee=Fee(amount=D("0.15000000"), asset="USDT"),
+        ).model_copy(update={"filled_at": BAR + timedelta(seconds=3)})
+        second = sell_trade(
+            quantity=D("0.2"),
+            quote=D("20.50000000"),
+            fee=Fee(amount=D("0.10000000"), asset="USDT"),
+            trade_id="2",
+        ).model_copy(update={"filled_at": BAR + timedelta(seconds=9)})
+        executor, _, portfolio = build(client=_settling_client([first, second]), portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.00000000")  # 2.25 gross, less 0.25
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        line = booked[0]
+        assert str(line.fee) == "0.25000000"  # type: ignore[attr-defined]
+        assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
+        assert line.fills == 2  # type: ignore[attr-defined]
+        assert line.filled_at == (BAR + timedelta(seconds=9)).isoformat()  # type: ignore[attr-defined]
+        assert not hasattr(line, "order_created_at")
+
+    async def test_the_resolved_close_booked_line_carries_the_fee_and_no_fill_detail(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site B's `close_booked` (CRITICAL): fee and fee_asset -- NOT fills, filled_at or order time.
+
+        Answers `M5k-052` at Site B. FABRICATED fee `0.25000000` USDT.
+        MUTATION: drop `fee` or `fee_asset`.
+
+        **THE THREE ABSENCES ARE PINNED AS FOUND, NOT AS RULED.**
+        `_resolve_close` holds the whole settlement and hands
+        `_book_resolved_close` only its fee, so this line carries less than
+        Site A's for the same kind of event. A ruling that passes the
+        settlement through flips the loop below.
+        """
+        client = _settling_client([sell_trade(fee=Fee(amount=D("0.25000000"), asset="USDT"))])
+        executor, _, _ = build(client=client, portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        line = booked[0]
+        assert line.levelno == logging.CRITICAL
+        assert str(line.fee) == "0.25000000"  # type: ignore[attr-defined]
+        assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
+        for absent in ("fills", "filled_at", "order_created_at"):
+            assert not hasattr(line, absent), absent
+
     @pytest.mark.parametrize(
         "answer",
         [ExchangeConnectionError("timed out"), [], [sell_trade(quantity=D("0.25"))]],

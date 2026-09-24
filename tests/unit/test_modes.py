@@ -45,7 +45,7 @@ from tests.unit.test_risk_manager import (
     symbol_info,
 )
 from trading_bot.config.models import StopLossConfig, TakeProfitConfig
-from trading_bot.core.assessment import EntryIntent
+from trading_bot.core.assessment import EntryIntent, ExitIntent
 from trading_bot.core.enums import (
     OrderSide,
     OrderStatus,
@@ -61,6 +61,7 @@ from trading_bot.core.enums import (
 from trading_bot.core.exceptions import (
     ConfigError,
     ExchangeAPIError,
+    ExchangeConnectionError,
     StrategyNotFoundError,
     TradingBotError,
 )
@@ -125,6 +126,9 @@ _BOOK_QTY = D("0.02257000")
 _BOOK_ENTRY_FILL = D("80756.69")
 _BOOK_TOTAL = D("1786.22691640")
 _BOOK_EXACT = D("-36.4515769000")
+#: A FABRICATED exit fee in the quote asset, 0.1% of `_BOOK_TOTAL` rounded to
+#: the venue's eight places. Every captured fee is zero; see the booking test.
+_BOOK_FEE = Fee(amount=D("1.78622692"), asset="USDT")
 #: The bar the position was entered on, and therefore the bar its leg ids
 #: encode. The leg and the position must agree or the compare set is empty.
 _BOOK_BAR = datetime(2026, 8, 15, 11, 0, tzinfo=timezone.utc)
@@ -2734,6 +2738,12 @@ class TestTheStoreIsReadAtBoot:
         The path is TEMPORARY: the module's autouse `_isolate_run_artefacts`
         chdirs to `tmp_path`, so the relative `DEFAULT_STORE_PATH` resolves
         under it and the operator's real state file is never touched.
+
+        **THE FEE IS NON-ZERO, AND FABRICATED.** Every captured commission is
+        `0.00000000`, and a zero fee booked net and a zero fee ignored write
+        the same figure to disk -- so under it this test could not tell the
+        whole chain from one that dropped the fee anywhere between
+        `settle_exit` and `store.save`. `_BOOK_FEE` makes the two differ.
         """
         settings = write_settings(tmp_path)
         leg = Order(
@@ -2763,7 +2773,7 @@ class TestTheStoreIsReadAtBoot:
                     quantity=_BOOK_QTY,
                     price=D("79141.56"),
                     quote_quantity=_BOOK_TOTAL,
-                    fee=Fee(amount=D("0.00000000"), asset="USDT"),
+                    fee=_BOOK_FEE,
                     filled_at=NOW,
                 )
             ],
@@ -2787,7 +2797,9 @@ class TestTheStoreIsReadAtBoot:
         after = store.load()
         assert after is not None
         assert after.ledger is not None  # NOT null, for the first time
-        assert after.ledger.realised_pnl == _BOOK_EXACT
+        # NET of the venue's fee, on disk: -36.4515769000 - 1.78622692.
+        assert after.ledger.realised_pnl == _BOOK_EXACT - _BOOK_FEE.amount
+        assert after.ledger.realised_pnl == D("-38.2378038200")
         assert SYMBOL not in system.portfolio.positions
 
     async def test_a_restored_record_is_rewritten_not_dropped_by_the_next_write(
@@ -3724,3 +3736,183 @@ class TestTheBootGateHasThreeCauses:
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
             assert list(system.executor._pending) == [SYMBOL]
             assert system.portfolio.blocked_symbols == {}
+
+
+class _ClosingRootClient(FakeRootClient):
+    """A root client that can run Q-C 4b's close: leg reads, cancel, confirm, sell, settle.
+
+    The protective legs answer quiet -- nothing executed -- before and after the
+    cancel, so the plan and the confirm both say SELL. The close id (`-CL`)
+    re-reads the same sell `create_order` returned. Every venue round trip is
+    recorded in ``calls``, so a test can assert what was NOT asked.
+    """
+
+    def __init__(self, *, sell: Order, settlement: list[Trade] | Exception) -> None:
+        super().__init__()
+        self._sell = sell
+        self._settlement = settlement
+        self.calls: list[str] = []
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        self.calls.append("get_order")
+        if (client_order_id or "").rsplit("-", 1)[-1] == "CL":
+            return self._sell
+        return Order(
+            order_id="9",
+            symbol=symbol,
+            side=OrderSide.SELL,
+            type=OrderType.STOP_LOSS,
+            status=OrderStatus.NEW,
+            quantity=_BOOK_QTY,
+            filled_quantity=D("0"),
+        )
+
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        self.calls.append("cancel_order_list")
+        return _live_list_for(symbol)
+
+    async def create_order(self, request: OrderRequest) -> Order:
+        self.calls.append("create_order")
+        return self._sell
+
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        self.calls.append("get_my_trades")
+        if isinstance(self._settlement, Exception):
+            raise self._settlement
+        return list(self._settlement)
+
+
+class TestADeferredSettlementAcrossARestart:
+    """F2 in `docs/NEXT_MILESTONE.md`, driven end to end rather than seeded.
+
+    Placed at the END OF THE FILE, after the last class closes, for the reason
+    `TestTheBootGateSeesPending` gives.
+    """
+
+    async def test_a_close_deferred_before_a_restart_is_released_unbooked_after_it(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """DEFER, PERSIST, RESTART, RESOLVE -- through two real roots and the real store.
+
+        Root 1 holds a position and closes it through the executor's own
+        `dispatch`: the sell FILLS and its settlement read fails in transport,
+        so Site A DEFERS -- the record the root's writer put on disk before the
+        cancel stays there. Root 2 boots fresh from that store, as a restart
+        does, holding no `Position`, and its first candle resolves the record.
+
+        **THE OUTCOME, PREDICTED BEFORE THIS TEST WAS WRITTEN:** released
+        unbooked at CRITICAL as `filled_and_released` -- the fill classifies
+        `POSITION_ABSENT`, so nothing is settled, nothing is booked, the
+        tracker stays empty and the record leaves the store. The tracker is in
+        memory by ruling and the store carries no deferral count, so a restart
+        cannot re-enter the retention and cannot book.
+
+        TWO pairs, because a restored close on the only pair is refused at boot
+        before the first candle, and this test is about the candle.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        sold = Order(
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            status=OrderStatus.FILLED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY,
+            filled_quote_quantity=_BOOK_TOTAL,
+        )
+        close = Signal(
+            symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW, strategy="t"
+        )
+        exit_ok = RiskAssessment(
+            symbol=SYMBOL,
+            approved=True,
+            reason="ok",
+            stage=None,
+            intent=ExitIntent(
+                symbol=SYMBOL, side=OrderSide.SELL, quantity=_BOOK_QTY, reference_price=D("100")
+            ),
+        )
+
+        # ROOT 1: the sell fills, the settlement read fails, Site A defers.
+        first = _ClosingRootClient(sell=sold, settlement=ExchangeConnectionError("timed out"))
+        async with live_system(settings, client=first, stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=_BOOK_QTY,
+                entry_price=D("80700.00"),
+                entry_fill_price=_BOOK_ENTRY_FILL,
+                entry_bar_time=_BOOK_BAR,
+                protection=ProtectionState.UNKNOWN,
+                order_list_id=list_client_order_id(SYMBOL, _BOOK_BAR),
+                venue_order_list_id=255471,
+                stop_loss=D("79141.56"),
+                take_profit=D("83000.00"),
+            )
+            await system.executor.dispatch(close, exit_ok, candle())
+
+            assert first.calls.count("create_order") == 1
+            assert first.calls.count("get_my_trades") == 1
+            assert system.executor._pending[SYMBOL].kind == "close"
+            assert system.executor._settlement_deferrals == {SYMBOL: 0}
+            assert system.portfolio.ledger is None
+
+        between = store.load()
+        assert between is not None
+        assert [(r.kind, r.symbol) for r in between.pending] == [("close", SYMBOL)]
+
+        # ROOT 2: a fresh boot from that store -- no Position, no tracker.
+        second = _ClosingRootClient(sell=sold, settlement=[])
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.execution.executor"):
+            async with live_system(settings, client=second, stream=FakeStream()) as system:
+                assert list(system.executor._pending) == [SYMBOL]
+                assert system.executor._settlement_deferrals == {}
+                assert SYMBOL not in system.portfolio.positions
+
+                await system.executor(candle())
+
+                assert system.executor._pending == {}
+                assert system.executor._settlement_deferrals == {}
+                assert system.portfolio.ledger is None
+
+        assert second.calls == ["get_order"]  # the close re-read, and no settlement
+        resolved = [
+            r
+            for r in caplog.records
+            if r.name == "trading_bot.execution.executor"
+            and getattr(r, "event", None) == "close_record_resolved"
+        ]
+        assert len(resolved) == 1
+        assert resolved[0].levelno == logging.CRITICAL
+        assert resolved[0].outcome == "filled_and_released"  # type: ignore[attr-defined]
+
+        after = store.load()
+        assert after is not None
+        assert after.pending == ()
+        assert after.ledger is None

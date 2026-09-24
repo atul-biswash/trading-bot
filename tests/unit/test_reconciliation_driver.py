@@ -1315,6 +1315,48 @@ async def test_a_bookable_exit_fetches_once_and_books_net_of_its_fee() -> None:
     assert portfolio.free_quote == Decimal("10000") + BOOK_TOTAL - Decimal("0.37000000")
 
 
+async def test_the_booking_line_carries_the_settlement_it_was_booked_net_of(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`exit_booked` carries fee, fee_asset, fills, order_created_at and filled_at.
+
+    Answers `M5k-052`: until this test nothing read the line. TWO fills whose
+    fees and times differ from each other and from the leg's creation time,
+    so a line that logged one fill's fee, the EARLIEST fill time, the creation
+    time as the fill time, or a fixed count would each fail. FABRICATED fees:
+    every captured fee is zero. MUTATION: drop any of the five fields, swap
+    `order_created_at` and `filled_at`, or take `min` where `settle_exit`
+    takes `max`.
+    """
+    portfolio = _portfolio(_booking_position())
+    first_quote = Decimal("1582.84000000")
+    early = _trade(
+        quantity=Decimal("0.02000000"),
+        quote=first_quote,
+        fee=Fee(amount=Decimal("0.30000000"), asset="USDT"),
+    ).model_copy(update={"filled_at": NOW + timedelta(seconds=2)})
+    late = _trade(
+        quantity=Decimal("0.00257000"),
+        quote=BOOK_TOTAL - first_quote,
+        fee=Fee(amount=Decimal("0.07000000"), asset="USDT"),
+    ).model_copy(update={"trade_id": "2", "filled_at": NOW + timedelta(seconds=5)})
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": [early, late]})
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    assert len(booked) == 1
+    line = booked[0]
+    assert str(line.fee) == "0.37000000"  # type: ignore[attr-defined]
+    assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
+    assert line.fills == 2  # type: ignore[attr-defined]
+    # The leg's CREATION time, from `_filled_leg`, under its own name ...
+    assert line.order_created_at == NOW.isoformat()  # type: ignore[attr-defined]
+    # ... and the LATEST fill's matching-engine time, which is neither.
+    assert line.filled_at == (NOW + timedelta(seconds=5)).isoformat()  # type: ignore[attr-defined]
+
+
 @pytest.mark.parametrize("failing", ["BTCUSDT", "ETHUSDT"])
 async def test_a_failed_settlement_skips_that_position_and_books_the_other(failing: str) -> None:
     """R-g: SKIP AND CONTINUE. Parametrised over which symbol fails, so one run has it FIRST.
