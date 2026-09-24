@@ -24,7 +24,7 @@ division mutation at all -- both paths return ``20``.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -393,6 +393,43 @@ def test_settle_exit_aggregates_one_orders_fills() -> None:
     assert settlement.fee.asset == "USDT"
     assert settlement.fill_count == 2
     assert settlement.filled_at == FILLS_3189811[1].filled_at
+
+
+#: THE LATEST TIME IS NEITHER FIRST NOR LAST IN LIST ORDER, and that is the
+#: whole design: taking the first fill, the last fill or the earliest time
+#: each picks a different one of the other two.
+_T0 = datetime(2026, 9, 17, 9, 48, 2, 916000, tzinfo=timezone.utc)
+_SPREAD_FILLS = (
+    _fill("1", "0.01000000", "765.77740000").model_copy(
+        update={"filled_at": _T0 + timedelta(seconds=1)}
+    ),
+    _fill("2", "0.00900000", "689.19966000").model_copy(
+        update={"filled_at": _T0 + timedelta(seconds=5)}
+    ),
+    _fill("3", "0.00414000", "317.03184360").model_copy(
+        update={"filled_at": _T0 + timedelta(seconds=3)}
+    ),
+)
+
+
+def test_settle_exit_takes_the_latest_fill_time_not_the_first_or_last() -> None:
+    """`filled_at` is the LATEST fill's time. MUTATION: `fills[0]`, `fills[-1]` or `min`.
+
+    **FABRICATED, BECAUSE NO REAL ORDER CAN EXPRESS IT.** MEASURED against the
+    myTrades capture whose SHA-256 is
+    111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970: 0 of its 8
+    multi-fill SELL orders carry distinct fill times -- every one, 2 to 23
+    fills, shares a single matching-engine timestamp. So
+    `test_settle_exit_aggregates_one_orders_fills` above, which uses order
+    3189811 verbatim, ABSTAINS on this mutation: its two fills share
+    09:48:02.916 and every choice returns the same instant. This fixture moves
+    the times apart and puts the latest in the MIDDLE of the list.
+    """
+    settlement = settle_exit(
+        _SPREAD_FILLS, order_id="3189811", quote_asset="USDT", executed_quantity=D("0.02314000")
+    )
+
+    assert settlement.filled_at == _T0 + timedelta(seconds=5)
 
 
 _BNB = Fee(amount=D("0.00001000"), asset="BNB")

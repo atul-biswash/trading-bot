@@ -1273,6 +1273,10 @@ async def test_a_position_that_is_not_the_portfolios_own_refuses_loudly(
 # --------------------------------------------------------------------------
 _ZERO_USDT = Fee(amount=Decimal("0.00000000"), asset="USDT")
 
+#: The booking line's settlement fields: one set, shared with both executor
+#: lines through `execution/booking_line.py`.
+_SEVEN = ("order_id", "quantity", "fee", "fee_asset", "fills", "filled_at", "order_created_at")
+
 
 def _trade(
     *,
@@ -1318,15 +1322,21 @@ async def test_a_bookable_exit_fetches_once_and_books_net_of_its_fee() -> None:
 async def test_the_booking_line_carries_the_settlement_it_was_booked_net_of(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """`exit_booked` carries fee, fee_asset, fills, order_created_at and filled_at.
+    """`exit_booked` carries all SEVEN settlement fields, read so an absent one FAILS.
 
     Answers `M5k-052`: until this test nothing read the line. TWO fills whose
     fees and times differ from each other and from the leg's creation time,
     so a line that logged one fill's fee, the EARLIEST fill time, the creation
     time as the fill time, or a fixed count would each fail. FABRICATED fees:
-    every captured fee is zero. MUTATION: drop any of the five fields, swap
+    every captured fee is zero. MUTATION: drop any of the seven fields, swap
     `order_created_at` and `filled_at`, or take `min` where `settle_exit`
     takes `max`.
+
+    **READ THROUGH `vars()`, NOT BY ATTRIBUTE -- R3.** An `extra=` field is an
+    instance attribute of the `LogRecord`, so `line.fee_asset` on a line that
+    lacks it raises `AttributeError` before any comparison runs: a CRASH, not
+    a kill, under `M5i-115`, and P29 measured exactly that. `.get()` turns the
+    absence into a `None` the `==` rejects, as an `AssertionError`.
     """
     portfolio = _portfolio(_booking_position())
     first_quote = Decimal("1582.84000000")
@@ -1347,14 +1357,45 @@ async def test_the_booking_line_carries_the_settlement_it_was_booked_net_of(
 
     booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
     assert len(booked) == 1
-    line = booked[0]
-    assert str(line.fee) == "0.37000000"  # type: ignore[attr-defined]
-    assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
-    assert line.fills == 2  # type: ignore[attr-defined]
-    # The leg's CREATION time, from `_filled_leg`, under its own name ...
-    assert line.order_created_at == NOW.isoformat()  # type: ignore[attr-defined]
-    # ... and the LATEST fill's matching-engine time, which is neither.
-    assert line.filled_at == (NOW + timedelta(seconds=5)).isoformat()  # type: ignore[attr-defined]
+    line = vars(booked[0])
+    assert {key: line.get(key) for key in _SEVEN} == {
+        "order_id": "777",
+        # The settlement's own sum, 0.02000000 + 0.00257000.
+        "quantity": BOOK_QTY,
+        "fee": Decimal("0.37000000"),
+        "fee_asset": "USDT",
+        "fills": 2,
+        # The LATEST fill's matching-engine time ...
+        "filled_at": (NOW + timedelta(seconds=5)).isoformat(),
+        # ... and the leg's CREATION time, from `_filled_leg`, which is neither.
+        "order_created_at": NOW.isoformat(),
+    }
+    assert str(line.get("fee")) == "0.37000000"  # the exponent, which `==` cannot see
+
+
+async def test_an_unknown_order_creation_time_is_absent_from_exit_booked(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A leg record with no timestamp: the key is ABSENT, never `null`.
+
+    MUTATION: emit `"order_created_at": None` -- the driver's own behaviour
+    until the helper, and what `.get()` alone could not tell from absence.
+    The other six fields are asserted present, so a line missing entirely
+    cannot pass by containing nothing.
+    """
+    portfolio = _portfolio(_booking_position())
+    leg = _filled_leg("BTCUSDT").model_copy(update={"created_at": None})
+    client = _StubClient({"BTCUSDT": [leg]}, trades={"777": [_trade()]})
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    (record,) = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    line = vars(record)
+    assert "order_created_at" not in line
+    assert {key: key in line for key in _SEVEN if key != "order_created_at"} == {
+        key: True for key in _SEVEN if key != "order_created_at"
+    }
 
 
 @pytest.mark.parametrize("failing", ["BTCUSDT", "ETHUSDT"])

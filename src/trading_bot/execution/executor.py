@@ -42,6 +42,7 @@ from trading_bot.core.models import (
 from trading_bot.core.portfolio import settle_exit
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, close_client_order_id
 from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
+from trading_bot.execution.booking_line import settlement_fields
 from trading_bot.execution.close_plan import CloseAction, LegReport, plan_close
 from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.placement import build_placement
@@ -62,7 +63,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
     from trading_bot.core.assessment import RiskAssessment
     from trading_bot.core.interfaces import ExchangeClient
-    from trading_bot.core.models import Candle, ExitSettlement, Fee, OrderList, Signal
+    from trading_bot.core.models import Candle, ExitSettlement, OrderList, Signal
     from trading_bot.core.portfolio import Portfolio
 
 __all__ = ["OrderExecutor", "Pending", "PendingClose", "PendingPlacement"]
@@ -2329,14 +2330,14 @@ class OrderExecutor:
             extra={
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": signal.symbol,
-                "order_id": order.order_id,
-                "quantity": order.filled_quantity,
                 "quote_total": total,
-                "fee": settlement.fee.amount,
-                "fee_asset": settlement.fee.asset,
-                "fills": settlement.fill_count,
-                "filled_at": settlement.filled_at.isoformat(),
                 "realised": realised,
+                # `order_id` and `quantity` are the settlement's, EQUAL BY
+                # CONSTRUCTION to `order.order_id` and `order.filled_quantity`,
+                # which this line used to log: `_settle` hands `settle_exit`
+                # both, and it filters on the first and refuses unless the
+                # fills sum to the second.
+                **settlement_fields(settlement, order_created_at=order.created_at),
                 "candle_time": candle.close_time.isoformat(),
             },
         )
@@ -2811,7 +2812,13 @@ class OrderExecutor:
                 # WITH TWO OUTCOMES**, because it is the only one that writes.
                 texts = (
                     _RESOLVED_BOOKED
-                    if self._book_resolved_close(symbol, candle, total=total, fee=settlement.fee)
+                    if self._book_resolved_close(
+                        symbol,
+                        candle,
+                        total=total,
+                        settlement=settlement,
+                        order_created_at=None if order is None else order.created_at,
+                    )
                     else _RESOLVED_BOOK_FAILED
                 )
             elif isinstance(settle_failure, FeeUnresolvableError) and not isinstance(
@@ -3013,8 +3020,24 @@ class OrderExecutor:
             filled_quote_quantity=order.filled_quote_quantity,
         ).total
 
-    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money, fee: Fee) -> bool:
+    def _book_resolved_close(
+        self,
+        symbol: str,
+        candle: Candle,
+        *,
+        total: Money,
+        settlement: ExitSettlement,
+        order_created_at: datetime | None,
+    ) -> bool:
         """Book a resolved close. **Ruling 5, and the R2 reversal lives here.**
+
+        **IT TAKES THE WHOLE SETTLEMENT, NOT ITS FEE.** It used to take ``fee``
+        alone, so its ``close_booked`` line carried fee and fee_asset and none
+        of the fill detail the sell site's line carries for the same event
+        (``M5k-066``). It books with ``settlement.fee`` and logs through
+        ``settlement_fields``, the field set all three booking lines share;
+        ``order_created_at`` is the re-read sell's record time, OMITTED when
+        the venue sent none.
 
         **IT RETURNS WHETHER IT WROTE, AND THAT IS WHAT CLOSES `M5h-371`.**
         ``True`` only past `close_position`; ``False`` from the ``except``.
@@ -3066,7 +3089,7 @@ class OrderExecutor:
         """
         try:
             realised = self._portfolio.close_position(
-                symbol, exit_quote_total=total, now=utc_now(), fee=fee
+                symbol, exit_quote_total=total, now=utc_now(), fee=settlement.fee
             )
         except Exception as exc:
             _log.critical(
@@ -3090,9 +3113,8 @@ class OrderExecutor:
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": symbol,
                 "quote_total": total,
-                "fee": fee.amount,
-                "fee_asset": fee.asset,
                 "realised": realised,
+                **settlement_fields(settlement, order_created_at=order_created_at),
                 "candle_time": candle.close_time.isoformat(),
             },
         )

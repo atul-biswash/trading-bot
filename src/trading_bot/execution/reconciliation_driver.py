@@ -48,6 +48,7 @@ from trading_bot.core.exceptions import ExchangeError, FeeUnresolvableError
 # the same fact. Making it public is a `core/` decision and is not taken here.
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION, settle_exit
 from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
+from trading_bot.execution.booking_line import settlement_fields
 from trading_bot.execution.reconciliation import (
     reconcile_open_positions,
     resolve_unresolved_legs,
@@ -636,6 +637,14 @@ class ReconciliationDriver:
         creation time under a name ruled misleading at R3. ``order_created_at``
         carries that value under its own name, and ``filled_at`` is the venue's
         matching-engine time from the fills.
+
+        **The settlement's fields come from ``settlement_fields``**, the one
+        field set all three booking lines share. ``order_id`` and ``quantity``
+        are the settlement's, EQUAL BY CONSTRUCTION to ``fill.order_id`` and
+        ``fill.filled_quantity``, which this line used to log: ``settle_exit``
+        is given both, filters on the first and refuses unless the fills sum to
+        the second. ``order_created_at`` is OMITTED when the leg's record
+        carried no timestamp; it was ``null`` until then.
         """
         _log.info(
             "Booked exit for %s",
@@ -643,17 +652,9 @@ class ReconciliationDriver:
             extra={
                 "event": _EVENT_BOOKED,
                 "symbol": symbol,
-                "order_id": fill.order_id,
-                "quantity": fill.filled_quantity,
                 "quote_total": total,
-                "fee": settlement.fee.amount,
-                "fee_asset": settlement.fee.asset,
-                "fills": settlement.fill_count,
                 "realised": realised,
-                "order_created_at": (
-                    fill.order_created_at.isoformat() if fill.order_created_at is not None else None
-                ),
-                "filled_at": settlement.filled_at.isoformat(),
+                **settlement_fields(settlement, order_created_at=fill.order_created_at),
             },
         )
 

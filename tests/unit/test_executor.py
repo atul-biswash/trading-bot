@@ -4217,6 +4217,31 @@ class TestTheResolutionLineAgreesWithItself:
 # --------------------------------------------------------------------------
 _BTC_FEE = Fee(amount=D("0.00000100"), asset="BTC")
 
+#: The booking line's settlement fields: one set, shared with the driver's
+#: `exit_booked` through `execution/booking_line.py`.
+_SEVEN = ("order_id", "quantity", "fee", "fee_asset", "fills", "filled_at", "order_created_at")
+
+
+def _two_fills() -> tuple[Trade, Trade]:
+    """The sell's two fills: fees and times DIFFERENT, the later time apart from the candle's.
+
+    FABRICATED fees `0.15000000` and `0.10000000` USDT -- every captured SELL fee
+    is zero -- so a line logging one fill's fee, the earliest time or a fixed
+    count fails. The quantities sum to `CLOSE_QTY`, so the settlement is complete.
+    """
+    first = sell_trade(
+        quantity=D("0.3"),
+        quote=D("30.75000000"),
+        fee=Fee(amount=D("0.15000000"), asset="USDT"),
+    ).model_copy(update={"filled_at": BAR + timedelta(seconds=3)})
+    second = sell_trade(
+        quantity=D("0.2"),
+        quote=D("20.50000000"),
+        fee=Fee(amount=D("0.10000000"), asset="USDT"),
+        trade_id="2",
+    ).model_copy(update={"filled_at": BAR + timedelta(seconds=9)})
+    return first, second
+
 
 def _settling_client(*answers: list[Trade] | Exception) -> FakeClient:
     """A close whose sell FILLS, whose settlement reads answer IN ORDER (the last
@@ -4312,32 +4337,28 @@ class TestSettlement:
         assert portfolio.ledger is not None
         assert portfolio.ledger.realised_pnl == D("2.00000000")
 
-    async def test_the_close_booked_line_carries_the_settlement_but_not_the_order_time(
+    async def test_the_close_booked_line_carries_all_seven_settlement_fields(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Site A's `close_booked`: fee, fee_asset, fills and filled_at -- and NO `order_created_at`.
+        """Site A's `close_booked`: the seven fields every booking line now shares.
 
         Answers `M5k-052` at Site A. TWO fills whose fees and times differ, the
         later time apart from the candle's, so a line logging one fill's fee,
         the earliest time, the candle time or a fixed count fails. FABRICATED
-        fees. MUTATION: drop any of the four fields, or take `min` of the times.
+        fees. MUTATION: drop any of the seven fields, or take `min` of the times.
 
-        **THE ABSENCE IS PINNED AS FOUND, NOT AS RULED.** The driver's
-        `exit_booked` carries `order_created_at` and this line never has; a
-        ruling that adds it here flips the last assertion.
+        **`order_created_at` FLIPPED FROM ABSENT TO PRESENT, BY RULING R1.** It
+        was pinned absent as found (`M5k-066`); this line now carries the
+        MARKET sell's own record time. The sell is given one, FABRICATED at
+        `BAR+1s`, because the default response carries none -- the MARKET
+        payload's shape is documented here, never measured. Read through
+        `vars()`, so an absent field fails the assertion rather than raising
+        `AttributeError` (R3).
         """
-        first = sell_trade(
-            quantity=D("0.3"),
-            quote=D("30.75000000"),
-            fee=Fee(amount=D("0.15000000"), asset="USDT"),
-        ).model_copy(update={"filled_at": BAR + timedelta(seconds=3)})
-        second = sell_trade(
-            quantity=D("0.2"),
-            quote=D("20.50000000"),
-            fee=Fee(amount=D("0.10000000"), asset="USDT"),
-            trade_id="2",
-        ).model_copy(update={"filled_at": BAR + timedelta(seconds=9)})
-        executor, _, portfolio = build(client=_settling_client([first, second]), portfolio=_held())
+        first, second = _two_fills()
+        sold = sell_fill().model_copy(update={"created_at": BAR + timedelta(seconds=1)})
+        client = _selling_client(trades_answers=[[first, second]], sell_answer=sold)
+        executor, _, portfolio = build(client=client, portfolio=_held())
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
@@ -4346,28 +4367,40 @@ class TestSettlement:
         assert portfolio.ledger.realised_pnl == D("2.00000000")  # 2.25 gross, less 0.25
         booked = _records(caplog, "close_booked")
         assert len(booked) == 1
-        line = booked[0]
-        assert str(line.fee) == "0.25000000"  # type: ignore[attr-defined]
-        assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
-        assert line.fills == 2  # type: ignore[attr-defined]
-        assert line.filled_at == (BAR + timedelta(seconds=9)).isoformat()  # type: ignore[attr-defined]
-        assert not hasattr(line, "order_created_at")
+        line = vars(booked[0])
+        assert {key: line.get(key) for key in _SEVEN} == {
+            "order_id": "777",
+            "quantity": D("0.5"),
+            "fee": D("0.25000000"),
+            "fee_asset": "USDT",
+            "fills": 2,
+            "filled_at": (BAR + timedelta(seconds=9)).isoformat(),
+            "order_created_at": (BAR + timedelta(seconds=1)).isoformat(),
+        }
+        assert str(line.get("fee")) == "0.25000000"  # the exponent, which `==` cannot see
 
-    async def test_the_resolved_close_booked_line_carries_the_fee_and_no_fill_detail(
+    async def test_the_resolved_close_booked_line_carries_all_seven_settlement_fields(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Site B's `close_booked` (CRITICAL): fee and fee_asset -- NOT fills, filled_at or order time.
+        """Site B's `close_booked` (CRITICAL): the SAME seven fields as Site A's.
 
-        Answers `M5k-052` at Site B. FABRICATED fee `0.25000000` USDT.
-        MUTATION: drop `fee` or `fee_asset`.
+        Answers `M5k-052` at Site B. FABRICATED fees, the same two fills as
+        Site A's test. MUTATION: drop any of the seven fields, or hand
+        `_book_resolved_close` the fee alone again.
 
-        **THE THREE ABSENCES ARE PINNED AS FOUND, NOT AS RULED.**
-        `_resolve_close` holds the whole settlement and hands
-        `_book_resolved_close` only its fee, so this line carries less than
-        Site A's for the same kind of event. A ruling that passes the
-        settlement through flips the loop below.
+        **FOUR FIELDS FLIPPED FROM ABSENT TO PRESENT, BY RULING R1.** This line
+        carried fee and fee_asset only (`M5k-066`), because `_resolve_close`
+        handed `_book_resolved_close` the settlement's fee and nothing else. It
+        now takes the settlement and the re-read sell's record time, whose
+        value is FABRICATED at `BAR+1s` on the re-read. Read through `vars()`
+        (R3).
         """
-        client = _settling_client([sell_trade(fee=Fee(amount=D("0.25000000"), asset="USDT"))])
+        first, second = _two_fills()
+        resold = sell_fill().model_copy(update={"created_at": BAR + timedelta(seconds=1)})
+        client = _selling_client(
+            trades_answers=[[first, second]],
+            leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": resold},
+        )
         executor, _, _ = build(client=client, portfolio=_held())
         executor._pending[SYMBOL] = _close()
 
@@ -4376,12 +4409,18 @@ class TestSettlement:
 
         booked = _records(caplog, "close_booked")
         assert len(booked) == 1
-        line = booked[0]
-        assert line.levelno == logging.CRITICAL
-        assert str(line.fee) == "0.25000000"  # type: ignore[attr-defined]
-        assert line.fee_asset == "USDT"  # type: ignore[attr-defined]
-        for absent in ("fills", "filled_at", "order_created_at"):
-            assert not hasattr(line, absent), absent
+        assert booked[0].levelno == logging.CRITICAL
+        line = vars(booked[0])
+        assert {key: line.get(key) for key in _SEVEN} == {
+            "order_id": "777",
+            "quantity": D("0.5"),
+            "fee": D("0.25000000"),
+            "fee_asset": "USDT",
+            "fills": 2,
+            "filled_at": (BAR + timedelta(seconds=9)).isoformat(),
+            "order_created_at": (BAR + timedelta(seconds=1)).isoformat(),
+        }
+        assert str(line.get("fee")) == "0.25000000"
 
     @pytest.mark.parametrize(
         "answer",
