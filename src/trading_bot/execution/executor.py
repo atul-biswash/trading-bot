@@ -24,7 +24,13 @@ from typing import TYPE_CHECKING, Final, Literal
 
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import OrderSide, OrderType, PositionSide, ProtectionState
-from trading_bot.core.exceptions import ClientRefusalError, OrderNotFoundError
+from trading_bot.core.exceptions import (
+    ClientRefusalError,
+    ExchangeError,
+    FeeFillsIncompleteError,
+    FeeUnresolvableError,
+    OrderNotFoundError,
+)
 from trading_bot.core.models import (
     Money,
     Order,
@@ -33,6 +39,7 @@ from trading_bot.core.models import (
     OtoOrderListRequest,
     Position,
 )
+from trading_bot.core.portfolio import settle_exit
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, close_client_order_id
 from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
 from trading_bot.execution.close_plan import CloseAction, LegReport, plan_close
@@ -55,7 +62,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
     from trading_bot.core.assessment import RiskAssessment
     from trading_bot.core.interfaces import ExchangeClient
-    from trading_bot.core.models import Candle, OrderList, Signal
+    from trading_bot.core.models import Candle, ExitSettlement, Fee, OrderList, Signal
     from trading_bot.core.portfolio import Portfolio
 
 __all__ = ["OrderExecutor", "Pending", "PendingClose", "PendingPlacement"]
@@ -243,6 +250,11 @@ _EVENT_CLOSE_SOLD_UNBOOKED = "close_sold_unbooked"
 #: DROPPED; here the figure itself is absent, the exit is unpriceable, and the
 #: position is KEPT.
 _EVENT_CLOSE_SOLD_UNPRICED = "close_sold_unpriced"
+#: The bot's close sell FILLED and its fee could not be settled yet. WARNING,
+#: and its own event: the record is KEPT and settlement is retried on the
+#: symbol's next candles, so this is neither `close_record_resolved` (nothing
+#: resolved) nor `close_sold_unbooked` (nothing dropped).
+_EVENT_CLOSE_SETTLEMENT_DEFERRED = "close_settlement_deferred"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
 #: trade happened. Its own reason rather than reusing an existing one, because
@@ -328,6 +340,12 @@ _CLOSE_REFUSALS: Final[dict[CloseAction, str]] = {
 #: stated reason: nothing in this tree computes a non-zero generation yet.
 _CLOSE_GENERATION: Final = 0
 
+#: How many of the symbol's OWN candles a close whose sell FILLED may wait for
+#: its settlement before it is dropped unbooked at CRITICAL, outcome
+#: `settlement_timeout`. Ruled by the project owner: five bars of the symbol's
+#: timeframe, counted from the first deferral. See `_settlement_deferrals`.
+_SETTLEMENT_RETRY_BARS: Final = 5
+
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
 _REASON_PENDING = "placement_pending"
@@ -383,6 +401,17 @@ _RESOLVED_BOOKED: Final = _CloseResolutionText(
     ),
 )
 
+#: The balance-sheet sentence, ONE value read by every text that drops a filled
+#: close unbooked. `_RESOLVED_RELEASED`'s own note below says the sentence is
+#: added ONCE and must not be copied to a second site; a shared constant is how
+#: two texts carry it without a copy. Its evaluated string is byte-identical
+#: to the one `_RESOLVED_RELEASED` carried before the refactor.
+_UNBOOKED_BALANCE_SHEET_NOTE: Final = (
+    "NOTE THE BALANCE SHEET: the free quote balance is NOT credited here, so it "
+    "stays short by those proceeds until the next restart re-seeds it from the "
+    "venue -- entries may be refused or under-sized until then."
+)
+
 #: The sell filled and could not be priced, so it is dropped without booking.
 #:
 #: **READ FROM TWO SITES, AND THAT IS WHY THE BALANCE-SHEET SENTENCE LIVES
@@ -408,10 +437,7 @@ _RESOLVED_RELEASED: Final = _CloseResolutionText(
         "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
         "released and the pending record is gone from memory and from the store. "
         "That trade is NOT in the ledger -- enter the executed quantity and quote "
-        "total below by hand. Trading continues. NOTE THE BALANCE SHEET: the free "
-        "quote balance is NOT credited here, so it stays short by those proceeds "
-        "until the next restart re-seeds it from the venue -- entries may be "
-        "refused or under-sized until then."
+        "total below by hand. Trading continues. " + _UNBOOKED_BALANCE_SHEET_NOTE
     ),
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and was DROPPED "
@@ -475,6 +501,46 @@ _RESOLVED_BOOK_FAILED: Final = _CloseResolutionText(
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and BOOKING IT "
         "FAILED; the POSITION SURVIVES and the ledger may be half-applied"
+    ),
+)
+
+#: The sell filled and its fee is in an asset this ledger cannot subtract -- not
+#: the quote asset, or not a sell at all -- so it is dropped unbooked. It is NOT
+#: retried: unlike a transport failure or a fill list the venue has not finished
+#: indexing, a fee's denomination does not change by waiting.
+_RESOLVED_FEE_UNRESOLVABLE: Final = _CloseResolutionText(
+    outcome="fee_unresolvable",
+    resolution=(
+        "THE SELL FILLED and ITS FEE CANNOT BE BOOKED: the venue charged it in an "
+        "asset this ledger does not subtract from a quote total, and there is no "
+        "converter. NOTHING WAS BOOKED by this bot. The position is released and the "
+        "pending record is gone from memory and from the store. That trade is NOT "
+        "in the ledger -- enter the executed quantity, the quote total below and the "
+        "commission the venue reports for it by hand. Trading continues. "
+        + _UNBOOKED_BALANCE_SHEET_NOTE
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell FILLED and its fee is in "
+        "an asset this ledger cannot book; it was DROPPED UNBOOKED"
+    ),
+)
+
+#: The sell filled and its settlement did not arrive within the retry bound --
+#: `_SETTLEMENT_RETRY_BARS` of the symbol's own candles -- so it is dropped
+#: unbooked. Ruled by the project owner: a bounded wait, then the operator.
+_RESOLVED_SETTLEMENT_TIMEOUT: Final = _CloseResolutionText(
+    outcome="settlement_timeout",
+    resolution=(
+        "THE SELL FILLED and ITS FEE COULD NOT BE SETTLED within the retry bound, so "
+        "NOTHING WAS BOOKED by this bot. The position is released and the pending "
+        "record is gone from memory and from the store. That trade is NOT in the "
+        "ledger -- enter the executed quantity, the quote total below and the "
+        "commission the venue reports for it by hand. Trading continues. "
+        + _UNBOOKED_BALANCE_SHEET_NOTE
+    ),
+    message=(
+        "%s: a pending close record was resolved -- the sell FILLED and its settlement "
+        "TIMED OUT; it was DROPPED UNBOOKED and the venue's figures are recorded below"
     ),
 )
 
@@ -674,6 +740,7 @@ class OrderExecutor:
         client: ExchangeClient,
         portfolio: Portfolio,
         budget: DispatchBudget,
+        settlement_bounds: CallBounds,
         persist_pending: PendingWriter | None = None,
         restored_pending: Sequence[Pending] = (),
     ) -> None:
@@ -718,11 +785,31 @@ class OrderExecutor:
         self._client = client
         self._portfolio = portfolio
         self._budget = budget
+        #: Bounds ONE settlement fetch: ``reconcile_deadline_s`` at one attempt,
+        #: by the project owner's ruling, supplied by the composition root. Not
+        #: ``budget``'s: a settlement follows a sell that has already spent it.
+        self._settlement_bounds = settlement_bounds
         #: ``None`` means DO NOT PERSIST, and that default is what keeps every
         #: existing test and any caller not yet updated byte-for-byte
         #: unchanged. The composition root supplies the real writer.
         self._persist_pending = persist_pending
         self._pending: dict[str, Pending] = {record.symbol: record for record in restored_pending}
+        #: THE RETENTION TRACKER, ruled by the project owner: symbol -> the
+        #: symbol's OWN candles seen since its close first deferred settlement.
+        #: Set by the first deferral at either site, advanced in ``__call__``
+        #: only by a candle of that symbol, cleared by ``_release_close``, and at
+        #: ``_SETTLEMENT_RETRY_BARS`` the record is dropped unbooked at CRITICAL.
+        #:
+        #: **IN MEMORY ONLY, and that is sufficient.** After a restart there is
+        #: no ``Position``, so a restored close classifies ``POSITION_ABSENT``,
+        #: never fetches settlement, and is released on the first candle.
+        #:
+        #: **THE STALLED-FEED LIMIT, stated so it is not mistaken for a wall-
+        #: clock bound.** The count is of the symbol's own candles, so if that
+        #: symbol's feed stops, its count stops too, and its record is held
+        #: until the feed resumes or the process restarts -- while retries go
+        #: on during other symbols' candles.
+        self._settlement_deferrals: dict[str, int] = {}
 
     # -- Option 4 resolution, on the candle subscription --------------------
     async def __call__(self, candle: Candle) -> None:
@@ -757,6 +844,10 @@ class OrderExecutor:
         """
         if not self._pending:
             return
+        # THE RETENTION COUNT ADVANCES ON THE SYMBOL'S OWN CANDLE, and ahead of
+        # the budget's `break` below, so a bar with no budget still counts.
+        if candle.symbol in self._settlement_deferrals:
+            self._settlement_deferrals[candle.symbol] += 1
         now = utc_now()
         started_at = now
         for symbol, record in list(self._pending.items()):
@@ -1945,6 +2036,11 @@ class OrderExecutor:
             # most ambiguous outcome there is. `translate_binance_error` says so
             # at its own site and marks the split UNRULED, and `.code` cannot
             # separate them either.
+            #
+            # ANNOTATED BY THE FEE COMMIT: "retention is SINGLE-SHOT" still
+            # holds for the record this branch retains when the sell did not
+            # fill. A sell that FILLED and whose settlement cannot be read is
+            # kept up to `_SETTLEMENT_RETRY_BARS` of the symbol's own candles.
             if isinstance(exc, ClientRefusalError):
                 self._go_naked(signal, position, candle, _REASON_CLOSE_SELL_FAILED)
             else:
@@ -2042,8 +2138,94 @@ class OrderExecutor:
             self._release_close(signal.symbol)
             return
 
-        self._book_close(signal, position, candle, total=total, order=order)
+        settlement, failure = await self._settle(
+            position.symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
+        )
+        if settlement is None:
+            # SITE A DEFERS ON EVERY SETTLEMENT FAILURE -- transport, empty,
+            # incomplete and foreign asset alike. Ruled by the project owner:
+            # the sell SUCCEEDED, so nothing is dropped here; the record is kept
+            # and `_resolve_close` settles it on the next bar, where the one
+            # place a filled close is dropped decides.
+            self._defer_settlement(
+                signal, position, candle, order=order, total=total, failure=failure
+            )
+            return
+        self._book_close(signal, position, candle, total=total, order=order, settlement=settlement)
         self._release_close(signal.symbol)
+
+    async def _settle(
+        self, symbol: str, *, order_id: str, executed_quantity: Money
+    ) -> tuple[ExitSettlement | None, Exception | None]:
+        """One order's fills, settled by the ledger -- or the failure. Never raises those.
+
+        Bounded by ``settlement_bounds`` -- ``reconcile_deadline_s`` at one
+        attempt -- and not by the dispatch budget. Returns a pair, like
+        :meth:`_read_close_outcome`, because the caller branches on WHICH
+        failure it was: an ``ExchangeError`` or ``FeeFillsIncompleteError`` may
+        cure by waiting, a foreign-asset ``FeeUnresolvableError`` cannot.
+        """
+        try:
+            trades = await self._client.get_my_trades(
+                symbol,
+                order_id=order_id,
+                timeout_s=self._settlement_bounds.timeout_s,
+                attempts=self._settlement_bounds.attempts,
+            )
+            settlement = settle_exit(
+                trades,
+                order_id=order_id,
+                quote_asset=self._portfolio.quote_asset,
+                executed_quantity=executed_quantity,
+            )
+        except (ExchangeError, FeeUnresolvableError) as exc:
+            return None, exc
+        return settlement, None
+
+    def _defer_settlement(
+        self,
+        signal: Signal,
+        position: Position,
+        candle: Candle,
+        *,
+        order: Order,
+        total: Money,
+        failure: Exception | None,
+    ) -> None:
+        """The sell FILLED and its settlement is not readable yet: keep, mark, say so.
+
+        Nothing is booked and nothing is dropped. The ``PendingClose`` written
+        before the cancel stays in memory and on disk, so the next candle's
+        ``_resolve_close`` re-reads the sell by its derived id and settles it,
+        within ``_SETTLEMENT_RETRY_BARS`` of the symbol's own candles.
+        Protection is marked ``UNKNOWN`` for ``_go_naked_retaining``'s reason: it
+        was cancelled before the sell, and that refuses entries meanwhile.
+
+        **No ``_refuse``**, for ``_sold_unbooked``'s reason: the close
+        SUCCEEDED. And the CLOSE guard in ``dispatch`` refuses a second close on
+        this symbol while the record is held.
+        """
+        position.protection = ProtectionState.UNKNOWN
+        self._settlement_deferrals.setdefault(signal.symbol, 0)
+        _log.warning(
+            "%s close sell FILLED and its fee is not yet settled; the record is kept and "
+            "settlement is retried at resolution",
+            signal.symbol,
+            extra={
+                "event": _EVENT_CLOSE_SETTLEMENT_DEFERRED,
+                "symbol": signal.symbol,
+                "site": "sell",
+                "order_id": order.order_id,
+                "executed_qty": order.filled_quantity,
+                "quote_total": total,
+                "close_client_order_id": close_client_order_id(
+                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                ),
+                "error_type": None if failure is None else type(failure).__name__,
+                "error": None if failure is None else str(failure),
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
 
     async def _requery_sell_total(self, position: Position, bounds: CallBounds) -> Money | None:
         """The sell's quote total, read back by the id we sent. ``None`` if not.
@@ -2074,6 +2256,7 @@ class OrderExecutor:
         *,
         total: Money,
         order: Order,
+        settlement: ExitSettlement,
     ) -> bool:
         """Credit, accrue and delete -- the bot's own exit reaching the ledger.
 
@@ -2121,7 +2304,7 @@ class OrderExecutor:
         """
         try:
             realised = self._portfolio.close_position(
-                position.symbol, exit_quote_total=total, now=utc_now()
+                position.symbol, exit_quote_total=total, now=utc_now(), fee=settlement.fee
             )
         except Exception as exc:
             # The credit may have landed and the accrual raised -- the C12
@@ -2149,6 +2332,10 @@ class OrderExecutor:
                 "order_id": order.order_id,
                 "quantity": order.filled_quantity,
                 "quote_total": total,
+                "fee": settlement.fee.amount,
+                "fee_asset": settlement.fee.asset,
+                "fills": settlement.fill_count,
+                "filled_at": settlement.filled_at.isoformat(),
                 "realised": realised,
                 "candle_time": candle.close_time.isoformat(),
             },
@@ -2445,6 +2632,13 @@ class OrderExecutor:
         **SINGLE-SHOT, and that is what stops retention wedging a symbol.**
         `_resolve_close` releases the record in a `finally` on every branch
         including a failed query, so this holds the symbol for exactly one bar.
+
+        **ANNOTATED BY THE FEE COMMIT: NO LONGER ON EVERY BRANCH.** When the
+        re-read finds the sell FILLED and its settlement cannot be read yet,
+        the record is KEPT, for up to `_SETTLEMENT_RETRY_BARS` of the symbol's
+        own candles, and then dropped at CRITICAL. Every other branch still
+        releases on the first resolution, so for a sell that did NOT fill this
+        paragraph stands as written.
         """
         position.protection = ProtectionState.UNKNOWN
         _log.critical(
@@ -2480,6 +2674,7 @@ class OrderExecutor:
         stuck in-memory one is not.
         """
         self._pending.pop(symbol, None)
+        self._settlement_deferrals.pop(symbol, None)
         self._persist_after_removal(symbol)
 
     async def _resolve_close(
@@ -2508,6 +2703,13 @@ class OrderExecutor:
         call sites each remembering to call it. `_read_close_outcome` already
         swallows its own failure; the ``finally`` is what makes that belt and
         braces rather than a single point.
+
+        **ANNOTATED BY THE FEE COMMIT: THE CLEAR IS NO LONGER UNCONDITIONAL.**
+        One branch skips it deliberately: the sell FILLED and its settlement
+        could not be read, so the record is kept for the next bar, under
+        `_SETTLEMENT_RETRY_BARS`, and dropped at CRITICAL when that expires.
+        The ``finally`` still decides every branch, and ``deferred`` defaults
+        to False, so an exception or an early return still releases.
 
         **TWO POSITION CASES, AND NEITHER IS AN ERROR.** After a restart there
         is no `Position` at all -- it is in-process only and boot reconstructs
@@ -2568,6 +2770,13 @@ class OrderExecutor:
         # never to raise; this does not depend on that remaining true.
         order: Order | None = None
         failure: Exception | None = None
+        # BOUND BEFORE THE `try` FOR THE SAME REASON, and all three are read in
+        # the `finally`. `deferred` is the one new DEFAULT that matters: False
+        # releases, which is the existing single-shot behaviour on every path
+        # that does not reach a settlement.
+        settlement: ExitSettlement | None = None
+        settle_failure: Exception | None = None
+        deferred = False
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
             # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
@@ -2579,6 +2788,10 @@ class OrderExecutor:
             filled = order is not None and order.filled_quantity > 0
             if filled:
                 total = self._bookable_total(symbol, order)
+            if total is not None and order is not None:
+                settlement, settle_failure = await self._settle(
+                    symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
+                )
         finally:
             # **THE QUERY NOW DECIDES THE DROP AND, ON ONE BRANCH, A LEDGER
             # WRITE.** Two commits ago it decided nothing at all. The CLEAR and
@@ -2592,15 +2805,32 @@ class OrderExecutor:
             # describe an intention the write did not carry out. It used to be
             # computed in the `try` from `total is not None` -- the intention to
             # book -- and emitted before any of this ran.
-            if total is not None:
+            if total is not None and settlement is not None:
                 # Confirmed flat, in process, priced by the venue: the capital
                 # is back and the trade belongs in the ledger. **THE ONLY BRANCH
                 # WITH TWO OUTCOMES**, because it is the only one that writes.
                 texts = (
                     _RESOLVED_BOOKED
-                    if self._book_resolved_close(symbol, candle, total=total)
+                    if self._book_resolved_close(symbol, candle, total=total, fee=settlement.fee)
                     else _RESOLVED_BOOK_FAILED
                 )
+            elif isinstance(settle_failure, FeeUnresolvableError) and not isinstance(
+                settle_failure, FeeFillsIncompleteError
+            ):
+                # A FEE IN AN ASSET THIS LEDGER CANNOT SUBTRACT, or a fill that is
+                # not a sell. Waiting cannot cure it, so it is not retried.
+                self._drop_position_unbooked(symbol)
+                texts = _RESOLVED_FEE_UNRESOLVABLE
+            elif total is not None:
+                # SETTLEMENT NOT READABLE YET -- transport, or a fill list that is
+                # empty or short (Variant L, ruled by the project owner). Retained
+                # under the tracker until `_SETTLEMENT_RETRY_BARS` of the symbol's
+                # own candles, then dropped at CRITICAL as `settlement_timeout`.
+                if self._settlement_deferrals.setdefault(symbol, 0) >= _SETTLEMENT_RETRY_BARS:
+                    self._drop_position_unbooked(symbol)
+                    texts = _RESOLVED_SETTLEMENT_TIMEOUT
+                else:
+                    deferred = True
             elif filled:
                 # Confirmed flat but not bookable -- no position to price it
                 # against, a partial, or no quote total reported.
@@ -2609,13 +2839,41 @@ class OrderExecutor:
             else:
                 self._retain_position_unprotected(symbol)
                 texts = _RESOLVED_RETAINED
-            self._release_close(symbol)
-            # **LAST, AND AFTER THE RELEASE** -- `M5i-056`. Moving the log into
-            # this `finally` removed the protection the `try` used to give it: a
-            # raise in the logger no longer lands on a `finally` that clears the
-            # record. Putting it after `_release_close` restores that -- there
-            # is nothing left to strand.
-            self._log_close_resolved(record, candle, order=order, failure=failure, texts=texts)
+            if deferred:
+                # KEPT, and NOT released: the record is the only handle on a sell
+                # that filled and is not yet booked. WARNING, not the CRITICAL
+                # below, because nothing has been resolved and nothing dropped.
+                self._log_settlement_deferred(record, candle, settle_failure)
+            else:
+                self._release_close(symbol)
+                # **LAST, AND AFTER THE RELEASE** -- `M5i-056`. Moving the log
+                # into this `finally` removed the protection the `try` used to
+                # give it: a raise in the logger no longer lands on a `finally`
+                # that clears the record. Putting it after `_release_close`
+                # restores that -- there is nothing left to strand.
+                self._log_close_resolved(record, candle, order=order, failure=failure, texts=texts)
+
+    def _log_settlement_deferred(
+        self, record: PendingClose, candle: Candle, failure: Exception | None
+    ) -> None:
+        """One WARNING for a resolved close whose settlement is retried next bar."""
+        _log.warning(
+            "%s: the close sell FILLED and its settlement could not be read; the record is "
+            "kept and retried on this symbol's next candle",
+            record.symbol,
+            extra={
+                "event": _EVENT_CLOSE_SETTLEMENT_DEFERRED,
+                "symbol": record.symbol,
+                "site": "resolution",
+                "close_client_order_id": close_client_order_id(
+                    record.symbol, record.entry_bar_time, generation=record.generation
+                ),
+                "bars_deferred": self._settlement_deferrals.get(record.symbol, 0),
+                "error_type": None if failure is None else type(failure).__name__,
+                "error": None if failure is None else str(failure),
+                "candle_time": candle.close_time.isoformat(),
+            },
+        )
 
     def _retain_position_unprotected(self, symbol: str) -> None:
         """Keep the position and mark its protection UNKNOWN. **P2/P4.**
@@ -2755,7 +3013,7 @@ class OrderExecutor:
             filled_quote_quantity=order.filled_quote_quantity,
         ).total
 
-    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money) -> bool:
+    def _book_resolved_close(self, symbol: str, candle: Candle, *, total: Money, fee: Fee) -> bool:
         """Book a resolved close. **Ruling 5, and the R2 reversal lives here.**
 
         **IT RETURNS WHETHER IT WROTE, AND THAT IS WHAT CLOSES `M5h-371`.**
@@ -2807,7 +3065,9 @@ class OrderExecutor:
         twice and contradicted itself.
         """
         try:
-            realised = self._portfolio.close_position(symbol, exit_quote_total=total, now=utc_now())
+            realised = self._portfolio.close_position(
+                symbol, exit_quote_total=total, now=utc_now(), fee=fee
+            )
         except Exception as exc:
             _log.critical(
                 "Booking the resolved close for %s FAILED; the position survives and the "
@@ -2830,6 +3090,8 @@ class OrderExecutor:
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": symbol,
                 "quote_total": total,
+                "fee": fee.amount,
+                "fee_asset": fee.asset,
                 "realised": realised,
                 "candle_time": candle.close_time.isoformat(),
             },

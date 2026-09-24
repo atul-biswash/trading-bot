@@ -300,6 +300,19 @@ scoped to priority 4.**
 *Arming condition:* **whoever next reads `ExitFill.venue_time` for anything
 other than display.**
 
+> **RESOLVED BY THE FEE COMMIT.** The condition fired and is discharged: the
+> field is renamed `ExitFill.order_created_at`, the true fill time is
+> fetched from `myTrades` and logged as `filled_at` on every booking line,
+> and the `venue_time` key is gone from `exit_booked`. **"Persisted" is
+> aligned** with the project owner's ruling: it meant durable execution
+> logging, never `data/state.json`, where the field never was.
+>
+> **The rename itself landed one commit earlier**, in the preparatory commit
+> whose subject begins `feat(exchange): fetch fills by order id`, which fired
+> this condition and REAFFIRMED it rather than resolving it. What only the
+> fee commit supplies is `filled_at` -- the latest `myTrades.time` among the
+> exit order's fills -- so the fee commit is the one that resolves A4.
+
 ### A5. `M5j-011`'s DIVERGED branch RAN — OBSERVED-ADJACENT, not observed
 
 See priority 1 above for the measured distribution. The branch was exercised and
@@ -322,6 +335,57 @@ is a fill price**. **The remedy is wording, not control flow.**
 
 *Arming condition:* **whoever next edits `_report`'s warning text or
 `_book_exits`'s booking line.**
+
+---
+
+## OPENED BY THE FEE COMMIT
+
+### F1. HIGH -- the driver retries a permanent fee refusal on every pass
+
+**The reconciliation driver retries a non-Incomplete `FeeUnresolvableError`
+on every due pass, with no bound and no terminal outcome.** `_settle` in
+`execution/reconciliation_driver.py` catches it around `settle_exit`, logs
+`exit_book_refused` at WARNING and skips. The position survives with
+untrusted protection, so `COMMITTED_RISK_UNKNOWN` keeps entries refused
+PORTFOLIO-WIDE for as long as the position lives, and the next due pass
+fetches the same fills and refuses again. The condition cannot cure itself:
+it is a fee in an asset this ledger cannot subtract, or a fill that is not a
+sell.
+
+**The executor drops the same condition at CRITICAL after one bar.** The sell
+site defers it like every settlement failure, and on the next bar
+`_resolve_close` takes its `fee_unresolvable` branch and drops the position
+unbooked. Two sites, two outcomes, one fact. **It needs one ruled terminal
+outcome for both sites.**
+
+REASONED from the code. Pinned for ONE pass only, by
+`test_a_settlement_the_ledger_refuses_skips_and_keeps_the_position[foreign_fee]`;
+no test drives the repetition.
+
+*Arming condition:* **whoever next edits `_settle` in
+`execution/reconciliation_driver.py` or the `fee_unresolvable` branch of
+`_resolve_close`.**
+
+### F2. A restart after a deferred settlement -- UNMEASURED until the tests-only commit
+
+A close whose settlement is deferred keeps its pending record, and the store
+persists it as a `PendingCloseRecord`: `kind`, `symbol`, `entry_bar_time`,
+`generation` and `quantity`. It carries no deferral count and no settlement,
+because the retention tracker is in-memory by ruling. After a restart there
+is no `Position`, so the resolution is predicted to classify the fill
+`POSITION_ABSENT` and drop the record unbooked at CRITICAL with the released
+text, making no settlement fetch and leaving the tracker empty -- provided
+another pair is tradeable, since a config whose every pair is excluded is
+refused at boot before the first candle.
+
+**That prediction is REASONED.** The nearest test,
+`test_no_position_in_memory_drops_unbooked_and_leaves_the_ledger_absent`,
+seeds `_pending` on a fresh executor. Nothing drives defer, persist through
+the real store, restore through a fresh root and resolve. **UNMEASURED until
+the tests-only commit that follows the fee commit.**
+
+*Arming condition:* **whoever next edits the restart branch of
+`_resolve_close` or the store's `PendingCloseRecord`.**
 
 ---
 

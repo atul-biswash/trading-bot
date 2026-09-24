@@ -30,13 +30,19 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from trading_bot.core.enums import PositionSide, ProtectionState
-from trading_bot.core.models import Position
-from trading_bot.core.portfolio import Ledger, Portfolio
+from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
+from trading_bot.core.exceptions import FeeFillsIncompleteError, FeeUnresolvableError
+from trading_bot.core.models import Fee, Position, Trade
+from trading_bot.core.portfolio import Ledger, Portfolio, settle_exit
 
 D = Decimal
 SYMBOL = "BTCUSDT"
 NOW = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+#: THE MEASURED FEE, not a stub: every SELL fill in the myTrades capture whose
+#: SHA-256 is 111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970
+#: carries commission "0.00000000" in USDT. Tests whose subject is not the fee
+#: book with it; the fee's own tests use a fabricated non-zero amount.
+USDT_ZERO_FEE = Fee(amount=D("0.00000000"), asset="USDT")
 
 # --------------------------------------------------------------------------
 # The awkward shape, MEASURED.
@@ -93,7 +99,9 @@ class TestExactQuoteTotal:
         """
         portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position()})
 
-        pnl = portfolio.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW)
+        pnl = portfolio.close_position(
+            SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+        )
 
         assert pnl == AWKWARD_PNL
         # The credit is the venue's figure verbatim: no multiplication of ours.
@@ -110,7 +118,7 @@ class TestExactQuoteTotal:
         portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position()})
 
         pnl = portfolio.close_position(
-            SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=D("0.5")
+            SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=Fee(amount=D("0.5"), asset="USDT")
         )
 
         assert pnl == AWKWARD_PNL - D("0.5")
@@ -128,7 +136,9 @@ class TestExactQuoteTotal:
             positions={SYMBOL: _position(side=PositionSide.SHORT)},
         )
 
-        pnl = portfolio.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW)
+        pnl = portfolio.close_position(
+            SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+        )
 
         # entry_cost - gross, the exact negation of the long case.
         assert pnl == -AWKWARD_PNL
@@ -143,7 +153,9 @@ class TestExactQuoteTotal:
         portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position(entry_fill=None)})
 
         with pytest.raises(ValueError, match="cost basis is unknown"):
-            portfolio.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW)
+            portfolio.close_position(
+                SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+            )
 
         # Nothing was written: the refusal precedes every commit step.
         assert SYMBOL in portfolio.positions
@@ -169,7 +181,7 @@ class TestPricePathIsUnchanged:
             positions={SYMBOL: _position(quantity=D("2"), entry=D("100"), entry_fill=D("100"))},
         )
 
-        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
 
         assert pnl == D("20")  # (110 - 100) * 2
         assert portfolio.free_quote == D("1220")  # 1000 + 2 * 110
@@ -202,8 +214,10 @@ class TestPricePathIsUnchanged:
         by_price = _fresh()
         by_total = _fresh()
 
-        pnl_price = by_price.close_position(SYMBOL, exit_price=D("110"), now=NOW)
-        pnl_total = by_total.close_position(SYMBOL, exit_quote_total=D("220"), now=NOW)
+        pnl_price = by_price.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
+        pnl_total = by_total.close_position(
+            SYMBOL, exit_quote_total=D("220"), now=NOW, fee=USDT_ZERO_FEE
+        )
 
         assert pnl_price == pnl_total
         assert by_price.free_quote == by_total.free_quote
@@ -221,7 +235,11 @@ class TestIllegalCombinations:
 
         with pytest.raises(ValueError, match="never both"):
             portfolio.close_position(
-                SYMBOL, exit_price=D("110"), exit_quote_total=AWKWARD_TOTAL, now=NOW
+                SYMBOL,
+                exit_price=D("110"),
+                exit_quote_total=AWKWARD_TOTAL,
+                now=NOW,
+                fee=USDT_ZERO_FEE,
             )
 
         assert SYMBOL in portfolio.positions
@@ -235,7 +253,7 @@ class TestIllegalCombinations:
         portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position()})
 
         with pytest.raises(ValueError, match="neither was given"):
-            portfolio.close_position(SYMBOL, now=NOW)
+            portfolio.close_position(SYMBOL, now=NOW, fee=USDT_ZERO_FEE)
 
         assert SYMBOL in portfolio.positions
         assert portfolio.free_quote == D("1000")
@@ -265,7 +283,7 @@ class TestIllegalCombinations:
         portfolio = Portfolio(free_quote=D("1000"))  # holds nothing
 
         with pytest.raises(ValueError, match=match):
-            portfolio.close_position(SYMBOL, now=NOW, **kwargs)
+            portfolio.close_position(SYMBOL, now=NOW, fee=USDT_ZERO_FEE, **kwargs)
 
 
 class TestOrderingSurvivesOnTheNewPath:
@@ -292,7 +310,9 @@ class TestOrderingSurvivesOnTheNewPath:
         monkeypatch.setattr(Portfolio, "record_realised_pnl", _boom)
 
         with pytest.raises(ValidationError):
-            portfolio.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW)
+            portfolio.close_position(
+                SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+            )
 
         # THE POINT: the position survives, so a later pass can retry.
         assert SYMBOL in portfolio.positions
@@ -309,9 +329,125 @@ class TestOrderingSurvivesOnTheNewPath:
 
         with pytest.raises(ValueError, match="timezone-aware"):
             portfolio.close_position(
-                SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW.replace(tzinfo=None)
+                SYMBOL,
+                exit_quote_total=AWKWARD_TOTAL,
+                now=NOW.replace(tzinfo=None),
+                fee=USDT_ZERO_FEE,
             )
 
         assert SYMBOL in portfolio.positions
         assert portfolio.free_quote == D("1000")
         assert portfolio.ledger is None
+
+
+# --------------------------------------------------------------------------
+# The fee commit: a required Fee, and the ledger's settlement of an exit
+# --------------------------------------------------------------------------
+def _fill(
+    trade_id: str,
+    quantity: str,
+    quote: str,
+    *,
+    order_id: str = "3189811",
+    fee: Fee = USDT_ZERO_FEE,
+    side: OrderSide = OrderSide.SELL,
+) -> Trade:
+    return Trade(
+        trade_id=trade_id,
+        order_id=order_id,
+        symbol=SYMBOL,
+        side=side,
+        quantity=D(quantity),
+        price=D("76577.74000000"),
+        quote_quantity=D(quote),
+        fee=fee,
+        filled_at=datetime(2026, 9, 17, 9, 48, 2, 916000, tzinfo=timezone.utc),
+    )
+
+
+#: ORDER 3189811's TWO FILLS, VERBATIM from the myTrades capture whose SHA-256 is
+#: 111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970. Their
+#: quoteQty sums to 1772.00890360, which is the venue's own total on that
+#: order's close_booked line in the log capture whose SHA-256 is
+#: 0e6b673e16671152a4e08ca6cc8390e7b72ea8b75c3e7303fa0c16b4e04d223e.
+FILLS_3189811 = (
+    _fill("997264", "0.01945000", "1489.43704300"),
+    _fill("997265", "0.00369000", "282.57186060"),
+)
+
+
+def test_settle_exit_aggregates_one_orders_fills() -> None:
+    """Summed, never divided: fee, quote total, quantity, count and time.
+
+    MUTATION: take the first fill, or book `Decimal(0)` for the fee. Every
+    captured fee is zero, so the fee is pinned by its EXPONENT: a sum over
+    `0.00000000` is `0E-8`, and `Decimal(0)` has exponent 0.
+    """
+    settlement = settle_exit(
+        FILLS_3189811, order_id="3189811", quote_asset="USDT", executed_quantity=D("0.02314000")
+    )
+
+    assert settlement.quote_quantity == D("1772.00890360")
+    assert settlement.quantity == D("0.02314000")
+    assert settlement.fee.amount.as_tuple().exponent == -8
+    assert settlement.fee.asset == "USDT"
+    assert settlement.fill_count == 2
+    assert settlement.filled_at == FILLS_3189811[1].filled_at
+
+
+_BNB = Fee(amount=D("0.00001000"), asset="BNB")
+
+#: FABRICATED rows: no captured SELL fill carries a non-USDT fee, so every
+#: refusal below is constructed; the 128 BTC-denominated BUY fills in the
+#: capture never reach an exit booking.
+_SETTLE_REFUSALS = [
+    ((), FeeFillsIncompleteError),
+    ((_fill("1", "0.02314000", "1772.00890360", order_id="999"),), FeeFillsIncompleteError),
+    (FILLS_3189811[:1], FeeFillsIncompleteError),
+    ((_fill("1", "0.02314000", "1772.00890360", fee=_BNB),), FeeUnresolvableError),
+    (
+        (FILLS_3189811[0], _fill("997265", "0.00369000", "282.57186060", fee=_BNB)),
+        FeeUnresolvableError,
+    ),
+    ((_fill("1", "0.02314000", "1772.00890360", side=OrderSide.BUY),), FeeUnresolvableError),
+]
+
+
+@pytest.mark.parametrize(
+    ("trades", "expected"),
+    _SETTLE_REFUSALS,
+    ids=["no_fills", "another_order", "incomplete", "foreign_asset", "mixed_assets", "a_buy"],
+)
+def test_settle_exit_refuses_rather_than_guesses(
+    trades: tuple[Trade, ...], expected: type[Exception]
+) -> None:
+    """Waiting can cure the first three and not the last three -- so the TYPE is pinned exactly.
+
+    MUTATION: raise the base class for everything, or accept a partial list.
+    M5i-115: an unmet `pytest.raises` raises `Failed`, not `AssertionError`.
+    """
+    with pytest.raises(FeeUnresolvableError) as excinfo:
+        settle_exit(
+            trades, order_id="3189811", quote_asset="USDT", executed_quantity=D("0.02314000")
+        )
+
+    assert type(excinfo.value) is expected
+
+
+def test_close_position_refuses_a_fee_in_another_asset() -> None:
+    """R-c: no converter. Refused BEFORE anything is written, held or not.
+
+    FABRICATED fee in BTC. MUTATION: drop the guard, or place it after the
+    absent-symbol return -- the unheld call below then returns `Decimal(0)`.
+    """
+    portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position()})
+    btc_fee = Fee(amount=D("0.00000100"), asset="BTC")
+
+    with pytest.raises(FeeUnresolvableError, match="fee in USDT"):
+        portfolio.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=btc_fee)
+    with pytest.raises(FeeUnresolvableError, match="fee in USDT"):
+        portfolio.close_position("ETHUSDT", exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=btc_fee)
+
+    assert SYMBOL in portfolio.positions
+    assert portfolio.free_quote == D("1000")
+    assert portfolio.ledger is None

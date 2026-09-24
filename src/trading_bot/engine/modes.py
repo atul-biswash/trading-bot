@@ -153,7 +153,7 @@ from trading_bot.core.interfaces import (
 from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
-from trading_bot.execution.dispatch_budget import DispatchBudget
+from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.executor import (
     OrderExecutor,
     Pending,
@@ -1073,6 +1073,16 @@ def _require_something_tradeable(
     while looking perfectly healthy, which is the failure shape above reached by
     a second route this check could not previously see.
 
+    **ANNOTATED BY THE FEE COMMIT: "LEFT TO ITSELF THAT SYMBOL REFUSES ENTRIES
+    FOR THE LIFE OF THE PROCESS" DOES NOT DESCRIBE THE EXECUTOR.**
+    ``OrderExecutor.__call__`` resolves every restored record on the first
+    candle, closes included, and ``_resolve_close`` releases a restored close
+    there: with no ``Position`` after a restart, the fill classifies
+    ``POSITION_ABSENT`` and the record is dropped unbooked. The lock heals one
+    candle after boot. What stands is this check's own reason, one step
+    earlier: on a config whose every pair is excluded the boot refuses BEFORE
+    that first candle, so the healing path is never reached there.
+
     **A RESTORED *PLACEMENT* IS NOT IN ``pending``, AND EXCLUDING ONE WOULD
     DEADLOCK THE BOT.** The two locks look alike and behave oppositely. A
     placement lock is SELF-HEALING: ``OrderExecutor.__call__`` resolves it
@@ -1541,6 +1551,9 @@ async def live_system(
                     client=resolved_client,
                     portfolio=portfolio,
                     budget=DispatchBudget.from_config(settings.config),
+                    settlement_bounds=CallBounds(
+                        timeout_s=settings.config.risk.reconcile_deadline_s, attempts=1
+                    ),
                     persist_pending=_persist_pending,
                     # RESTORED, NOT RESOLVED. These are questions the previous
                     # process could not answer, handed straight to the existing

@@ -36,6 +36,7 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
 from trading_bot.core.enums import ProtectionState
+from trading_bot.core.exceptions import ExchangeError, FeeUnresolvableError
 
 # A PRIVATE name, imported across modules deliberately. The alternative is a
 # second definition of "which protection states may be trusted", and two
@@ -45,7 +46,7 @@ from trading_bot.core.enums import ProtectionState
 # consequence: admitting `ACTIVE` to it later quiets this warning for healthy
 # positions automatically, because the line and the refusal are then keyed off
 # the same fact. Making it public is a `core/` decision and is not taken here.
-from trading_bot.core.portfolio import _TRUSTED_PROTECTION
+from trading_bot.core.portfolio import _TRUSTED_PROTECTION, settle_exit
 from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
 from trading_bot.execution.reconciliation import (
     reconcile_open_positions,
@@ -56,12 +57,13 @@ from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Mapping, Sequence
+    from decimal import Decimal
 
     from trading_bot.config.models import AppConfig
     from trading_bot.core.interfaces import ExchangeClient
-    from trading_bot.core.models import Candle, Position
+    from trading_bot.core.models import Candle, ExitSettlement, Position
     from trading_bot.core.portfolio import Ledger, Portfolio
-    from trading_bot.execution.reconciliation import ProtectionAssessment
+    from trading_bot.execution.reconciliation import ExitFill, ProtectionAssessment
 
     #: Writes the accrued ledger durably. **Raising means the write did NOT
     #: happen**, and the caller must treat the ledger as unpersisted.
@@ -90,6 +92,9 @@ _EVENT_BOOKED = "exit_booked"
 _EVENT_BOOK_REFUSED = "exit_book_refused"
 _EVENT_LEDGER_UNWRITABLE = "ledger_unwritable"
 _EVENT_EXIT_UNBOOKABLE = "exit_unbookable"
+#: A bookable exit whose settlement could not be read or used this pass. The
+#: position is KEPT and the next pass retries; WARNING, like a refusal.
+_EVENT_SETTLEMENT_DEFERRED = "exit_settlement_deferred"
 
 #: What each refusal MEANS HERE, appended to the fact `classify_bookability`
 #: states. `M5i-068`: the fact is shared and the consequence is not. The
@@ -151,6 +156,13 @@ class ReconciliationBudget:
     #: interval would re-read on a bar that taught it nothing.
     dedup_interval: timedelta
     #: Total calls the whole phase may make, pass plus point queries.
+    #:
+    #: **ANNOTATED BY THE FEE COMMIT: THE PHASE NOW ALSO SETTLES, OUTSIDE THIS
+    #: COUNT.** Booking fetches one ``get_my_trades`` per bookable exit,
+    #: bounded by ``timeout_s`` at ``attempts``, and nothing here counts it;
+    #: the coherence validator's third term reserves its time instead. So "the
+    #: whole phase" above is the pass, the point queries AND settlement, and
+    #: this field bounds only the first two.
     max_calls: int
     #: Bound on ONE call, in seconds.
     timeout_s: float
@@ -323,7 +335,7 @@ class ReconciliationDriver:
         # saw a filled stop genuinely did see untrusted protection; the warning
         # is true, and the booking line that follows says what was done about it.
         try:
-            self._book_exits(reported, now=now)
+            await self._book_exits(reported, now=now)
         except Exception as exc:  # the driver must never raise; see the docstring
             self._log_phase_failure(_PHASE_BOOKING, candle, exc)
 
@@ -389,7 +401,7 @@ class ReconciliationDriver:
             },
         )
 
-    def _book_exits(
+    async def _book_exits(
         self,
         results: Sequence[tuple[Position, ProtectionAssessment]],
         *,
@@ -477,87 +489,176 @@ class ReconciliationDriver:
         is that caller. It is documented rather than closed: reaching it needs a
         non-finite total, which ``Money`` is what rejects, and the surviving
         position makes the failure visible and repeating rather than silent.
+
+        **SETTLEMENT, by the project owner's rulings at M5k.** A bookable exit
+        fetches its order's fills -- ``get_my_trades`` for that order id, exactly
+        once, at ``reconcile_deadline_s`` and one attempt -- immediately before
+        ``close_position``, and books net of the fee
+        :func:`~trading_bot.core.portfolio.settle_exit` sums from them. Nothing
+        else fetches: a diverged, partial, unpriced or cost-basis-less exit
+        makes no call, and neither does a pass with no fill. A fetch that raises
+        from the exchange family, or a settlement the ledger refuses, SKIPS that
+        position at WARNING and the loop goes on; the position survives, so the
+        next pass retries. Anything else propagates to ``_PHASE_BOOKING`` with
+        its traceback. **The save runs in a ``finally``**, so exits booked
+        earlier in a pass are persisted even when a later one raises -- which
+        the orphan guard's ``raise`` used to prevent.
         """
         booked = 0
-        for position, assessment in results:
-            fill = assessment.exit_fill
-            if fill is None:
-                if assessment.state is ProtectionState.DIVERGED:
-                    self._escalate_unbookable_divergence(position, assessment)
-                continue
+        try:
+            for position, assessment in results:
+                fill = assessment.exit_fill
+                if fill is None:
+                    if assessment.state is ProtectionState.DIVERGED:
+                        self._escalate_unbookable_divergence(position, assessment)
+                    continue
 
-            if self._portfolio.positions.get(position.symbol) is not position:
-                raise ValueError(
-                    f"{position.symbol} reached exit booking without being the portfolio's own "
-                    "position for that symbol. An orphan has no Position and cannot arrive here; "
-                    "reaching this means a caller now pairs assessments with something other than "
-                    "portfolio.open_positions, and booking it would silently no-op"
+                if self._portfolio.positions.get(position.symbol) is not position:
+                    raise ValueError(
+                        f"{position.symbol} reached exit booking without being the portfolio's own "
+                        "position for that symbol. An orphan has no Position and cannot arrive here; "
+                        "reaching this means a caller now pairs assessments with something other than "
+                        "portfolio.open_positions, and booking it would silently no-op"
+                    )
+
+                # **ROWS 2, 3 AND 5 ARE NOW ONE CALL.** They asked three of
+                # `classify_bookability`'s four facts in the order it now holds
+                # canonically -- `Q > P > C` beneath `A`, which the five pins at
+                # `61919ce` measured before (ii) could reorder it. Row 4 above is
+                # NOT among them and is not absorbed: `ExitFill` states that
+                # *no leg reported a fill* and *a leg filled and the venue gave no
+                # quote total* are different facts, and collapsing them would lose
+                # the only signal separating "no exit" from "an exit I cannot book".
+                #
+                # `POSITION_ABSENT` cannot arrive here: every pair comes from
+                # `portfolio.open_positions`, and the orphan guard above has already
+                # established this IS the portfolio's own position.
+                verdict = classify_bookability(
+                    position=position,
+                    filled_quantity=fill.filled_quantity,
+                    filled_quote_quantity=fill.filled_quote_quantity,
                 )
+                total = verdict.total
+                if total is None:
+                    # **THE FACT COMES FROM THE PREDICATE; THE CONSEQUENCE IS
+                    # OURS** -- `M5i-068`. Each row keeps the clause it already
+                    # carried, VERBATIM, because the three are different operator
+                    # facts and collapsing them would lose the one row 2 states:
+                    # that the position is closed at the venue. The partial-fill
+                    # clause is true HERE, where a refusal leaves the position
+                    # present and untrusted, and is the exact inverse at
+                    # `_sell_and_book`, where `_go_naked` cancels protection -- so
+                    # it is appended at the caller and never written into
+                    # `execution/bookability.py`.
+                    self._refuse_booking(
+                        position.symbol,
+                        fill.order_id,
+                        verdict.reason + _BOOK_REFUSAL_CONSEQUENCE[verdict.outcome],
+                    )
+                    continue
 
-            # **ROWS 2, 3 AND 5 ARE NOW ONE CALL.** They asked three of
-            # `classify_bookability`'s four facts in the order it now holds
-            # canonically -- `Q > P > C` beneath `A`, which the five pins at
-            # `61919ce` measured before (ii) could reorder it. Row 4 above is
-            # NOT among them and is not absorbed: `ExitFill` states that
-            # *no leg reported a fill* and *a leg filled and the venue gave no
-            # quote total* are different facts, and collapsing them would lose
-            # the only signal separating "no exit" from "an exit I cannot book".
-            #
-            # `POSITION_ABSENT` cannot arrive here: every pair comes from
-            # `portfolio.open_positions`, and the orphan guard above has already
-            # established this IS the portfolio's own position.
-            verdict = classify_bookability(
-                position=position,
-                filled_quantity=fill.filled_quantity,
-                filled_quote_quantity=fill.filled_quote_quantity,
-            )
-            if verdict.outcome is not BookabilityOutcome.BOOKABLE:
-                # **THE FACT COMES FROM THE PREDICATE; THE CONSEQUENCE IS
-                # OURS** -- `M5i-068`. Each row keeps the clause it already
-                # carried, VERBATIM, because the three are different operator
-                # facts and collapsing them would lose the one row 2 states:
-                # that the position is closed at the venue. The partial-fill
-                # clause is true HERE, where a refusal leaves the position
-                # present and untrusted, and is the exact inverse at
-                # `_sell_and_book`, where `_go_naked` cancels protection -- so
-                # it is appended at the caller and never written into
-                # `execution/bookability.py`.
-                self._refuse_booking(
+                settlement = await self._settle(position.symbol, fill)
+                if settlement is None:
+                    continue
+
+                # Row 1. THE TOTAL PASSES STRAIGHT THROUGH -- no division into a
+                # unit price and no re-multiplication. MEASURED, that round trip is
+                # lossy: run 3's own shape, 0.02257000 against 35.38691640, returns
+                # a delta of -1E-26, and `_dump_money` writes such a residual into
+                # `data/state.json` verbatim.
+                realised = self._portfolio.close_position(
                     position.symbol,
-                    fill.order_id,
-                    verdict.reason + _BOOK_REFUSAL_CONSEQUENCE[verdict.outcome],
+                    exit_quote_total=total,
+                    now=now,
+                    fee=settlement.fee,
                 )
-                continue
+                booked += 1
+                self._log_booked(position.symbol, fill, settlement, total=total, realised=realised)
+        finally:
+            self._persist_booked(booked)
 
-            # Row 1. THE TOTAL PASSES STRAIGHT THROUGH -- no division into a
-            # unit price and no re-multiplication. MEASURED, that round trip is
-            # lossy: run 3's own shape, 0.02257000 against 35.38691640, returns
-            # a delta of -1E-26, and `_dump_money` writes such a residual into
-            # `data/state.json` verbatim.
-            realised = self._portfolio.close_position(
-                position.symbol,
-                exit_quote_total=fill.filled_quote_quantity,
-                now=now,
+    async def _settle(self, symbol: str, fill: ExitFill) -> ExitSettlement | None:
+        """The exit's fills, settled -- or ``None``, having said why. Never raises those.
+
+        Catches the exchange family around the FETCH only, and
+        ``FeeUnresolvableError`` around the SETTLEMENT only; both skip this
+        position at WARNING and leave it for the next pass. Anything else --
+        a programming error, a malformed record the mapper refuses --
+        propagates to ``_PHASE_BOOKING`` with its traceback.
+        """
+        try:
+            trades = await self._client.get_my_trades(
+                symbol,
+                order_id=fill.order_id,
+                timeout_s=self._budget.timeout_s,
+                attempts=self._budget.attempts,
             )
-            booked += 1
-            _log.info(
-                "Booked exit for %s",
-                position.symbol,
+        except ExchangeError as exc:
+            _log.warning(
+                "Settlement fetch for %s failed; it is retried next pass",
+                symbol,
                 extra={
-                    "event": _EVENT_BOOKED,
-                    "symbol": position.symbol,
+                    "event": _EVENT_SETTLEMENT_DEFERRED,
+                    "symbol": symbol,
                     "order_id": fill.order_id,
-                    "quantity": fill.filled_quantity,
-                    "quote_total": fill.filled_quote_quantity,
-                    "realised": realised,
-                    "order_created_at": (
-                        fill.order_created_at.isoformat()
-                        if fill.order_created_at is not None
-                        else None
-                    ),
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
                 },
             )
+            return None
+        try:
+            return settle_exit(
+                trades,
+                order_id=fill.order_id,
+                quote_asset=self._portfolio.quote_asset,
+                executed_quantity=fill.filled_quantity,
+            )
+        except FeeUnresolvableError as exc:
+            self._refuse_booking(
+                symbol,
+                fill.order_id,
+                f"{exc} -- so it is not booked and the position keeps its untrusted protection",
+            )
+            return None
 
+    @staticmethod
+    def _log_booked(
+        symbol: str,
+        fill: ExitFill,
+        settlement: ExitSettlement,
+        *,
+        total: Decimal,
+        realised: Decimal,
+    ) -> None:
+        """One line per booked exit, carrying the settlement it was booked net of.
+
+        ``venue_time`` is GONE from this line: it was the order record's
+        creation time under a name ruled misleading at R3. ``order_created_at``
+        carries that value under its own name, and ``filled_at`` is the venue's
+        matching-engine time from the fills.
+        """
+        _log.info(
+            "Booked exit for %s",
+            symbol,
+            extra={
+                "event": _EVENT_BOOKED,
+                "symbol": symbol,
+                "order_id": fill.order_id,
+                "quantity": fill.filled_quantity,
+                "quote_total": total,
+                "fee": settlement.fee.amount,
+                "fee_asset": settlement.fee.asset,
+                "fills": settlement.fill_count,
+                "realised": realised,
+                "order_created_at": (
+                    fill.order_created_at.isoformat() if fill.order_created_at is not None else None
+                ),
+                "filled_at": settlement.filled_at.isoformat(),
+            },
+        )
+
+    def _persist_booked(self, booked: int) -> None:
+        """Save the ledger once, if this pass booked anything. Called from a ``finally``."""
         ledger = self._portfolio.ledger
         if booked == 0 or self._persist_ledger is None or ledger is None:
             # `ledger is None` is mypy narrowing, not a branch: `booked > 0`

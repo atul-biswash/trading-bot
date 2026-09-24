@@ -1284,6 +1284,31 @@ data.
   `_book_exits` synchronous and call-free; or `_book_exits` may itself become
   async. This rule holds under either and chooses neither.
 
+  > **BOTH CASES ARE NOW RULED, AND SO IS WHERE THE FETCH LIVES -- by the
+  > project owner, for the commit whose subject begins `feat(accounting):
+  > exits book net of the venue's own fee`.** The three paragraphs above were
+  > true when written and stay standing.
+  >
+  > **`PARTIAL_FILL` is not settled**: zero venue calls, no `close_position`,
+  > and the position keeps `UNKNOWN` -- the behaviour it already had.
+  > **`NO_QUOTE_TOTAL` is ruled; implemented in the follow-up commit**: one
+  > `get_my_trades` for the order is permitted, and the sum of
+  > `quote_quantity` across its fills supplies the missing total so the exit
+  > books. MEASURED as a premise: on the seven multi-fill SELL orders
+  > carrying a booking line, the summed `quoteQty` equals the venue's
+  > `cummulativeQuoteQty` by value and by exponent, in the captures whose
+  > SHA-256 are
+  > `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`,
+  > `b02a4ef6385f0c188496f265ba487302bb15929dc9061077e741ac3977062a1b` and
+  > `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`.
+  > That it holds where the total is ABSENT is reasoned: there, nothing can
+  > be compared.
+  >
+  > **The fetch lives in `_book_exits`, which is now async**: exactly one
+  > call per verified bookable exit, bounded by `reconcile_deadline_s` at one
+  > attempt. Diverged and unbookable exits make none, and a failure skips
+  > that position while the pass continues.
+
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
   support, mature async/websocket managers, order helpers.
@@ -1571,6 +1596,15 @@ data.
   > deduction and base-quantity netting are still unimplemented, and the
   > arming condition below still stands for the next edit to the mode
   > resolution.
+
+  > **ANNOTATED BY THE FEE COMMIT: FROM HERE THE LEDGER IS NET OF EXIT FEES
+  > AND GROSS OF ENTRY FEES**, by the project owner's ruling R-a -- exit fees
+  > only, because entry-fee netting is this block's own subject. So the ledger
+  > does NOT match an exchange statement: every entry commission is missing
+  > from it, and realised P&L is overstated by exactly that. It is a
+  > partial-net ledger by fee SIDE -- a different partiality from the
+  > two-of-three split this file rejects, which was partial by booking SITE
+  > -- and it is recorded here so it is not rediscovered as a defect.
 
   *Arming condition:* **whoever next edits the mode resolution in
   `Settings.__init__` or `_cmd_run`, or authorises a run in
@@ -2935,6 +2969,15 @@ window was 119 seconds.
 latency or a fill-time ordering from it is wrong by the position's whole
 lifetime. **The rename and the true fill time are scoped to the accounting
 milestone**, with the port widening `M5j-012` describes.
+
+> **"PERSISTED" MEANS DURABLE EXECUTION LOGGING, NOT `data/state.json` --
+> ruled by the project owner.** MEASURED: `venue_time` occurs nowhere under
+> `src/trading_bot/persistence/`; it reached durable storage only as a field
+> of the `exit_booked` line. The paragraph's consequence stands on that
+> reading: every captured log keeps the misleading value. **And the rename
+> has landed**: the field is `ExitFill.order_created_at`, and the booking
+> line carries `order_created_at` and `filled_at` -- the latest
+> `myTrades.time` among the order's fills -- where it carried `venue_time`.
 
 **ARGUE A SILENCE FROM PRESENCE, NOT FROM ABSENCE.** *"I searched and found
 nothing"* is the weakest evidence this project produces, because it is returned

@@ -23,7 +23,7 @@ from trading_bot.core.enums import (
     ProtectionState,
 )
 from trading_bot.core.exceptions import ExchangeConnectionError, OrderNotFoundError
-from trading_bot.core.models import Candle, Order, Position
+from trading_bot.core.models import Candle, Fee, Order, Position, Trade
 from trading_bot.core.portfolio import Ledger, Portfolio
 from trading_bot.exchange.ids import OrderListLeg, client_order_id
 from trading_bot.execution import reconciliation_driver as driver_module
@@ -81,7 +81,16 @@ class _StubClient:
         orders: dict[str, Order | Exception] | None = None,
         *,
         enumerate_error: Exception | None = None,
+        trades: dict[str, list[Trade] | Exception] | None = None,
     ) -> None:
+        #: Settlement answers by order id. An order id NOT here is answered by
+        #: one fill mirroring the filled leg this stub already serves -- fee
+        #: `0.00000000` USDT, the measured value -- and an order id with no
+        #: such leg RAISES, so a call nobody configured cannot pass quietly.
+        self._trades = trades or {}
+        #: Every order id `get_my_trades` was asked for, IN ORDER. The instrument
+        #: for R6: zero on diverged, partial and healthy passes, one per booking.
+        self.settled: list[str] = []
         self.books = books if books is not None else {}
         self.orders = orders or {}
         self._enumerate_error = enumerate_error
@@ -114,6 +123,45 @@ class _StubClient:
         if isinstance(answer, Exception):
             raise answer
         return answer
+
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        self.settled.append(order_id or "")
+        self.bounds.append((timeout_s, attempts))
+        if order_id in self._trades:
+            answer = self._trades[order_id]
+            if isinstance(answer, Exception):
+                raise answer
+            return list(answer)
+        served = [*self.books.get(symbol, []), *self.orders.values()]
+        for order in served:
+            if (
+                isinstance(order, Order)
+                and order.order_id == order_id
+                and order.filled_quantity > 0
+            ):
+                assert order.filled_quote_quantity is not None
+                return [
+                    Trade(
+                        trade_id="1",
+                        order_id=order.order_id,
+                        symbol=symbol,
+                        side=OrderSide.SELL,
+                        quantity=order.filled_quantity,
+                        price=STOP,
+                        quote_quantity=order.filled_quote_quantity,
+                        fee=Fee(amount=Decimal("0.00000000"), asset="USDT"),
+                        filled_at=NOW,
+                    )
+                ]
+        raise AssertionError(f"get_my_trades({order_id!r}) was not configured")
 
 
 def _order(symbol: str, leg: OrderListLeg) -> Order:
@@ -683,6 +731,7 @@ async def test_a_partial_fill_is_not_booked(caplog: pytest.LogCaptureFixture) ->
     assert "partial" in refusals[0].reason  # type: ignore[attr-defined]
     assert portfolio.ledger is None
     assert portfolio.positions["BTCUSDT"].protection is ProtectionState.UNKNOWN
+    assert client.settled == []  # R-h: a partial makes no settlement call
 
 
 async def test_an_over_fill_is_refused_by_the_same_test() -> None:
@@ -1043,6 +1092,7 @@ async def test_a_healthy_active_pass_escalates_nothing(
     assert [r for r in caplog.records if getattr(r, "event", None) == "exit_unbookable"] == []
     assert [r for r in caplog.records if r.levelno >= logging.CRITICAL] == []
     assert position.protection is ProtectionState.ACTIVE
+    assert client.settled == []  # a pass with no fill makes no settlement call
 
 
 async def test_the_escalation_books_nothing_and_saves_nothing() -> None:
@@ -1067,6 +1117,9 @@ async def test_the_escalation_books_nothing_and_saves_nothing() -> None:
     assert portfolio.ledger is None
     assert "BTCUSDT" in portfolio.positions
     assert writer.calls == []
+    # THE CALL THE R6 CLAIM IS ABOUT, read at last: until the fee commit this
+    # test named "zero venue calls" and asserted nothing that read one.
+    assert client.settled == []
 
 
 async def test_the_escalation_crosses_the_state_as_a_value_not_a_member(
@@ -1207,9 +1260,158 @@ async def test_a_position_that_is_not_the_portfolios_own_refuses_loudly(
     driver = _driver(portfolio, _StubClient({"BTCUSDT": []}))
 
     with pytest.raises(ValueError, match="orphan"):
-        driver._book_exits([(stranger, assessment)], now=NOW)
+        await driver._book_exits([(stranger, assessment)], now=NOW)
 
     # And through `__call__` the same failure is contained, not raised.
     with caplog.at_level(logging.ERROR):
         await driver(_candle())
     assert portfolio.ledger is None
+
+
+# --------------------------------------------------------------------------
+# Settlement: one fetch per bookable exit, net of the fee, and what a failure does
+# --------------------------------------------------------------------------
+_ZERO_USDT = Fee(amount=Decimal("0.00000000"), asset="USDT")
+
+
+def _trade(
+    *,
+    order_id: str = "777",
+    quantity: Decimal = BOOK_QTY,
+    quote: Decimal = BOOK_TOTAL,
+    fee: Fee = _ZERO_USDT,
+) -> Trade:
+    """One fill of `_filled_leg`'s order. The zero USDT fee is the MEASURED value."""
+    return Trade(
+        trade_id="1",
+        order_id=order_id,
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        quantity=quantity,
+        price=STOP,
+        quote_quantity=quote,
+        fee=fee,
+        filled_at=NOW,
+    )
+
+
+async def test_a_bookable_exit_fetches_once_and_books_net_of_its_fee() -> None:
+    """ONE settlement read, bounded like every reconciliation call, and the fee subtracted.
+
+    FABRICATED fee `0.37000000` USDT -- every captured fee is zero, so a real
+    one could not tell a booking net of the fee from one that ignores it.
+    MUTATION: fetch twice, drop the bound, or book without the fee.
+    """
+    portfolio = _portfolio(_booking_position())
+    fee = Fee(amount=Decimal("0.37000000"), asset="USDT")
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": [_trade(fee=fee)]})
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert client.settled == ["777"]
+    assert client.bounds[-1] == (BUDGET.timeout_s, BUDGET.attempts)
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT - Decimal("0.37000000")
+    assert portfolio.free_quote == Decimal("10000") + BOOK_TOTAL - Decimal("0.37000000")
+
+
+@pytest.mark.parametrize("failing", ["BTCUSDT", "ETHUSDT"])
+async def test_a_failed_settlement_skips_that_position_and_books_the_other(failing: str) -> None:
+    """R-g: SKIP AND CONTINUE. Parametrised over which symbol fails, so one run has it FIRST.
+
+    MUTATION: `return` where the skip continues -- the later symbol then books
+    nothing in the run where the failure comes first.
+    """
+    eth_leg = _filled_leg("ETHUSDT").model_copy(update={"order_id": "778"})
+    portfolio = _portfolio(_booking_position("BTCUSDT"), _booking_position("ETHUSDT"))
+    failing_id = "777" if failing == "BTCUSDT" else "778"
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")], "ETHUSDT": [eth_leg]},
+        trades={failing_id: ExchangeConnectionError("timed out")},
+    )
+    writer = _RecordingWriter()
+
+    await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    booked = "ETHUSDT" if failing == "BTCUSDT" else "BTCUSDT"
+    assert failing in portfolio.positions
+    assert booked not in portfolio.positions
+    assert sorted(client.settled) == ["777", "778"]
+    assert len(writer.calls) == 1
+
+
+async def test_the_save_runs_when_a_later_position_raises() -> None:
+    """The persist sits in a `finally`: an exit booked before a raise still reaches disk.
+
+    MUTATION: move `_persist_booked` out of the `finally`. DECLARED: drives
+    `_book_exits` directly, as the orphan-guard test above does, because the
+    pass cannot hand it an orphan.
+    """
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    client = _StubClient({"BTCUSDT": []}, trades={"777": [_trade()]})
+    writer = _RecordingWriter()
+    fill = ExitFill(order_id="777", filled_quantity=BOOK_QTY, filled_quote_quantity=BOOK_TOTAL)
+    filled = ProtectionAssessment(state=ProtectionState.UNKNOWN, reason="filled", exit_fill=fill)
+    driver = _driver(portfolio, client, persist_ledger=writer)
+
+    with pytest.raises(ValueError, match="orphan"):
+        await driver._book_exits(
+            [(position, filled), (_booking_position("ETHUSDT"), filled)], now=NOW
+        )
+
+    assert "BTCUSDT" not in portfolio.positions
+    assert len(writer.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "trades",
+    [
+        [_trade(fee=Fee(amount=Decimal("0.00000100"), asset="BTC"))],
+        [],
+        [_trade(quantity=Decimal("0.02000000"))],
+    ],
+    ids=["foreign_fee", "no_fills", "short_fills"],
+)
+async def test_a_settlement_the_ledger_refuses_skips_and_keeps_the_position(
+    trades: list[Trade], caplog: pytest.LogCaptureFixture
+) -> None:
+    """Ruling 5: caught around `settle_exit` at WARNING, and the position waits for a later pass.
+
+    FABRICATED rows. MUTATION: let `FeeUnresolvableError` propagate -- the
+    pass then logs a phase failure instead of a refusal -- or book anyway.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": trades})
+
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client)(_candle())
+
+    watched = {"exit_book_refused", "reconciliation_phase_failed"}
+    events = [getattr(r, "event", None) for r in caplog.records]
+    assert [e for e in events if e in watched] == ["exit_book_refused"]
+    assert "BTCUSDT" in portfolio.positions
+    assert portfolio.ledger is None
+
+
+async def test_a_lagging_fill_list_is_retried_and_books_on_the_next_pass() -> None:
+    """A short list on one pass, the whole list on the next: kept, then booked once.
+
+    MUTATION: drop the position on a short list, or never re-fetch it.
+    """
+    portfolio = _portfolio(_booking_position())
+    answers: dict[str, list[Trade] | Exception] = {"777": [_trade(quantity=Decimal("0.02000000"))]}
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades=answers)
+    ticks = iter([NOW, NOW + timedelta(minutes=2)])
+    driver = _driver(portfolio, client, clock=lambda: next(ticks))
+
+    await driver(_candle())
+    assert "BTCUSDT" in portfolio.positions
+
+    answers["777"] = [_trade()]
+    await driver(_candle())
+
+    assert client.settled == ["777", "777"]
+    assert "BTCUSDT" not in portfolio.positions
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT

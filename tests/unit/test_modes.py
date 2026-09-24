@@ -72,6 +72,7 @@ from trading_bot.core.interfaces import (
 from trading_bot.core.models import (
     Balance,
     Candle,
+    Fee,
     Order,
     OrderList,
     OrderRequest,
@@ -219,6 +220,7 @@ class FakeRootClient(ExchangeClient):
         order_lists: list[OrderList] | None = None,
         order_lists_error: Exception | None = None,
         own_open_orders: list[Order] | None = None,
+        my_trades: list[Trade] | None = None,
     ) -> None:
         self._balances = (
             balances
@@ -236,6 +238,10 @@ class FakeRootClient(ExchangeClient):
         #: default answer here would let the fixture decide a result nobody
         #: chose. Only the end-to-end booking test supplies one.
         self._own_open_orders = own_open_orders
+        #: ``None`` KEEPS THE RAISE, for ``own_open_orders``' reason above. Only
+        #: the end-to-end booking test supplies fills, because booking now
+        #: settles its fee before it writes.
+        self._my_trades = my_trades
         self.symbol_info_calls: list[str] = []
         self.order_list_calls = 0
         self.close_calls = 0
@@ -277,7 +283,7 @@ class FakeRootClient(ExchangeClient):
     async def cancel_order(self, symbol: str, order_id: str) -> Order:  # pragma: no cover
         raise NotImplementedError
 
-    async def get_my_trades(  # pragma: no cover
+    async def get_my_trades(
         self,
         symbol: str,
         *,
@@ -286,8 +292,9 @@ class FakeRootClient(ExchangeClient):
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Trade]:
-        """Raises. No boot path reads fills, and an unconfigured answer from a
-        venue call is a real classification no test should get by accident.
+        """Raises unless configured. No boot path reads fills, and an unconfigured
+        answer from a venue call is a real classification no test should get by
+        accident. The end-to-end booking test configures one.
 
         Present because ``ExchangeClient`` is an ABC: without it this fake is
         unconstructible, and MEASURED there are 84 construction sites in this
@@ -295,7 +302,9 @@ class FakeRootClient(ExchangeClient):
         flags a missing abstract method only at a construction site, and
         ``tests/`` is outside ``files``.
         """
-        raise NotImplementedError
+        if self._my_trades is None:
+            raise NotImplementedError
+        return list(self._my_trades)
 
     async def get_open_orders(self, symbol: str | None = None) -> list[Order]:  # pragma: no cover
         raise NotImplementedError
@@ -2743,7 +2752,22 @@ class TestTheStoreIsReadAtBoot:
             ),
             created_at=NOW,
         )
-        client = FakeRootClient(own_open_orders=[leg])
+        client = FakeRootClient(
+            own_open_orders=[leg],
+            my_trades=[
+                Trade(
+                    trade_id="1",
+                    order_id="777",
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=_BOOK_QTY,
+                    price=D("79141.56"),
+                    quote_quantity=_BOOK_TOTAL,
+                    fee=Fee(amount=D("0.00000000"), asset="USDT"),
+                    filled_at=NOW,
+                )
+            ],
+        )
 
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             system.portfolio.positions[SYMBOL] = Position(

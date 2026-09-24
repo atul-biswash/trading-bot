@@ -645,6 +645,28 @@ class Trade(_Frozen):
     is_maker: bool = False
 
 
+class ExitSettlement(_Frozen):
+    """One exit order's fills, settled by the ledger: fee, quote total, quantity, time.
+
+    **THE LEDGER AGGREGATES; THE PORT DOES NOT.** ``get_my_trades`` returns one
+    :class:`Trade` per fill, and
+    :func:`~trading_bot.core.portfolio.settle_exit` builds this from an order's
+    fills by SUMMING -- no division, so every figure here is exact.
+
+    ``fee`` is always in the quote asset: ``settle_exit`` refuses anything else,
+    because there is no converter. ``filled_at`` is the LATEST ``myTrades.time``
+    among the fills, the venue's matching-engine time -- the true fill time
+    ``ExitFill.order_created_at`` is not.
+    """
+
+    order_id: str
+    fee: Fee
+    quote_quantity: Money
+    quantity: Money
+    filled_at: datetime
+    fill_count: int = Field(ge=1)
+
+
 class Position(BaseModel):
     """An open position and its protective levels. Mutable by design.
 

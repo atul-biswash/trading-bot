@@ -40,10 +40,12 @@ from trading_bot.core.enums import (
     SignalAction,
     StopType,
 )
+from trading_bot.core.exceptions import FeeUnresolvableError
 from trading_bot.core.interfaces import MarketDataProvider
 from trading_bot.core.interfaces import RiskManager as RiskManagerPort
 from trading_bot.core.models import (
     Candle,
+    Fee,
     Position,
     ProtectiveLevels,
     RiskDecision,
@@ -75,6 +77,11 @@ D = Decimal
 #: A fixed instant every test measures from. Midday UTC, so a test can advance
 #: hours in either direction without accidentally crossing a day boundary.
 NOW = datetime(2026, 7, 25, 12, 0, tzinfo=timezone.utc)
+#: THE MEASURED FEE, not a stub: every SELL fill in the myTrades capture whose
+#: SHA-256 is 111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970
+#: carries commission "0.00000000" in USDT. Tests whose subject is not the fee
+#: book with it; the fee's own tests use a fabricated non-zero amount.
+USDT_ZERO_FEE = Fee(amount=D("0.00000000"), asset="USDT")
 
 SYMBOL = "BTCUSDT"
 TIMEFRAME = "1m"
@@ -571,7 +578,7 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"))
         portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
 
-        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
 
         assert pnl == D("20")  # (110 - 100) * 2
         assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
@@ -585,7 +592,9 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"))
         portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
 
-        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=D("0.5"))
+        pnl = portfolio.close_position(
+            SYMBOL, exit_price=D("110"), now=NOW, fee=Fee(amount=D("0.5"), asset="USDT")
+        )
 
         assert pnl == D("19.5")
         assert portfolio.free_quote == D("1019.5")
@@ -593,7 +602,9 @@ class TestPortfolio:
 
     def test_close_position_on_a_symbol_not_held_is_a_normal_zero(self) -> None:
         portfolio = Portfolio(free_quote=D("1000"))
-        assert portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW) == D("0")
+        assert portfolio.close_position(
+            SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE
+        ) == D("0")
         assert portfolio.free_quote == D("1000")
         assert portfolio.realised_today(NOW) == D("0")
 
@@ -605,23 +616,34 @@ class TestPortfolio:
         portfolio.open_position(long_position(), cost=D("100"))
 
         with pytest.raises(ValueError, match="timezone-aware"):
-            portfolio.close_position(SYMBOL, exit_price=D("110"), now=datetime(2026, 7, 25, 12, 0))
+            portfolio.close_position(
+                SYMBOL,
+                exit_price=D("110"),
+                now=datetime(2026, 7, 25, 12, 0),
+                fee=USDT_ZERO_FEE,
+            )
 
     @pytest.mark.parametrize(
         ("exit_price", "fee", "now", "expected", "match"),
         [
-            (110.0, D("0"), NOW, TypeError, "unsupported operand"),
-            (D("110"), 0.5, NOW, TypeError, "unsupported operand"),
-            (D("110"), D("2000"), NOW, ValidationError, "greater than or equal to 0"),
-            (D("-500"), D("0"), NOW, ValidationError, "greater than or equal to 0"),
-            (D("110"), D("0"), NOW.replace(tzinfo=None), ValueError, "timezone-aware"),
+            (110.0, USDT_ZERO_FEE, NOW, TypeError, "unsupported operand"),
+            (D("110"), Fee(amount=D("0.5"), asset="BTC"), NOW, FeeUnresolvableError, "fee in USDT"),
+            (
+                D("110"),
+                Fee(amount=D("2000"), asset="USDT"),
+                NOW,
+                ValidationError,
+                "greater than or equal to 0",
+            ),
+            (D("-500"), USDT_ZERO_FEE, NOW, ValidationError, "greater than or equal to 0"),
+            (D("110"), USDT_ZERO_FEE, NOW.replace(tzinfo=None), ValueError, "timezone-aware"),
         ],
-        ids=["float_price", "float_fee", "fee_exceeds_balance", "negative_price", "naive_now"],
+        ids=["float_price", "foreign_fee", "fee_exceeds_balance", "negative_price", "naive_now"],
     )
     def test_a_failed_close_leaves_the_ledger_untouched(
         self,
         exit_price: Decimal | float,
-        fee: Decimal | float,
+        fee: Fee,
         now: datetime,
         expected: type[Exception],
         match: str,
@@ -640,12 +662,14 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("800"), positions={SYMBOL: long_position(quantity="2")})
 
         with pytest.raises(expected, match=match):
-            # float operands are deliberate: two of the five triggers.
+            # The float price is deliberate, one of the five triggers. The
+            # FOREIGN FEE row replaced a float-fee row when `fee` became a
+            # `Fee`: a float can no longer reach it, and a fee in BTC can.
             portfolio.close_position(
                 SYMBOL,
                 exit_price=exit_price,  # type: ignore[arg-type]
                 now=now,
-                fee=fee,  # type: ignore[arg-type]
+                fee=fee,
             )
 
         assert SYMBOL in portfolio.positions
@@ -773,7 +797,7 @@ class TestPortfolio:
         monkeypatch.setattr(Portfolio, "record_realised_pnl", _boom)
 
         with pytest.raises(ValidationError):
-            portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+            portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
 
         # THE POINT: the position survives, so the next reconciliation pass
         # sees it and can try again. Losing it is the unrecoverable failure.
@@ -794,7 +818,7 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"))
         portfolio.open_position(long_position(quantity="2", entry="100"), cost=D("200"))
 
-        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW)
+        pnl = portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
 
         assert pnl == D("20")  # unchanged: (110 - 100) * 2
         assert portfolio.free_quote == D("1020")  # 800 + 2 * 110
@@ -815,7 +839,9 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"), positions={"ETHUSDT": long_position()})
         before = portfolio.ledger
 
-        assert portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW) == D("0")
+        assert portfolio.close_position(
+            SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE
+        ) == D("0")
 
         assert portfolio.free_quote == D("1000")
         assert portfolio.ledger is before  # identity: not even rebuilt

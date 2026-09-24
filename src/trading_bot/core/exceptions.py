@@ -32,6 +32,31 @@ class LiveTradingBlockedError(TradingBotError):
     """
 
 
+class FeeUnresolvableError(TradingBotError):
+    """An exit's fee cannot be booked, and the ledger refuses rather than guesses.
+
+    Raised by :func:`~trading_bot.core.portfolio.settle_exit` and by
+    ``Portfolio.close_position``'s denomination guard: a fee charged in an asset
+    other than the portfolio's quote asset, or a fill that is not a sell. There
+    is no converter, by the project owner's ruling, so such a fee is refused.
+
+    **Deliberately NOT an :class:`ExchangeError`.** The venue answered; it is
+    the LEDGER that cannot use the answer. A caller catching the exchange
+    family around a fetch must not swallow this by accident.
+    """
+
+
+class FeeFillsIncompleteError(FeeUnresolvableError):
+    """The venue reported no fills for the order, or fewer than it executed.
+
+    A separate type because it is the one refusal that WAITING can cure: a
+    ``myTrades`` list the venue has not finished indexing looks exactly like
+    this, and how long that takes is UNMEASURED. Callers retry it under a
+    bound; a fee in the wrong asset does not change by waiting and is not
+    retried.
+    """
+
+
 # --- Exchange ---------------------------------------------------------------
 class ExchangeError(TradingBotError):
     """Base class for exchange-related failures."""

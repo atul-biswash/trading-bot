@@ -42,11 +42,14 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from trading_bot.core.enums import PositionSide, ProtectionState
-from trading_bot.core.models import Money, Position
+from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
+from trading_bot.core.exceptions import FeeFillsIncompleteError, FeeUnresolvableError
+from trading_bot.core.models import ExitSettlement, Fee, Money, Position
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
+
+    from trading_bot.core.models import Trade
 
 #: Divisor for the whole-percent config fields (``5.0`` means 5%).
 _PERCENT = Decimal(100)
@@ -96,6 +99,59 @@ _NO_EXIT_VALUE = (
     "close_position needs exit_quote_total (the venue's own quote total, preferred) or "
     "exit_price (a unit price, which is a lossy quotient of that total); neither was given"
 )
+
+
+def settle_exit(
+    trades: Sequence[Trade], *, order_id: str, quote_asset: str, executed_quantity: Decimal
+) -> ExitSettlement:
+    """Aggregate one exit order's fills into what booking needs. Refuses, never guesses.
+
+    **THE LEDGER'S AGGREGATION**, by the project owner's ruling: the port returns
+    one :class:`~trading_bot.core.models.Trade` per fill and this sums them. It
+    sums and never divides, so fee, quote total and quantity are exact.
+
+    **The fee must be in ``quote_asset``, every fill of it** -- there is no
+    converter, and a fee in BNB or in the base asset subtracted from a quote
+    total would write a plausible wrong number. And **the fills must account
+    for the whole executed quantity**: a partial list would under-count the fee
+    SILENTLY, so it is refused.
+
+    :raises FeeFillsIncompleteError: no fill carries ``order_id``, or the fills
+        sum to a quantity other than ``executed_quantity``. Waiting can cure
+        this, so callers retry it.
+    :raises FeeUnresolvableError: a fill is not a sell, or a fee is in an asset
+        other than ``quote_asset``. Waiting cannot cure this.
+    """
+    fills = [trade for trade in trades if trade.order_id == order_id]
+    if not fills:
+        raise FeeFillsIncompleteError(
+            f"the venue reported no fills for order {order_id}; a fill list the venue "
+            "has not finished indexing looks exactly like this"
+        )
+    if any(trade.side is not OrderSide.SELL for trade in fills):
+        raise FeeUnresolvableError(
+            f"order {order_id} carries a non-SELL fill; an exit settles sells only"
+        )
+    assets = {trade.fee.asset for trade in fills}
+    if assets != {quote_asset}:
+        raise FeeUnresolvableError(
+            f"order {order_id} is charged in {sorted(assets)}; only {quote_asset} can be "
+            "subtracted from a quote-denominated exit, and there is no converter"
+        )
+    quantity = sum((trade.quantity for trade in fills), Decimal(0))
+    if quantity != executed_quantity:
+        raise FeeFillsIncompleteError(
+            f"order {order_id}'s fills sum to {quantity} against {executed_quantity} "
+            "executed; the fill list is incomplete"
+        )
+    return ExitSettlement(
+        order_id=order_id,
+        fee=Fee(amount=sum((trade.fee.amount for trade in fills), Decimal(0)), asset=quote_asset),
+        quote_quantity=sum((trade.quote_quantity for trade in fills), Decimal(0)),
+        quantity=quantity,
+        filled_at=max(trade.filled_at for trade in fills),
+        fill_count=len(fills),
+    )
 
 
 def _require_aware(name: str, moment: datetime) -> datetime:
@@ -462,7 +518,7 @@ class Portfolio(BaseModel):
         exit_price: Decimal | None = None,
         exit_quote_total: Decimal | None = None,
         now: datetime,
-        fee: Decimal = Decimal(0),
+        fee: Fee,
     ) -> Decimal:
         """Close ``symbol``, credit the proceeds, and book the realised P&L.
 
@@ -517,6 +573,16 @@ class Portfolio(BaseModel):
         ledger holds realised facts only is that it must match an exchange
         statement -- and a statement is net of fees. A gross-only close would
         fail the test that rule sets for itself.
+
+        **``fee`` IS A :class:`~trading_bot.core.models.Fee`, REQUIRED, AND ITS
+        ASSET MUST BE :attr:`quote_asset`** -- the project owner's rulings at
+        M5k. There is no default, so no caller can book without stating what
+        the fee was and in what; and there is no converter, so a fee in any
+        other asset is refused with :class:`FeeUnresolvableError` before
+        anything is written, for a symbol not held as much as for one held.
+        **It is the EXIT fee only**: an entry's commission is netted nowhere,
+        so the ledger is net of exit fees and gross of entry fees, and the
+        paragraph above does not yet hold of it.
 
         Accrual goes through :meth:`record_realised_pnl` rather than assigning
         :attr:`realised_pnl` directly, so there is one accrual path and one day
@@ -582,14 +648,19 @@ class Portfolio(BaseModel):
             )
         if exit_price is None and exit_quote_total is None:
             raise ValueError(_NO_EXIT_VALUE)
+        if fee.asset != self.quote_asset:
+            raise FeeUnresolvableError(
+                f"close_position takes a fee in {self.quote_asset}; given {fee.amount} "
+                f"{fee.asset}, and there is no converter"
+            )
 
         position = self.positions.get(symbol)
         if position is None:
             return Decimal(0)
 
         if exit_quote_total is not None:
-            pnl = self._realised_from_total(position, exit_quote_total) - fee
-            proceeds = self.free_quote + exit_quote_total - fee
+            pnl = self._realised_from_total(position, exit_quote_total) - fee.amount
+            proceeds = self.free_quote + exit_quote_total - fee.amount
         elif exit_price is not None:
             # UNCHANGED, and not rewritten in the other limb's shape.
             # ``unrealized_pnl`` computes ``(exit_price - entry_fill_price) x
@@ -598,8 +669,8 @@ class Portfolio(BaseModel):
             # context -- Decimal distributivity fails -- so expressing this one
             # as the other would move figures the eight close tests in
             # ``test_risk_manager.py`` pin.
-            pnl = position.unrealized_pnl(exit_price) - fee
-            proceeds = self.free_quote + position.quantity * exit_price - fee
+            pnl = position.unrealized_pnl(exit_price) - fee.amount
+            proceeds = self.free_quote + position.quantity * exit_price - fee.amount
         else:  # pragma: no cover - refused above
             # A REAL BRANCH, not an ``assert``, which vanishes under -O. It is
             # unreachable today and deliberately kept: it is what makes a future

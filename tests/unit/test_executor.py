@@ -44,6 +44,7 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.core.models import (
     Candle,
+    Fee,
     Order,
     OrderList,
     OrderRequest,
@@ -52,9 +53,10 @@ from trading_bot.core.models import (
     Position,
     ProtectiveLevels,
     Signal,
+    Trade,
 )
 from trading_bot.core.portfolio import Portfolio
-from trading_bot.execution.dispatch_budget import DispatchBudget
+from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.executor import (
     OrderExecutor,
     Pending,
@@ -68,6 +70,9 @@ D = Decimal
 SYMBOL = "BTCUSDT"
 BAR = datetime(2024, 5, 1, 12, 0, tzinfo=timezone.utc)
 _EXEC_LOGGER = "trading_bot.execution.executor"
+#: The settlement bound the composition root derives from
+#: `reconcile_deadline_s` at one attempt, at the shipped value.
+SETTLEMENT_BOUNDS = CallBounds(timeout_s=3.0, attempts=1)
 
 
 # --------------------------------------------------------------------------
@@ -220,7 +225,15 @@ class FakeClient:
         leg_answers: dict[str, Order | Exception] | None = None,
         cancel_answer: Exception | None = None,
         sell_answer: Order | Exception | None = None,
+        trades_answers: list[list[Trade] | Exception] | None = None,
     ) -> None:
+        #: What `get_my_trades` answers, in order; the LAST answer repeats.
+        #: ``None`` answers one fill mirroring the default sell -- the whole
+        #: executed quantity at the venue's total, fee `0.00000000` USDT, the
+        #: measured value -- so a close that only needs to book settles.
+        self._trades_answers = trades_answers
+        #: ``(order_id, timeout_s, attempts)`` per settlement fetch.
+        self.settlements: list[tuple[str | None, float | None, int | None]] = []
         #: What the list cancel does. ``None`` succeeds; an exception is raised.
         #: `OrderNotFoundError` is how a test says ``-2011``, which is NORMAL on
         #: this path rather than a failure.
@@ -341,6 +354,29 @@ class FakeClient:
             return self._sell_answer
         return sell_fill()
 
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        """The settlement read. Counted in `venue_calls` like every round trip."""
+        self.venue_calls.append("get_my_trades")
+        self.settlements.append((order_id, timeout_s, attempts))
+        if self._trades_answers is None:
+            return [sell_trade(order_id=order_id or "777")]
+        answer = (
+            self._trades_answers.pop(0)
+            if len(self._trades_answers) > 1
+            else self._trades_answers[0]
+        )
+        if isinstance(answer, Exception):
+            raise answer
+        return list(answer)
+
     async def get_all_order_lists(
         self,
         *,
@@ -420,6 +456,7 @@ def build(
         client=resolved_client,  # type: ignore[arg-type]
         portfolio=resolved_portfolio,
         budget=DispatchBudget(deadline_s=deadline_s),
+        settlement_bounds=SETTLEMENT_BOUNDS,
         persist_pending=persist,
     )
     return executor, resolved_client, resolved_portfolio
@@ -1458,6 +1495,7 @@ class TestThePendingUnion:
             client=FakeClient(),  # type: ignore[arg-type]
             portfolio=Portfolio(free_quote=D("10000")),
             budget=DispatchBudget(deadline_s=9.0),
+            settlement_bounds=SETTLEMENT_BOUNDS,
             restored_pending=(_close(),),
         )
 
@@ -1494,6 +1532,38 @@ def sell_fill(*, executed: Decimal = CLOSE_QTY, total: Decimal | None = SELL_TOT
         quantity=CLOSE_QTY,
         filled_quantity=executed,
         filled_quote_quantity=total,
+    )
+
+
+#: THE MEASURED FEE, not a stub -- see `sell_trade`.
+USDT_ZERO_FEE = Fee(amount=D("0.00000000"), asset="USDT")
+
+
+def sell_trade(
+    *,
+    order_id: str = "777",
+    quantity: Decimal = CLOSE_QTY,
+    quote: Decimal = SELL_TOTAL,
+    fee: Fee = USDT_ZERO_FEE,
+    trade_id: str = "1",
+) -> Trade:
+    """One fill of the MARKET sell, as `get_my_trades` returns it.
+
+    The default fee is `0.00000000` USDT, the value MEASURED on every SELL fill
+    in the capture whose SHA-256 is
+    111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970. Tests whose
+    subject is the fee pass a FABRICATED non-zero one, said so where they do.
+    """
+    return Trade(
+        trade_id=trade_id,
+        order_id=order_id,
+        symbol=SYMBOL,
+        side=OrderSide.SELL,
+        quantity=quantity,
+        price=D("102.50000000"),
+        quote_quantity=quote,
+        fee=fee,
+        filled_at=BAR,
     )
 
 
@@ -2065,7 +2135,7 @@ class TestTheCloseExecutes:
     OF ITS OWN VOLITION**, and none of it has run against a venue.
     """
 
-    async def test_the_full_sequence_is_exactly_six_calls_in_order(self) -> None:
+    async def test_the_full_sequence_is_six_calls_then_one_settlement_read(self) -> None:
         """**THE ORDERING, asserted as a list rather than a count.**
 
         MUTATION: sell before cancelling; or skip the re-confirm.
@@ -2075,13 +2145,17 @@ class TestTheCloseExecutes:
         would pass under a reordering; the list will not. And the two `get_order`
         pairs straddling the cancel are what ruling 4 requires -- collapsing them
         into one pair passes a count of six and fails this.
+
+        This read `..._is_exactly_six_calls_in_order` until the fee commit, which
+        adds the SEVENTH call: the settlement read, after the sell and before the
+        booking. The name is corrected because it describes the tree.
         """
         client = _selling_client()
         executor, _, _ = build(client=client, portfolio=_held())
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        assert client.venue_calls == FULL_CLOSE
+        assert client.venue_calls == [*FULL_CLOSE, "get_my_trades"]
 
     async def test_a_close_is_refused_while_a_close_record_is_pending(
         self, caplog: pytest.LogCaptureFixture
@@ -2134,7 +2208,7 @@ class TestTheCloseExecutes:
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        assert client.venue_calls == FULL_CLOSE
+        assert client.venue_calls == [*FULL_CLOSE, "get_my_trades"]
         assert len(client.sold) == 1
 
     async def test_the_cancel_uses_the_venue_numeric_id(self) -> None:
@@ -2258,7 +2332,7 @@ class TestTheCloseExecutes:
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        assert client.venue_calls == FULL_CLOSE
+        assert client.venue_calls == [*FULL_CLOSE, "get_my_trades"]
 
     async def test_any_other_cancel_failure_does_not_sell(
         self, caplog: pytest.LogCaptureFixture
@@ -2361,7 +2435,7 @@ class TestTheCloseExecutes:
 
         await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
+        assert client.venue_calls == [*FULL_CLOSE, "get_order", "get_my_trades"]
         assert client.order_queries[-1].endswith("-CL")
         assert portfolio.ledger is not None
         assert portfolio.ledger.realised_pnl == D("2.25000000")
@@ -3664,6 +3738,11 @@ class TestAResolvedFillIsBooked:
         """
         portfolio = _held(quantity=_LOSSY_QTY)
         client = _resolving_client(_sold(executed=str(_LOSSY_QTY), quote=_LOSSY_TOTAL))
+        # The settlement must account for the whole lossy quantity, or it is
+        # refused as incomplete and the close defers instead of booking.
+        client._trades_answers = [
+            [sell_trade(order_id="77", quantity=_LOSSY_QTY, quote=D(_LOSSY_TOTAL))]
+        ]
         executor, _, _ = build(client=client, portfolio=portfolio)
         executor._pending[SYMBOL] = _close()
 
@@ -3693,7 +3772,7 @@ class TestAResolvedFillIsBooked:
         the two are different facts about the day.
         """
         # `build()`'s default portfolio holds NOTHING -- the restart shape.
-        executor, _, portfolio = build(client=_resolving_client())
+        executor, client, portfolio = build(client=_resolving_client())
         executor._pending[SYMBOL] = _close()
 
         await executor(candle())
@@ -3701,6 +3780,12 @@ class TestAResolvedFillIsBooked:
         assert portfolio.ledger is None
         assert portfolio.free_quote == D("10000")
         assert portfolio.positions == {}
+        # A RESTART STARTS WITH NO RETENTION COUNT AND FETCHES NO SETTLEMENT:
+        # with no position the fill classifies POSITION_ABSENT, the record is
+        # released on this first candle, and the in-memory bound is not needed.
+        assert "get_my_trades" not in client.venue_calls
+        assert executor._pending == {}
+        assert executor._settlement_deferrals == {}
 
     async def test_a_partial_fill_books_nothing_here_as_it_does_on_the_live_path(
         self,
@@ -4125,3 +4210,221 @@ class TestTheResolutionLineAgreesWithItself:
         assert "the trade is BOOKED" in message
         assert record.outcome == "filled_and_booked"  # type: ignore[attr-defined]
         assert "DO NOT enter this trade by hand" in record.resolution  # type: ignore[attr-defined]
+
+
+# --------------------------------------------------------------------------
+# The fee commit: settlement at Site A and Site B, and the retention tracker
+# --------------------------------------------------------------------------
+_BTC_FEE = Fee(amount=D("0.00000100"), asset="BTC")
+
+
+def _settling_client(*answers: list[Trade] | Exception) -> FakeClient:
+    """A close whose sell FILLS, whose settlement reads answer IN ORDER (the last
+    repeats), and whose close id re-reads that same sell -- so Site B can pick a
+    deferred close up on a later candle."""
+    return _selling_client(
+        trades_answers=list(answers),
+        leg_answers={"SL": _leg("0"), "TP": _leg("0"), "CL": sell_fill()},
+    )
+
+
+def _bar(minute: int) -> Candle:
+    return candle(close_time=BAR + timedelta(minutes=minute))
+
+
+class TestSettlement:
+    async def test_the_close_reads_its_fills_once_after_the_sell_and_books_net_of_the_fee(
+        self,
+    ) -> None:
+        """Site A: one read, after the sell, at the settlement bound, and the fee subtracted.
+
+        FABRICATED fee `0.25000000` USDT: every captured fee is zero. MUTATION:
+        skip the read, bound it by the dispatch budget, or ignore the fee.
+        """
+        client = _settling_client([sell_trade(fee=Fee(amount=D("0.25000000"), asset="USDT"))])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == [*FULL_CLOSE, "get_my_trades"]
+        assert client.settlements == [("777", 3.0, 1)]
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.00000000")  # 2.25 gross, less 0.25
+        assert SYMBOL not in executor._pending
+
+    @pytest.mark.parametrize(
+        "answer",
+        [
+            [],
+            [sell_trade(quantity=D("0.25"))],
+            ExchangeConnectionError("timed out"),
+            [sell_trade(fee=_BTC_FEE)],
+        ],
+        ids=["empty", "incomplete", "transport", "foreign_asset"],
+    )
+    async def test_every_settlement_failure_after_the_sell_defers(
+        self, answer: list[Trade] | Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Ruling 3: the sell SUCCEEDED, so nothing is dropped and nothing booked -- the record waits.
+
+        FABRICATED answers. These replace P22's two drop-at-Site-A tests, which
+        ruling 3 withdrew. MUTATION: drop unbooked, release the record, or book.
+        """
+        writer = RecordingWriter()
+        executor, _, portfolio = build(
+            client=_settling_client(answer), portfolio=_held(), persist=writer
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert executor._pending[SYMBOL].kind == "close"
+        assert SYMBOL in writer.symbols()  # still on disk: no removal write
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+        assert portfolio.ledger is None
+        assert len(_records(caplog, "close_settlement_deferred")) == 1
+        assert _records(caplog, "close_sold_unbooked") == []
+
+    async def test_a_deferred_close_is_booked_by_the_next_bar(self) -> None:
+        """Site A defers; Site B re-reads the sell by its derived id, settles and books it.
+
+        MUTATION: release the record at the deferral -- nothing is left to resolve.
+        """
+        client = _settling_client([], [sell_trade()])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        await executor(_bar(1))
+
+        assert client.venue_calls[-3:] == ["get_my_trades", "get_order", "get_my_trades"]
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
+        assert SYMBOL not in executor._pending
+
+    async def test_a_resolved_close_books_net_of_its_fee(self) -> None:
+        """Site B, FABRICATED fee `0.25000000` USDT. MUTATION: book it gross."""
+        client = _settling_client([sell_trade(fee=Fee(amount=D("0.25000000"), asset="USDT"))])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        await executor(candle())
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.00000000")
+
+    @pytest.mark.parametrize(
+        "answer",
+        [ExchangeConnectionError("timed out"), [], [sell_trade(quantity=D("0.25"))]],
+        ids=["transport", "empty", "incomplete"],
+    )
+    async def test_a_resolved_close_keeps_its_record_on_a_settlement_it_cannot_read(
+        self, answer: list[Trade] | Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Rulings 1 and 2 (Variant L): kept under the tracker at WARNING, not dropped.
+
+        MUTATION: drop at CRITICAL as R-j literally read, or release the record.
+        """
+        executor, _, portfolio = build(client=_settling_client(answer), portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        assert SYMBOL in executor._pending
+        assert SYMBOL in portfolio.positions
+        assert len(_records(caplog, "close_settlement_deferred")) == 1
+        assert _records(caplog, "close_record_resolved") == []
+
+    async def test_a_resolved_close_with_a_foreign_fee_drops_as_fee_unresolvable(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Waiting cannot change a fee's asset, so it is not retried. FABRICATED BTC fee.
+
+        MUTATION: retain it under the tracker like an incomplete list.
+        """
+        executor, _, portfolio = build(
+            client=_settling_client([sell_trade(fee=_BTC_FEE)]), portfolio=_held()
+        )
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.outcome == "fee_unresolvable"  # type: ignore[attr-defined]
+        assert SYMBOL not in executor._pending
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.ledger is None
+
+    @pytest.mark.parametrize(
+        "failure", [ExchangeConnectionError("timed out"), []], ids=["transport", "empty"]
+    )
+    async def test_a_deferred_close_is_kept_through_bar_five_and_dropped_at_bar_six(
+        self, failure: list[Trade] | Exception, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Ruling 1: five bars of the symbol's OWN candles, then CRITICAL `settlement_timeout`.
+
+        Bar 1 is Site A's deferral; bars 2 to 6 are resolution attempts. The
+        `empty` row is Variant L's retention, bounded by the same count.
+        MUTATION: N of 4 or 6, `>` for `>=`, or no bound at all.
+        """
+        client = _settling_client([], failure)
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            for bar in range(2, 6):
+                await executor(_bar(bar - 1))
+                assert SYMBOL in executor._pending, f"dropped early, at bar {bar}"
+            assert _records(caplog, "close_record_resolved") == []
+            await executor(_bar(5))
+
+        (record,) = _records(caplog, "close_record_resolved")
+        assert record.levelno == logging.CRITICAL
+        assert record.outcome == "settlement_timeout"  # type: ignore[attr-defined]
+        assert "COULD NOT BE SETTLED" in record.resolution  # type: ignore[attr-defined]
+        assert SYMBOL not in executor._pending
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.ledger is None
+
+    async def test_a_booking_on_bar_three_clears_the_count(self) -> None:
+        """The count leaves with the record, so a LATER close on the symbol starts from zero.
+
+        MUTATION: keep the count after booking -- the second close then drops two
+        bars early, at minute 12 instead of minute 14.
+        """
+        timeout = ExchangeConnectionError("timed out")
+        client = _settling_client([], timeout, [sell_trade()], [], timeout)
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        await executor(_bar(1))
+        await executor(_bar(2))
+        assert SYMBOL not in portfolio.positions  # booked on bar 3
+
+        portfolio.positions[SYMBOL] = _held().positions[SYMBOL]
+        await executor.dispatch(close_signal(), exit_assessment(), _bar(9))
+        for minute in range(10, 14):
+            await executor(_bar(minute))
+            assert SYMBOL in executor._pending, f"dropped early, at minute {minute}"
+        await executor(_bar(14))
+        assert SYMBOL not in executor._pending
+
+    async def test_another_symbols_candles_do_not_advance_the_count(self) -> None:
+        """Counted on the symbol's OWN candles. MUTATION: count every call -- the
+        record then drops on the fifth ETHUSDT candle."""
+        executor, _, _ = build(
+            client=_settling_client([], ExchangeConnectionError("timed out")), portfolio=_held()
+        )
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        eth = _bar(1).model_copy(update={"symbol": "ETHUSDT"})
+        for _ in range(10):
+            await executor(eth)
+        assert SYMBOL in executor._pending
+
+        for minute in range(2, 6):
+            await executor(_bar(minute))
+        assert SYMBOL in executor._pending
+        await executor(_bar(6))
+        assert SYMBOL not in executor._pending
