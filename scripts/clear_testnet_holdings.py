@@ -17,10 +17,13 @@ and it is the whole of what it is for.
 2. Credentials come from the **testnet slot only**.
    :func:`_testnet_credentials` reads ``BINANCE_TESTNET_API_KEY`` /
    ``BINANCE_TESTNET_API_SECRET`` and refuses when either is empty. It
-   deliberately does **not** call ``Settings.binance_credentials()``, which
-   falls back to the LIVE key slot when the testnet slot is blank -- a
-   convenience for a read-only probe and a hazard for a seller. The live slot is
-   never read, so even a mis-built client has nothing to authenticate with.
+   deliberately does **not** call ``Settings.binance_credentials()``. That
+   function also serves TESTNET from the testnet slots only, since the
+   live-trading guard removed its fallback to the LIVE slot, but reaching it
+   needs a ``Settings`` built from ``config.yaml``, which this script never
+   loads -- and a seller's testnet guarantee belongs in the file being audited.
+   The live slot is never read, so even a mis-built client has nothing to
+   authenticate with.
 3. :func:`build_client` asserts ``client.testnet is True`` before any signed
    call, reading the library's own state rather than trusting the argument.
 
@@ -154,10 +157,13 @@ def _testnet_credentials(secrets: Secrets | None = None) -> tuple[str, str]:
     """The TESTNET key pair, and never the live one.
 
     **This is not ``Settings.binance_credentials()`` and must not become it.**
-    That function reads ``binance_api_key`` when the testnet slot is empty,
-    which is a sensible fallback for a read-only probe and the wrong behaviour
-    for a script whose only action is a sale. Refusing here means the live
-    credential is never in memory on this path.
+    That function read ``binance_api_key`` when the testnet slot was empty
+    until the live-trading guard removed the fallback; it now serves the
+    testnet slots only. The refusal stays HERE regardless, because a script
+    whose only action is a sale should not rest its testnet guarantee on a
+    function in another file. Refusing here means the live slot is never read
+    on this path -- ``Secrets()`` still loads it, as it loads every slot, but
+    nothing here touches it.
 
     ``secrets`` is injectable so the tests can express a populated live slot
     beside an empty testnet slot without touching ``.env``.

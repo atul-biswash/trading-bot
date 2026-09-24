@@ -215,9 +215,11 @@ class TestCredentials:
     async def test_the_live_key_slot_is_never_read(self) -> None:
         """Catches `binance_credentials()` creeping back in.
 
-        That function falls back to the LIVE slot when the testnet slot is
-        blank, so this exact state -- live populated, testnet empty -- is the
-        one where the two implementations differ.
+        Until the live-trading guard, that function fell back to the LIVE slot
+        in exactly this state -- live populated, testnet empty. It now refuses
+        here too, so the two implementations no longer differ in OUTCOME; they
+        differ in MESSAGE, and the match below is on this script's own refusal
+        text, which ``binance_credentials()`` does not produce.
         """
         with pytest.raises(ConfigError, match="will not fall back to the live"):
             await canceller.build_client(_factory(), secrets=_secrets(testnet=False, live=True))

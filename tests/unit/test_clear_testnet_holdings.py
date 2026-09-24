@@ -114,10 +114,11 @@ class TestCredentials:
     async def test_the_live_key_slot_is_never_read(self) -> None:
         """A blank testnet slot REFUSES; it does not fall back to the live keys.
 
-        This is the behaviour that differs from
-        ``Settings.binance_credentials()``, which reads ``binance_api_key`` in
-        exactly this state. Selling with a live credential is the failure this
-        script is shaped to make impossible.
+        ``Settings.binance_credentials()`` read ``binance_api_key`` in exactly
+        this state until the live-trading guard removed that fallback; it now
+        refuses here too, with its own message, and the match below is on this
+        script's. Selling with a live credential is the failure this script is
+        shaped to make impossible.
         """
         with pytest.raises(ConfigError, match="testnet slot only"):
             clearer._testnet_credentials(_secrets(testnet=False, live=True))

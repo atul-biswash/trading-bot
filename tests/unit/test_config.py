@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from tests.integration.credentials import has_credentials
 from trading_bot.config.models import (
     AppConfig,
     BacktestConfig,
@@ -98,6 +99,45 @@ def test_live_mode_without_keys_raises(config_path: Path, monkeypatch: pytest.Mo
     assert settings.mode is TradingMode.TESTNET
     with pytest.raises(ConfigError, match=r"^Missing Binance Testnet credentials$"):
         settings.binance_credentials()
+
+
+def test_the_integration_gate_counts_only_the_testnet_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Credentialed means BOTH testnet slots populated, and nothing else.
+
+    ``Settings.binance_credentials`` serves TESTNET from the testnet slots only,
+    so a gate that still counted the live slots would report a live-only
+    machine as credentialed, and the three integration tests would FAIL there
+    instead of skipping. The live pair is populated in every state below, so a
+    gate that consults it at all is caught.
+
+    The testnet pair arrives through ``.env`` in the working directory, which
+    the autouse fixture has already moved to ``tmp_path``: a gate reading
+    ``os.environ`` instead of ``Secrets()`` misses it, which is the defect the
+    gate was first rebuilt to fix.
+
+    MUTATION: restore ``or primary``; accept the testnet key without its
+    secret; read ``os.environ``; or refuse when the live pair is also present.
+    Each fails one state below. SURVIVES: accepting the testnet SECRET without
+    its key -- only the key-without-secret half is expressed here.
+
+    A kill here reports ``AssertionError``: every check is a plain ``assert``,
+    so M5i-115's ``Failed`` case does not arise.
+    """
+    monkeypatch.setenv("BINANCE_API_KEY", "live_key")
+    monkeypatch.setenv("BINANCE_API_SECRET", "live_secret")
+    assert has_credentials() is False
+
+    monkeypatch.setenv("BINANCE_TESTNET_API_KEY", "tn_key")
+    assert has_credentials() is False
+
+    monkeypatch.delenv("BINANCE_TESTNET_API_KEY")
+    (tmp_path / ".env").write_text(
+        "BINANCE_TESTNET_API_KEY=tn_key\nBINANCE_TESTNET_API_SECRET=tn_secret\n",
+        encoding="utf-8",
+    )
+    assert has_credentials() is True
 
 
 def test_invalid_config_rejected(tmp_path: Path) -> None:

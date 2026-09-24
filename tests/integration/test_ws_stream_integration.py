@@ -1,9 +1,9 @@
 """Opt-in integration test: the real Binance **testnet** kline WebSocket.
 
 Skipped unless testnet credentials are present in the environment
-(``BINANCE_TESTNET_API_KEY`` / ``BINANCE_TESTNET_API_SECRET``, or the primary
-``BINANCE_API_KEY`` / ``BINANCE_API_SECRET`` as a fallback), so the default test
-run stays hermetic and offline. Run it explicitly with::
+(``BINANCE_TESTNET_API_KEY`` / ``BINANCE_TESTNET_API_SECRET``, both of them; the
+live slots do not count), so the default test run stays hermetic and offline.
+Run it explicitly with::
 
     pytest -m integration
 

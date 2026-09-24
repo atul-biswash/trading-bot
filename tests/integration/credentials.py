@@ -22,18 +22,23 @@ from __future__ import annotations
 from trading_bot.config.settings import Secrets
 
 SKIP_REASON = (
-    "No Binance credentials found. Set BINANCE_TESTNET_API_KEY/SECRET (or "
-    "BINANCE_API_KEY/SECRET) in .env or in the environment to run the opt-in "
-    "testnet integration tests."
+    "No Binance Testnet credentials found. Set BINANCE_TESTNET_API_KEY and "
+    "BINANCE_TESTNET_API_SECRET in .env or in the environment to run the opt-in "
+    "testnet integration tests. The live slots do not count: these tests connect "
+    "through Settings.binance_credentials, which serves the testnet slots only."
 )
 
 
 def has_credentials() -> bool:
-    """Return ``True`` when a usable key/secret pair is reachable."""
+    """Return ``True`` when BOTH testnet slots are populated, and only then.
+
+    The live slots are not consulted. ``Settings.binance_credentials`` serves
+    TESTNET from the testnet slots only, with no fallback, and every test this
+    gates connects through it -- so a machine holding only the live pair has
+    nothing those tests can use, and must skip rather than fail.
+    """
     secrets = Secrets()
-    testnet = bool(secrets.binance_testnet_api_key and secrets.binance_testnet_api_secret)
-    primary = bool(secrets.binance_api_key and secrets.binance_api_secret)
-    return testnet or primary
+    return bool(secrets.binance_testnet_api_key and secrets.binance_testnet_api_secret)
 
 
 #: Evaluated once at import, because the skip mark is applied at collection.
