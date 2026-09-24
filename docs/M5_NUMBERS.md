@@ -729,6 +729,17 @@ coincide produce two back-to-back invocations, each with a full budget:
 P_sim x D  +  N_max x T_recon  <=  alpha x T_min
 ```
 
+> **ANNOTATED AT M5k: A THIRD TERM, SETTLEMENT, IS ADDED BY THE PROJECT OWNER'S
+> RULING.** The check now reads
+> `P_sim x D + N_max x T_recon + min(N_max, P_sim) x T_recon <= alpha x T_min`.
+> The formula above stays standing, because it was true when decided. The
+> reason in one line: **a settlement fetch per exiting position is real work
+> the check did not count.** Each fetch is bounded by `T_recon` at one
+> attempt, and `min(N_max, P_sim)` caps the positions that can exit on one
+> bar, because positions are keyed by symbol. On the committed single-pair
+> `config.yaml` the check reads 21.0 s against 30.0 s; two 1-minute-led pairs
+> at `T_recon = 3.0` read 33.0 s and are refused.
+
 | Symbol | Meaning | Source |
 |---|---|---|
 | `D` | `risk.dispatch_deadline_s` — the whole sequence, worst case the 3-call `CLOSE` | config |

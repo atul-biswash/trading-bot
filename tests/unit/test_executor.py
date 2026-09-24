@@ -2083,6 +2083,60 @@ class TestTheCloseExecutes:
 
         assert client.venue_calls == FULL_CLOSE
 
+    async def test_a_close_is_refused_while_a_close_record_is_pending(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """THE CLOSE GUARD. A second CLOSE is refused BEFORE any venue read.
+
+        MUTATION: drop the guard, or move it below `_plan_close`. Either way the
+        cancelled legs below report nothing executed, the plan is SELL, and the
+        path reads, cancels and sells -- a second MARKET sell.
+
+        **THE LEGS MUST BE CANCELED WITH NOTHING EXECUTED**, because that is
+        exactly what a symbol whose close is pending reports, and it is the
+        only fixture under which the unguarded path SELLS. The next test is
+        its control: the same fixture with no record does sell.
+        """
+        client = _selling_client(
+            leg_answers={
+                "SL": _leg("0", OrderStatus.CANCELED),
+                "TP": _leg("0", OrderStatus.CANCELED),
+            }
+        )
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        record = _close()
+        executor._pending[SYMBOL] = record
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == []
+        assert client.sold == []
+        assert client.cancelled == []
+        assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["close_pending"]
+        assert executor._pending[SYMBOL] is record
+        assert SYMBOL in portfolio.positions
+
+    async def test_a_close_with_no_pending_record_still_proceeds(self) -> None:
+        """The guard's CONTROL: the same fixture, no record, and the sell goes out.
+
+        This is what proves the fixture above plans SELL -- without it, a
+        refusal there could come from the plan rather than the guard.
+        MUTATION: refuse every CLOSE, or refuse on any pending record.
+        """
+        client = _selling_client(
+            leg_answers={
+                "SL": _leg("0", OrderStatus.CANCELED),
+                "TP": _leg("0", OrderStatus.CANCELED),
+            }
+        )
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == FULL_CLOSE
+        assert len(client.sold) == 1
+
     async def test_the_cancel_uses_the_venue_numeric_id(self) -> None:
         """MUTATION: cancel with `position.order_list_id`.
 

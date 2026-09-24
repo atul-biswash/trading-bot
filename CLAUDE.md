@@ -1238,6 +1238,19 @@ data.
   that symbol's exits is refusing to act on unknown state, not a limit. The two
   read as a contradiction unless the scope is stated, so it is stated here. See
   `docs/QB_ESCALATION.md`, Class E.
+
+  > **ANNOTATED BY THE PROJECT OWNER'S RULING AT M5k: A SECOND `CLOSE` WHILE A
+  > CLOSE RECORD IS PENDING IS REFUSED, AND THAT REFUSES A DOUBLE-SELL, NOT AN
+  > EXIT.** A pending record of kind `"close"` in `OrderExecutor._pending` means
+  > this bot has already cancelled the symbol's protection and sent its MARKET
+  > sell. The exit has happened at the venue, or is being resolved. `dispatch`
+  > now refuses a further `CLOSE` for that symbol before `_plan_close` runs,
+  > with reason `close_pending`. Without the guard, the cancelled legs report
+  > nothing executed, `plan_close` answers `SELL`, and `_execute_close` sends a
+  > second MARKET sell: of base already sold, or of base this bot does not own.
+  > **The rule above is unchanged**: no *limit* gates a `CLOSE`. This is the
+  > venue-state case it already scopes out, and the refusal lifts when the
+  > record resolves.
 - **R6: NO SPECULATIVE VENUE QUERY WHEN AN EXIT IS UNBOOKABLE, MISSING OR
   DIVERGED — AND SETTLING A CONFIRMED FILL IS NOT ONE.** Ruled by the project
   owner at M5k. R6 forbids a query made to search for an explanation:

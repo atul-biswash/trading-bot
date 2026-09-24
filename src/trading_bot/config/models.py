@@ -682,9 +682,20 @@ class AppConfig(_Model):
     def _check_dispatch_budget_fits_the_bar(self) -> AppConfig:
         """Refuse a budget that cannot fit inside the shortest bar.
 
-        ``P_sim x D + N_max x T_recon <= alpha x T_min``, per candle-handler
-        invocation -- the right unit, because two pairs whose bars coincide
-        produce two back-to-back invocations, each with a full budget.
+        ``P_sim x D + N_max x T_recon + min(N_max, P_sim) x T_recon <= alpha x
+        T_min``, per candle-handler invocation -- the right unit, because two
+        pairs whose bars coincide produce two back-to-back invocations, each
+        with a full budget.
+
+        **THE THIRD TERM IS SETTLEMENT, added by the project owner's ruling at
+        M5k.** Booking an exit fetches that order's fills once, bounded by
+        ``reconcile_deadline_s`` at one attempt, and neither of the first two
+        terms counts that call. At most one settlement runs per position per
+        bar -- a position the reconciler books is gone before the executor
+        runs, and one in the executor's hands has no fill for the reconciler
+        to book -- and positions are keyed by symbol and capped at
+        ``max_open_positions``, so ``min(N_max, P_sim)`` bounds how many can
+        exit on one bar.
 
         It lives on :class:`AppConfig` rather than :class:`RiskConfig` because
         two of its five terms come from ``trading.pairs``, which ``RiskConfig``
@@ -712,11 +723,13 @@ class AppConfig(_Model):
         t_min_s = min(timeframe_to_ms(pair.timeframe) for pair in enabled) / 1000
         p_sim = len(enabled)
         n_max = self.risk.limits.max_open_positions
+        exiting = min(n_max, p_sim)
         dispatch = p_sim * self.risk.dispatch_deadline_s
         reconcile = n_max * self.risk.reconcile_deadline_s
+        settlement = exiting * self.risk.reconcile_deadline_s
         budget = _PIPELINE_HEADROOM * t_min_s
 
-        if dispatch + reconcile <= budget:
+        if dispatch + reconcile + settlement <= budget:
             return self
 
         shortest = min(enabled, key=lambda pair: timeframe_to_ms(pair.timeframe))
@@ -724,7 +737,9 @@ class AppConfig(_Model):
             f"risk.dispatch_deadline_s = {self.risk.dispatch_deadline_s} x {p_sim} pair(s) "
             f"that can close simultaneously, plus risk.reconcile_deadline_s = "
             f"{self.risk.reconcile_deadline_s} x limits.max_open_positions = {n_max}, "
-            f"is {dispatch + reconcile:.1f}s. That exceeds "
+            f"plus settlement at risk.reconcile_deadline_s = "
+            f"{self.risk.reconcile_deadline_s} x {exiting} position(s) that can exit on one "
+            f"bar, is {dispatch + reconcile + settlement:.1f}s. That exceeds "
             f"{_PIPELINE_HEADROOM:.0%} of the shortest enabled timeframe "
             f"({shortest.symbol}/{shortest.timeframe} = {t_min_s:.0f}s, budget {budget:.1f}s).\n"
             "\n"
@@ -732,6 +747,7 @@ class AppConfig(_Model):
             "while it is still working is missed and never backfilled -- and a gap\n"
             "re-masks ATR to NaN long after warmup, disabling ATR stops on that pair.\n"
             "\n"
-            "Lower risk.dispatch_deadline_s, lower risk.limits.max_open_positions, or\n"
-            "configure a longer shortest timeframe in config.yaml."
+            "Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower\n"
+            "risk.limits.max_open_positions, enable fewer pairs, or configure a longer\n"
+            "shortest timeframe in config.yaml."
         )

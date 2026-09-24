@@ -331,6 +331,10 @@ _CLOSE_GENERATION: Final = 0
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"
 _REASON_PENDING = "placement_pending"
+#: A CLOSE for a symbol whose own close is already pending. ITS OWN REASON,
+#: never `_REASON_PENDING`'s: that one names an unresolved PLACEMENT, and an
+#: operator sent there would look for an entry nobody made.
+_REASON_CLOSE_PENDING = "close_pending"
 _REASON_CLIENT_REFUSAL = "client_refusal"
 #: ITS OWN REASON, never the budget's and never the pending guard's. An
 #: operator reading this must be sent to the DISK; reusing another string here
@@ -997,6 +1001,23 @@ class OrderExecutor:
         # booking. The two point queries are reads. Every write in section 4b's
         # sequence is reserved.
         if not isinstance(intent, EntryIntent):
+            # THE CLOSE GUARD, ruled by the project owner at M5k. A pending
+            # record of kind "close" means this symbol's protection is already
+            # cancelled and its MARKET sell already sent. `_plan_close` would
+            # read those cancelled legs as "nothing executed", plan SELL, and
+            # send a SECOND sell -- of base already sold, or of base this bot
+            # does not own. So it is refused BEFORE any read. That refuses a
+            # double-sell, not an exit: the exit is the record's.
+            #
+            # CLOSE RECORDS ONLY. While a PLACEMENT is pending no `Position`
+            # exists, so `RiskManager` has already refused this CLOSE at
+            # `NOTHING_TO_CLOSE` and `_plan_close` would refuse it again at
+            # `close_no_position`; widening the guard would name that state
+            # wrongly.
+            record = self._pending.get(signal.symbol)
+            if record is not None and record.kind == "close":
+                self._refuse(signal, _REASON_CLOSE_PENDING, candle)
+                return
             await self._plan_close(signal, candle)
             return
 

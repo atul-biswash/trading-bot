@@ -16,6 +16,7 @@ from trading_bot.config.models import (
     PairConfig,
     PositionSizingConfig,
     RiskConfig,
+    RiskLimitsConfig,
     StopLossConfig,
     StrategyConfig,
     TakeProfitConfig,
@@ -480,17 +481,64 @@ class TestTheTransportFitsTheDispatchDeadline:
 
 
 class TestDispatchBudgetCoherence:
-    """`P_sim x D + N_max x T_recon <= alpha x T_min`, enforced at config load.
+    """`P_sim x D + N_max x T_recon + min(N_max, P_sim) x T_recon <= alpha x T_min`,
+    enforced at config load.
 
     On AppConfig rather than RiskConfig, because two of the five terms come from
     `trading.pairs`, which RiskConfig cannot see.
     """
 
-    def test_the_shipped_shape_passes_with_margin(self) -> None:
-        """2 x 9.0 + 3 x 3.0 = 27.0 against a 30.0s budget -- 3.0s spare, and
-        1.5s under the 10.5s ceiling the constraint admits for the deadline.
+    def test_two_pairs_on_a_1m_bar_are_refused_once_settlement_counts(self) -> None:
+        """2 x 9.0 + 3 x 3.0 + 2 x 3.0 = 33.0 against a 30.0s budget.
+
+        THIS TEST WAS `test_the_shipped_shape_passes_with_margin` AND ASSERTED THE
+        OPPOSITE: the same two pairs summed to 27.0 before settlement counted.
+        Inverted by the project owner's ruling that the check counts one
+        settlement fetch per position that can exit on one bar.
+
+        MUTATION: leave the settlement term out -- 27.0 passes and this fails.
+        M5i-115: an unmet `pytest.raises` raises `Failed`, not `AssertionError`.
         """
-        _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")])
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")])
+        message = str(excinfo.value)
+        assert "settlement" in message
+        assert "33.0s" in message
+
+    def test_the_committed_single_pair_shape_passes(self) -> None:
+        """1 x 9.0 + 3 x 3.0 + 1 x 3.0 = 21.0 against 30.0 -- the committed shape.
+
+        `config.yaml` as committed enables BTCUSDT on 1m alone. What this pins
+        is narrow, and said so: the shape loads, which only an over-count past
+        the 9.0s of slack would break.
+        """
+        config = _app_config(pairs=[("BTCUSDT", "1m")])
+        assert [pair.symbol for pair in config.trading.enabled_pairs] == ["BTCUSDT"]
+
+    def test_settlement_counts_positions_that_can_exist_not_the_position_cap(self) -> None:
+        """One 1m pair at T = 3.6: 9.0 + 3 x 3.6 + min(3, 1) x 3.6 = 23.4, which passes.
+
+        One pair can hold one position whatever the cap, so one settlement.
+        MUTATION: count settlement as `max_open_positions x T` -- 9.0 + 10.8 +
+        10.8 = 30.6, refused, and this fails.
+        """
+        config = _app_config(pairs=[("BTCUSDT", "1m")], risk=RiskConfig(reconcile_deadline_s=3.6))
+        assert config.risk.reconcile_deadline_s == 3.6
+
+    def test_settlement_counts_the_position_cap_not_the_pair_count(self) -> None:
+        """Three 1m pairs, cap 1, D = 7.0: 3 x 7.0 + 1 x 3.0 + min(1, 3) x 3.0 = 27.0.
+
+        Three pairs can hold at most one position when the cap is one, so one
+        settlement. MUTATION: count settlement as `P_sim x T` -- 21.0 + 3.0 +
+        9.0 = 33.0, refused, and this fails. `requests_timeout_s=8` keeps the
+        transport check (`8 <= 7.0 + 1.0`) from refusing the config first.
+        """
+        config = _app_config(
+            pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")],
+            risk=RiskConfig(dispatch_deadline_s=7.0, limits=RiskLimitsConfig(max_open_positions=1)),
+            exchange=ExchangeConfig(requests_timeout_s=8),
+        )
+        assert config.risk.limits.max_open_positions == 1
 
     def test_a_third_simultaneous_pair_is_refused(self) -> None:
         """What makes adding a pair a decision rather than a silent degradation:
@@ -548,6 +596,7 @@ class TestDispatchBudgetCoherence:
                     PairConfig(symbol="SOLUSDT", timeframe="1m", enabled=False),
                 ]
             ),
+            risk=RiskConfig(reconcile_deadline_s=2.3),
         )
         assert len(config.trading.enabled_pairs) == 2
 

@@ -643,6 +643,7 @@ def _config_with_pairs(tmp_path: Any) -> str:
         "    - symbol: btcusdt\n      timeframe: 1m\n"
         "    - symbol: ETHUSDT\n      timeframe: 5m\n"
         "    - symbol: DOGEUSDT\n      timeframe: 1m\n      enabled: false\n"
+        "risk:\n  reconcile_deadline_s: 2.3\n"
         "strategy:\n  name: sma_crossover\n  params:\n    fast_period: 5\n    slow_period: 20\n"
         "backtesting:\n  start_date: '2024-01-01'\n  end_date: '2024-02-01'\n",
         encoding="utf-8",

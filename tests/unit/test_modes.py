@@ -455,6 +455,7 @@ def write_settings(
         "trading:\n"
         f"  base_currency: {base_currency}\n"
         f"{block}"
+        "risk:\n  reconcile_deadline_s: 2.3\n"
         f"strategy:\n  name: {strategy}\n"
         "backtesting:\n  start_date: '2024-01-01'\n  end_date: '2024-02-01'\n"
         "logging:\n  console: false\n  file:\n    enabled: false\n",
