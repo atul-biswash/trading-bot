@@ -5,9 +5,10 @@ Two separate concerns are combined here:
 * :class:`Secrets` — API keys and tokens, loaded from environment / ``.env``.
 * :class:`AppConfig` — non-secret behaviour, parsed from ``config.yaml``.
 
-:func:`get_settings` merges them into a single cached :class:`Settings` facade
-and resolves *which* Binance credentials to use based on the active mode
-(testnet vs. live), so the rest of the app never has to think about it.
+:func:`get_settings` merges them into a single cached :class:`Settings` facade.
+Its credential read serves the Binance TESTNET slots and refuses every other
+mode: live trading is blocked by architectural invariant (CLAUDE.md), enforced
+by :func:`refuse_live_trading`.
 """
 
 from __future__ import annotations
@@ -22,16 +23,29 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from trading_bot.config.models import AppConfig
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import ConfigError
+from trading_bot.core.exceptions import ConfigError, LiveTradingBlockedError
 
 DEFAULT_CONFIG_PATH = "config.yaml"
+
+#: The ruled refusal, verbatim. Three lines joined by ``\n`` and no trailing
+#: newline, because ``SystemExit`` prints its argument and adds its own.
+LIVE_TRADING_BLOCKED_MESSAGE = (
+    "FATAL: Live trading is blocked by architectural invariant (CLAUDE.md).\n"
+    "Base-denominated entry fee netting is unmodeled in position sizing and order list "
+    "generation.\n"
+    "Startup refused."
+)
 
 
 class Secrets(BaseSettings):
     """Secret values read from environment variables / ``.env``.
 
-    Field names map to upper-case env vars (e.g. ``binance_api_key`` reads
-    ``BINANCE_API_KEY``). Nothing here is ever written to logs.
+    Field names map to upper-case env vars (e.g. ``binance_testnet_api_key``
+    reads ``BINANCE_TESTNET_API_KEY``). Nothing here is ever written to logs.
+
+    **The two live slots are declared and read nowhere.** They stay so an
+    ``.env`` carrying them still loads; :meth:`Settings.binance_credentials`
+    serves the testnet slots only.
     """
 
     model_config = SettingsConfigDict(
@@ -53,6 +67,23 @@ class Secrets(BaseSettings):
     bot_mode: TradingMode | None = None
 
 
+def refuse_live_trading(mode: TradingMode) -> None:
+    """Raise :class:`LiveTradingBlockedError` if ``mode`` trades real money.
+
+    **The one predicate every entry point and the credential read share.**
+    ``uses_real_money`` is true for ``TradingMode.LIVE`` alone -- unlike
+    ``is_live_connection``, which is also true for TESTNET -- so this refuses
+    real money and admits testnet, paper and backtest.
+
+    **It takes the mode and nothing else, deliberately.** No ``allow=``
+    parameter, no environment variable, no config flag: CLAUDE.md's block is
+    lifted by a reviewed code change, never by a switch.
+    ``tests/unit/test_live_guard.py`` pins the signature.
+    """
+    if mode.uses_real_money:
+        raise LiveTradingBlockedError(LIVE_TRADING_BLOCKED_MESSAGE)
+
+
 class Settings:
     """Facade exposing resolved config + secrets to the rest of the app."""
 
@@ -67,24 +98,35 @@ class Settings:
         return self.mode is TradingMode.LIVE
 
     def binance_credentials(self) -> tuple[str, str]:
-        """Return the ``(api_key, api_secret)`` appropriate for the active mode.
+        """Return the TESTNET ``(api_key, api_secret)``, or refuse.
 
-        In testnet mode, testnet-specific keys are preferred and fall back to
-        the primary keys. Raises :class:`ConfigError` if required keys are
-        missing for a mode that needs a live connection.
+        **THREE REFUSALS, IN THIS ORDER, AND ALL OF THEM PRECEDE ANY READ OF A
+        KEY SLOT.** Ruled by the project owner at M5k.
+
+        1. ``LIVE`` raises :class:`LiveTradingBlockedError` through
+           :func:`refuse_live_trading`, so the live key never leaves
+           :class:`Secrets`. Every client built from ``Settings`` takes its
+           keys here, which makes this the backstop behind the entry-point
+           checks.
+        2. ``PAPER`` and ``BACKTEST`` raise :class:`ConfigError`: they use no
+           exchange credentials. Until this they were handed the live slots,
+           and both client constructors build ``testnet=False`` for any mode
+           but TESTNET -- so either reaching a constructor would have bound the
+           live venue.
+        3. ``TESTNET`` reads the testnet slots ONLY. There is no fallback to
+           the live slots: an empty testnet slot is a refusal, never a live
+           key sent to the testnet host.
+
+        :raises LiveTradingBlockedError: the mode trades real money.
+        :raises ConfigError: PAPER or BACKTEST, or a testnet slot is empty.
         """
-        if self.mode is TradingMode.TESTNET:
-            key = self._secrets.binance_testnet_api_key or self._secrets.binance_api_key
-            secret = self._secrets.binance_testnet_api_secret or self._secrets.binance_api_secret
-        else:
-            key = self._secrets.binance_api_key
-            secret = self._secrets.binance_api_secret
-
-        if self.mode.is_live_connection and (not key or not secret):
-            raise ConfigError(
-                f"Missing Binance API credentials for mode '{self.mode.value}'. "
-                "Set them in your .env file (see .env.example)."
-            )
+        refuse_live_trading(self.mode)
+        if self.mode in (TradingMode.PAPER, TradingMode.BACKTEST):
+            raise ConfigError("PAPER and BACKTEST modes do not use exchange credentials")
+        key = self._secrets.binance_testnet_api_key
+        secret = self._secrets.binance_testnet_api_secret
+        if not key or not secret:
+            raise ConfigError("Missing Binance Testnet credentials")
         return key, secret
 
     @property

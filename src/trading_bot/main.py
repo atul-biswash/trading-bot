@@ -21,9 +21,14 @@ import signal
 import sys
 from typing import TYPE_CHECKING
 
-from trading_bot.config.settings import Settings, get_settings
+from trading_bot.config.settings import (
+    LIVE_TRADING_BLOCKED_MESSAGE,
+    Settings,
+    get_settings,
+    refuse_live_trading,
+)
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import TradingBotError
+from trading_bot.core.exceptions import LiveTradingBlockedError, TradingBotError
 from trading_bot.utils.logger import get_logger, setup_logging
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -128,10 +133,14 @@ def _cmd_run(settings: Settings, mode_override: TradingMode | None) -> int:
     log = get_logger(__name__)
     if mode_override is not None:
         settings.mode = mode_override
+    # THE LIVE GUARD FOR `--mode`, the one route `main` cannot see: the CLI
+    # override lands here, after `main` has already checked the configured
+    # mode. It replaces the warning that used to be this branch's whole
+    # response to LIVE, and it runs before the "Starting in" line so a refused
+    # run never announces itself as starting. `main` translates the raise.
+    refuse_live_trading(settings.mode)
 
     log.info("Starting in %s mode", settings.mode.value.upper())
-    if settings.mode is TradingMode.LIVE:
-        log.warning("LIVE mode uses REAL funds. Ensure you understand the risks.")
 
     # Validate that credentials exist for modes needing a live connection.
     if settings.mode.is_live_connection:
@@ -170,6 +179,16 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
 
+    # THE LIVE GUARD FOR `config.yaml` AND `BOT_MODE`, on every subcommand, and
+    # AHEAD OF `setup_logging` so a refused start opens no log file. Live
+    # trading is blocked by architectural invariant (CLAUDE.md); nothing
+    # overrides it. `SystemExit` with a string exits 1 and prints the ruled
+    # message to stderr, unadorned.
+    try:
+        refuse_live_trading(settings.mode)
+    except LiveTradingBlockedError:
+        raise SystemExit(LIVE_TRADING_BLOCKED_MESSAGE) from None
+
     setup_logging(settings.config.logging)
     log = get_logger(__name__)
     log.info("%s", _BANNER)
@@ -181,6 +200,11 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_backtest(settings)
         if args.command == "strategies":
             return _cmd_strategies()
+    except LiveTradingBlockedError:
+        # AHEAD of the generic clause below, which would log it and return 1
+        # with a different text. Reached by `_cmd_run`'s `--mode` guard, and by
+        # `Settings.binance_credentials` if any path ever skipped both guards.
+        raise SystemExit(LIVE_TRADING_BLOCKED_MESSAGE) from None
     except TradingBotError as exc:
         log.error("%s", exc)
         return 1

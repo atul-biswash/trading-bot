@@ -1479,6 +1479,14 @@ data.
 **Config & safety**
 - **Testnet is the default everywhere.** Live trading requires explicit
   confirmation. Every example defaults to Testnet.
+
+  > **ANNOTATED: THIS DESCRIBES A CONFIRMATION THAT NO LONGER UNLOCKS
+  > ANYTHING.** It was true only of `scripts/check_testnet.py`, whose
+  > `--confirm-live` gated a read-only live check. With live refused at every
+  > entry point there is nothing left to confirm; the flag is still accepted so
+  > the documented command reaches the refusal rather than an argparse error.
+  > The sentence is kept because it records the design the block suspended.
+
 - **LIVE TRADING IS BLOCKED UNTIL ENTRY-FEE DEDUCTION AND BASE-QUANTITY NETTING
   ARE IMPLEMENTED IN THE SIZING AND PLACEMENT PIPELINE.** Ruled by the project
   owner at M5k. The bullet above says how live is entered; this one says it may
@@ -1524,6 +1532,32 @@ data.
   in `_cmd_run`, logs *"LIVE mode uses REAL funds. Ensure you understand the
   risks."* and continues. `--confirm-live` exists only in
   `scripts/check_testnet.py`. The block is a ruling, held by whoever reads it.
+
+  > **ANNOTATED BY THE COMMIT THAT ADDS THE GUARD: THE PARAGRAPH ABOVE IS NO
+  > LONGER TRUE, and it stays standing because it was true when written.**
+  > `Settings.binance_credentials` now refuses before it reads any key slot:
+  > `TradingMode.LIVE` with `LiveTradingBlockedError`, through
+  > `refuse_live_trading`; PAPER and BACKTEST with `ConfigError`, *"PAPER and
+  > BACKTEST modes do not use exchange credentials"*; and TESTNET is served
+  > from the testnet slots only, with no fallback, refusing an empty one with
+  > *"Missing Binance Testnet credentials"*. So the live slots are read nowhere
+  > in `src/` or `scripts/` -- `binance_api_key` and `binance_api_secret`
+  > survive only as `Secrets` declarations.
+  >
+  > **The entry points refuse first**, and each turns the refusal into
+  > `SystemExit(LIVE_TRADING_BLOCKED_MESSAGE)`, exit 1: `main` in `main.py` for
+  > `config.yaml` and `BOT_MODE`, ahead of `setup_logging`; `_cmd_run` for
+  > `run --mode live`, where it replaces the warning that was this branch's
+  > whole response; and `main` in `scripts/check_testnet.py` for `--mode live`,
+  > which `--confirm-live` no longer unlocks. `tests/unit/test_live_guard.py`
+  > pins each route separately. Added by the commit whose subject begins
+  > `feat(config): refuse live trading at every entry point` -- a commit cannot
+  > carry its own SHA.
+  >
+  > **It ENFORCES the block; it does not lift or discharge it.** Entry-fee
+  > deduction and base-quantity netting are still unimplemented, and the
+  > arming condition below still stands for the next edit to the mode
+  > resolution.
 
   *Arming condition:* **whoever next edits the mode resolution in
   `Settings.__init__` or `_cmd_run`, or authorises a run in

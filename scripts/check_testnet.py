@@ -25,13 +25,17 @@ Safety
 * The mode is taken **only** from ``--mode`` (default ``testnet``); this script
   deliberately ignores the mode in ``config.yaml`` / ``BOT_MODE`` so a stray
   ``live`` there can never cause an accidental live connection.
-* ``--mode live`` additionally requires ``--confirm-live``.
+* **Live connectivity checking is blocked by architectural invariant
+  (CLAUDE.md).** ``--mode live`` is refused before any setting is read, with
+  the ruled message and exit 1. ``--mode live`` and ``--confirm-live`` stay
+  parseable only so the documented command reaches that refusal rather than
+  an argparse error; ``--confirm-live`` confirms nothing.
 
 Examples
 --------
     python scripts/check_testnet.py
     python scripts/check_testnet.py --symbol ETHUSDT
-    python scripts/check_testnet.py --mode live --confirm-live
+    python scripts/check_testnet.py --candidates BTCUSDT,ETHUSDT
 """
 
 from __future__ import annotations
@@ -43,9 +47,13 @@ from collections import Counter
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from trading_bot.config.settings import get_settings
+from trading_bot.config.settings import (
+    LIVE_TRADING_BLOCKED_MESSAGE,
+    get_settings,
+    refuse_live_trading,
+)
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import ConfigError, TradingBotError
+from trading_bot.core.exceptions import ConfigError, LiveTradingBlockedError, TradingBotError
 from trading_bot.exchange import BinanceClient
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -113,12 +121,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--mode",
         choices=["testnet", "live"],
         default="testnet",
-        help="Environment to connect to (default: testnet).",
+        help=(
+            "Environment to connect to (default: testnet). 'live' is refused: live "
+            "trading is blocked by architectural invariant (CLAUDE.md)."
+        ),
     )
     parser.add_argument(
         "--confirm-live",
         action="store_true",
-        help="Required acknowledgement when --mode live is used.",
+        help="Accepted and ignored: it confirms nothing, and --mode live is refused.",
     )
     parser.add_argument(
         "--symbol",
@@ -414,19 +425,23 @@ async def _check(
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point. Returns a process exit code (0 ok, 1 exchange, 2 config)."""
+    """Entry point. Returns a process exit code (0 ok, 1 exchange, 2 config).
+
+    ``--mode live`` does not return: it raises ``SystemExit`` carrying the ruled
+    message, which exits 1.
+    """
     args = _build_parser().parse_args(argv)
     mode = TradingMode.LIVE if args.mode == "live" else TradingMode.TESTNET
 
-    if mode is TradingMode.LIVE and not args.confirm_live:
-        print(
-            "Refusing to connect to LIVE without explicit confirmation.\n"
-            "Re-run with:  python scripts/check_testnet.py --mode live --confirm-live",
-            file=sys.stderr,
-        )
-        return 2
-    if mode is TradingMode.LIVE:
-        print("!! LIVE selected — connecting to real Binance with real funds.")
+    # THE LIVE GUARD, BEFORE ANY SETTING IS READ AND OUTSIDE THE `try` BELOW,
+    # so neither `except ConfigError` nor `except TradingBotError` can turn it
+    # into a different message or exit code. It supersedes the old
+    # `--confirm-live` gate: live connectivity checking is blocked by
+    # architectural invariant (CLAUDE.md), whatever flag accompanies it.
+    try:
+        refuse_live_trading(mode)
+    except LiveTradingBlockedError:
+        raise SystemExit(LIVE_TRADING_BLOCKED_MESSAGE) from None
 
     candidates = [name.strip().upper() for name in args.candidates.split(",") if name.strip()]
 

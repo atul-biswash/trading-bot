@@ -174,8 +174,10 @@ python -m trading_bot backtest      # not implemented yet
 
 `check_testnet.py` takes its mode **only** from `--mode` (default `testnet`),
 deliberately ignoring `config.yaml` and `BOT_MODE`, so a stray `live` there can
-never cause an accidental live connection. `--mode live` additionally requires
-`--confirm-live`. Exit codes: `0` ok, `1` exchange error, `2` config error.
+never cause an accidental live connection. `--mode live` is blocked by
+architectural invariant (CLAUDE.md): it is refused before any setting is read,
+exit `1`, and `--confirm-live` confirms nothing. Exit codes: `0` ok, `1`
+exchange error or live refused, `2` config error.
 
 `run` stops cleanly on Ctrl-C; SIGINT and SIGTERM both close the WebSocket and
 REST connections.

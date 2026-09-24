@@ -38,9 +38,10 @@ path.
 **TESTNET ONLY, with no live path at all.** The mode is the literal
 ``TradingMode.TESTNET`` assigned in code; there is no ``--mode`` flag and no
 ``config.yaml`` key that can reach it. That is stricter than
-``check_testnet.py``, which offers ``--mode live --confirm-live``, and the
-reason is that this script has one purpose on one account: surface that cannot
-be reached cannot be reached by accident.
+``check_testnet.py``, which still parses ``--mode live`` but only to refuse it
+-- live connectivity is blocked by architectural invariant (CLAUDE.md) -- and
+the reason is that this script has one purpose on one account: surface that
+cannot be reached cannot be reached by accident.
 
 **IT LOGS, THROUGH THE BOT'S OWN ``setup_logging``, AND THAT IS THE POINT.**
 ``check_testnet.py`` takes no lock and writes no log, so a full run of it

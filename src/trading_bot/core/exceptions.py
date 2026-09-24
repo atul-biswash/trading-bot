@@ -16,6 +16,22 @@ class ConfigError(TradingBotError):
     """Invalid, missing, or contradictory configuration."""
 
 
+class LiveTradingBlockedError(TradingBotError):
+    """A mode that trades real money was resolved while live trading is blocked.
+
+    **Deliberately NOT a :class:`ConfigError`.** Entry points already catch
+    ``ConfigError`` and report it as a mistake to correct --
+    ``scripts/check_testnet.py`` with exit 2 and a "Configuration error"
+    prefix. This is not a mistake in ``config.yaml``; it is CLAUDE.md's
+    live-trading block, and every entry point translates it to ``SystemExit``
+    carrying the ruled message, with its clause placed AHEAD of its generic
+    handler.
+
+    It still subclasses :class:`TradingBotError`, so a caller catching the base
+    still stops on it rather than letting it escape as a traceback.
+    """
+
+
 # --- Exchange ---------------------------------------------------------------
 class ExchangeError(TradingBotError):
     """Base class for exchange-related failures."""

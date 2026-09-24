@@ -81,11 +81,22 @@ def test_testnet_prefers_testnet_keys(config_path: Path, monkeypatch: pytest.Mon
 
 
 def test_live_mode_without_keys_raises(config_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BOT_MODE", "live")
-    monkeypatch.delenv("BINANCE_API_KEY", raising=False)
-    monkeypatch.delenv("BINANCE_API_SECRET", raising=False)
+    """The missing-credentials refusal, on the only mode that can still reach it.
+
+    REWRITTEN BY DELIBERATE REMOVAL, and the node id is kept. This used to set
+    ``BOT_MODE=live`` and expect ``ConfigError`` for absent live keys. LIVE is
+    now refused with ``LiveTradingBlockedError`` before any key slot is read,
+    so "LIVE without keys" is unreachable; what survives is TESTNET with its
+    slots empty, which refuses because there is no fallback to the live slots.
+
+    M5i-115: an unmet ``pytest.raises`` raises ``Failed``, not
+    ``AssertionError``, and that is what a kill here reports.
+    """
+    monkeypatch.delenv("BINANCE_TESTNET_API_KEY", raising=False)
+    monkeypatch.delenv("BINANCE_TESTNET_API_SECRET", raising=False)
     settings = get_settings(str(config_path))
-    with pytest.raises(ConfigError):
+    assert settings.mode is TradingMode.TESTNET
+    with pytest.raises(ConfigError, match=r"^Missing Binance Testnet credentials$"):
         settings.binance_credentials()
 
 
