@@ -88,6 +88,11 @@ that separation load-bearing. Booking from a `DIVERGED` leg would need a price
 the venue never gave, which is the `NO_QUOTE_TOTAL` path, so the honest options
 are **escalate** or **refuse loudly**, not book.
 
+> **ANNOTATED BY 3b-2b: the `NO_QUOTE_TOTAL` path now BOOKS**, from the sum of
+> the order's own fills (the 3b ruling), so it is no longer an example of not
+> booking. The conclusion stands on its own ground: a `DIVERGED` leg reported
+> no fill, so it has no fills to sum.
+
 ### 2. A gate-count self-verification helper
 
 The 18 count sites are maintained by hand across two files and nothing checks
@@ -458,6 +463,12 @@ removing that record fails it at `ValueError` rather than at an assertion.
 `test_a_partial_fill_with_no_cost_basis_still_goes_naked`, or runs a survey
 whose predicted killers include it.**
 
+> **RESOLVED FOR THE NAMED TEST BY 3b-2b; THE SWEEP STAYS DEFERRED.** The
+> condition fired both ways: the test was edited, and 3b-2b's ordering survey
+> predicted it among its killers. Its unpack is now a length assertion
+> followed by indexing, and under the four orderings that put C ahead of P it
+> failed as `AssertionError` -- a kill, MEASURED. The 12-site sweep is untouched.
+
 ### `M5i-126`. A substring assertion pins wherever its anchor occurs
 
 `test_the_refusal_names_the_cause_the_remedy_and_the_opt_out` asserts three
@@ -474,6 +485,14 @@ is false at the abandoned-after-cancel caller under `ALREADY_CLOSED`, where the
 venue closed the position for us. Three members of this family have already been
 split off for exactly this reason (`_go_naked_retaining`, `_sold_unbooked`,
 `_sold_unpriced`); this would be the fourth.
+
+> **ANNOTATED BY 3b-2: `_sold_unpriced` IS REMOVED, by the project owner's
+> Decision 2** -- *"Deprecate and remove `_sold_unpriced`."* The family has two
+> split-off members, not three, and a fourth would be the third. Its branch's
+> inputs now go elsewhere: a partial fill to `_go_naked`, whose "still open" is
+> TRUE there; a cost-basis-less one to `_sold_unbooked`; an unpriced whole fill
+> to the fetch, then booking, a hold or the deferral. The false sentence this
+> item names is untouched.
 
 **THE FALSE SENTENCE HAS NOT BEEN EMITTED — MEASURED.** Three instruments agree
 at zero: the rendered text `UNPROTECTED`, the structured field
@@ -495,6 +514,12 @@ three tail exits"* where there are now four.
 
 *Arming condition:* **whoever next edits
 `test_a_complete_fill_the_venue_never_priced_reaches_the_naked_guard`.**
+
+> **RESOLVED BY 3b-2b.** The condition fired and is discharged: the test is
+> rewritten as
+> `test_a_complete_fill_the_venue_never_priced_books_from_its_fills_after_the_requery`,
+> because the `_sold_unpriced` branch it pinned was removed by the project
+> owner's Decision 2, and both stale sentences went with the old docstring.
 
 ---
 

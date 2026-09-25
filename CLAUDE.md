@@ -1371,6 +1371,24 @@ data.
   > attempt. Diverged and unbookable exits make none, and a failure skips
   > that position while the pass continues.
 
+  > **ANNOTATED BY 3b-2, WHICH IMPLEMENTS `NO_QUOTE_TOTAL` UNDER THE PROJECT
+  > OWNER'S DECISIONS 1 AND 2.** Two sentences above stop being true of the
+  > tree, and both stay standing because they were true when written.
+  > *"`NO_QUOTE_TOTAL` is ruled; implemented in the follow-up commit"* is
+  > discharged here, not in the commit that followed it. *"Diverged and
+  > unbookable exits make none"* is false for exactly one unbookable outcome:
+  > `NO_QUOTE_TOTAL` now spends the one `get_my_trades` the ruling permits, and
+  > books from that same settlement, holds, or defers. **What SURVIVES, and
+  > Decision 1 is why:** *"`PARTIAL_FILL` is not settled: zero venue calls"*
+  > stays TRUE whether or not the venue priced the fill. Decision 1, verbatim:
+  > *"Reorder the evaluation sequence for unpriced fills to assess Actionable
+  > status (A), Quantity completeness (P), and Cost basis presence (C) before
+  > spending a venue call on Missing Quote Total (Q)."* A diverged, partial or
+  > cost-basis-less exit makes none. Decision 2, verbatim: *"Deprecate and
+  > remove `_sold_unpriced`. Route any trade query failure or incomplete fill
+  > resolution at Site A directly through the standard deferral pathway to
+  > Site B under the in-memory N = 5 bar retention ceiling."*
+
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
   support, mature async/websocket managers, order helpers.

@@ -57,11 +57,19 @@ from trading_bot.core.exceptions import (
 # positions automatically, because the line and the refusal are then keyed off
 # the same fact. Making it public is a `core/` decision and is not taken here.
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION, held_exit, settle_exit
-from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
+from trading_bot.execution.bookability import (
+    BookabilityOutcome,
+    classify_bookability,
+    require_bookable,
+)
 from trading_bot.execution.booking_line import (
+    DISAGREE_MESSAGE,
+    EVENT_QUOTE_TOTALS_DISAGREE,
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
+    disagreement_fields,
     hold_fields,
+    quote_total_fields,
     settlement_fields,
 )
 from trading_bot.execution.reconciliation import (
@@ -79,6 +87,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.core.interfaces import ExchangeClient
     from trading_bot.core.models import Candle, ExitSettlement, Position
     from trading_bot.core.portfolio import Ledger, Portfolio
+    from trading_bot.execution.bookability import TotalSource
     from trading_bot.execution.reconciliation import ExitFill, ProtectionAssessment
 
     #: Writes the accrued ledger durably. **Raising means the write did NOT
@@ -123,11 +132,10 @@ _EVENT_SETTLEMENT_DEFERRED = "exit_settlement_deferred"
 #: this site rather than silently taking a default clause. `BOOKABLE` is absent
 #: because it is not a refusal, and `POSITION_ABSENT` because every pair here
 #: comes from `portfolio.open_positions`; either arriving is a `KeyError` that
-#: names the bug rather than a sentence that hides it.
+#: names the bug rather than a sentence that hides it. **`NO_QUOTE_TOTAL` is
+#: absent from 3b-2b**, because it is no longer refused here: it spends the one
+#: settlement fetch and books from the order's own fills instead.
 _BOOK_REFUSAL_CONSEQUENCE: Final[dict[BookabilityOutcome, str]] = {
-    BookabilityOutcome.NO_QUOTE_TOTAL: (
-        " and the position is closed at the venue with nothing booked"
-    ),
     BookabilityOutcome.PARTIAL_FILL: (
         " -- so it is not booked and the position keeps its untrusted protection"
     ),
@@ -453,9 +461,11 @@ class ReconciliationDriver:
 
         **THE SIX STATES, all decided here.** A fill with a quote total, a
         complete quantity and a known cost basis is BOOKED. A fill whose
-        ``filled_quote_quantity`` is ``None`` is REFUSED and escalated -- that
-        absence means *a leg filled and cannot be priced*, which is a different
-        fact from ``exit_fill is None`` and must not pass silently. A PARTIAL
+        ``filled_quote_quantity`` is ``None`` is SETTLED and, from 3b-2b,
+        BOOKED from the sum of its order's own fills -- that absence means *a
+        leg filled and the venue gave no total*, which is a different fact from
+        ``exit_fill is None`` and must not pass silently; a supply that cannot
+        be read skips the position and the next pass retries it. A PARTIAL
         fill is not booked: it keeps ``UNKNOWN``, which is today's behaviour,
         and the existing ``COMMITTED_RISK_UNKNOWN`` interlock refuses
         portfolio-wide. No ``exit_fill`` at all on a healthy state is the
@@ -515,9 +525,12 @@ class ReconciliationDriver:
         fetches its order's fills -- ``get_my_trades`` for that order id, exactly
         once, at ``reconcile_deadline_s`` and one attempt -- immediately before
         ``close_position``, and books net of the fee
-        :func:`~trading_bot.core.portfolio.settle_exit` sums from them. Nothing
-        else fetches: a diverged, partial, unpriced or cost-basis-less exit
-        makes no call, and neither does a pass with no fill. A fetch that raises
+        :func:`~trading_bot.core.portfolio.settle_exit` sums from them. **So
+        does an exit the venue did not price** (3b-2b): the same one fetch, and
+        its fills' summed ``quote_quantity`` supplies the missing total before
+        the fill is re-classified. Nothing else fetches: a diverged, partial or
+        cost-basis-less exit makes no call, and neither does a pass with no
+        fill. A fetch that raises
         from the exchange family, or a fill list the ledger refuses as
         INCOMPLETE, SKIPS that position at WARNING and the loop goes on; the
         position survives, so the next pass retries. A settlement the ledger
@@ -565,34 +578,51 @@ class ReconciliationDriver:
                     filled_quantity=fill.filled_quantity,
                     filled_quote_quantity=fill.filled_quote_quantity,
                 )
-                total = verdict.total
-                if total is None:
+                if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
+                    # Row 2, CURED (3b-2b). A, P and C are clear (Decision 1), so
+                    # this is the ONE call a missing total may spend -- the same
+                    # settlement fetch a priced exit makes. `_settle` reports its
+                    # own failure (deferred, incomplete or HELD) and returns None.
+                    settlement = await self._settle(position.symbol, fill)
+                    if settlement is None:
+                        continue
+                    verdict = classify_bookability(
+                        position=position,
+                        filled_quantity=fill.filled_quantity,
+                        filled_quote_quantity=fill.filled_quote_quantity,
+                        fills_total=settlement.quote_quantity,
+                    )
+                elif verdict.total is None:
                     # **THE FACT COMES FROM THE PREDICATE; THE CONSEQUENCE IS
-                    # OURS** -- `M5i-068`. Each row keeps the clause it already
-                    # carried, VERBATIM, because the three are different operator
-                    # facts and collapsing them would lose the one row 2 states:
-                    # that the position is closed at the venue. The partial-fill
-                    # clause is true HERE, where a refusal leaves the position
-                    # present and untrusted, and is the exact inverse at
-                    # `_sell_and_book`, where `_go_naked` cancels protection -- so
-                    # it is appended at the caller and never written into
-                    # `execution/bookability.py`.
+                    # OURS** -- `M5i-068`. Each refusing row keeps the clause it
+                    # already carried, VERBATIM. Row 2's -- *the position is closed
+                    # at the venue with nothing booked* -- left with row 2's
+                    # refusal at 3b-2b: a missing total spends its one call above
+                    # instead. The partial-fill clause is true HERE, where a
+                    # refusal leaves the position present and untrusted, and is
+                    # the exact inverse at `_sell_and_book`, where `_go_naked`
+                    # cancels protection -- so it is appended at the caller and
+                    # never written into `execution/bookability.py`.
                     self._refuse_booking(
                         position.symbol,
                         fill.order_id,
                         verdict.reason + _BOOK_REFUSAL_CONSEQUENCE[verdict.outcome],
                     )
                     continue
+                else:
+                    settlement = await self._settle(position.symbol, fill)
+                    if settlement is None:
+                        continue
+                    self._warn_if_totals_disagree(position.symbol, verdict.total, settlement)
 
-                settlement = await self._settle(position.symbol, fill)
-                if settlement is None:
-                    continue
-
-                # Row 1. THE TOTAL PASSES STRAIGHT THROUGH -- no division into a
-                # unit price and no re-multiplication. MEASURED, that round trip is
+                # Row 1. THE TOTAL PASSES STRAIGHT THROUGH -- the venue's own, or
+                # the sum of the order's own fills, and never a division into a
+                # unit price and a re-multiplication. MEASURED, that round trip is
                 # lossy: run 3's own shape, 0.02257000 against 35.38691640, returns
                 # a delta of -1E-26, and `_dump_money` writes such a residual into
-                # `data/state.json` verbatim.
+                # `data/state.json` verbatim. `require_bookable` is the one guard
+                # between the re-classification above and the ledger write.
+                total, source = require_bookable(verdict)
                 realised = self._portfolio.close_position(
                     position.symbol,
                     exit_quote_total=total,
@@ -600,7 +630,14 @@ class ReconciliationDriver:
                     fee=settlement.fee,
                 )
                 booked += 1
-                self._log_booked(position.symbol, fill, settlement, total=total, realised=realised)
+                self._log_booked(
+                    position.symbol,
+                    fill,
+                    settlement,
+                    total=total,
+                    source=source,
+                    realised=realised,
+                )
         finally:
             self._persist_booked(booked)
 
@@ -682,6 +719,34 @@ class ReconciliationDriver:
             )
             return None
 
+    def _warn_if_totals_disagree(
+        self, symbol: str, venue_total: Decimal | None, settlement: ExitSettlement
+    ) -> None:
+        """H: ONE WARNING when the venue's total and the fills' sum differ. The venue's is booked.
+
+        Called on the venue path only, after a settlement succeeded; on the
+        fills path the booked figure IS the sum, and there is nothing to
+        compare. ``venue_total`` is ``Money | None`` only because the verdict
+        carries it that way; on this path it is present.
+        """
+        if venue_total is None or settlement.quote_quantity == venue_total:
+            return
+        _log.warning(
+            DISAGREE_MESSAGE,
+            symbol,
+            extra={
+                "event": EVENT_QUOTE_TOTALS_DISAGREE,
+                "symbol": symbol,
+                **disagreement_fields(
+                    order_id=settlement.order_id,
+                    venue_total=venue_total,
+                    fills_total=settlement.quote_quantity,
+                    quote_asset=self._portfolio.quote_asset,
+                    site="reconciliation",
+                ),
+            },
+        )
+
     @staticmethod
     def _log_booked(
         symbol: str,
@@ -689,6 +754,7 @@ class ReconciliationDriver:
         settlement: ExitSettlement,
         *,
         total: Decimal,
+        source: TotalSource,
         realised: Decimal,
     ) -> None:
         """One line per booked exit, carrying the settlement it was booked net of.
@@ -705,6 +771,10 @@ class ReconciliationDriver:
         is given both, filters on the first and refuses unless the fills sum to
         the second. ``order_created_at`` is OMITTED when the leg's record
         carried no timestamp; it was ``null`` until then.
+
+        **``quote_total`` travels with ``quote_total_source``** (3b-2b), both
+        from ``quote_total_fields``: the venue's own total, or the sum of the
+        order's own fills when the venue gave none.
         """
         _log.info(
             "Booked exit for %s",
@@ -712,7 +782,7 @@ class ReconciliationDriver:
             extra={
                 "event": _EVENT_BOOKED,
                 "symbol": symbol,
-                "quote_total": total,
+                **quote_total_fields(total, source),
                 "realised": realised,
                 **settlement_fields(settlement, order_created_at=fill.order_created_at),
             },

@@ -18,7 +18,12 @@ from types import ModuleType
 from trading_bot.core.models import ExitSettlement, Fee, HeldExit
 from trading_bot.execution import executor as executor_module
 from trading_bot.execution import reconciliation_driver as driver_module
-from trading_bot.execution.booking_line import hold_fields, settlement_fields
+from trading_bot.execution.booking_line import (
+    disagreement_fields,
+    hold_fields,
+    quote_total_fields,
+    settlement_fields,
+)
 
 D = Decimal
 FILLED_AT = datetime(2026, 9, 17, 9, 48, 5, 916000, tzinfo=timezone.utc)
@@ -131,6 +136,103 @@ def test_all_three_booking_lines_consume_the_helper() -> None:
     for module in (executor_module, driver_module):
         written = _dict_keys(module) & set(_SETTLEMENT_ONLY_KEYS)
         assert written == set(), f"{module.__name__} writes {sorted(written)} itself"
+
+
+#: The two keys `quote_total_fields` writes. **Extended at 3b-2b (D).**
+_QUOTE_TOTAL_KEYS = ("quote_total", "quote_total_source")
+_BOOKING_EMITTERS = {"_log_booked", "_book_close", "_book_resolved_close"}
+
+
+def _literal_keys_in(module: ModuleType, function: str) -> set[str]:
+    """Every string key ``function`` writes itself: a dict display's, or a subscript store's."""
+    tree = ast.parse(Path(inspect.getfile(module)).read_text(encoding="utf-8"))
+    keys: set[str] = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef) or fn.name != function:
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Dict):
+                keys |= {
+                    k.value
+                    for k in node.keys
+                    if isinstance(k, ast.Constant) and isinstance(k.value, str)
+                }
+            elif (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.ctx, ast.Store)
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)
+            ):
+                keys.add(node.slice.value)
+    return keys
+
+
+def test_all_three_booking_lines_write_their_total_through_the_provenance_helper() -> None:
+    """D's census: the three emitters call ``quote_total_fields``, and none writes its keys.
+
+    MUTATION: write ``"quote_total": total`` literally at any of the three, or
+    drop ``quote_total_source`` from one line.
+
+    **SCOPED TO THE THREE BOOKING EMITTERS, deliberately.** Other lines in both
+    modules carry ``quote_total`` legitimately and without a source -- the
+    deferral, the drop, the resolution and the hold lines report a figure the
+    venue gave, not a booked one -- so a module-wide census of that key would
+    forbid correct lines. ``quote_total_source``, which only a booking has, IS
+    checked module-wide: no site may write it by hand.
+    """
+    callers = _functions_calling(executor_module, "quote_total_fields") | _functions_calling(
+        driver_module, "quote_total_fields"
+    )
+    assert callers == _BOOKING_EMITTERS
+
+    for module in (executor_module, driver_module):
+        for function in _BOOKING_EMITTERS:
+            written = _literal_keys_in(module, function) & set(_QUOTE_TOTAL_KEYS)
+            assert written == set(), f"{module.__name__}.{function} writes {sorted(written)}"
+        assert "quote_total_source" not in _dict_keys(module), (
+            f"{module.__name__} writes quote_total_source itself"
+        )
+
+
+def test_the_provenance_fields_carry_the_total_beside_its_source() -> None:
+    """D: both keys, by value and type, and nothing else. MUTATION: drop or swap either."""
+    total = D("1786.22691640")
+
+    fields = quote_total_fields(total, "fills")
+
+    assert fields == {"quote_total": total, "quote_total_source": "fills"}
+    assert fields["quote_total"] is total
+    assert str(fields["quote_total"]) == "1786.22691640"
+
+
+def test_the_disagreement_fields_pair_both_amounts_with_the_asset() -> None:
+    """H: BOTH amounts, beside the one asset naming them, and the site. By value and type.
+
+    FABRICATED amounts that DIFFER, so a helper that wrote one amount into
+    both keys changes a value. MUTATION: drop the asset, or swap the amounts.
+    """
+    fields = disagreement_fields(
+        order_id="3189811",
+        venue_total=D("1772.00890360"),
+        fills_total=D("1772.00000000"),
+        quote_asset="USDT",
+        site="reconciliation",
+    )
+
+    assert fields == {
+        "order_id": "3189811",
+        "venue_quote_total": D("1772.00890360"),
+        "fills_quote_total": D("1772.00000000"),
+        "quote_asset": "USDT",
+        "site": "reconciliation",
+    }
+    assert {key: type(value) for key, value in fields.items()} == {
+        "order_id": str,
+        "venue_quote_total": Decimal,
+        "fills_quote_total": Decimal,
+        "quote_asset": str,
+        "site": str,
+    }
 
 
 #: FABRICATED: a BNB fee and a USDT fee on one order -- no captured SELL fill

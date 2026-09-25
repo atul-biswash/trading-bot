@@ -686,30 +686,62 @@ async def test_a_second_pass_over_the_same_fill_books_nothing() -> None:
     assert client.asked == ["BTCUSDT"]  # and nothing to enumerate
 
 
-async def test_a_fill_with_no_quote_total_refuses_and_does_not_book(
+def _supplying_fills() -> list[Trade]:
+    """Two fills of `_filled_leg`'s order summing to `BOOK_QTY` and to `BOOK_TOTAL`.
+
+    So a booking from the fills lands on `BOOK_EXACT`, the figure a priced exit
+    books. FABRICATED: no capture holds an exit the venue did not price
+    (`M5k-093`); the split is chosen, and the two sums are the fixture's own.
+    """
+    return [
+        Trade(
+            trade_id=trade_id,
+            order_id="777",
+            symbol="BTCUSDT",
+            side=OrderSide.SELL,
+            quantity=Decimal(quantity),
+            price=STOP,
+            quote_quantity=Decimal(quote),
+            fee=Fee(amount=Decimal("0.00000000"), asset="USDT"),
+            filled_at=NOW,
+        )
+        for trade_id, quantity, quote in (
+            ("1", "0.01257000", "994.80000000"),
+            ("2", "0.01000000", "791.42691640"),
+        )
+    ]
+
+
+async def test_a_fill_with_no_quote_total_books_from_its_summed_fills_with_one_fetch(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Row 2 -- a leg filled and CANNOT BE PRICED.
+    """Row 2, CURED at 3b-2b -- a leg filled, the venue gave no total, and its fills supply it.
 
-    MUTATION: fall through to booking with `exit_price=None`, or collapse this
-    branch into the `exit_fill is None` skip.
+    MUTATION: ignore `fills_total`; fetch twice; label the source `"venue"`.
 
-    Distinct from row 4 by construction: the position closed at the venue and
-    nothing can be booked for it, which is the state an operator most needs
-    told. Asserted on the reason text, because collapsing the two absences
-    would still produce a refusal -- just a silent one.
+    Rewritten from `test_a_fill_with_no_quote_total_refuses_and_does_not_book`,
+    which pinned the refusal the 3b ruling replaces. The stub RECORDS every
+    `get_my_trades` before it answers, so "one fetch" is a count it could have
+    failed. The fills are FABRICATED; see `_supplying_fills`.
     """
     portfolio = _portfolio(_booking_position())
-    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]},
+        trades={"777": _supplying_fills()},
+    )
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.DEBUG):
         await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
 
-    refusals = [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"]
-    assert len(refusals) == 1
-    assert "no quote total" in refusals[0].reason  # type: ignore[attr-defined]
-    assert portfolio.ledger is None
-    assert "BTCUSDT" in portfolio.positions  # nothing was closed
+    assert client.settled == ["777"]
+    assert "BTCUSDT" not in portfolio.positions
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    assert len(booked) == 1
+    assert vars(booked[0]).get("quote_total") == BOOK_TOTAL
+    assert vars(booked[0]).get("quote_total_source") == "fills"
+    assert [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"] == []
 
 
 async def test_a_partial_fill_is_not_booked(caplog: pytest.LogCaptureFixture) -> None:
@@ -787,8 +819,9 @@ async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
 # **THIS IS THE ONE SITE WHERE THE BOOKABILITY CRITERIA'S ORDER IS
 # OBSERVABLE**, because the three refusals carry three distinct operator
 # messages. Everywhere else the criteria are checked the branches are
-# indistinguishable -- `_bookability`'s caller reads a `None` total from all
-# four of its exclusions, and `_sell_and_book` maps two reasons onto one action.
+# indistinguishable by MESSAGE -- `_bookability`'s caller reads a `None` total
+# from its exclusions (and, from 3b-2b, whether to fetch), and `_sell_and_book`
+# maps two reasons onto one action.
 #
 # **AND IT WAS COMPLETELY UNPINNED UNTIL THESE TESTS.** Every driver fixture
 # above varies exactly ONE axis, so no input makes two conditions true at once
@@ -798,7 +831,7 @@ async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
 # **THEY EXIST TO MAKE A REORDER FAIL LOUDLY**, and the reorder is coming.
 # `M5i-053`: the driver's order is the CANONICAL one a shared bookability
 # predicate must adopt, because it is the only order that preserves every
-# caller's observable behaviour -- `_bookability`'s caller is order-blind and
+# caller's observable behaviour -- `_bookability`'s caller was order-blind and
 # `_sell_and_book` maps a SET of reasons to one action, so the driver's
 # messages are the only thing a canonical order can break. Whoever writes
 # Option 3 half (ii) should find that constraint from a failing test here, not
@@ -1002,24 +1035,16 @@ async def test_each_refusal_states_this_callers_consequence(
     caller-owned half of every refusal message was unheld, and a rewiring that
     silently dropped it would have shipped green. This is that hole.
 
-    **BOTH ROWS, BECAUSE THE TWO CLAUSES ARE DIFFERENT OPERATOR FACTS.** Row 2
-    says the position is CLOSED AT THE VENUE; row 3 says it KEEPS ITS
-    UNTRUSTED PROTECTION. Collapsing them onto one clause loses the first
-    entirely, and asserting only one would not catch that.
+    **ROW 2 LEFT THIS TEST AT 3b-2b, WITH ITS REFUSAL.** Its clause -- *"the
+    position is closed at the venue with nothing booked"* -- belonged to a
+    refusal the 3b ruling replaced: a fill the venue did not price now books
+    from its own fills, and
+    `test_a_fill_with_no_quote_total_books_from_its_summed_fills_with_one_fetch`
+    pins that. What remains is row 3's clause against row 5's, which appends
+    NONE. Both are asserted, so neither collapsing the two onto one clause nor
+    dropping row 3's passes; and row 2's clause is asserted absent from both,
+    because nothing refuses with it any more.
     """
-    # Row 2 -- a fill the venue never priced.
-    portfolio = _portfolio(_booking_position())
-    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
-    with caplog.at_level(logging.WARNING):
-        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
-    no_total = _two_condition_refusal(caplog)
-    assert "no quote total" in no_total, "the FACT half, from the predicate"
-    assert "closed at the venue with nothing booked" in no_total, (
-        "row 2's CONSEQUENCE half, which belongs to this caller and not to the module"
-    )
-
-    caplog.clear()
-
     # Row 3 -- a partial fill.
     portfolio = _portfolio(_booking_position())
     client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quantity=BOOK_PARTIAL)]})
@@ -1030,9 +1055,20 @@ async def test_each_refusal_states_this_callers_consequence(
     assert "keeps its untrusted protection" in partial, (
         "row 3's CONSEQUENCE half -- TRUE here, and the exact inverse at `_go_naked`"
     )
-    # ...and the two consequences are NOT interchangeable.
+
+    caplog.clear()
+
+    # Row 5 -- no cost basis. Its consequence clause is EMPTY by the mapping.
+    portfolio = _portfolio(_booking_position(entry_fill_price=None))
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+    with caplog.at_level(logging.WARNING):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+    no_basis = _two_condition_refusal(caplog)
+    assert "entry_fill_price" in no_basis, "the FACT half, from the predicate"
+    # ...and the consequences are NOT interchangeable.
+    assert "keeps its untrusted protection" not in no_basis
     assert "closed at the venue" not in partial
-    assert "keeps its untrusted protection" not in no_total
+    assert "closed at the venue" not in no_basis
 
 
 async def test_a_pass_with_no_fill_books_nothing_and_saves_nothing() -> None:
@@ -1590,6 +1626,98 @@ async def test_an_unbookable_settlement_is_held_after_one_fetch(
     assert client.settled == ["777"]
     assert len(_held_lines(caplog)) == 1
     assert [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"] == []
+
+
+# --------------------------------------------------------------------------
+# 3b-2b: a missing total supplied from the fills -- when the supply fails,
+# and when the venue's own total and its fills disagree
+# --------------------------------------------------------------------------
+async def test_an_unpriced_fill_whose_fills_fall_short_is_refused_and_kept() -> None:
+    """Variant L on the supply: fills short of the fill are refused, the position kept.
+
+    FABRICATED: no total and a short fill list. MUTATION: book a short sum, or
+    drop the position -- either would put a figure the fills do not account for
+    in the ledger, or lose the position the next pass would retry.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]},
+        trades={"777": [_trade(quantity=Decimal("0.02000000"), quote=Decimal("1582.80000000"))]},
+    )
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert client.settled == ["777"]
+    assert "BTCUSDT" in portfolio.positions
+    assert portfolio.ledger is None
+
+
+async def test_a_venue_total_that_disagrees_with_its_fills_books_the_venue_and_warns(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """H at the driver: the VENUE'S total is booked, and ONE WARNING names both, with the asset.
+
+    FABRICATED: the fills sum to `1786.20000000` against the venue's
+    `BOOK_TOTAL` -- a DIFFERING sum, so both a booking of the wrong figure and
+    a missing warning are visible. MUTATION: omit the warning, or book the sum.
+    """
+    portfolio = _portfolio(_booking_position())
+    fills_sum = Decimal("1786.20000000")
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]},
+        trades={"777": [_trade(quote=fills_sum)]},
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    warned = [
+        r for r in caplog.records if getattr(r, "event", None) == "exit_quote_totals_disagree"
+    ]
+    assert len(warned) == 1
+    fields = vars(warned[0])
+    assert warned[0].levelno == logging.WARNING
+    assert fields.get("venue_quote_total") == BOOK_TOTAL
+    assert fields.get("fills_quote_total") == fills_sum
+    assert fields.get("quote_asset") == "USDT"
+    assert fields.get("site") == "reconciliation"
+    assert fields.get("order_id") == "777"
+    booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    assert len(booked) == 1
+    assert vars(booked[0]).get("quote_total") == BOOK_TOTAL
+    assert vars(booked[0]).get("quote_total_source") == "venue"
+
+
+async def test_a_foreign_fee_on_the_supplying_fetch_holds_after_one_fetch(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """R2 on the Q path: the one fetch that would supply the total finds a BTC fee -- HELD.
+
+    FABRICATED BTC fee and no total. Pass 2 runs two minutes on, so only
+    ruling A keeps it away. The hold line OMITS `quote_total`: the venue gave
+    none and nothing was supplied. MUTATION: refuse at WARNING, or fetch again.
+    """
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]},
+        trades={"777": _TERMINAL["foreign_fee"]},
+    )
+    ticks = iter([NOW, NOW + timedelta(minutes=2)])
+    driver = _driver(portfolio, client, clock=lambda: next(ticks))
+
+    with caplog.at_level(logging.DEBUG):
+        await driver(_candle())
+        await driver(_candle())
+
+    assert client.settled == ["777"]
+    lines = _held_lines(caplog)
+    assert len(lines) == 1
+    assert "quote_total" not in vars(lines[0])
+    assert position.settlement_hold is True
+    assert portfolio.ledger is None
 
 
 def _cancelled_leg() -> Order:

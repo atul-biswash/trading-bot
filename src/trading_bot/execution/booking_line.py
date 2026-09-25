@@ -31,6 +31,13 @@ at its own level.
 **THE HOLD LINE LIVES HERE TOO** (R2): an exit that filled and cannot be
 booked is held at three sites, and :func:`hold_fields` is their one field set,
 for the reason ``settlement_fields`` is the booking lines'.
+
+**SO DO THE BOOKED FIGURE'S PROVENANCE AND THE DISAGREEMENT LINE** (3b-2b). A
+booked total is the venue's own or the sum of the order's own fills, and
+:func:`quote_total_fields` writes it BESIDE the source that says which, for all
+three booking lines. When the venue's total exists and the fills sum to
+something else, the venue's is booked and each site emits ONE WARNING through
+:func:`disagreement_fields`, both amounts paired with their asset.
 """
 
 from __future__ import annotations
@@ -42,8 +49,18 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from decimal import Decimal
 
     from trading_bot.core.models import ExitSettlement, HeldExit
+    from trading_bot.execution.bookability import TotalSource
 
-__all__ = ["EVENT_SETTLEMENT_HELD", "HOLD_MESSAGE", "hold_fields", "settlement_fields"]
+__all__ = [
+    "DISAGREE_MESSAGE",
+    "EVENT_QUOTE_TOTALS_DISAGREE",
+    "EVENT_SETTLEMENT_HELD",
+    "HOLD_MESSAGE",
+    "disagreement_fields",
+    "hold_fields",
+    "quote_total_fields",
+    "settlement_fields",
+]
 
 #: The event of the one CRITICAL an exit hold emits, at whichever site holds
 #: it -- the reconciliation driver, the executor's sell, or its resolution. R2.
@@ -53,6 +70,46 @@ HOLD_MESSAGE: Final = (
     "%s: an exit FILLED and cannot be booked -- NOTHING WAS BOOKED and the position is "
     "HELD until an operator acts"
 )
+
+#: The event of the one WARNING a booking site emits when the venue's quote
+#: total and the sum of the order's own fills disagree. The venue's is booked.
+EVENT_QUOTE_TOTALS_DISAGREE: Final = "exit_quote_totals_disagree"
+#: Its message. ``%s`` is the symbol, so every site passes the same arguments.
+DISAGREE_MESSAGE: Final = (
+    "%s: the venue's quote total and the sum of its fills disagree -- the VENUE'S is booked"
+)
+
+
+def quote_total_fields(total: Decimal, source: TotalSource) -> dict[str, Decimal | str]:
+    """The booked total and its provenance, as ``extra=`` may carry them.
+
+    ``quote_total`` is the figure ``close_position`` was handed and
+    ``quote_total_source`` says whose it is: ``"venue"`` for the order's own
+    ``cummulativeQuoteQty``, ``"fills"`` for the sum of its fills. The two are
+    one fact and are written together, by this function only; a booking line
+    spreads the result and writes neither key itself.
+    """
+    return {"quote_total": total, "quote_total_source": source}
+
+
+def disagreement_fields(
+    *, order_id: str, venue_total: Decimal, fills_total: Decimal, quote_asset: str, site: str
+) -> dict[str, Decimal | str]:
+    """The disagreement line's fields: BOTH amounts, beside the ONE asset naming them.
+
+    ``venue_total`` is what is booked; ``fills_total`` is what the order's own
+    fills sum to. ``quote_asset`` is the portfolio's -- the asset both figures
+    are denominated in, per the money rule's pairing -- and ``site`` is which of
+    the three booking sites saw it. Nothing here logs; the caller emits at
+    WARNING.
+    """
+    return {
+        "order_id": order_id,
+        "venue_quote_total": venue_total,
+        "fills_quote_total": fills_total,
+        "quote_asset": quote_asset,
+        "site": site,
+    }
 
 
 def settlement_fields(

@@ -2440,42 +2440,29 @@ class TestTheCloseExecutes:
         assert portfolio.ledger is not None
         assert portfolio.ledger.realised_pnl == D("2.25000000")
 
-    async def test_a_complete_fill_the_venue_never_priced_reaches_the_naked_guard(
+    async def test_a_complete_fill_the_venue_never_priced_books_from_its_fills_after_the_requery(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**Q AT SITE 2. The PATH and the STATE -- deliberately not the label.**
+        """**Q AT SITE A, CURED (3b-2b): requery, ONE settlement, book from the fills.**
 
-        MUTATION: route this state to `_sold_unbooked`; drop the position.
+        MUTATION: ignore `fills_total`; label the source `"venue"`; skip the
+        requery.
 
-        **THE SIBLING OF THE TEST ABOVE WITH ONE AXIS CHANGED.** That one lets
-        the requery ANSWER with a total; this one lets it answer with none. The
-        create-order response is byte-identical between them, so a pass here
-        and there together say the tail discriminates on the POST-REQUERY total
-        rather than on the response's own field -- which is the ordering
-        `_sell_and_book` states and nothing else pins.
+        REWRITTEN from `..._never_priced_reaches_the_naked_guard`, and that
+        rewrite is what RESOLVES `M5i-109`: the old docstring's two stale
+        sentences -- a sibling named `..._is_reported_as_partial_today`, and
+        *"the three tail exits"* -- go with it, and the `_sold_unpriced` branch it
+        pinned was removed by the project owner's Decision 2.
 
         **THE `"CL"` KEY IS PRESENT AND EXPLICIT, AND THAT IS LOAD-BEARING.**
-        `_selling_client` seeds only `SL` and `TP`, and `FakeClient.get_order`
-        subscripts that dict, so omitting `CL` reaches `None` by `KeyError`
-        through `_requery_sell_total`'s bare ``except``. The path would then be
-        driven by a FIXTURE DEFECT rather than by the venue answer the test
-        claims to model -- the fake deciding the result, which is the hazard
-        `FakeRootClient.get_all_order_lists` already records.
-
-        **NOTHING IN THE TREE REACHED THIS BRANCH BEFORE THIS TEST.** MEASURED
-        by instrumenting the three tail exits across the whole module: 15 tests
-        reach the tail, 2 of them go naked, and BOTH arrive via `PARTIAL_FILL`.
-        The `NO_QUOTE_TOTAL` disjunct had zero coverage -- `M5i-098`.
-
-        **IT ASSERTS NO LABEL, ON PURPOSE.** Commit B corrects the reason code
-        and the operator text; this test must survive that untouched, so it
-        pins only what B preserves. Its sibling `..._is_reported_as_partial_-
-        today` pins the label and IS rewritten by B. One instrument, one
-        measurement, kept apart so a failure says which moved.
+        `FakeClient.get_order` subscripts the leg answers, so omitting `CL`
+        would reach `None` by `KeyError` through `_requery_sell_total`'s bare
+        ``except`` -- the fake deciding the result. Here the re-read answers,
+        and STILL carries no total. FABRICATED: no capture holds one
+        (`M5k-093`). The default settlement is one fill of the whole quantity at
+        `SELL_TOTAL`, so the booked figure is the fills' sum.
         """
         client = _selling_client(sell_answer=sell_fill(total=None))
-        # The re-read answers, and STILL carries no total -- so the venue
-        # priced this complete fill neither time.
         client._leg_answers = {  # type: ignore[assignment]
             "SL": _leg("0"),
             "TP": _leg("0"),
@@ -2486,58 +2473,42 @@ class TestTheCloseExecutes:
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        # THE SELL REALLY HAPPENED, and the fallback really ran.
-        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
+        # The sell, the re-read, and exactly ONE settlement read.
+        assert client.venue_calls == [*FULL_CLOSE, "get_order", "get_my_trades"]
         assert client.order_queries[-1].endswith("-CL")
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        assert vars(booked[0]).get("quote_total") == SELL_TOTAL
+        assert vars(booked[0]).get("quote_total_source") == "fills"
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
+        assert SYMBOL not in portfolio.positions
+        assert executor._pending == {}
 
-        # THE GUARD BOUND, and the drop-unbooked branch did not.
-        assert len(_records(caplog, "close_sold_unpriced")) == 1
-        assert _records(caplog, "close_sold_unbooked") == []
-
-        # THE POSITION IS RETAINED, and nothing was booked.
-        assert SYMBOL in portfolio.positions
-        assert portfolio.ledger is None
-
-    async def test_a_complete_fill_the_venue_never_priced_says_so_and_nothing_else(
+    async def test_a_complete_fill_the_venue_never_priced_whose_fills_cannot_be_read_defers(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**B6, AND BOTH POLARITIES -- the absent half is the one that cost.**
+        """**DECISION 2 AT SITE A: a failed supply DEFERS to Site B -- nothing kept, nothing dropped.**
 
-        MUTATION: revert the reason to `close_partial_fill`; restore
-        `_go_naked`'s wording on this branch; emit under
-        `close_position_naked`.
+        MUTATION: drop instead of deferring; release the record; restore a
+        `_sold_unpriced`-shaped line.
 
-        **THIS TEST REPLACED ONE THAT ASSERTED THE OPPOSITE, DELIBERATELY.**
-        Commit A shipped this state under `close_partial_fill` and pinned it
-        that way, in a test whose docstring said in words that every assertion
-        in it was a falsehood. That was a BEFORE-measurement: a fixture written
-        after a change agrees with the code beside it and demonstrates nothing,
-        so the diff between that test's assertions and these is the evidence
-        that the label moved. A reader finding both versions in the history is
-        seeing that method, not a reversal.
+        REWRITTEN from `..._never_priced_says_so_and_nothing_else`, which pinned
+        `close_sold_unpriced` and its text. The project owner's Decision 2
+        removed that branch: *"Route any trade query failure or incomplete fill
+        resolution at Site A directly through the standard deferral pathway to
+        Site B under the in-memory N = 5 bar retention ceiling."*
 
-        **THE THREE FALSEHOODS, EACH ASSERTED ABSENT BY NAME.** On a COMPLETE
-        fill `close_partial_fill` says "partial" of a whole sell, *"still
-        open"* describes base that is gone, and *"selling the base manually"*
-        instructs a SECOND sale of an asset already sold -- `M5i-035`'s
-        measured money bug, reached through a second branch. A test asserting
-        only what is present would pass with the false phrase beside the true
-        one, which is the state `M5i-007` found.
-
-        **AND THE EVENT NAME IS ASSERTED TWICE OVER**, because an operator
-        filtering on `close_position_naked` must not find this record and one
-        filtering on `close_sold_unbooked` must not either: that branch DROPS
-        the position and this one keeps it, so the two cannot share a name
-        without sending a reader to look for a position that is or is not
-        there.
-
-        `dispatch_refused` is asserted ABSENT. The close SUCCEEDED -- the venue
-        is flat and the signal got what it asked for -- so a refusal here would
-        be logged against a `CLOSE` that did its job. That is `_sold_unbooked`'s
-        stated discriminator, and `_go_naked_retaining` refuses instead because
-        ITS sell may never have happened.
+        FABRICATED: no total, and a transport failure on the one settlement
+        read. What `_sold_unpriced`'s test guarded still holds and is asserted:
+        no line claims the position is still open, none instructs a sale, and
+        no refusal is logged against a `CLOSE` that did its job. The deferral
+        line OMITS `quote_total` -- there is none -- where it used to carry it.
         """
-        client = _selling_client(sell_answer=sell_fill(total=None))
+        client = _selling_client(
+            sell_answer=sell_fill(total=None),
+            trades_answers=[ExchangeConnectionError("timed out")],
+        )
         client._leg_answers = {  # type: ignore[assignment]
             "SL": _leg("0"),
             "TP": _leg("0"),
@@ -2548,43 +2519,22 @@ class TestTheCloseExecutes:
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        records = _records(caplog, "close_sold_unpriced")
-        assert len(records) == 1, "B6's branch did not fire; the Q exit is gone"
-        (record,) = records
-        message = record.getMessage()
-        resolution = record.resolution  # type: ignore[attr-defined]
-
-        assert record.levelno == logging.CRITICAL
-        # ITS OWN NAME. Neither neighbour may claim this record.
-        assert _records(caplog, "close_position_naked") == []
-        assert _records(caplog, "close_sold_unbooked") == []
-        # ...and no refusal, because the close did what it was asked.
-        assert _records(caplog, "dispatch_refused") == []
-
-        # MUST NOT call a whole fill partial.
-        assert record.reason == "close_no_quote_total"  # type: ignore[attr-defined]
-        assert "partial" not in message
-        assert "partial" not in resolution
-        # MUST NOT say the position is still open at the venue.
-        assert "still open" not in message
-        assert "still open" not in resolution
-        # MUST NOT instruct a second sale of base already gone. THE EXPENSIVE ONE.
-        assert "selling the base" not in resolution
-        assert "SELF-REFRESHING" not in resolution
-
-        # ...and MUST say what is actually known, which is four things.
-        assert "FILLED" in message
-        assert "NO QUOTE TOTAL" in message
-        assert "NOTHING WAS BOOKED" in resolution
-        assert "DO NOT SELL THIS BASE AGAIN" in resolution
-        assert "trade history" in resolution
-        # The handle an operator reconciles by.
-        assert record.close_client_order_id.endswith("-CL")  # type: ignore[attr-defined]
-
-        # THE POSITION IS KEPT and marked, which is what refuses entries.
+        assert client.venue_calls == [*FULL_CLOSE, "get_order", "get_my_trades"]
+        deferred = _records(caplog, "close_settlement_deferred")
+        assert len(deferred) == 1
+        fields = vars(deferred[0])
+        assert fields.get("site") == "sell"
+        assert fields.get("executed_qty") == CLOSE_QTY
+        assert "quote_total" not in fields
+        # KEPT for Site B: the record, and the position it will settle.
+        assert getattr(executor._pending.get(SYMBOL), "kind", None) == "close"
         assert SYMBOL in portfolio.positions
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
         assert portfolio.ledger is None
+        # Nothing claims more than is known.
+        assert _records(caplog, "close_position_naked") == []
+        assert _records(caplog, "close_sold_unbooked") == []
+        assert _records(caplog, "dispatch_refused") == []
 
     async def test_an_unpriced_partial_sell_goes_naked_with_zero_calls_after_the_sell(
         self, caplog: pytest.LogCaptureFixture
@@ -2600,8 +2550,9 @@ class TestTheCloseExecutes:
         configured -- priced, so a requery made here would even succeed -- so
         `venue_calls == FULL_CLOSE` fails on the one extra call either mutation
         spends. Until 3b-2a this input was re-read and reached `_sold_unpriced`,
-        whose line says the sell FILLED IN FULL; `close_sold_unpriced` is
-        asserted absent for that reason.
+        whose line says the sell FILLED IN FULL. That event no longer exists
+        (Decision 2, 3b-2b), so its absence is no longer asserted: nothing can
+        emit it.
         """
         client = _selling_client(sell_answer=sell_fill(executed=D("0.2"), total=None))
         client._leg_answers = {  # type: ignore[assignment]
@@ -2618,7 +2569,6 @@ class TestTheCloseExecutes:
         naked = _records(caplog, "close_position_naked")
         assert len(naked) == 1, "the partial did not go naked"
         assert vars(naked[0]).get("reason") == "close_partial_fill"
-        assert _records(caplog, "close_sold_unpriced") == []
         # Base remains at the venue, so the position is KEPT, untrusted.
         assert SYMBOL in portfolio.positions
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
@@ -2661,29 +2611,62 @@ class TestTheCloseExecutes:
         assert fields.get("executed_qty") == CLOSE_QTY
         assert "quote_total" not in fields
         assert fields.get("outcome") == "filled_and_released"
-        assert _records(caplog, "close_sold_unpriced") == []
         # DROPPED, not booked, and the record released.
         assert SYMBOL not in portfolio.positions
         assert portfolio.ledger is None
         assert portfolio.free_quote == D("10000")
         assert executor._pending == {}
 
-    async def test_an_unpriced_whole_sell_with_its_cost_basis_still_requeries_then_is_kept(
+    async def test_an_unpriced_whole_sell_with_its_cost_basis_still_requeries_and_books_the_venue_total(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """**THE CONTROL for the two zero-call tests above: Q still requeries.**
+        """**THE CONTROL for the two zero-call tests above: Q still requeries (G).**
 
         MUTATION: skip the requery on Q.
 
-        The same fake shape with both other facts false, so what reached the
-        requery there would reach it here -- and here it MUST. The response and
-        the re-read both carry no total (FABRICATED, `M5k-093`), so the sell
-        reaches `_sold_unpriced` exactly as before 3b-2a. DECLARED: this
-        overlaps `..._never_priced_reaches_the_naked_guard` on purpose, and it
-        abstains from every reorder mutation, because Q wins on this input
+        REWRITTEN at 3b-2b from `..._still_requeries_then_is_kept`: the sell no
+        longer reaches `_sold_unpriced`, which Decision 2 removed. The same fake
+        shape with both other facts false, so what reached the requery there
+        would reach it here -- and here it MUST. The response carries no total
+        (FABRICATED, `M5k-093`); the re-read by the close id DOES, so the verdict
+        is re-taken on the VENUE'S figure and the one settlement books it,
+        labelled `"venue"` -- the fills agree, so no disagreement line. DECLARED:
+        it abstains from every reorder mutation, because Q wins on this input
         under either order.
         """
         client = _selling_client(sell_answer=sell_fill(total=None))
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(),
+        }
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == [*FULL_CLOSE, "get_order", "get_my_trades"]
+        assert client.order_queries[-1].endswith("-CL")
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        assert vars(booked[0]).get("quote_total") == SELL_TOTAL
+        assert vars(booked[0]).get("quote_total_source") == "venue"
+        assert _records(caplog, "exit_quote_totals_disagree") == []
+        assert portfolio.ledger is not None
+
+    async def test_an_unpriced_sell_with_a_foreign_fee_holds_after_one_fetch(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R2 on the Q path: the one read that would supply the total finds a BTC fee -- HELD.
+
+        FABRICATED: no total on the response or the re-read, and a BTC fee. The
+        hold line OMITS `quote_total`, since the venue gave none and nothing was
+        supplied. MUTATION: treat the hold as a deferral.
+        """
+        client = _selling_client(
+            sell_answer=sell_fill(total=None),
+            trades_answers=[[sell_trade(fee=_BTC_FEE)]],
+        )
         client._leg_answers = {  # type: ignore[assignment]
             "SL": _leg("0"),
             "TP": _leg("0"),
@@ -2694,14 +2677,46 @@ class TestTheCloseExecutes:
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
-        assert client.order_queries[-1].endswith("-CL")
-        unpriced = _records(caplog, "close_sold_unpriced")
-        assert len(unpriced) == 1, "the whole unpriced sell did not reach _sold_unpriced"
-        assert vars(unpriced[0]).get("reason") == "close_no_quote_total"
-        assert _records(caplog, "close_sold_unbooked") == []
-        assert SYMBOL in portfolio.positions
+        assert client.venue_calls == [*FULL_CLOSE, "get_order", "get_my_trades"]
+        held = _records(caplog, "exit_settlement_held")
+        assert len(held) == 1
+        assert vars(held[0]).get("site") == "sell"
+        assert "quote_total" not in vars(held[0])
+        assert portfolio.positions[SYMBOL].settlement_hold is True
+        assert getattr(executor._pending.get(SYMBOL), "kind", None) == "close"
+        assert _records(caplog, "close_settlement_deferred") == []
         assert portfolio.ledger is None
+
+    async def test_a_priced_sell_that_disagrees_with_its_fills_books_the_venue_total_and_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """H at Site A: the VENUE'S total is booked, and ONE WARNING names both, with the asset.
+
+        FABRICATED: one fill of the whole quantity summing to `51.20000000`
+        against the response's `SELL_TOTAL` of `51.25000000` -- a DIFFERING
+        sum. MUTATION: omit the warning, or book the fills' sum.
+        """
+        fills_sum = D("51.20000000")
+        client = _selling_client(trades_answers=[[sell_trade(quote=fills_sum)]])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        warned = _records(caplog, "exit_quote_totals_disagree")
+        assert len(warned) == 1
+        assert warned[0].levelno == logging.WARNING
+        fields = vars(warned[0])
+        assert fields.get("venue_quote_total") == SELL_TOTAL
+        assert fields.get("fills_quote_total") == fills_sum
+        assert fields.get("quote_asset") == "USDT"
+        assert fields.get("site") == "sell"
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        assert vars(booked[0]).get("quote_total") == SELL_TOTAL
+        assert vars(booked[0]).get("quote_total_source") == "venue"
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
 
     async def test_a_partial_fill_books_nothing_and_goes_naked(
         self, caplog: pytest.LogCaptureFixture
@@ -2987,7 +3002,11 @@ class TestAnUnbookableSellIsDropped:
         with caplog.at_level(logging.CRITICAL):
             await executor.dispatch(close_signal(), exit_assessment(), candle())
 
-        (naked,) = _records(caplog, "close_position_naked")
+        # ASSERTED, NEVER UNPACKED (`M5i-104`): a tuple unpack of the wrong
+        # count raises `ValueError`, which is a crash rather than a kill.
+        records = _records(caplog, "close_position_naked")
+        assert len(records) == 1, "the partial fill with no cost basis did not go naked"
+        naked = records[0]
         assert naked.reason == "close_partial_fill"  # type: ignore[attr-defined]
         assert "still open" in naked.getMessage()
         assert "selling the base manually" in naked.resolution  # type: ignore[attr-defined]
@@ -3932,40 +3951,119 @@ class TestAResolvedFillIsBooked:
         assert portfolio.ledger is None
         assert portfolio.free_quote == D("10000")
 
-    async def test_a_fill_with_no_quote_total_reported_books_nothing(self) -> None:
-        """A fill the venue priced for nobody. **No total, no booking.**
+    async def test_a_resolved_fill_with_no_quote_total_books_from_its_fills(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**Q AT SITE B, CURED (3b-2b):** one settlement, and its fills' sum is booked.
 
-        MUTATION: fall back to a derived figure when the total is absent.
+        MUTATION: ignore `fills_total`; label the source `"venue"`; drop the
+        fill as before.
 
-        `filled_quote_quantity` is `Money | None` and that field's own docstring
-        keeps the two apart: `None` means THE VENUE DID NOT REPORT IT, where
-        zero means it reported nothing filled. There is no fallback by design --
-        `close_position` would have to be handed a number this process invented.
-
-        Unreachable through `_sold()`, which always carries a total, so the
-        `Order` is built here directly. That is the point: the branch exists for
-        a venue response shape the happy-path fixture cannot produce.
+        REWRITTEN from `test_a_fill_with_no_quote_total_reported_books_nothing`,
+        which pinned *"No total, no booking"* -- the rule the 3b ruling replaced:
+        *"sum an order's fills' quote_quantity to supply a missing total, and
+        re-classify."* The total is still never DERIVED from a price; it is the
+        sum of the venue's own fills. FABRICATED: no capture holds an absent
+        total (`M5k-093`); the default settlement is one fill of the whole
+        quantity at `SELL_TOTAL`.
         """
         portfolio = _held()
-        unpriced = Order(
-            order_id="78",
-            symbol=SYMBOL,
-            side=OrderSide.SELL,
-            type=OrderType.MARKET,
-            status=OrderStatus.FILLED,
-            quantity=CLOSE_QTY,
-            filled_quantity=CLOSE_QTY,
-            filled_quote_quantity=None,
+        executor, client, _ = build(
+            client=_resolving_client(self._unpriced_sold()), portfolio=portfolio
         )
-        executor, _, _ = build(client=_resolving_client(unpriced), portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        assert client.venue_calls == ["get_order", "get_my_trades"]
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        assert vars(booked[0]).get("quote_total") == SELL_TOTAL
+        assert vars(booked[0]).get("quote_total_source") == "fills"
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == D("2.25000000")
+        assert SYMBOL not in portfolio.positions
+        assert executor._pending == {}
+
+    async def test_a_resolved_unpriced_partial_makes_no_fetch_and_releases(self) -> None:
+        """P at Site B is decided with ZERO fetches, priced or not (Decision 1).
+
+        MUTATION: fetch on every filled answer; or put Q ahead of P.
+
+        FABRICATED: an unpriced partial. `get_my_trades` is RECORDED by the fake
+        before it answers, so a fetch would show here.
+        """
+        partial = self._unpriced_sold().model_copy(update={"filled_quantity": D("0.2")})
+        portfolio = _held()
+        executor, client, _ = build(client=_resolving_client(partial), portfolio=portfolio)
         executor._pending[SYMBOL] = _close()
 
         await executor(candle())
 
+        assert client.venue_calls == ["get_order"]
         assert portfolio.ledger is None
-        assert portfolio.free_quote == D("10000")
-        # Still dropped -- the fill is confirmed, only its price is not.
         assert SYMBOL not in portfolio.positions
+        assert executor._pending == {}
+
+    async def test_a_resolved_unpriced_fill_whose_fills_cannot_be_read_is_retained(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Decision 2's other half: a failed supply is RETAINED under N = 5, never dropped.
+
+        MUTATION: key the retention branch on the total rather than on the
+        fetch -- a fill with no total then falls to the drop.
+
+        FABRICATED: no total, and a transport failure on the one settlement
+        read. The position and the record both stay for the next bar.
+        """
+        client = _resolving_client(self._unpriced_sold())
+        client._trades_answers = [ExchangeConnectionError("timed out")]
+        portfolio = _held()
+        executor, _, _ = build(client=client, portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        assert SYMBOL in executor._pending
+        assert SYMBOL in portfolio.positions
+        assert portfolio.ledger is None
+        deferred = _records(caplog, "close_settlement_deferred")
+        assert len(deferred) == 1
+        assert vars(deferred[0]).get("site") == "resolution"
+        assert _records(caplog, "close_record_resolved") == []
+
+    async def test_a_resolved_priced_fill_that_disagrees_with_its_fills_warns(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """H at Site B: the VENUE'S total is booked, and ONE WARNING names both, with the asset.
+
+        FABRICATED: the venue's `1810.57726950` against fills summing to
+        `1810.50000000` -- a DIFFERING sum. MUTATION: omit the warning.
+        """
+        fills_sum = D("1810.50000000")
+        client = _resolving_client()
+        client._trades_answers = [[sell_trade(order_id="77", quantity=D("0.5"), quote=fills_sum)]]
+        portfolio = _held()
+        executor, _, _ = build(client=client, portfolio=portfolio)
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor(candle())
+
+        warned = _records(caplog, "exit_quote_totals_disagree")
+        assert len(warned) == 1
+        fields = vars(warned[0])
+        assert fields.get("venue_quote_total") == D("1810.57726950")
+        assert fields.get("fills_quote_total") == fills_sum
+        assert fields.get("quote_asset") == "USDT"
+        assert fields.get("site") == "resolution"
+        booked = _records(caplog, "close_booked")
+        assert len(booked) == 1
+        assert vars(booked[0]).get("quote_total_source") == "venue"
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == _EXPECTED_RESOLVED_PNL
 
     @staticmethod
     def _unpriced_sold() -> Order:
@@ -3998,13 +4096,19 @@ class TestAResolvedFillIsBooked:
         the figure's absence keeps the key off it. Read through `vars(record)`,
         because `getattr` on a key written as `None` and on one never written
         answers the same.
+
+        **RE-DERIVED AT 3b-2b TO THE RESTART SHAPE.** Its input held the
+        position in memory; from 3b-2b that fill BOOKS from its own fills. With
+        no position (A) it is still released, with ZERO fetches, and the line
+        still omits the total the venue never reported.
         """
-        executor, _, _ = build(client=_resolving_client(self._unpriced_sold()), portfolio=_held())
+        executor, client, _ = build(client=_resolving_client(self._unpriced_sold()))
         executor._pending[SYMBOL] = _close()
 
         with caplog.at_level(logging.CRITICAL):
             await executor(candle())
 
+        assert "get_my_trades" not in client.venue_calls
         resolved = _records(caplog, "close_record_resolved")
         assert len(resolved) == 1, "the close record was not resolved"
         fields = vars(resolved[0])
@@ -4026,8 +4130,11 @@ class TestAResolvedFillIsBooked:
         own trades at the venue when not; both halves are asserted, and the old
         promise ABSENT, since a test asserting only presence would pass with the
         stale clause left beside the new one.
+
+        **RE-DERIVED AT 3b-2b TO THE RESTART SHAPE**, for the J test's reason:
+        with the position in memory this fill now books.
         """
-        executor, _, _ = build(client=_resolving_client(self._unpriced_sold()), portfolio=_held())
+        executor, _, _ = build(client=_resolving_client(self._unpriced_sold()))
         executor._pending[SYMBOL] = _close()
 
         with caplog.at_level(logging.CRITICAL):

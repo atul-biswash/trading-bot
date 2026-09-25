@@ -47,11 +47,16 @@ from trading_bot.execution.bookability import (
     BookabilityOutcome,
     BookabilityVerdict,
     classify_bookability,
+    require_bookable,
 )
 from trading_bot.execution.booking_line import (
+    DISAGREE_MESSAGE,
+    EVENT_QUOTE_TOTALS_DISAGREE,
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
+    disagreement_fields,
     hold_fields,
+    quote_total_fields,
     settlement_fields,
 )
 from trading_bot.execution.close_plan import CloseAction, LegReport, plan_close
@@ -76,6 +81,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.core.interfaces import ExchangeClient
     from trading_bot.core.models import Candle, OrderList, Signal
     from trading_bot.core.portfolio import Portfolio
+    from trading_bot.execution.bookability import TotalSource
 
 __all__ = ["OrderExecutor", "Pending", "PendingClose", "PendingPlacement"]
 
@@ -251,21 +257,11 @@ _EVENT_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 #: `close_position_naked` -- that line says the position is still open and
 #: instructs a manual sale, and both are false here because the base is gone.
 _EVENT_CLOSE_SOLD_UNBOOKED = "close_sold_unbooked"
-#: The bot's OWN close sell COMPLETED and the venue never priced it. **B6.** Its
-#: own event, and it must not reuse either neighbour. Not
-#: `close_position_naked`: that line says the position is still open and
-#: instructs a manual sale, and both are false once a WHOLE fill has executed --
-#: an operator acting on it sells base that is already gone, which is
-#: `M5i-035`'s measured failure reached through a second branch. Not
-#: `close_sold_unbooked` either, and the difference is the position: there the
-#: cost basis is missing -- priced or not, since the project owner's PIN-1 at
-#: 3b-2a -- so the position is DROPPED; here the cost basis is present, the
-#: figure itself is absent, the exit is unpriceable, and the position is KEPT.
-_EVENT_CLOSE_SOLD_UNPRICED = "close_sold_unpriced"
-#: The bot's close sell FILLED and its fee could not be settled yet. WARNING,
-#: and its own event: the record is KEPT and settlement is retried on the
-#: symbol's next candles, so this is neither `close_record_resolved` (nothing
-#: resolved) nor `close_sold_unbooked` (nothing dropped).
+#: The bot's close sell FILLED and its fee -- and, when the venue gave no quote
+#: total, that total too -- could not be settled yet. WARNING, and its own
+#: event: the record is KEPT and settlement is retried on the symbol's next
+#: candles, so this is neither `close_record_resolved` (nothing resolved) nor
+#: `close_sold_unbooked` (nothing dropped).
 _EVENT_CLOSE_SETTLEMENT_DEFERRED = "close_settlement_deferred"
 
 #: The working leg expired: the venue ANSWERED and said nothing filled, so no
@@ -306,38 +302,6 @@ _REASON_CLOSE_SELL_FAILED = "close_sell_failed"
 #: sold. Ruling 2.
 _REASON_CLOSE_SELL_UNCONFIRMED = "close_sell_unconfirmed"
 _REASON_CLOSE_PARTIAL_FILL = "close_partial_fill"
-#: A COMPLETE fill the venue never priced. Deliberately NOT
-#: `_REASON_CLOSE_PARTIAL_FILL`, for the reason `_REASON_CLOSE_SELL_UNCONFIRMED`
-#: is not `_REASON_CLOSE_SELL_FAILED`: the word asserts a state this client does
-#: not possess, and an operator acts on it. "Partial" says base REMAINS at the
-#: venue, so a reader goes looking for a remainder to sell -- and on a whole
-#: fill that is a SECOND sale of an asset already gone.
-#:
-#: **THE TWO SHARED THIS STRING UNTIL B6 BECAUSE ONE GUARD CATCHES BOTH, AND
-#: ONE GUARD IS NOT ONE FACT.** `classify_bookability` has separated them since
-#: (ii)b -- `NO_QUOTE_TOTAL` against `PARTIAL_FILL` -- and
-#: `reconciliation_driver` already gives each its own consequence at the other
-#: caller. `_sell_and_book` was the last site in the tree that collapsed them.
-#: `M5i-098`.
-_REASON_CLOSE_NO_QUOTE_TOTAL = "close_no_quote_total"
-
-#: The reason at `_sell_and_book`'s unpriced guard, as a mapping from the
-#: verdict rather than a literal at the branch -- so the outcome-to-reason
-#: correspondence lives in ONE place.
-#:
-#: **ONE ENTRY SINCE 3b-2a.** `PARTIAL_FILL`'s entry was removed: the project
-#: owner's Decision 1 decides P before the requery, so the partial branch
-#: passes `_REASON_CLOSE_PARTIAL_FILL` itself and never reaches this guard.
-#: Exhaustive over what can reach it, and the exhaustiveness is a property of
-#: the ladder rather than a hope. `POSITION_ABSENT` cannot arrive: `position`
-#: is a non-optional parameter. `PARTIAL_FILL` and `NO_COST_BASIS` leave
-#: through earlier branches and `BOOKABLE` through the booking. A further
-#: outcome would raise `KeyError` at the site rather than falling through to a
-#: default, which is the same reason `_CLOSE_REFUSALS` below has no trailing
-#: ``else``.
-_NAKED_SELL_REASON: Final[dict[BookabilityOutcome, str]] = {
-    BookabilityOutcome.NO_QUOTE_TOTAL: _REASON_CLOSE_NO_QUOTE_TOTAL,
-}
 
 #: One refusal reason per verdict, as a total mapping rather than a chain of
 #: ``if``s. Exhaustive by construction: `CloseAction` has three members and a
@@ -1954,20 +1918,26 @@ class OrderExecutor:
         by querying the id we WOULD have sent. C1 built that derivation; this is
         its first caller.
 
-        **THE QUOTE TOTAL IS THE VENUE'S, NEVER A DERIVED PRICE.** Booking takes
-        `exit_quote_total`, because recovering a price by dividing is MEASURED
-        lossy -- run 3's own shape round-trips to a 28-digit residual, and
-        `_dump_money` writes such a residual into `data/state.json` verbatim.
+        **THE QUOTE TOTAL IS THE VENUE'S, NEVER A DERIVED PRICE** -- its own
+        total, or from 3b-2b the sum of the order's own fills when it gave none.
+        Booking takes `exit_quote_total`, because recovering a price by dividing
+        is MEASURED lossy -- run 3's own shape round-trips to a 28-digit
+        residual, and `_dump_money` writes such a residual into
+        `data/state.json` verbatim.
 
-        **THE TAIL HAS FOUR OUTCOMES, AND THEIR ORDER IS THE LADDER'S --
-        `A > P > C > Q`, the project owner's Decision 1.** The sell is
-        classified FIRST, on its own response's total. A PARTIAL fill fails
-        closed into `_go_naked`; a COMPLETE fill against a position carrying no
-        `entry_fill_price` is dropped UNBOOKED by `_sold_unbooked`, priced or
-        not -- the owner's PIN-1; a COMPLETE fill the response did not price is
-        re-read by its close id and, still unpriced, goes to `_sold_unpriced`;
-        everything else books. **The first two make ZERO calls after the
-        sell**: the requery waits until P and C are decided (PIN-2). The
+        **THE TAIL'S ORDER IS THE LADDER'S -- `A > P > C > Q`, the project
+        owner's Decision 1.** The sell is classified FIRST, on its own
+        response's total. A PARTIAL fill fails closed into `_go_naked`; a
+        COMPLETE fill against a position carrying no `entry_fill_price` is
+        dropped UNBOOKED by `_sold_unbooked`, priced or not -- the owner's
+        PIN-1. **Those two make ZERO calls after the sell**: the requery waits
+        until P and C are decided (PIN-2). A COMPLETE fill the response did not
+        price is re-read by its close id; then every remaining fill is SETTLED
+        once, and a fill still unpriced takes its total from the settlement's
+        summed fills (the 3b ruling). A settlement waiting may cure is DEFERRED
+        to `_resolve_close` -- for an unpriced fill too, by the owner's Decision
+        2, which removed `_sold_unpriced` -- one waiting cannot cure is HELD
+        (R2), and everything else books through `require_bookable`. The
         partial guard precedes the cost-basis branch -- `M5i-043`.
         MEASURED, three states driven through the pre-B-i tree: a partial fill
         with no cost basis reaches `_go_naked` with `close_partial_fill` and
@@ -1988,7 +1958,8 @@ class OrderExecutor:
         whose line says *"THE SELL FILLED IN FULL"* and *"DO NOT SELL THIS BASE
         AGAIN -- the whole position executed"* -- false for a partial, whose
         remainder is still at the venue. Classifying first sends it to
-        `_go_naked`, where "still open" is true.
+        `_go_naked`, where "still open" is true. `_sold_unpriced` itself was
+        removed at 3b-2b.
 
         **WHAT IT REPLACED WAS NOT A WORDING DEFECT** -- `M5i-045`. Before B-i
         this state fell through to `_book_close`, where `close_position` raised
@@ -2137,50 +2108,26 @@ class OrderExecutor:
             return
 
         if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
-            # Q, and only now: P and C are decided. P-c's fallback.
+            # Q, and only now: P and C are decided. P-c's fallback, kept (G):
             # `newOrderRespType` is set NOWHERE in this tree, so the response
             # type is the venue's default and the shape is DOCUMENTED rather
             # than measured here -- the only MARKET payload this repository
             # holds is a hand-written fixture. So the total is not assumed: the
-            # sell is re-read by the id it was sent under, and the verdict is
-            # re-taken on what the re-read returns.
-            total = await self._requery_sell_total(position, bounds)
-            verdict = classify_bookability(
-                position=position,
-                filled_quantity=order.filled_quantity,
-                filled_quote_quantity=total,
-            )
+            # sell is re-read by the id it was sent under, and a priced re-read
+            # re-takes the verdict. An unpriced one leaves it Q, and the
+            # settlement below supplies the total from the order's own fills.
+            requeried = await self._requery_sell_total(position, bounds)
+            if requeried is not None:
+                total = requeried
+                verdict = classify_bookability(
+                    position=position,
+                    filled_quantity=order.filled_quantity,
+                    filled_quote_quantity=total,
+                )
 
-        if total is None:
-            # Q, STILL. THE SELL COMPLETED AND THE VENUE NEVER PRICED IT, twice.
-            # **B6, and this branch is what `M5i-098` was deferred to.** Until
-            # it existed this state fell through the partial guard and was
-            # reported as `close_partial_fill` -- "partial" of a whole sell,
-            # beside `_go_naked`'s "still open" and its instruction to sell the
-            # base by hand. All three false, and the third is `M5i-035`'s money
-            # bug arriving through a second branch.
-            #
-            # **`total is None` COINCIDES EXACTLY WITH `NO_QUOTE_TOTAL` HERE**,
-            # because `P` and `C` have already returned and `A` cannot fire on a
-            # non-optional `position`. So the mapping lookup below is total
-            # here, and the narrowing mypy needs is the same test -- one
-            # condition serving both, rather than a verdict check mypy cannot
-            # follow through an object.
-            #
-            # RULING 5 IS UNCHANGED: there is nothing safe to book. The
-            # position is KEPT here for the reason `_sold_unpriced` states --
-            # dropping one whose base may remain invites a second entry on top
-            # of it -- and since 3b-2a only a WHOLE fill against a position
-            # carrying its cost basis arrives.
-            self._sold_unpriced(
-                signal,
-                position,
-                candle,
-                order=order,
-                reason=_NAKED_SELL_REASON[verdict.outcome],
-            )
-            return
-
+        # THE ONE SETTLEMENT FETCH, on every path that reaches here -- priced by
+        # the venue, or Q. A missing total spends no call of its own: the fills
+        # the fee needs are the fills that sum to the total.
         settled = await self._settle(
             position.symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
         )
@@ -2188,7 +2135,8 @@ class OrderExecutor:
             # R2: TERMINAL, AND NOT A DEFERRAL. The record written before the
             # cancel is KEPT -- so the close_pending guard refuses a second sell
             # -- and the position is KEPT, held. No `_refuse`: the close
-            # succeeded.
+            # succeeded. `quote_total` is the venue's when it gave one, and the
+            # hold line omits it otherwise.
             self._hold_close(
                 position,
                 settled,
@@ -2205,11 +2153,45 @@ class OrderExecutor:
             # `_resolve_close` settles it on the next bar, where the one place a
             # filled close is dropped decides. A fee this ledger cannot subtract,
             # or a fill that is not a sell, is R2's hold, above.
+            #
+            # **AND SO DOES Q, BY THE PROJECT OWNER'S DECISION 2**, verbatim:
+            # *"Deprecate and remove `_sold_unpriced`. Route any trade query
+            # failure or incomplete fill resolution at Site A directly through
+            # the standard deferral pathway to Site B under the in-memory N = 5
+            # bar retention ceiling."* `total` is then `None` and the deferral
+            # line omits it.
             self._defer_settlement(
                 signal, position, candle, order=order, total=total, failure=settled
             )
             return
-        self._book_close(signal, position, candle, total=total, order=order, settlement=settled)
+        if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
+            # THE 3b RULING: *"sum an order's fills' quote_quantity to supply a
+            # missing total, and re-classify."* `settle_exit` has already shown
+            # those fills account for the whole executed quantity.
+            verdict = classify_bookability(
+                position=position,
+                filled_quantity=order.filled_quantity,
+                filled_quote_quantity=total,
+                fills_total=settled.quote_quantity,
+            )
+        else:
+            self._warn_if_totals_disagree(
+                position.symbol, verdict.total, settled, candle, site="sell"
+            )
+        # THE ONE GUARD between the re-classification and the ledger write. Until
+        # 3b-2b this fall-through was unguarded here: it booked whatever the
+        # re-taken verdict carried, safe only because the ladder's order made it
+        # BOOKABLE.
+        booked_total, source = require_bookable(verdict)
+        self._book_close(
+            signal,
+            position,
+            candle,
+            total=booked_total,
+            source=source,
+            order=order,
+            settlement=settled,
+        )
         self._release_close(signal.symbol)
 
     async def _settle(
@@ -2295,7 +2277,7 @@ class OrderExecutor:
         candle: Candle,
         *,
         order: Order,
-        total: Money,
+        total: Money | None,
         failure: Exception | None,
     ) -> None:
         """The sell FILLED and its settlement is not readable yet: keep, mark, say so.
@@ -2310,25 +2292,69 @@ class OrderExecutor:
         **No ``_refuse``**, for ``_sold_unbooked``'s reason: the close
         SUCCEEDED. And the CLOSE guard in ``dispatch`` refuses a second close on
         this symbol while the record is held.
+
+        **FROM 3b-2b IT ALSO TAKES A SELL THE VENUE DID NOT PRICE**, by the
+        project owner's Decision 2: its fills are both the fee and the total,
+        so one unreadable settlement leaves both unknown and Site B supplies
+        both. ``total`` is then ``None`` and ``quote_total`` is OMITTED from the
+        line, never written null.
         """
         position.protection = ProtectionState.UNKNOWN
         self._settlement_deferrals.setdefault(signal.symbol, 0)
+        extra: dict[str, object] = {
+            "event": _EVENT_CLOSE_SETTLEMENT_DEFERRED,
+            "symbol": signal.symbol,
+            "site": "sell",
+            "order_id": order.order_id,
+            "executed_qty": order.filled_quantity,
+            "close_client_order_id": close_client_order_id(
+                position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+            ),
+            "error_type": None if failure is None else type(failure).__name__,
+            "error": None if failure is None else str(failure),
+            "candle_time": candle.close_time.isoformat(),
+        }
+        if total is not None:
+            # OMITTED WHEN ABSENT, never null -- Decision 2's unpriced input.
+            extra["quote_total"] = total
         _log.warning(
             "%s close sell FILLED and its fee is not yet settled; the record is kept and "
             "settlement is retried at resolution",
             signal.symbol,
+            extra=extra,
+        )
+
+    def _warn_if_totals_disagree(
+        self,
+        symbol: str,
+        venue_total: Money | None,
+        settlement: ExitSettlement,
+        candle: Candle,
+        *,
+        site: str,
+    ) -> None:
+        """H: ONE WARNING when the venue's total and the fills' sum differ. The venue's is booked.
+
+        Called on the venue path only, after a settlement succeeded, at both
+        executor sites -- ``site`` says which. On the fills path the booked
+        figure IS the sum and there is nothing to compare. ``venue_total`` is
+        ``Money | None`` only because the verdict carries it that way.
+        """
+        if venue_total is None or settlement.quote_quantity == venue_total:
+            return
+        _log.warning(
+            DISAGREE_MESSAGE,
+            symbol,
             extra={
-                "event": _EVENT_CLOSE_SETTLEMENT_DEFERRED,
-                "symbol": signal.symbol,
-                "site": "sell",
-                "order_id": order.order_id,
-                "executed_qty": order.filled_quantity,
-                "quote_total": total,
-                "close_client_order_id": close_client_order_id(
-                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+                "event": EVENT_QUOTE_TOTALS_DISAGREE,
+                "symbol": symbol,
+                **disagreement_fields(
+                    order_id=settlement.order_id,
+                    venue_total=venue_total,
+                    fills_total=settlement.quote_quantity,
+                    quote_asset=self._portfolio.quote_asset,
+                    site=site,
                 ),
-                "error_type": None if failure is None else type(failure).__name__,
-                "error": None if failure is None else str(failure),
                 "candle_time": candle.close_time.isoformat(),
             },
         )
@@ -2361,10 +2387,15 @@ class OrderExecutor:
         candle: Candle,
         *,
         total: Money,
+        source: TotalSource,
         order: Order,
         settlement: ExitSettlement,
     ) -> bool:
         """Credit, accrue and delete -- the bot's own exit reaching the ledger.
+
+        ``total`` is the venue's own quote total, or the sum of the order's own
+        fills when the venue gave none; ``source`` says which, and both of this
+        method's lines carry it through ``quote_total_fields`` (3b-2b).
 
         **IT RETURNS WHETHER IT WROTE. Option 3, half (i).** ``True`` only past
         the write; ``False`` from the ``except``. The verdict is what lets a
@@ -2422,7 +2453,7 @@ class OrderExecutor:
                 extra={
                     "event": _EVENT_CLOSE_BOOK_FAILED,
                     "symbol": signal.symbol,
-                    "quote_total": total,
+                    **quote_total_fields(total, source),
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                 },
@@ -2435,7 +2466,7 @@ class OrderExecutor:
             extra={
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": signal.symbol,
-                "quote_total": total,
+                **quote_total_fields(total, source),
                 "realised": realised,
                 # `order_id` and `quantity` are the settlement's, EQUAL BY
                 # CONSTRUCTION to `order.order_id` and `order.filled_quantity`,
@@ -2542,101 +2573,6 @@ class OrderExecutor:
             extra=extra,
         )
         self._drop_position_unbooked(signal.symbol)
-
-    def _sold_unpriced(
-        self,
-        signal: Signal,
-        position: Position,
-        candle: Candle,
-        *,
-        order: Order,
-        reason: str,
-    ) -> None:
-        """The sell COMPLETED and the venue never priced it. **B6.**
-
-        **THE THIRD MEMBER OF A FAMILY, and each member exists because
-        `_go_naked`'s literals are false for one more state.**
-        `_go_naked_retaining` was split off for a sell that was SENT and whose
-        outcome is unknown; `_sold_unbooked` for one that COMPLETED and was
-        PRICED against a position with no cost basis; this for one that
-        COMPLETED and was never priced at all. The bodies are short and the
-        DOCSTRINGS are why they cannot be one method with a flag -- `_go_naked`
-        argues that the position is still open and that an operator must sell
-        the base by hand, and both are false once a whole fill has executed.
-
-        **WHY THE POSITION IS KEPT, where `_sold_unbooked` DROPS.** That branch
-        drops by the project owner's PIN-1, priced or not, from 3b-2a: its
-        position carries no cost basis, so nothing could be booked whatever
-        the venue said. Here the position carries its cost basis, the response
-        carried `executedQty` and no total, and the re-read carried none
-        either -- an answer odd enough that the executed quantity is not
-        independently confirmed. The
-        two errors are not symmetric, and `CLAUDE.md` decides it: take the
-        reading whose wrong answer is REVERSIBLE. Keeping a position whose base
-        is gone costs entries until an operator restarts; dropping one whose
-        base is still there lets the next signal open a SECOND entry on top of
-        it, and no later edit un-places that.
-
-        **IT REUSES `_retain_position_unprotected` RATHER THAN WRITING
-        `protection` ITSELF.** That method's docstring counts the writers of
-        this field, and a third would make its own count false while adding a
-        third source of one truth. It takes a bare symbol, so nothing has to be
-        fabricated to call it from here.
-
-        **IT DOES NOT CALL `_refuse`, and the discriminator is
-        `_sold_unbooked`'s rather than a new one**: the close SUCCEEDED -- the
-        venue is flat and the signal got what it asked for -- so
-        `dispatch_refused` would log a refusal against a `CLOSE` that did its
-        job. `_go_naked_retaining` DOES refuse, and correctly, because there the
-        sell's outcome is unknown and the close may not have happened. The
-        family splits on "did the close happen", not on "is the position gone".
-
-        **IT RELEASES THE CLOSE RECORD.** The venue has been asked twice -- the
-        `create_order` response and the re-read by the derived close id -- and
-        answered both times without a total. A retained record would buy a third
-        query and hold the symbol another bar for it; `_go_naked_retaining`
-        retains because its question is *did the sell happen*, which is
-        unanswered, and here it is answered.
-
-        **WHAT IS LOST, STATED RATHER THAN HIDDEN.** That trade's realised P&L
-        is unrecoverable in-process: the proceeds figure never existed on this
-        client, and `close_position` prices realised P&L from it. The operator
-        path is the venue's own trade history, which is what the resolution
-        text sends them to.
-        """
-        self._retain_position_unprotected(signal.symbol)
-        _log.critical(
-            "%s: the close sell FILLED and the venue reported NO QUOTE TOTAL -- nothing "
-            "could be booked and the position is kept unprotected",
-            signal.symbol,
-            extra={
-                "event": _EVENT_CLOSE_SOLD_UNPRICED,
-                "symbol": signal.symbol,
-                "reason": reason,
-                "quantity": position.quantity,
-                "entry_bar_time": position.entry_bar_time.isoformat(),
-                "generation": _CLOSE_GENERATION,
-                "close_client_order_id": close_client_order_id(
-                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
-                ),
-                "venue_order_list_id": position.venue_order_list_id,
-                "status": order.status.value,
-                "executed_qty": order.filled_quantity,
-                "order_id": order.order_id,
-                "resolution": (
-                    "THE SELL FILLED IN FULL and the venue gave no quote total, twice -- "
-                    "on the order response and on the re-read by the close id below. "
-                    "NOTHING WAS BOOKED and no proceeds were credited, so this trade is "
-                    "NOT in the ledger and its realised P&L cannot be reconstructed here. "
-                    "Look the fill up in the venue's trade history by that id and enter it "
-                    "by hand. DO NOT SELL THIS BASE AGAIN -- the whole position executed. "
-                    "The position is KEPT and marked UNKNOWN, so entries are refused on "
-                    "every symbol until an operator clears it by restarting."
-                ),
-                "candle_time": candle.close_time.isoformat(),
-            },
-        )
-        self._release_close(signal.symbol)
 
     def _go_naked(self, signal: Signal, position: Position, candle: Candle, reason: str) -> None:
         """Protection is cancelled and the position is not closed. RULING 6.
@@ -2872,8 +2808,9 @@ class OrderExecutor:
         `Position` and `PendingCloseRecord` carries no `entry_price`, so the
         figure was UNRECONSTRUCTABLE -- an engineering limit, never a policy of
         forfeiting valid accounting. In-process both are present, so the figure
-        is computable and the venue's own quote total is the input. The restart
-        case is unchanged and still drops unbooked.
+        is computable and the venue's own quote total is the input -- or, from
+        3b-2b, the sum of the order's own fills when the venue gave none. The
+        restart case is unchanged and still drops unbooked.
         """
         symbol = record.symbol
         # THE CONSERVATIVE DEFAULT, and it is load-bearing rather than tidy.
@@ -2905,6 +2842,14 @@ class OrderExecutor:
         # deferred one, and the `finally` reads both.
         held: HeldExit | None = None
         kept_held = False
+        # 3b-2b, bound here for the same reason. `fetched` is what the retention
+        # branch keys on: a fill the settlement was FETCHED for -- priced by the
+        # venue, or not priced at all -- is retained under N = 5 when the fetch
+        # fails, never dropped; False is every path that fetches nothing (A, P,
+        # C, unconfirmed), which releases as before. `source` travels with
+        # `total` into the booking.
+        fetched = False
+        source: TotalSource | None = None
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
             # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
@@ -2919,17 +2864,43 @@ class OrderExecutor:
             # parameter to carry it. `filled` already implies it, and mypy will
             # not narrow through that intermediate bool.
             if filled and order is not None:
-                total = self._bookability(symbol, order).total
-            if total is not None and order is not None:
-                settled = await self._settle(
-                    symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
-                )
-                if isinstance(settled, ExitSettlement):
-                    settlement = settled
-                elif isinstance(settled, HeldExit):
-                    held = settled
-                else:
-                    settle_failure = settled
+                verdict = self._bookability(symbol, order)
+                # THE FETCH RUNS FOR BOOKABLE AND FOR Q ONLY -- the one call Q
+                # may spend (Decision 1). A, P and C are decided without a
+                # venue call and reach the drop below; after a restart A still
+                # decides, with zero fetches. `total` is the venue's, or None.
+                if verdict.outcome in (
+                    BookabilityOutcome.BOOKABLE,
+                    BookabilityOutcome.NO_QUOTE_TOTAL,
+                ):
+                    fetched = True
+                    total = verdict.total
+                    settled = await self._settle(
+                        symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
+                    )
+                    if isinstance(settled, ExitSettlement):
+                        if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
+                            # THE 3b RULING: *"sum an order's fills'
+                            # quote_quantity to supply a missing total, and
+                            # re-classify."*
+                            verdict = classify_bookability(
+                                position=self._portfolio.positions.get(symbol),
+                                filled_quantity=order.filled_quantity,
+                                filled_quote_quantity=order.filled_quote_quantity,
+                                fills_total=settled.quote_quantity,
+                            )
+                        else:
+                            self._warn_if_totals_disagree(
+                                symbol, verdict.total, settled, candle, site="resolution"
+                            )
+                        # THE ONE GUARD between the re-classification and the
+                        # ledger write; `settlement` is bound only past it.
+                        total, source = require_bookable(verdict)
+                        settlement = settled
+                    elif isinstance(settled, HeldExit):
+                        held = settled
+                    else:
+                        settle_failure = settled
         finally:
             # **THE QUERY NOW DECIDES THE DROP AND, ON ONE BRANCH, A LEDGER
             # WRITE.** Two commits ago it decided nothing at all. The CLEAR and
@@ -2943,16 +2914,18 @@ class OrderExecutor:
             # describe an intention the write did not carry out. It used to be
             # computed in the `try` from `total is not None` -- the intention to
             # book -- and emitted before any of this ran.
-            if total is not None and settlement is not None:
-                # Confirmed flat, in process, priced by the venue: the capital
-                # is back and the trade belongs in the ledger. **THE ONLY BRANCH
-                # WITH TWO OUTCOMES**, because it is the only one that writes.
+            if total is not None and source is not None and settlement is not None:
+                # Confirmed flat, in process, priced by the venue or by the sum
+                # of the order's own fills: the capital is back and the trade
+                # belongs in the ledger. **THE ONLY BRANCH WITH TWO OUTCOMES**,
+                # because it is the only one that writes.
                 texts = (
                     _RESOLVED_BOOKED
                     if self._book_resolved_close(
                         symbol,
                         candle,
                         total=total,
+                        source=source,
                         settlement=settlement,
                         order_created_at=None if order is None else order.created_at,
                     )
@@ -2975,11 +2948,15 @@ class OrderExecutor:
                     quote_total=total,
                 )
                 kept_held = True
-            elif total is not None:
+            elif fetched:
                 # SETTLEMENT NOT READABLE YET -- transport, or a fill list that is
                 # empty or short (Variant L, ruled by the project owner). Retained
                 # under the tracker until `_SETTLEMENT_RETRY_BARS` of the symbol's
                 # own candles, then dropped at CRITICAL as `settlement_timeout`.
+                # **KEYED ON `fetched`, NOT ON `total`, from 3b-2b**: a fill the
+                # venue did not price has no total until its settlement supplies
+                # one, so keying on the total would DROP it here instead of
+                # retrying -- the loss Decision 2 routes it to this branch to avoid.
                 if self._settlement_deferrals.setdefault(symbol, 0) >= _SETTLEMENT_RETRY_BARS:
                     self._drop_position_unbooked(symbol)
                     texts = _RESOLVED_SETTLEMENT_TIMEOUT
@@ -2987,7 +2964,9 @@ class OrderExecutor:
                     deferred = True
             elif filled:
                 # Confirmed flat but not bookable -- no position to price it
-                # against, a partial, or no quote total reported.
+                # against (A), a partial (P), or no cost basis (C), each decided
+                # with zero fetches. A fill with no quote total is FETCHED above
+                # and never reaches here.
                 self._drop_position_unbooked(symbol)
                 texts = _RESOLVED_RELEASED
             else:
@@ -3109,7 +3088,8 @@ class OrderExecutor:
         **THE FOUR CONDITIONS NOW LIVE IN `classify_bookability`**, which is
         the single shared predicate option 3 half (ii) delivered. This method
         asks it and returns the verdict whole; `_resolve_close` reads its
-        total. It decides nothing itself. Read `execution/bookability.py` for
+        outcome to decide whether to fetch, and its total. It decides nothing
+        itself. Read `execution/bookability.py` for
         the facts and their canonical order `A > P > C > Q`, the project
         owner's Decision 1. What remains here is the history, because it is
         this method's.
@@ -3155,14 +3135,17 @@ class OrderExecutor:
         in the direction nobody notices. Ruling 5 in `_sell_and_book` fails
         closed on exactly this and so does this path.
 
-        **THE VENUE MUST HAVE REPORTED THE TOTAL.** `filled_quote_quantity` is
+        **THE TOTAL MUST BE THE VENUE'S.** `filled_quote_quantity` is
         `cummulativeQuoteQty` carried verbatim, and `None` there means the venue
         did not report it -- kept distinct from a genuine zero by that field's
-        own design. There is no fallback: deriving a total by multiplying
-        `average_price` reintroduces the quotient error the exchange's own
-        accounting does not have, and `CLAUDE.md` records a stop booked at its
-        trigger under-reporting 137.36 of 241.15 USDT across three exits.
-        **The booked figure is the venue's or there is no booked figure.**
+        own design. Deriving a total by multiplying `average_price` is refused:
+        it reintroduces the quotient error the exchange's own accounting does
+        not have, and `CLAUDE.md` records a stop booked at its trigger
+        under-reporting 137.36 of 241.15 USDT across three exits. **From 3b-2b
+        there is one fallback, and it is the venue's too**: `_resolve_close`
+        fetches the order's fills and supplies their summed `quote_quantity`
+        as `fills_total` -- the 3b ruling -- so a fill this method answers
+        `NO_QUOTE_TOTAL` for is settled and re-classified rather than dropped.
         """
         return classify_bookability(
             position=self._portfolio.positions.get(symbol),
@@ -3176,10 +3159,15 @@ class OrderExecutor:
         candle: Candle,
         *,
         total: Money,
+        source: TotalSource,
         settlement: ExitSettlement,
         order_created_at: datetime | None,
     ) -> bool:
         """Book a resolved close. **Ruling 5, and the R2 reversal lives here.**
+
+        ``total`` is the venue's own quote total, or from 3b-2b the sum of the
+        order's own fills when the venue gave none; ``source`` says which, and
+        both of this method's lines carry it through ``quote_total_fields``.
 
         **IT TAKES THE WHOLE SETTLEMENT, NOT ITS FEE.** It used to take ``fee``
         alone, so its ``close_booked`` line carried fee and fee_asset and none
@@ -3249,7 +3237,7 @@ class OrderExecutor:
                 extra={
                     "event": _EVENT_CLOSE_BOOK_FAILED,
                     "symbol": symbol,
-                    "quote_total": total,
+                    **quote_total_fields(total, source),
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                     "candle_time": candle.close_time.isoformat(),
@@ -3262,7 +3250,7 @@ class OrderExecutor:
             extra={
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": symbol,
-                "quote_total": total,
+                **quote_total_fields(total, source),
                 "realised": realised,
                 **settlement_fields(settlement, order_created_at=order_created_at),
                 "candle_time": candle.close_time.isoformat(),
@@ -3300,31 +3288,31 @@ class OrderExecutor:
         this project keeps finding, so it is corrected in place: it is a claim
         about the tree, and annotate-never-delete governs findings.
 
-        **WHAT REACHES HERE NOW, all six unbookable and for different
-        reasons.** The first four are `_bookability`'s four refusals on the
-        RESOLUTION path; the fifth is B-i on the LIVE close path; the sixth is
-        a settlement that did not arrive within `_SETTLEMENT_RETRY_BARS`. A
-        claim about the tree, so it is corrected in place rather than annotated
-        -- the list read "all three" until M5i commit 3a added the fourth and
-        3b the fifth, and "all five" until R2, while the settlement timeout and
-        a fee this ledger cannot subtract both reached here unlisted. That
-        second one no longer does: it is HELD (R2), never dropped.
+        **WHAT REACHES HERE NOW, all five unbookable and for different
+        reasons.** The first three are `_bookability`'s refusals that fetch
+        nothing on the RESOLUTION path; the fourth is B-i on the LIVE close
+        path; the fifth is a settlement that did not arrive within
+        `_SETTLEMENT_RETRY_BARS`. A claim about the tree, so it is corrected in
+        place rather than annotated -- the list read "all three" until M5i
+        commit 3a added the fourth and 3b the fifth, "all five" until R2, while
+        the settlement timeout and a fee this ledger cannot subtract both
+        reached here unlisted, and "all six" until 3b-2b, which took the fill
+        the venue did not price off it: that one is settled and booked from
+        the order's own fills, and reaches here only through the timeout.
 
         * no `Position` in memory -- the RESTART case, where the cost basis is
           unreconstructable and the old argument holds exactly as written;
         * a PARTIAL fill -- `close_position` deletes the whole entry and credits
           one total, so booking it would credit proceeds for base still held;
-        * the venue reported no `cummulativeQuoteQty` -- and a total is never
-          derived, because a quotient reintroduces the error the exchange's own
-          accounting does not have;
         * the position is present and carries NO `entry_fill_price`, so it is in
           memory and still unpriceable -- two facts, `M5i-001`;
         * from `_sold_unbooked`, that same absent cost basis on a sell this
           process just sent and watched complete;
         * and a confirmed fill whose settlement stayed unreadable for
-          `_SETTLEMENT_RETRY_BARS` of the symbol's own candles.
+          `_SETTLEMENT_RETRY_BARS` of the symbol's own candles -- priced by the
+          venue or not.
 
-        In all six the proceeds are in the CRITICAL line instead when the
+        In all five the proceeds are in the CRITICAL line instead when the
         venue reported them, and otherwise in the order's own trades at the
         venue, for an operator to enter by hand.
 

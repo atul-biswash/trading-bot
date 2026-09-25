@@ -2,8 +2,9 @@
 
 **THIS IS THE ONLY PLACE THE FULL ORDER IS OBSERVABLE**, which is why the
 predicate is tested directly rather than only through the three call sites
-(ii)b integrates. ``_bookability``'s caller reads only the verdict's total,
-``None`` from all four refusals, and so is order-blind; ``_sell_and_book``
+(ii)b integrates. ``_bookability``'s caller reads the verdict's total and, from
+3b-2b, whether its outcome may spend a fetch -- which makes P against Q
+observable there only as a call, never as a message; ``_sell_and_book``
 maps a SET of facts onto one action; and neither of those two can produce ``POSITION_ABSENT`` at all, since
 both hold a non-optional ``Position``. Only the driver's three operator
 messages ever showed an ordering, and they show it for three facts of the four.
@@ -56,6 +57,7 @@ from trading_bot.execution.bookability import (
     BookabilityOutcome,
     BookabilityVerdict,
     classify_bookability,
+    require_bookable,
 )
 
 #: Run 3's own shape -- the project's first complete trade -- so the fixtures
@@ -90,12 +92,14 @@ def _classify(
     position: Position | None,
     filled_quantity: Money = QTY,
     filled_quote_quantity: Money | None = TOTAL,
+    fills_total: Money | None = None,
 ) -> BookabilityVerdict:
-    """One call, so a case reads as the three facts it varies."""
+    """One call, so a case reads as the facts it varies."""
     return classify_bookability(
         position=position,
         filled_quantity=filled_quantity,
         filled_quote_quantity=filled_quote_quantity,
+        fills_total=fills_total,
     )
 
 
@@ -397,6 +401,7 @@ class TestABookableFill:
 
         assert verdict.outcome is BookabilityOutcome.BOOKABLE
         assert verdict.total == TOTAL
+        assert verdict.total_source == "venue"
 
     def test_a_bookable_total_is_the_venues_own_figure_verbatim(self) -> None:
         """IDENTITY, not equality -- the venue's object, never a computation.
@@ -409,13 +414,146 @@ class TestABookableFill:
         against ``35.38691640``, returns a delta of ``-1E-26``, which
         ``_dump_money`` then writes into ``data/state.json`` verbatim.
         ``CLAUDE.md``: a stop booked at its trigger under-reported 137.36 of
-        241.15 USDT across three exits. **The booked figure is the venue's or
-        there is no booked figure.**
+        241.15 USDT across three exits. **The booked figure is the venue's:
+        its total, or from 3b-2b the sum of its own fills** -- see
+        ``TestASuppliedTotal``.
         """
         quote = Decimal("1786.22691640")
         verdict = _classify(position=_position(), filled_quote_quantity=quote)
 
         assert verdict.total is quote
+
+
+# --------------------------------------------------------------------------
+# 3b-2b -- a missing total supplied by the order's own fills.
+# --------------------------------------------------------------------------
+#: The sum of the order's fills, DELIBERATELY APART from `TOTAL`, so a verdict
+#: carrying the wrong one of the two changes the value asserted.
+FILLS_SUM = Decimal("1786.20000000")
+
+
+class TestASuppliedTotal:
+    """The 3b ruling: *"sum an order's fills' quote_quantity to supply a missing
+    total, and re-classify."* Every absent venue total here is FABRICATED -- no
+    capture holds one (``M5k-093``).
+    """
+
+    def test_a_fills_total_supplies_an_absent_venue_total(self) -> None:
+        """Q cured: BOOKABLE, the fills' figure by IDENTITY, and the source says so.
+
+        MUTATION: ignore ``fills_total``; or label its total ``"venue"``.
+        """
+        supplied = Decimal("1786.20000000")
+        verdict = _classify(position=_position(), filled_quote_quantity=None, fills_total=supplied)
+
+        assert verdict.outcome is BookabilityOutcome.BOOKABLE
+        assert verdict.total is supplied
+        assert verdict.total_source == "fills"
+        assert verdict.reason == (
+            "the fill is complete, priced by the sum of its own fills, and the position "
+            "carries its cost basis"
+        )
+
+    def test_a_venue_total_is_never_replaced_by_a_fills_total(self) -> None:
+        """BOTH figures present and DIFFERENT: the venue's wins, labelled ``"venue"``.
+
+        MUTATION: test ``fills_total`` before the venue's total.
+        """
+        verdict = _classify(position=_position(), fills_total=FILLS_SUM)
+
+        assert verdict.total == TOTAL
+        assert verdict.total != FILLS_SUM
+        assert verdict.total_source == "venue"
+
+    @pytest.mark.parametrize(
+        ("case", "position", "filled", "expected"),
+        [
+            ("partial", _position(), PARTIAL, BookabilityOutcome.PARTIAL_FILL),
+            (
+                "no_cost_basis",
+                _position(entry_fill_price=None),
+                QTY,
+                BookabilityOutcome.NO_COST_BASIS,
+            ),
+        ],
+        ids=lambda value: value if isinstance(value, str) else "",
+    )
+    def test_a_fills_total_cannot_rescue_a_partial_or_a_missing_cost_basis(
+        self, case: str, position: Position, filled: Money, expected: BookabilityOutcome
+    ) -> None:
+        """Supply comes AFTER P and C: a fills sum cannot make either bookable.
+
+        MUTATION: read ``fills_total`` ahead of the P or C rung.
+        """
+        verdict = _classify(
+            position=position,
+            filled_quantity=filled,
+            filled_quote_quantity=None,
+            fills_total=FILLS_SUM,
+        )
+
+        assert verdict.outcome is expected
+        assert verdict.total is None
+        assert verdict.total_source is None
+
+    @pytest.mark.parametrize(
+        ("total", "source"),
+        [(TOTAL, None), (None, "venue")],
+        ids=["total_without_source", "source_without_total"],
+    )
+    def test_a_total_and_its_source_travel_together(
+        self, total: Decimal | None, source: str | None
+    ) -> None:
+        """The type refuses one without the other. MUTATION: delete ``__post_init__``."""
+        with pytest.raises(ValueError, match="together, or neither"):
+            BookabilityVerdict(
+                BookabilityOutcome.BOOKABLE,
+                "reason",
+                total=total,
+                total_source=source,  # type: ignore[arg-type]
+            )
+
+
+def test_require_bookable_returns_the_total_and_source_for_bookable() -> None:
+    """The one guard passes a BOOKABLE verdict through: its figure by identity, and its source.
+
+    MUTATION: return anything but the verdict's own pair.
+    """
+    supplied = Decimal("1786.20000000")
+    verdict = _classify(position=_position(), filled_quote_quantity=None, fills_total=supplied)
+
+    total, source = require_bookable(verdict)
+
+    assert total is supplied
+    assert source == "fills"
+
+
+#: One verdict per non-bookable outcome, built by the REAL predicate. The
+#: absent totals are FABRICATED (`M5k-093`).
+_NON_BOOKABLE = {
+    "position_absent": {"position": None},
+    "partial_fill": {"position": _position(), "filled_quantity": PARTIAL},
+    "no_cost_basis": {"position": _position(entry_fill_price=None)},
+    "no_quote_total": {"position": _position(), "filled_quote_quantity": None},
+}
+
+
+@pytest.mark.parametrize("outcome", sorted(_NON_BOOKABLE))
+def test_require_bookable_refuses_every_other_outcome(outcome: str) -> None:
+    """**THE KILLABLE FORM OF THE GUARD**, called directly.
+
+    MUTATION: return instead of raising for a non-bookable verdict.
+
+    At the three sites the guard is reachable only if the ladder's order
+    breaks, so no site test can express its absence; this can. The message is
+    asserted to NAME the outcome, which is what an operator reading the phase
+    failure needs.
+    """
+    verdict = _classify(**_NON_BOOKABLE[outcome])  # type: ignore[arg-type]
+    assert verdict.outcome.value == outcome
+
+    with pytest.raises(ValueError, match=f"a {outcome} verdict reached booking"):
+        require_bookable(verdict)
 
 
 # --------------------------------------------------------------------------

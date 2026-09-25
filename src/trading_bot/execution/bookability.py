@@ -29,11 +29,14 @@ differently and the numbers were never the same fact twice.
   rather than merely unknown.
 * **Q** -- ``NO_QUOTE_TOTAL``. The venue reported a fill and gave no
   ``cummulativeQuoteQty`` for it -- or gave a negative one, which the venue
-  documents as unavailable and the adapter's ``to_order`` reads as absent.
-  There is no fallback: deriving a total by
-  multiplying an average price reintroduces the quotient error the exchange's
-  own accounting does not have. **The booked figure is the venue's or there is
-  no booked figure.**
+  documents as unavailable and the adapter's ``to_order`` reads as absent --
+  AND no sum of that order's own fills has been supplied. Deriving a total
+  from an average price is still refused. The 3b ruling permits
+  ``fills_total`` instead: *"sum an order's fills' quote_quantity to supply a
+  missing total, and re-classify"* -- each figure the venue's own, added and
+  never divided, and only after ``settle_exit`` has shown those fills account
+  for the whole executed quantity. **The booked figure is the venue's: its
+  total, or the sum of its own fills; ``total_source`` says which.**
 * **P** -- ``PARTIAL_FILL``. ``close_position`` deletes the whole entry and
   credits one total; there is no partial-close path and no way to express
   "0.3 of 0.5 sold". Booking a partial would delete a position whose base is
@@ -55,9 +58,11 @@ strictly preserves the invariant that `PARTIAL_FILL` makes zero venue calls."*
 **Q is last because it is the only rung a caller may later CURE** with a venue
 call, so nothing that makes zero calls may sit behind it.
 
-**IN 3b-2a Q STILL REFUSES.** No caller spends that call yet: a fill that
-clears A, P and C and carries no total is refused exactly as it was before the
-reorder, at every site. 3b-2b is where Q becomes curable.
+**FROM 3b-2b Q IS CURABLE.** Each of the three callers spends that one call --
+``get_my_trades`` for the order, whose settlement it needs anyway -- and
+re-classifies with ``fills_total``; Q is returned only when neither the venue
+nor a supplied sum of the order's own fills gives a total. It was refused at
+every site through 3b-2a.
 
 **A IS A NULL GUARD THAT BINDS THE NAME, NOT A PEER RUNG.** P reads
 ``position.quantity`` and C reads ``position.entry_fill_price``, so either one
@@ -121,10 +126,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from typing import Literal
 
 from trading_bot.core.models import Money, Position
 
-__all__ = ["BookabilityOutcome", "BookabilityVerdict", "classify_bookability"]
+__all__ = [
+    "BookabilityOutcome",
+    "BookabilityVerdict",
+    "TotalSource",
+    "classify_bookability",
+    "require_bookable",
+]
+
+#: Where a bookable total came from. ``"venue"`` is the order's own
+#: ``cummulativeQuoteQty``; ``"fills"`` is the sum of that order's fills'
+#: ``quote_quantity``, supplied only when the venue gave no total.
+TotalSource = Literal["venue", "fills"]
 
 
 class BookabilityOutcome(str, Enum):
@@ -137,13 +154,15 @@ class BookabilityOutcome(str, Enum):
     three call sites (ii)b integrates.
     """
 
-    #: The fill is complete, priced by the venue, and the position holding its
-    #: cost basis is in memory. :attr:`BookabilityVerdict.total` carries the
-    #: figure and is set on this outcome alone.
+    #: The fill is complete, priced by the venue or by the sum of its own fills,
+    #: and the position holding its cost basis is in memory.
+    #: :attr:`BookabilityVerdict.total` carries the figure and
+    #: :attr:`BookabilityVerdict.total_source` its origin, on this outcome alone.
     BOOKABLE = "bookable"
     #: No position is held for this symbol. **A**, and it is first.
     POSITION_ABSENT = "position_absent"
-    #: The venue reported a fill with no quote total. **Q**.
+    #: The venue reported a fill with no quote total, and no sum of the order's
+    #: own fills was supplied. **Q**, and it is last.
     NO_QUOTE_TOTAL = "no_quote_total"
     #: Less executed than the position holds. **P**.
     PARTIAL_FILL = "partial_fill"
@@ -153,7 +172,7 @@ class BookabilityOutcome(str, Enum):
 
 @dataclass(frozen=True, slots=True)
 class BookabilityVerdict:
-    """The outcome, the fact behind it, and -- only when bookable -- the figure.
+    """The outcome, the fact behind it, and -- only when bookable -- the figure and its source.
 
     A verdict is a **value carrying its reason**, the shape ``PlacementVerdict``
     and ``ProtectionAssessment`` already use in this package: *"'the stop rests
@@ -179,13 +198,25 @@ class BookabilityVerdict:
     verdict whole; the measurement above is of the method as it then was, and
     the single-sourcing it argues for is unchanged -- ``_resolve_close`` reads
     ``total`` off the one verdict.
+
+    **A TOTAL AND ITS SOURCE ARE ONE FACT**, so the type refuses one without
+    the other: :meth:`__post_init__` raises when exactly one of the two is
+    ``None``.
     """
 
     outcome: BookabilityOutcome
     reason: str
-    #: The venue's own quote total, passed through unchanged. ``None`` on every
-    #: refusal, and never derived -- see the module docstring's **Q**.
+    #: The venue's own quote total, or the sum of the order's own fills,
+    #: passed through unchanged. ``None`` on every refusal, and never derived
+    #: from a price -- see the module docstring's **Q**.
     total: Money | None = None
+    #: Which of the two :attr:`total` is. ``None`` exactly when it is.
+    total_source: TotalSource | None = None
+
+    def __post_init__(self) -> None:
+        # A total and its source are one fact: both present, or both absent.
+        if (self.total is None) != (self.total_source is None):
+            raise ValueError("a verdict carries a total and its source together, or neither")
 
 
 #: The fact halves, as module constants to keep the long ones out of the
@@ -207,6 +238,13 @@ REASON_NO_COST_BASIS = (
     "the position has no entry_fill_price, so its cost basis is unknown; the requested "
     "entry_price is not a substitute and would write a permanent distortion into the ledger"
 )
+REASON_BOOKABLE_VENUE = (
+    "the fill is complete, priced by the venue, and the position carries its cost basis"
+)
+REASON_BOOKABLE_FILLS = (
+    "the fill is complete, priced by the sum of its own fills, and the position carries its "
+    "cost basis"
+)
 
 
 def classify_bookability(
@@ -214,6 +252,7 @@ def classify_bookability(
     position: Position | None,
     filled_quantity: Money,
     filled_quote_quantity: Money | None,
+    fills_total: Money | None = None,
 ) -> BookabilityVerdict:
     """Classify one exit fill against the position it claims to close.
 
@@ -242,6 +281,10 @@ def classify_bookability(
     :param filled_quantity: Base quantity the venue reports executed.
     :param filled_quote_quantity: The venue's own quote total, or ``None`` when
         it reported none. Never a figure we computed.
+    :param fills_total: The sum of the order's own fills' ``quote_quantity``,
+        from the settlement a caller fetched because this was ``None``; or
+        ``None`` when none was supplied. **The venue's total wins whenever it
+        exists**: this is read only in its absence. Added, never divided.
     """
     if position is None:
         return BookabilityVerdict(BookabilityOutcome.POSITION_ABSENT, REASON_POSITION_ABSENT)
@@ -257,16 +300,55 @@ def classify_bookability(
         )
     if position.entry_fill_price is None:
         return BookabilityVerdict(BookabilityOutcome.NO_COST_BASIS, REASON_NO_COST_BASIS)
-    if filled_quote_quantity is None:
-        # Q IS LAST -- the project owner's Decision 1. Every rung above it is
-        # decided without a venue call, so a fill that is partial or has no
-        # cost basis answers that fact, never this one.
-        return BookabilityVerdict(BookabilityOutcome.NO_QUOTE_TOTAL, REASON_NO_QUOTE_TOTAL)
     # THE TOTAL PASSES STRAIGHT THROUGH -- no division into a unit price and no
     # re-multiplication. MEASURED, that round trip is lossy: run 3's own shape,
     # 0.02257000 against 35.38691640, returns a delta of -1E-26.
-    return BookabilityVerdict(
-        BookabilityOutcome.BOOKABLE,
-        "the fill is complete, priced by the venue, and the position carries its cost basis",
-        total=filled_quote_quantity,
-    )
+    if filled_quote_quantity is not None:
+        # THE VENUE'S TOTAL WINS WHENEVER IT EXISTS.
+        return BookabilityVerdict(
+            BookabilityOutcome.BOOKABLE,
+            REASON_BOOKABLE_VENUE,
+            total=filled_quote_quantity,
+            total_source="venue",
+        )
+    if fills_total is not None:
+        return BookabilityVerdict(
+            BookabilityOutcome.BOOKABLE,
+            REASON_BOOKABLE_FILLS,
+            total=fills_total,
+            total_source="fills",
+        )
+    # Q IS LAST -- the project owner's Decision 1. Every rung above it is
+    # decided without a venue call, so a fill that is partial or has no cost
+    # basis answers that fact, never this one.
+    return BookabilityVerdict(BookabilityOutcome.NO_QUOTE_TOTAL, REASON_NO_QUOTE_TOTAL)
+
+
+def require_bookable(verdict: BookabilityVerdict) -> tuple[Money, TotalSource]:
+    """The figure a BOOKABLE verdict carries, and its source. Anything else raises.
+
+    **THE SINGLE GUARD ON THE PATH FROM RE-CLASSIFICATION TO
+    ``close_position``, AT ALL THREE SITES** -- the reconciliation driver's
+    ``_book_exits``, the executor's ``_sell_and_book`` and its
+    ``_resolve_close``. Each of them books only what this returns. After a
+    settlement supplies ``fills_total`` the re-classification can only answer
+    ``BOOKABLE``, because A, P and C were already cleared on the same position
+    and quantity; that is a property of the ladder's ORDER, and nothing at a
+    call site would notice it breaking. 3b-2a left exactly that fall-through
+    unguarded at ``_sell_and_book``. This refuses it, loudly, at every site.
+
+    It also narrows ``total`` and ``total_source`` for the type checker, which
+    cannot follow the ``outcome`` through the object.
+
+    :raises ValueError: naming the outcome, for every non-bookable verdict.
+    """
+    if (
+        verdict.outcome is not BookabilityOutcome.BOOKABLE
+        or verdict.total is None
+        or verdict.total_source is None
+    ):
+        raise ValueError(
+            f"a {verdict.outcome.value} verdict reached booking, which books only a "
+            f"bookable one: {verdict.reason}"
+        )
+    return verdict.total, verdict.total_source
