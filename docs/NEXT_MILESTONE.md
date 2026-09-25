@@ -248,6 +248,18 @@ one.
 rejection of the two-of-three fix on ledger-comparability grounds, and the
 prohibition on `fee=Decimal(0)` as an interim stub.
 
+> **ANNOTATED PER `M5k-094`: THE HEADING IS HALF STALE.** Since `651d334`,
+> whose subject begins `feat(accounting): exits book net of the venue's own
+> fee`, every EXIT's commission reaches the ledger: all three booking sites
+> call `close_position(..., fee=settlement.fee)` on the fills `get_my_trades`
+> returns -- the new port method this item names as the remedy. **What
+> survives:** ENTRY commission still never reaches the ledger, by the project
+> owner's ruling R-a, and `to_order` still discards the venue's `fills`
+> report; the ledger is net of exit fees and gross of entry fees. **The
+> condition below watches `to_order` alone**, and the exit half was
+> discharged by a route it does not name, so it never fired. `193a5b9`, the
+> first commit to edit `to_order`, REAFFIRMED it.
+
 *Arming condition:* **whoever next edits `to_order` in `exchange/models.py`** —
 the single site where the venue's commission is discarded, and the first site
 any fee must cross.
@@ -335,6 +347,12 @@ is a fill price**. **The remedy is wording, not control flow.**
 
 *Arming condition:* **whoever next edits `_report`'s warning text or
 `_book_exits`'s booking line.**
+
+> **ANNOTATED BY 3b-2a: `classify_bookability` now reads `A > P > C > Q`**, by
+> the project owner's Decision 1; Q still refuses until 3b-2b. This item's
+> point is unchanged -- none of the four facts is a fill price -- and the
+> condition above is REAFFIRMED: `_report`'s warning text and `_book_exits`'s
+> booking line are untouched.
 
 ---
 

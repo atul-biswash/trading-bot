@@ -2586,6 +2586,123 @@ class TestTheCloseExecutes:
         assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
         assert portfolio.ledger is None
 
+    async def test_an_unpriced_partial_sell_goes_naked_with_zero_calls_after_the_sell(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**DECISION 1 AT SITE A: P is decided before any requery.**
+
+        MUTATION: restore `A > Q > P > C`; or move the requery back ahead of
+        the classification.
+
+        FABRICATED: the sell's response carries no total, which no capture
+        holds (`M5k-093`). **THE FAKE WOULD RECORD A REQUERY**: `get_order`
+        appends to `venue_calls` before it answers, and the `"CL"` answer is
+        configured -- priced, so a requery made here would even succeed -- so
+        `venue_calls == FULL_CLOSE` fails on the one extra call either mutation
+        spends. Until 3b-2a this input was re-read and reached `_sold_unpriced`,
+        whose line says the sell FILLED IN FULL; `close_sold_unpriced` is
+        asserted absent for that reason.
+        """
+        client = _selling_client(sell_answer=sell_fill(executed=D("0.2"), total=None))
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(executed=D("0.2")),
+        }
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == FULL_CLOSE
+        naked = _records(caplog, "close_position_naked")
+        assert len(naked) == 1, "the partial did not go naked"
+        assert vars(naked[0]).get("reason") == "close_partial_fill"
+        assert _records(caplog, "close_sold_unpriced") == []
+        # Base remains at the venue, so the position is KEPT, untrusted.
+        assert SYMBOL in portfolio.positions
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+        assert portfolio.ledger is None
+
+    async def test_an_unpriced_cost_basis_less_sell_is_dropped_with_zero_calls_after_the_sell(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE PROJECT OWNER'S PIN-1: drop through `_sold_unbooked`, no requery.**
+
+        MUTATION: keep the unpriced position instead of dropping it; restore
+        `A > Q > P > C`; or move the requery back ahead of the classification.
+
+        FABRICATED: no capture holds an absent total (`M5k-093`). The fake
+        would record a requery, and its `"CL"` answer is priced, so a requery
+        spent here would succeed and still fail `venue_calls == FULL_CLOSE`.
+        Until 3b-2a this input was re-read and KEPT by `_sold_unpriced`.
+
+        **THE LINE OMITS `quote_total`, NEVER NULL** -- asserted on the key,
+        through `vars(record)`, beside `executed_qty`, which shows the order
+        reached the line: an absent key on a line that dropped the order too
+        would prove nothing.
+        """
+        portfolio = _held(entry_fill=None)
+        client = _selling_client(sell_answer=sell_fill(total=None))
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(),
+        }
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == FULL_CLOSE
+        dropped = _records(caplog, "close_sold_unbooked")
+        assert len(dropped) == 1, "the cost-basis-less sell was not dropped"
+        fields = vars(dropped[0])
+        assert fields.get("executed_qty") == CLOSE_QTY
+        assert "quote_total" not in fields
+        assert fields.get("outcome") == "filled_and_released"
+        assert _records(caplog, "close_sold_unpriced") == []
+        # DROPPED, not booked, and the record released.
+        assert SYMBOL not in portfolio.positions
+        assert portfolio.ledger is None
+        assert portfolio.free_quote == D("10000")
+        assert executor._pending == {}
+
+    async def test_an_unpriced_whole_sell_with_its_cost_basis_still_requeries_then_is_kept(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**THE CONTROL for the two zero-call tests above: Q still requeries.**
+
+        MUTATION: skip the requery on Q.
+
+        The same fake shape with both other facts false, so what reached the
+        requery there would reach it here -- and here it MUST. The response and
+        the re-read both carry no total (FABRICATED, `M5k-093`), so the sell
+        reaches `_sold_unpriced` exactly as before 3b-2a. DECLARED: this
+        overlaps `..._never_priced_reaches_the_naked_guard` on purpose, and it
+        abstains from every reorder mutation, because Q wins on this input
+        under either order.
+        """
+        client = _selling_client(sell_answer=sell_fill(total=None))
+        client._leg_answers = {  # type: ignore[assignment]
+            "SL": _leg("0"),
+            "TP": _leg("0"),
+            "CL": sell_fill(total=None),
+        }
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == [*FULL_CLOSE, "get_order"]
+        assert client.order_queries[-1].endswith("-CL")
+        unpriced = _records(caplog, "close_sold_unpriced")
+        assert len(unpriced) == 1, "the whole unpriced sell did not reach _sold_unpriced"
+        assert vars(unpriced[0]).get("reason") == "close_no_quote_total"
+        assert _records(caplog, "close_sold_unbooked") == []
+        assert SYMBOL in portfolio.positions
+        assert portfolio.ledger is None
+
     async def test_a_partial_fill_books_nothing_and_goes_naked(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -2838,7 +2955,7 @@ class TestAnUnbookableSellIsDropped:
         assert "FILLED" in message
         assert "DROPPED UNBOOKED" in message
         assert "That trade is NOT in the ledger" in resolution
-        assert "enter the executed quantity and quote total below by hand" in resolution
+        assert "enter it by hand: the executed quantity below" in resolution
         # `M5i-042`: the balance sheet, which no line said before commit 3b.
         assert "free quote balance is NOT credited" in resolution
 
@@ -3850,6 +3967,80 @@ class TestAResolvedFillIsBooked:
         # Still dropped -- the fill is confirmed, only its price is not.
         assert SYMBOL not in portfolio.positions
 
+    @staticmethod
+    def _unpriced_sold() -> Order:
+        """A whole close fill the venue reported with NO quote total.
+
+        FABRICATED: no capture holds an absent total (`M5k-093`), and `_sold()`
+        always carries one, so the `Order` is built here directly.
+        """
+        return Order(
+            order_id="78",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            status=OrderStatus.FILLED,
+            quantity=CLOSE_QTY,
+            filled_quantity=CLOSE_QTY,
+            filled_quote_quantity=None,
+        )
+
+    async def test_the_resolution_line_omits_an_absent_quote_total(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**J: `quote_total` is OMITTED when the venue reported none, never null.**
+
+        MUTATION: write `quote_total` unconditionally, as `_log_close_resolved`
+        did until 3b-2a.
+
+        EXPRESSIVE: the order IS on the line -- `status` and `executed_qty` are
+        asserted -- so the branch that writes `quote_total` is reached, and only
+        the figure's absence keeps the key off it. Read through `vars(record)`,
+        because `getattr` on a key written as `None` and on one never written
+        answers the same.
+        """
+        executor, _, _ = build(client=_resolving_client(self._unpriced_sold()), portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        resolved = _records(caplog, "close_record_resolved")
+        assert len(resolved) == 1, "the close record was not resolved"
+        fields = vars(resolved[0])
+        assert fields.get("status") == "FILLED"
+        assert fields.get("executed_qty") == CLOSE_QTY
+        assert "quote_total" not in fields
+        assert fields.get("outcome") == "filled_and_released"
+
+    async def test_the_released_text_sends_the_operator_to_the_venue_for_an_absent_total(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**PIN-10: the released text no longer promises a figure "below".**
+
+        MUTATION: restore `_RESOLVED_RELEASED`'s old wording.
+
+        It read *"enter the executed quantity and quote total below by hand"*,
+        and on this line -- after J -- there is no quote total below. The text
+        now points at the line's `quote_total` when present and at the order's
+        own trades at the venue when not; both halves are asserted, and the old
+        promise ABSENT, since a test asserting only presence would pass with the
+        stale clause left beside the new one.
+        """
+        executor, _, _ = build(client=_resolving_client(self._unpriced_sold()), portfolio=_held())
+        executor._pending[SYMBOL] = _close()
+
+        with caplog.at_level(logging.CRITICAL):
+            await executor(candle())
+
+        resolved = _records(caplog, "close_record_resolved")
+        assert len(resolved) == 1, "the close record was not resolved"
+        resolution = vars(resolved[0]).get("resolution")
+        assert isinstance(resolution, str)
+        assert "from this line's quote_total when it is present" in resolution
+        assert "from the order's own trades at the venue" in resolution
+        assert "quote total below" not in resolution
+
     async def test_booking_deletes_through_close_position_not_a_third_path(self) -> None:
         """**There are TWO deletion paths and this commit adds none.**
 
@@ -3909,11 +4100,11 @@ class TestAResolvedFillIsBooked:
         """**THE FOURTH EXCLUSION. `M5i-001`, and it is the first test in the
         tree to reach ANY booking path with an absent cost basis.**
 
-        MUTATION: delete the `entry_fill_price is None` check in
-        `_bookable_total`; or invert it.
+        MUTATION: delete the `entry_fill_price is None` check that
+        `_bookability` asks; or invert it.
 
         **THE THREE OLD EXCLUSIONS ARE ASSERTED ABSENT, and that is what makes
-        a pass mean anything.** `_bookable_total` returns `None` on four
+        a pass mean anything.** `_bookability`'s total is `None` on four
         conditions and this fixture must fail exactly one of them. A test
         asserting only "nothing was booked" would pass whether the NEW check
         fired or one of the three old ones did -- and `M5i-038` measured that
@@ -4044,7 +4235,7 @@ class TestTheResolutionLineAgreesWithItself:
                 # basis is unreconstructable and the fill is released unbooked.
                 _no_portfolio,
                 "filled_and_released",
-                "enter the executed quantity and quote total below by hand",
+                "enter it by hand: the executed quantity below",
                 # `_RESOLVED_BOOKED`'s instruction inverts this branch's own --
                 # an operator who reads it leaves a real trade out of the ledger
                 # for ever. `STILL IN MEMORY` is `_RESOLVED_BOOK_FAILED`'s and is
@@ -4650,6 +4841,37 @@ class TestSettlement:
         assert SYMBOL in executor._pending
         await executor(_bar(6))
         assert SYMBOL not in executor._pending
+
+    async def test_the_settlement_timeout_text_no_longer_promises_a_total_below(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """**PIN-10, the timeout text.** MUTATION: restore its old wording.
+
+        It read *"enter the executed quantity, the quote total below and the
+        commission the venue reports for it by hand"*. The text now points at
+        the line's `quote_total` when present and at the order's own trades at
+        the venue when not, and still names the commission. Driven to the
+        timeout the way the bar-six test drives it: bar 1 defers, bars 2 to 5
+        retain, bar 6 drops.
+        """
+        client = _settling_client([], ExchangeConnectionError("timed out"))
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            for minute in range(1, 6):
+                await executor(_bar(minute))
+
+        resolved = _records(caplog, "close_record_resolved")
+        assert len(resolved) == 1, "the deferred close did not time out"
+        fields = vars(resolved[0])
+        assert fields.get("outcome") == "settlement_timeout"
+        resolution = fields.get("resolution")
+        assert isinstance(resolution, str)
+        assert "from this line's quote_total when it is present" in resolution
+        assert "from the order's own trades at the venue" in resolution
+        assert "commission the venue reports" in resolution
+        assert "the quote total below" not in resolution
 
 
 class TestTheCloseGuard:

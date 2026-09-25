@@ -547,10 +547,12 @@ class ReconciliationDriver:
                     )
 
                 # **ROWS 2, 3 AND 5 ARE NOW ONE CALL.** They asked three of
-                # `classify_bookability`'s four facts in the order it now holds
-                # canonically -- `Q > P > C` beneath `A`, which the five pins at
-                # `61919ce` measured before (ii) could reorder it. Row 4 above is
-                # NOT among them and is not absorbed: `ExitFill` states that
+                # `classify_bookability`'s four facts in the order `Q > P > C`,
+                # which the five pins at `61919ce` measured before (ii) could
+                # reorder it and which the predicate held canonically until
+                # 3b-2a; it now reads `A > P > C > Q`, by the project owner's
+                # Decision 1, and every refusal here still makes no call. Row 4
+                # above is NOT among them and is not absorbed: `ExitFill` states that
                 # *no leg reported a fill* and *a leg filled and the venue gave no
                 # quote total* are different facts, and collapsing them would lose
                 # the only signal separating "no exit" from "an exit I cannot book".

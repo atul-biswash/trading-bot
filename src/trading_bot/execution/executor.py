@@ -43,7 +43,11 @@ from trading_bot.core.models import (
 )
 from trading_bot.core.portfolio import held_exit, settle_exit
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, close_client_order_id
-from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
+from trading_bot.execution.bookability import (
+    BookabilityOutcome,
+    BookabilityVerdict,
+    classify_bookability,
+)
 from trading_bot.execution.booking_line import (
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
@@ -254,9 +258,9 @@ _EVENT_CLOSE_SOLD_UNBOOKED = "close_sold_unbooked"
 #: an operator acting on it sells base that is already gone, which is
 #: `M5i-035`'s measured failure reached through a second branch. Not
 #: `close_sold_unbooked` either, and the difference is the position: there the
-#: fill was PRICED and only the cost basis was missing, so the position is
-#: DROPPED; here the figure itself is absent, the exit is unpriceable, and the
-#: position is KEPT.
+#: cost basis is missing -- priced or not, since the project owner's PIN-1 at
+#: 3b-2a -- so the position is DROPPED; here the cost basis is present, the
+#: figure itself is absent, the exit is unpriceable, and the position is KEPT.
 _EVENT_CLOSE_SOLD_UNPRICED = "close_sold_unpriced"
 #: The bot's close sell FILLED and its fee could not be settled yet. WARNING,
 #: and its own event: the record is KEPT and settlement is retried on the
@@ -317,19 +321,22 @@ _REASON_CLOSE_PARTIAL_FILL = "close_partial_fill"
 #: `M5i-098`.
 _REASON_CLOSE_NO_QUOTE_TOTAL = "close_no_quote_total"
 
-#: One reason per verdict at `_sell_and_book`'s unbookable guard, as a total
-#: mapping rather than a ternary at each branch -- so the outcome-to-reason
-#: correspondence lives in ONE place and neither branch can drift from it.
+#: The reason at `_sell_and_book`'s unpriced guard, as a mapping from the
+#: verdict rather than a literal at the branch -- so the outcome-to-reason
+#: correspondence lives in ONE place.
 #:
-#: Exhaustive over what can reach that guard, and the exhaustiveness is a
-#: property of the ladder rather than a hope. `POSITION_ABSENT` cannot arrive:
-#: `position` is a non-optional parameter. `NO_COST_BASIS` and `BOOKABLE` leave
-#: through later branches. A further outcome would raise `KeyError` at the site
-#: rather than falling through to a default, which is the same reason
-#: `_CLOSE_REFUSALS` below has no trailing ``else``.
+#: **ONE ENTRY SINCE 3b-2a.** `PARTIAL_FILL`'s entry was removed: the project
+#: owner's Decision 1 decides P before the requery, so the partial branch
+#: passes `_REASON_CLOSE_PARTIAL_FILL` itself and never reaches this guard.
+#: Exhaustive over what can reach it, and the exhaustiveness is a property of
+#: the ladder rather than a hope. `POSITION_ABSENT` cannot arrive: `position`
+#: is a non-optional parameter. `PARTIAL_FILL` and `NO_COST_BASIS` leave
+#: through earlier branches and `BOOKABLE` through the booking. A further
+#: outcome would raise `KeyError` at the site rather than falling through to a
+#: default, which is the same reason `_CLOSE_REFUSALS` below has no trailing
+#: ``else``.
 _NAKED_SELL_REASON: Final[dict[BookabilityOutcome, str]] = {
     BookabilityOutcome.NO_QUOTE_TOTAL: _REASON_CLOSE_NO_QUOTE_TOTAL,
-    BookabilityOutcome.PARTIAL_FILL: _REASON_CLOSE_PARTIAL_FILL,
 }
 
 #: One refusal reason per verdict, as a total mapping rather than a chain of
@@ -448,8 +455,10 @@ _RESOLVED_RELEASED: Final = _CloseResolutionText(
     resolution=(
         "THE SELL FILLED and NOTHING WAS BOOKED by this bot. The position is "
         "released and the pending record is gone from memory and from the store. "
-        "That trade is NOT in the ledger -- enter the executed quantity and quote "
-        "total below by hand. Trading continues. " + _UNBOOKED_BALANCE_SHEET_NOTE
+        "That trade is NOT in the ledger -- enter it by hand: the executed quantity "
+        "below, and the quote total from this line's quote_total when it is present "
+        "or, when it is absent, from the order's own trades at the venue. Trading "
+        "continues. " + _UNBOOKED_BALANCE_SHEET_NOTE
     ),
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and was DROPPED "
@@ -525,9 +534,10 @@ _RESOLVED_SETTLEMENT_TIMEOUT: Final = _CloseResolutionText(
         "THE SELL FILLED and ITS FEE COULD NOT BE SETTLED within the retry bound, so "
         "NOTHING WAS BOOKED by this bot. The position is released and the pending "
         "record is gone from memory and from the store. That trade is NOT in the "
-        "ledger -- enter the executed quantity, the quote total below and the "
-        "commission the venue reports for it by hand. Trading continues. "
-        + _UNBOOKED_BALANCE_SHEET_NOTE
+        "ledger -- enter it by hand: the executed quantity below, the quote total "
+        "from this line's quote_total when it is present or, when it is absent, from "
+        "the order's own trades at the venue, and the commission the venue reports "
+        "for it. Trading continues. " + _UNBOOKED_BALANCE_SHEET_NOTE
     ),
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and its settlement "
@@ -1949,12 +1959,16 @@ class OrderExecutor:
         lossy -- run 3's own shape round-trips to a 28-digit residual, and
         `_dump_money` writes such a residual into `data/state.json` verbatim.
 
-        **THE TAIL HAS FOUR OUTCOMES, AND THE ORDER OF THE MIDDLE TWO IS
-        LOAD-BEARING.** A COMPLETE fill the venue never priced goes to
-        `_sold_unpriced`; a PARTIAL fill fails closed into `_go_naked`; a
-        COMPLETE, PRICED fill against a position carrying no `entry_fill_price`
-        is dropped UNBOOKED by `_sold_unbooked`; everything else books. The
-        third is B-i and it is checked after the partial guard -- `M5i-043`.
+        **THE TAIL HAS FOUR OUTCOMES, AND THEIR ORDER IS THE LADDER'S --
+        `A > P > C > Q`, the project owner's Decision 1.** The sell is
+        classified FIRST, on its own response's total. A PARTIAL fill fails
+        closed into `_go_naked`; a COMPLETE fill against a position carrying no
+        `entry_fill_price` is dropped UNBOOKED by `_sold_unbooked`, priced or
+        not -- the owner's PIN-1; a COMPLETE fill the response did not price is
+        re-read by its close id and, still unpriced, goes to `_sold_unpriced`;
+        everything else books. **The first two make ZERO calls after the
+        sell**: the requery waits until P and C are decided (PIN-2). The
+        partial guard precedes the cost-basis branch -- `M5i-043`.
         MEASURED, three states driven through the pre-B-i tree: a partial fill
         with no cost basis reaches `_go_naked` with `close_partial_fill` and
         that is CORRECT, because base remains at the venue and the manual sale
@@ -1968,6 +1982,13 @@ class OrderExecutor:
         already gone. One guard caught both because there is nothing safe to
         book either way; that is still true, and it was never a reason to give
         them one NAME. `M5i-098`.
+
+        **AND UNTIL 3b-2a THE REQUERY RAN BEFORE THE CLASSIFICATION**, with
+        `Q` ahead of `P`, so an unpriced PARTIAL sell reached `_sold_unpriced`,
+        whose line says *"THE SELL FILLED IN FULL"* and *"DO NOT SELL THIS BASE
+        AGAIN -- the whole position executed"* -- false for a partial, whose
+        remainder is still at the venue. Classifying first sends it to
+        `_go_naked`, where "still open" is true.
 
         **WHAT IT REPLACED WAS NOT A WORDING DEFECT** -- `M5i-045`. Before B-i
         this state fell through to `_book_close`, where `close_position` raised
@@ -2054,54 +2075,18 @@ class OrderExecutor:
                 self._go_naked_retaining(signal, position, candle)
             return
 
+        # **CLASSIFIED FIRST, ON THE SELL'S OWN TOTAL -- the project owner's
+        # Decision 1.** `A > P > C > Q`: the partial and cost-basis facts are
+        # decided before this method spends another venue call, so each exits
+        # below with ZERO calls after the sell. Until 3b-2a the requery ran
+        # first and the predicate was fed its answer; an unpriced partial then
+        # classified `NO_QUOTE_TOTAL` and reached `_sold_unpriced`.
         total = order.filled_quote_quantity
-        if total is None:
-            # P-c's fallback. `newOrderRespType` is set NOWHERE in this tree, so
-            # the response type is the venue's default and the shape is
-            # DOCUMENTED rather than measured here -- the only MARKET payload
-            # this repository holds is a hand-written fixture. So the total is
-            # not assumed: the sell is re-read by the id it was sent under.
-            total = await self._requery_sell_total(position, bounds)
-
-        # **THE POST-REQUERY `total` IS WHAT THE PREDICATE IS FED**, never
-        # `order.filled_quote_quantity`. The requery above is I/O and runs
-        # first; handing the predicate the raw field would ask it about a
-        # total this method has already improved on.
         verdict = classify_bookability(
             position=position,
             filled_quantity=order.filled_quantity,
             filled_quote_quantity=total,
         )
-
-        if total is None:
-            # Q. THE SELL COMPLETED AND THE VENUE NEVER PRICED IT. **B6, and
-            # this branch is what `M5i-098` was deferred to.** Until it existed
-            # this state fell through the partial guard below and was reported
-            # as `close_partial_fill` -- "partial" of a whole sell, beside
-            # `_go_naked`'s "still open" and its instruction to sell the base by
-            # hand. All three false, and the third is `M5i-035`'s money bug
-            # arriving through a second branch.
-            #
-            # **`total is None` COINCIDES EXACTLY WITH `NO_QUOTE_TOTAL`**,
-            # because `Q` precedes `P` in `A > Q > P > C` and `A` cannot fire on
-            # a non-optional `position`. So the mapping lookup below is total
-            # here, and the narrowing mypy needs is the same test -- one
-            # condition serving both, rather than a verdict check mypy cannot
-            # follow through an object.
-            #
-            # RULING 5 IS UNCHANGED AND STILL BINDS BOTH EXITS: there is nothing
-            # safe to book either way. What changes is only what the operator is
-            # TOLD, and the position is KEPT here for the reason
-            # `_sold_unpriced` states -- dropping one whose base may remain
-            # invites a second entry on top of it.
-            self._sold_unpriced(
-                signal,
-                position,
-                candle,
-                order=order,
-                reason=_NAKED_SELL_REASON[verdict.outcome],
-            )
-            return
 
         if verdict.outcome is BookabilityOutcome.PARTIAL_FILL:
             # P. RULING 5: A PARTIAL FILL FAILS CLOSED, and it must, because it
@@ -2114,9 +2099,9 @@ class OrderExecutor:
             #
             # **`_go_naked` IS CORRECT HERE AND ONLY HERE.** Base remains at the
             # venue, so "still open" is TRUE and the manual sale it instructs is
-            # the right action for the remainder. That is why this caller is
-            # untouched by B6 while the one above moved -- `M5i-043` measured
-            # the same distinction one branch later.
+            # the right action for the remainder -- priced or not, since
+            # 3b-2a decides P before any requery. `M5i-043` measured the same
+            # distinction against the cost-basis branch below.
             #
             # `POSITION_ABSENT` cannot arrive: `position` is a non-optional
             # parameter. It reaches neither branch rather than being given one
@@ -2128,21 +2113,72 @@ class OrderExecutor:
             # design corrects it -- correcting it would need the partial-close
             # path that does not exist. The operator path in `_go_naked` is what
             # resolves it.
-            self._go_naked(signal, position, candle, _NAKED_SELL_REASON[verdict.outcome])
+            self._go_naked(signal, position, candle, _REASON_CLOSE_PARTIAL_FILL)
             return
 
         if verdict.outcome is BookabilityOutcome.NO_COST_BASIS:
-            # B-i. COMPLETE, PRICED and UNPRICEABLE are three separate facts and
-            # only the third arrives here. **THE LADDER PUTS `NO_COST_BASIS`
-            # LAST** -- `M5i-043` -- so a partial fill with no cost basis
-            # answers `PARTIAL_FILL` and left above, where `_go_naked`'s "still
-            # open" and "sell the base by hand" are TRUE because base remains at
-            # the venue. Reaching here means the sell was COMPLETE, so telling
-            # the operator to sell again would instruct a SECOND sale of an
-            # asset already gone -- `M5i-035` measured exactly that when the two
-            # were collapsed.
+            # B-i. COMPLETE and UNPRICEABLE are separate facts and only the
+            # second is decided here. **THE LADDER PUTS `NO_COST_BASIS` AFTER
+            # `PARTIAL_FILL`** -- `M5i-043` -- so a partial fill with no cost
+            # basis answers `PARTIAL_FILL` and left above, where `_go_naked`'s
+            # "still open" and "sell the base by hand" are TRUE because base
+            # remains at the venue. Reaching here means the sell was COMPLETE,
+            # so telling the operator to sell again would instruct a SECOND sale
+            # of an asset already gone -- `M5i-035` measured exactly that when
+            # the two were collapsed.
+            #
+            # **PRICED OR NOT, AND WITH NO REQUERY -- the project owner's
+            # PIN-1**, verbatim: *"Adopt Option (a) -- Route directly to
+            # `_sold_unbooked` (drop position, zero venue calls)."* Until 3b-2a
+            # an unpriced sell here was re-read and KEPT by `_sold_unpriced`.
+            # `total` is `None` on that input and the line omits it.
             self._sold_unbooked(signal, position, candle, total=total, order=order)
             self._release_close(signal.symbol)
+            return
+
+        if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
+            # Q, and only now: P and C are decided. P-c's fallback.
+            # `newOrderRespType` is set NOWHERE in this tree, so the response
+            # type is the venue's default and the shape is DOCUMENTED rather
+            # than measured here -- the only MARKET payload this repository
+            # holds is a hand-written fixture. So the total is not assumed: the
+            # sell is re-read by the id it was sent under, and the verdict is
+            # re-taken on what the re-read returns.
+            total = await self._requery_sell_total(position, bounds)
+            verdict = classify_bookability(
+                position=position,
+                filled_quantity=order.filled_quantity,
+                filled_quote_quantity=total,
+            )
+
+        if total is None:
+            # Q, STILL. THE SELL COMPLETED AND THE VENUE NEVER PRICED IT, twice.
+            # **B6, and this branch is what `M5i-098` was deferred to.** Until
+            # it existed this state fell through the partial guard and was
+            # reported as `close_partial_fill` -- "partial" of a whole sell,
+            # beside `_go_naked`'s "still open" and its instruction to sell the
+            # base by hand. All three false, and the third is `M5i-035`'s money
+            # bug arriving through a second branch.
+            #
+            # **`total is None` COINCIDES EXACTLY WITH `NO_QUOTE_TOTAL` HERE**,
+            # because `P` and `C` have already returned and `A` cannot fire on a
+            # non-optional `position`. So the mapping lookup below is total
+            # here, and the narrowing mypy needs is the same test -- one
+            # condition serving both, rather than a verdict check mypy cannot
+            # follow through an object.
+            #
+            # RULING 5 IS UNCHANGED: there is nothing safe to book. The
+            # position is KEPT here for the reason `_sold_unpriced` states --
+            # dropping one whose base may remain invites a second entry on top
+            # of it -- and since 3b-2a only a WHOLE fill against a position
+            # carrying its cost basis arrives.
+            self._sold_unpriced(
+                signal,
+                position,
+                candle,
+                order=order,
+                reason=_NAKED_SELL_REASON[verdict.outcome],
+            )
             return
 
         settled = await self._settle(
@@ -2367,8 +2403,8 @@ class OrderExecutor:
 
         **THAT OTHER ONE NOW HAS TWO CALLERS, AND THE SECOND IS ON THIS PATH.**
         `_sold_unbooked` sits between this method and `_go_naked` in
-        `_sell_and_book`'s tail: a complete, priced sell whose position carries
-        no `entry_fill_price` is dropped there instead of reaching here. So the
+        `_sell_and_book`'s tail: a complete sell whose position carries no
+        `entry_fill_price` is dropped there instead of reaching here. So the
         deletion inventory is unchanged at TWO paths and the caller count is
         three -- `_book_close`, `_book_resolved_close` and `_sold_unbooked`.
         """
@@ -2418,10 +2454,21 @@ class OrderExecutor:
         position: Position,
         candle: Candle,
         *,
-        total: Money,
+        total: Money | None,
         order: Order,
     ) -> None:
         """The sell COMPLETED and cannot be priced. Drop it, say so. **B-i.**
+
+        **FROM 3b-2a IT ALSO TAKES A SELL THE VENUE DID NOT PRICE**, by the
+        project owner's PIN-1, verbatim: *"Adopt Option (a) -- Route directly
+        to `_sold_unbooked` (drop position, zero venue calls)."* Accepted, in
+        the owner's words: *"Dropping the position marks it unbooked, halts
+        active protective logic, and removes the symbol from active risk
+        exposure to match physical venue balance."* A position with no cost
+        basis cannot be booked whatever the venue says, so no requery is spent
+        on it. ``total`` is then ``None`` and ``quote_total`` is OMITTED from
+        the line, never written null; the resolution text sends the operator to
+        the order's own trades at the venue for the figure.
 
         **RULING 1 REQUIRES THE IDENTICAL OPERATIONAL SURFACE TO PATH A**, and
         this reads `_RESOLVED_RELEASED` rather than restating it -- the same
@@ -2452,7 +2499,7 @@ class OrderExecutor:
         Ruling 2 authorised a third copy of it only because option 3 was
         mandated to retire all three into one shared predicate; option 3 half
         (ii)b did that, and `execution/bookability.py::classify_bookability` is
-        what `_bookable_total`, `_sell_and_book` and `reconciliation_driver`'s
+        what `_bookability`, `_sell_and_book` and `reconciliation_driver`'s
         row ladder each now ask. The debt is paid.
         `test_bookability_criterion_census.py` holds `EXPECTED_PREDICATES` at
         ONE site.
@@ -2465,32 +2512,34 @@ class OrderExecutor:
         separates them, by collecting the functions that actually call the
         predicate.
         """
+        extra: dict[str, object] = {
+            "event": _EVENT_CLOSE_SOLD_UNBOOKED,
+            "symbol": signal.symbol,
+            "quantity": position.quantity,
+            "entry_bar_time": position.entry_bar_time.isoformat(),
+            "generation": _CLOSE_GENERATION,
+            "close_client_order_id": close_client_order_id(
+                position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+            ),
+            "candle_time": candle.close_time.isoformat(),
+            # THE TWO FIELDS RULING 1 BINDS. Read, never restated.
+            "outcome": _RESOLVED_RELEASED.outcome,
+            "resolution": _RESOLVED_RELEASED.resolution,
+            "status": order.status.value,
+            "executed_qty": order.filled_quantity,
+            # THE ONE FIELD PATH A CANNOT SUPPLY. `_log_close_resolved` emits no
+            # `order_id` even when it holds an `Order`; here the sell is ours and
+            # its venue id is the handle an operator reconciles by.
+            "order_id": order.order_id,
+        }
+        if total is not None:
+            # OMITTED WHEN ABSENT, never null -- PIN-1's unpriced input.
+            extra["quote_total"] = total
         _log.critical(
             "%s: the close sell FILLED and was DROPPED UNBOOKED -- this bot has no cost "
             "basis for the position, so the venue's figures below are the only record",
             signal.symbol,
-            extra={
-                "event": _EVENT_CLOSE_SOLD_UNBOOKED,
-                "symbol": signal.symbol,
-                "quantity": position.quantity,
-                "entry_bar_time": position.entry_bar_time.isoformat(),
-                "generation": _CLOSE_GENERATION,
-                "close_client_order_id": close_client_order_id(
-                    position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
-                ),
-                "candle_time": candle.close_time.isoformat(),
-                # THE TWO FIELDS RULING 1 BINDS. Read, never restated.
-                "outcome": _RESOLVED_RELEASED.outcome,
-                "resolution": _RESOLVED_RELEASED.resolution,
-                "status": order.status.value,
-                "executed_qty": order.filled_quantity,
-                "quote_total": total,
-                # THE ONE FIELD PATH A CANNOT SUPPLY. `_log_close_resolved`
-                # emits no `order_id` even when it holds an `Order`; here the
-                # sell is ours and its venue id is the handle an operator
-                # reconciles by.
-                "order_id": order.order_id,
-            },
+            extra=extra,
         )
         self._drop_position_unbooked(signal.symbol)
 
@@ -2516,10 +2565,12 @@ class OrderExecutor:
         the base by hand, and both are false once a whole fill has executed.
 
         **WHY THE POSITION IS KEPT, where `_sold_unbooked` DROPS.** That branch
-        holds the venue's own quote total, so the fill is corroborated and
-        dropping is factually right. Here the response carried `executedQty`
-        and no total, and the re-read carried none either -- an answer odd
-        enough that the executed quantity is not independently confirmed. The
+        drops by the project owner's PIN-1, priced or not, from 3b-2a: its
+        position carries no cost basis, so nothing could be booked whatever
+        the venue said. Here the position carries its cost basis, the response
+        carried `executedQty` and no total, and the re-read carried none
+        either -- an answer odd enough that the executed quantity is not
+        independently confirmed. The
         two errors are not symmetric, and `CLAUDE.md` decides it: take the
         reading whose wrong answer is REVERSIBLE. Keeping a position whose base
         is gone costs entries until an operator restarts; dropping one whose
@@ -2863,8 +2914,12 @@ class OrderExecutor:
             # and sold nothing, so treating any answer as a fill would drop a
             # position whose base is still at the venue.
             filled = order is not None and order.filled_quantity > 0
-            if filled:
-                total = self._bookable_total(symbol, order)
+            # `order is not None` is NOT one of the four facts -- a TYPE
+            # NARROWING, and `M5i-052` is why the predicate has no `order`
+            # parameter to carry it. `filled` already implies it, and mypy will
+            # not narrow through that intermediate bool.
+            if filled and order is not None:
+                total = self._bookability(symbol, order).total
             if total is not None and order is not None:
                 settled = await self._settle(
                     symbol, order_id=order.order_id, executed_quantity=order.filled_quantity
@@ -3048,15 +3103,21 @@ class OrderExecutor:
             return None, exc
         return order, None
 
-    def _bookable_total(self, symbol: str, order: Order | None) -> Money | None:
-        """The venue's quote total, or ``None`` when this fill must not be booked.
+    def _bookability(self, symbol: str, order: Order) -> BookabilityVerdict:
+        """This fill's verdict; its ``total`` is ``None`` when it must not be booked.
 
         **THE FOUR CONDITIONS NOW LIVE IN `classify_bookability`**, which is
         the single shared predicate option 3 half (ii) delivered. This method
-        asks it and returns the total it blesses; it decides nothing itself.
-        Read `execution/bookability.py` for the facts, their canonical order
-        `A > Q > P > C`, and why only two of that order's six relations are a
-        choice. What remains here is the history, because it is this method's.
+        asks it and returns the verdict whole; `_resolve_close` reads its
+        total. It decides nothing itself. Read `execution/bookability.py` for
+        the facts and their canonical order `A > P > C > Q`, the project
+        owner's Decision 1. What remains here is the history, because it is
+        this method's.
+
+        **IT WAS `_bookable_total` UNTIL 3b-2a** and returned the bare total,
+        with a leading ``order is None`` return that was a type narrowing and
+        not one of the four facts (`M5i-052`). It now takes a non-optional
+        ``Order`` and the narrowing sits at its one call site.
 
         **THE POSITION MUST BE IN MEMORY**, because it carries the cost basis.
         `close_position` prices realised P&L off `entry_fill_price`, and after a
@@ -3103,18 +3164,11 @@ class OrderExecutor:
         trigger under-reporting 137.36 of 241.15 USDT across three exits.
         **The booked figure is the venue's or there is no booked figure.**
         """
-        if order is None:
-            # NOT one of the four facts -- a TYPE NARROWING, and `M5i-052` is
-            # why the predicate has no `order` parameter to carry it. It is
-            # runtime-unreachable: the only call site is guarded by
-            # `filled = order is not None and order.filled_quantity > 0`, and
-            # mypy will not narrow through that intermediate bool.
-            return None
         return classify_bookability(
             position=self._portfolio.positions.get(symbol),
             filled_quantity=order.filled_quantity,
             filled_quote_quantity=order.filled_quote_quantity,
-        ).total
+        )
 
     def _book_resolved_close(
         self,
@@ -3247,7 +3301,7 @@ class OrderExecutor:
         about the tree, and annotate-never-delete governs findings.
 
         **WHAT REACHES HERE NOW, all six unbookable and for different
-        reasons.** The first four are `_bookable_total`'s four conditions on the
+        reasons.** The first four are `_bookability`'s four refusals on the
         RESOLUTION path; the fifth is B-i on the LIVE close path; the sixth is
         a settlement that did not arrive within `_SETTLEMENT_RETRY_BARS`. A
         claim about the tree, so it is corrected in place rather than annotated
@@ -3270,8 +3324,9 @@ class OrderExecutor:
         * and a confirmed fill whose settlement stayed unreadable for
           `_SETTLEMENT_RETRY_BARS` of the symbol's own candles.
 
-        In all six the proceeds are in the CRITICAL line instead, for an
-        operator to enter by hand.
+        In all six the proceeds are in the CRITICAL line instead when the
+        venue reported them, and otherwise in the order's own trades at the
+        venue, for an operator to enter by hand.
 
         **NO LONGER UNCONDITIONAL.** It ran on every answer until M5h-321a;
         it then ran on every CONFIRMED FILL, and from ruling 5 it runs on the
@@ -3398,7 +3453,11 @@ class OrderExecutor:
         if order is not None:
             extra["status"] = order.status.value
             extra["executed_qty"] = order.filled_quantity
-            extra["quote_total"] = order.filled_quote_quantity
+            if order.filled_quote_quantity is not None:
+                # OMITTED WHEN ABSENT, NEVER NULL -- the rule `hold_fields`
+                # already keeps for the same key. Until 3b-2a an order the venue
+                # never priced wrote `quote_total` as null here.
+                extra["quote_total"] = order.filled_quote_quantity
         if failure is not None:
             extra["error_type"] = type(failure).__name__
             extra["error"] = str(failure)

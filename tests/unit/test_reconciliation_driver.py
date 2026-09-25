@@ -787,8 +787,8 @@ async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
 # **THIS IS THE ONE SITE WHERE THE BOOKABILITY CRITERIA'S ORDER IS
 # OBSERVABLE**, because the three refusals carry three distinct operator
 # messages. Everywhere else the criteria are checked the branches are
-# indistinguishable -- `_bookable_total` returns `None` from all four of its
-# exclusions, and `_sell_and_book` maps two reasons onto one action.
+# indistinguishable -- `_bookability`'s caller reads a `None` total from all
+# four of its exclusions, and `_sell_and_book` maps two reasons onto one action.
 #
 # **AND IT WAS COMPLETELY UNPINNED UNTIL THESE TESTS.** Every driver fixture
 # above varies exactly ONE axis, so no input makes two conditions true at once
@@ -798,14 +798,19 @@ async def test_a_position_with_no_entry_fill_price_refuses_before_it_calls(
 # **THEY EXIST TO MAKE A REORDER FAIL LOUDLY**, and the reorder is coming.
 # `M5i-053`: the driver's order is the CANONICAL one a shared bookability
 # predicate must adopt, because it is the only order that preserves every
-# caller's observable behaviour -- `_bookable_total` is order-blind and
+# caller's observable behaviour -- `_bookability`'s caller is order-blind and
 # `_sell_and_book` maps a SET of reasons to one action, so the driver's
 # messages are the only thing a canonical order can break. Whoever writes
 # Option 3 half (ii) should find that constraint from a failing test here, not
 # from memory.
 #
-# The order, DRIVEN rather than read off the source: no-quote-total beats
-# partial beats absent-cost-basis. Q > P > C.
+# **3b-2a REORDERED IT, BY RULING RATHER THAN BY DRIFT.** The project owner's
+# Decision 1 decides P and C before Q, and the three tests that pinned Q first
+# were rewritten to the new winners, their inputs unchanged. Every refusal here
+# still makes ZERO `get_my_trades` calls, and each rewritten test says so.
+#
+# The order, DRIVEN rather than read off the source: partial beats
+# absent-cost-basis beats no-quote-total. P > C > Q.
 # --------------------------------------------------------------------------
 
 #: A fill smaller than `BOOK_QTY`, so the completeness test fails.
@@ -826,16 +831,25 @@ def _two_condition_refusal(
     return str(refusals[0].reason)  # type: ignore[attr-defined]
 
 
-async def test_no_quote_total_beats_a_partial_fill(caplog: pytest.LogCaptureFixture) -> None:
-    """Q + P both true. **Row 2 wins.** `M5i-054`.
+async def test_a_partial_fill_beats_a_missing_quote_total(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """P + Q both true. **Row 3 wins, and nothing is fetched.** Decision 1.
 
-    MUTATION: swap rows 2 and 3 in the ladder; or swap rows 2 and 5.
+    MUTATION: restore `A > Q > P > C`, putting Q ahead of P.
+
+    Rewritten at 3b-2a from `test_no_quote_total_beats_a_partial_fill`, which
+    pinned the old order: the same input, the winner and loser exchanged. The
+    fixture's absent total is FABRICATED -- no capture holds one (`M5k-093`).
 
     **THE ABSENT HALF IS THE LOAD-BEARING ONE HERE, and unusually it is the
     whole test.** A reorder does not stop a refusal happening -- it makes the
-    OTHER message fire -- so an assertion that only checked for a refusal, or
-    only for row 2's presence alongside whatever else came out, would pass
-    under the swap. Only asserting row 3's message ABSENT catches it.
+    OTHER message fire -- so only asserting row 2's message ABSENT catches it.
+
+    **ZERO `get_my_trades`, ON A STUB THAT WOULD RECORD ONE**: `_StubClient`
+    appends to `settled` before it answers anything. DECLARED: that assertion
+    abstains from the reorder -- the driver fetches for no refusal under either
+    order -- and pins instead that a partial fill costs no call.
     """
     portfolio = _portfolio(_booking_position())
     client = _StubClient(
@@ -850,8 +864,9 @@ async def test_no_quote_total_beats_a_partial_fill(caplog: pytest.LogCaptureFixt
         await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
 
     reason = _two_condition_refusal(caplog)
-    assert "no quote total" in reason
-    assert "partial" not in reason
+    assert "partial" in reason
+    assert "no quote total" not in reason
+    assert client.settled == []
     assert portfolio.ledger is None
     assert "BTCUSDT" in portfolio.positions
 
@@ -882,16 +897,17 @@ async def test_a_partial_fill_beats_an_absent_cost_basis(
     assert "BTCUSDT" in portfolio.positions
 
 
-async def test_no_quote_total_beats_an_absent_cost_basis(
+async def test_an_absent_cost_basis_beats_a_missing_quote_total(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Q + C both true. **Row 2 wins.** `M5i-054`.
+    """C + Q both true. **Row 5 wins, and nothing is fetched.** Decision 1.
 
-    MUTATION: swap rows 2 and 5 in the ladder.
+    MUTATION: restore `A > Q > P > C`, putting Q ahead of C.
 
-    The two rows are NOT adjacent, so this is the transposition the other two
-    tests cannot both catch between them -- swapping the ends leaves the middle
-    row in place and every single-axis test green.
+    Rewritten at 3b-2a from `test_no_quote_total_beats_an_absent_cost_basis`:
+    the same input, the winner and loser exchanged. The fixture's absent total
+    is FABRICATED (`M5k-093`). Zero `get_my_trades` on a stub that would record
+    one, abstaining from the reorder for the reason the partial test states.
     """
     portfolio = _portfolio(_booking_position(entry_fill_price=None))
     client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]})
@@ -900,22 +916,26 @@ async def test_no_quote_total_beats_an_absent_cost_basis(
         await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
 
     reason = _two_condition_refusal(caplog)
-    assert "no quote total" in reason
-    assert "entry_fill_price" not in reason
+    assert "entry_fill_price" in reason
+    assert "no quote total" not in reason
+    assert client.settled == []
     assert portfolio.ledger is None
     assert "BTCUSDT" in portfolio.positions
 
 
-async def test_all_three_conditions_at_once_report_the_first(
+async def test_all_three_conditions_at_once_report_the_partial_fill(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Q + P + C all true. **Row 2 wins.** The whole priority in one input.
+    """Q + P + C all true. **Row 3 wins.** The whole priority in one input.
 
-    MUTATION: any reorder that does not leave row 2 first.
+    MUTATION: any reorder that does not leave row 3 first.
 
-    The three pairwise tests pin the order by transposition; this pins the
-    WINNER outright, so a rotation -- which is two transpositions and could
-    leave each pair looking locally right -- still fails here.
+    Rewritten at 3b-2a from `test_all_three_conditions_at_once_report_the_first`,
+    whose winner was row 2; the input is unchanged and its absent total
+    FABRICATED (`M5k-093`). The three pairwise tests pin the order by
+    transposition; this pins the WINNER outright, so a rotation -- which is two
+    transpositions and could leave each pair looking locally right -- still
+    fails here. Zero `get_my_trades`, as in the two above.
     """
     portfolio = _portfolio(_booking_position(entry_fill_price=None))
     client = _StubClient(
@@ -930,9 +950,10 @@ async def test_all_three_conditions_at_once_report_the_first(
         await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
 
     reason = _two_condition_refusal(caplog)
-    assert "no quote total" in reason
-    assert "partial" not in reason
+    assert "partial" in reason
+    assert "no quote total" not in reason
     assert "entry_fill_price" not in reason
+    assert client.settled == []
 
 
 async def test_the_absent_cost_basis_refusal_names_the_cost_basis(

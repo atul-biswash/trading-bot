@@ -2,9 +2,9 @@
 
 **THIS IS THE ONLY PLACE THE FULL ORDER IS OBSERVABLE**, which is why the
 predicate is tested directly rather than only through the three call sites
-(ii)b integrates. ``_bookable_total`` returns a bare ``None`` from all four
-refusals and so is order-blind; ``_sell_and_book`` maps a SET of facts onto one
-action; and neither of those two can produce ``POSITION_ABSENT`` at all, since
+(ii)b integrates. ``_bookability``'s caller reads only the verdict's total,
+``None`` from all four refusals, and so is order-blind; ``_sell_and_book``
+maps a SET of facts onto one action; and neither of those two can produce ``POSITION_ABSENT`` at all, since
 both hold a non-optional ``Position``. Only the driver's three operator
 messages ever showed an ordering, and they show it for three facts of the four.
 
@@ -176,7 +176,14 @@ class TestOneFactAtATime:
 
 
 class TestTheLadderDecidesWhenTwoFactsHold:
-    """``A > Q > P > C``, pinned on inputs where the losing fact is ALSO true.
+    """``A > P > C > Q``, pinned on inputs where the losing fact is ALSO true.
+
+    **THE ORDER IS THE PROJECT OWNER'S DECISION 1**, and it was ``A > Q > P >
+    C`` until 3b-2a. ``q_beats_p`` and ``q_beats_c`` asserted the old order and
+    were replaced by ``p_beats_q`` and ``c_beats_q``, with the same inputs and
+    the winner and loser exchanged. ``a_beats_q`` and ``p_beats_c`` did not
+    move. Every absent total below is FABRICATED: no capture holds one
+    (``M5k-093``).
 
     **BOTH POLARITIES, AND THE ABSENT HALF IS THE WHOLE TEST.** A reorder does
     not stop a refusal happening -- it makes the OTHER fact answer. So each
@@ -196,20 +203,20 @@ class TestTheLadderDecidesWhenTwoFactsHold:
                 BookabilityOutcome.NO_QUOTE_TOTAL,
             ),
             (
-                "q_beats_p",
+                "p_beats_q",
                 _position(),
                 PARTIAL,
                 None,
-                BookabilityOutcome.NO_QUOTE_TOTAL,
                 BookabilityOutcome.PARTIAL_FILL,
+                BookabilityOutcome.NO_QUOTE_TOTAL,
             ),
             (
-                "q_beats_c",
+                "c_beats_q",
                 _position(entry_fill_price=None),
                 QTY,
                 None,
-                BookabilityOutcome.NO_QUOTE_TOTAL,
                 BookabilityOutcome.NO_COST_BASIS,
+                BookabilityOutcome.NO_QUOTE_TOTAL,
             ),
             (
                 "p_beats_c",

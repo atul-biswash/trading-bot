@@ -43,8 +43,21 @@ differently and the numbers were never the same fact twice.
   ``Position`` is constructed with ``entry_fill_price=None`` whenever the
   working-leg query failed or the FOK expired.
 
-THE ORDER IS ``A > Q > P > C``, AND ONLY TWO OF ITS SIX RELATIONS ARE A CHOICE
------------------------------------------------------------------------------
+THE ORDER IS ``A > P > C > Q``, BY THE PROJECT OWNER'S DECISION 1
+-----------------------------------------------------------------
+
+**IT WAS ``A > Q > P > C`` UNTIL 3b-2a, AND THE CHANGE IS THE RULING,
+VERBATIM:** *"Reorder the evaluation sequence for unpriced fills to assess
+Actionable status (A), Quantity completeness (P), and Cost basis presence (C)
+before spending a venue call on Missing Quote Total (Q)."* In the owner's
+words, the reason: *"Evaluating A -> P -> C before invoking the trade query
+strictly preserves the invariant that `PARTIAL_FILL` makes zero venue calls."*
+**Q is last because it is the only rung a caller may later CURE** with a venue
+call, so nothing that makes zero calls may sit behind it.
+
+**IN 3b-2a Q STILL REFUSES.** No caller spends that call yet: a fill that
+clears A, P and C and carries no total is refused exactly as it was before the
+reorder, at every site. 3b-2b is where Q becomes curable.
 
 **A IS A NULL GUARD THAT BINDS THE NAME, NOT A PEER RUNG.** P reads
 ``position.quantity`` and C reads ``position.entry_fill_price``, so either one
@@ -57,19 +70,24 @@ tested; ``CLAUDE.md`` names this coverage kind, *"enforcement by Python itself
 remaining relations are held by assertions in ``tests/unit/test_bookability.py``.
 Between the two, no relation is unheld.
 
-**A BEFORE Q is the one genuinely free choice, and it is ruled deliberately.**
-With no position in memory the quote total is unusable EVEN WHEN PRESENT, so
+**A BEFORE Q was the one genuinely free choice until Decision 1 ruled the other
+two Q relations, and it is ruled deliberately.** With no position in memory the
+quote total is unusable EVEN WHEN PRESENT, so
 reporting Q ahead of A puts a repairable-sounding obstacle -- ``_sell_and_book``
 literally holds a ``_requery_sell_total`` -- in front of an unrepairable one.
 That is the cause-before-consequence principle ``CLAUDE.md`` already applies to
 the staleness guard: *"staleness names the CAUSE where committed-risk-unknown
 names the CONSEQUENCE."* Ruled by the project owner.
 
-**Q > P > C is MEASURED, not chosen.** It is the order
-``reconciliation_driver``'s ladder already runs, and that ladder's three
-operator messages are the only place the order was ever observable. The five
-pins written at ``61919ce`` exist precisely so (ii) could not silently reorder
-it; this module adopts what they pinned.
+**Q > P > C WAS MEASURED, NOT CHOSEN, AND DECISION 1 SUPERSEDES IT.** It was
+the order ``reconciliation_driver``'s ladder ran, and that ladder's three
+operator messages were the only place the order was ever observable. The five
+pins written at ``61919ce`` existed precisely so (ii) could not silently
+reorder it, and (ii) adopted what they pinned. **They recorded the tree, not a
+constraint on it**, which is why this reorder is a ruling and not a drift: the
+pins that asserted Q first were rewritten with it, to the new winners.
+**P > C is unchanged**, and still ``M5i-043``'s: a partial fill with no cost
+basis answers partial, because base remains at the venue.
 
 THE REASON IS A FACT. THE CONSEQUENCE BELONGS TO THE CALLER
 ----------------------------------------------------------
@@ -84,8 +102,9 @@ reads **"Protection is cancelled and the position is not closed"** -- the exact
 inverse. A shared module carrying that clause would assert, from shared code,
 the opposite of what one of its own callers does.
 
-So a caller appends its own consequence. ``_bookable_total`` appends nothing
-because it discards the reason entirely.
+So a caller appends its own consequence. ``_resolve_close`` appends nothing,
+because it reads only the total of the verdict ``_bookability`` returns and
+discards the reason.
 
 **EVERY FACT HALF IS PINNED BY AN EXACT-STRING ASSERTION**, which is ``W6``
 (``M5i-015``) taken at its word: *"A future logger serving two outcomes from one
@@ -155,6 +174,11 @@ class BookabilityVerdict:
     two facts held in two places with nothing binding them. The alternative
     type-checks and is worse code, which is the case where mypy is not the
     instrument. ``M5i-075``.
+
+    ``_bookable_total`` became ``_bookability`` at 3b-2a and returns this
+    verdict whole; the measurement above is of the method as it then was, and
+    the single-sourcing it argues for is unchanged -- ``_resolve_close`` reads
+    ``total`` off the one verdict.
     """
 
     outcome: BookabilityOutcome
@@ -213,7 +237,7 @@ def classify_bookability(
     been satisfied at one of the three sites at all.
 
     :param position: The position this fill claims to close, or ``None`` when
-        none is held. Reachable as ``None`` only from ``_bookable_total``; the
+        none is held. Reachable as ``None`` only from ``_bookability``; the
         other two sites hold a non-optional ``Position`` by construction.
     :param filled_quantity: Base quantity the venue reports executed.
     :param filled_quote_quantity: The venue's own quote total, or ``None`` when
@@ -221,8 +245,6 @@ def classify_bookability(
     """
     if position is None:
         return BookabilityVerdict(BookabilityOutcome.POSITION_ABSENT, REASON_POSITION_ABSENT)
-    if filled_quote_quantity is None:
-        return BookabilityVerdict(BookabilityOutcome.NO_QUOTE_TOTAL, REASON_NO_QUOTE_TOTAL)
     if filled_quantity != position.quantity:
         # Interpolated rather than constant, because the two quantities ARE the
         # fact -- "partial" without them tells an operator nothing actionable.
@@ -235,6 +257,11 @@ def classify_bookability(
         )
     if position.entry_fill_price is None:
         return BookabilityVerdict(BookabilityOutcome.NO_COST_BASIS, REASON_NO_COST_BASIS)
+    if filled_quote_quantity is None:
+        # Q IS LAST -- the project owner's Decision 1. Every rung above it is
+        # decided without a venue call, so a fill that is partial or has no
+        # cost basis answers that fact, never this one.
+        return BookabilityVerdict(BookabilityOutcome.NO_QUOTE_TOTAL, REASON_NO_QUOTE_TOTAL)
     # THE TOTAL PASSES STRAIGHT THROUGH -- no division into a unit price and no
     # re-multiplication. MEASURED, that round trip is lossy: run 3's own shape,
     # 0.02257000 against 35.38691640, returns a delta of -1E-26.

@@ -48,7 +48,7 @@ EXPECTED_PREDICATES = {
 #: by deleting the checks and routing them nowhere, and only this pins which
 #: happened.
 EXPECTED_CONSUMERS = {
-    "_bookable_total",
+    "_bookability",
     "_sell_and_book",
     "_book_exits",
 }
@@ -123,8 +123,9 @@ def test_every_cost_basis_predicate_site_is_registered() -> None:
     The three retired copies asked the SAME question in THREE different orders,
     and one of them (``_sell_and_book``) tested only this fact because its
     other three were established upstream. That ordering difference was
-    ``M5i-039`` across files, and the predicate's single canonical ladder
-    ``A > Q > P > C`` is what resolved it.
+    ``M5i-039`` across files, and the predicate's single canonical ladder is
+    what resolved it -- ``A > Q > P > C`` then, ``A > P > C > Q`` from 3b-2a by
+    the project owner's Decision 1.
 
     **A COUNT OF ONE DOES NOT PROVE THE REWIRING** --
     ``test_all_three_call_sites_consume_the_shared_predicate`` is what does.

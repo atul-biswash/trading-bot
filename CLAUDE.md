@@ -3768,6 +3768,11 @@ asked the same question in three different orders; a census test holds the site
 count at one and a second test pins that the callers CONSUME it, because a count
 of one is equally reachable by deleting the checks and routing nowhere.
 
+> **ANNOTATED BY 3b-2: THE CANONICAL ORDER IS NOW `A > P > C > Q`**, by the
+> project owner's Decision 1, and `_bookable_total` is `_bookability`. The
+> paragraph records M5i's close and stays standing; what it says of the
+> predicate -- one criterion, one census, three consumers -- is unchanged.
+
 *The close-resolution prose now says what the code does.* A complete fill the
 venue never priced is no longer called `close_partial_fill` beside an
 instruction to sell base that is already gone; the unconfirmed branch no longer
