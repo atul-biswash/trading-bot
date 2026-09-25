@@ -21,10 +21,41 @@ Three things, and only three, because the obvious fourth is a stub:
    operator who is not reading logs will not learn about it.** Written plainly so
    nobody assumes otherwise.
 
+> **ANNOTATED AT M5k: the owner ratified CRITICAL as the log line alone;
+> `_log.critical(` sites went from 10 at M5j to 12 at HEAD (grep over `src/`),
+> and none sets a flag. This settles §1's shape, not site 4's N-cycle
+> question.** The ratification is recorded in the body of `3e444f0`, whose
+> subject begins `feat(execution): a diverged pass with no fill escalates`:
+> *"The departure is RATIFIED by ruling rather than repaired here, and it is the
+> shape the ten existing `_log.critical` sites already take."* The instrument
+> is `git grep -c '_log.critical('` over `src/` at `milestone/M5j` and at HEAD:
+> 9 in `execution/executor.py` and 1 in `execution/reconciliation_driver.py`,
+> then 9 and 3. `Portfolio` carries no halt field.
+>
+> **What survives:** item 1 -- the log line and its fixed field set -- and item
+> 3 entire, including *"an operator who is not reading logs will not learn
+> about it"*, which is truer now that the log line is all there is. Item 2 is
+> not withdrawn as a design; it is not built, and the owner ruled that its
+> absence is not a defect to repair at each new `CRITICAL` site.
+
 ### The halt does not survive a restart, and there is no mechanism in M5 to make it
 
 `Portfolio` is in-memory and per-run; `persistence/` is a stub and is deliberately
 deferred. So a restart clears every halt.
+
+> **ANNOTATED AT M5k: FALSE since M5h: the store persists pending records and
+> the ledger; positions and holds are still in-memory.** `persistence/store.py`
+> landed at `5db4921` (2026-08-29), inside M5h: it is absent at
+> `milestone/M5g` and present at `milestone/M5h`, MEASURED by
+> `git cat-file -e` at each tag. `PersistedState` holds `pending`, `ledger`, a
+> per-day history and a lifetime total; no field holds a `Position`, and M5k's
+> `Position.settlement_hold` lives on the position, so a restart still clears
+> every hold. The sentence has been false through three rotations -- M5h's,
+> M5i's and M5j's -- each of which ran step 4 over this file.
+>
+> **What survives:** *"a restart clears every halt"*, and the amnesia argument
+> for sites 2 and 5 below -- both rest on positions not being persisted, which
+> is still true. What expired is only the claim that nothing is.
 
 For sites 3 and 4 that is acceptable, because **boot reconciliation re-detects the
 condition** — the divergence is still there, the stale stamp is still stale.
@@ -59,6 +90,28 @@ Three categories, not two. The distinction is **what can clear it**.
 | 4 | Staleness exceeded, detected in the per-candle driver on a quiet bar | R5 | **Self-clearing** |
 | 5 | An open position has no computable stop while `stop_loss.enabled` is true | S1 | **Terminal** |
 
+> **ANNOTATED AT M5k: THE TABLE ABOVE IS NO LONGER THE LIST OF `CRITICAL`
+> EMITTERS, AND M5k ADDED THREE THAT NO ROW NAMES.** Found by content: every
+> `_log.critical(` in `src/` at HEAD, read to the `event` it emits, against the
+> same census at `milestone/M5j`. Each is classified here in this document's
+> own three categories, by what can clear it.
+>
+> | Event (site) | Condition | Category |
+> |---|---|---|
+> | `exit_unbookable` (`reconciliation_driver.py`, the diverged escalation) | A pass whose position-level verdict is `DIVERGED` and whose legs reported no fill: the requested legs are terminal and nothing is left to price | **Terminal**. Its own resolution text reads *"OPERATOR ONLY: no leg reported a fill, so there is nothing to price and nothing is booked."* It fires on every pass while the condition holds; the position is retained, untrusted, and entries are refused portfolio-wide |
+> | `exit_settlement_held` (`reconciliation_driver.py`'s `_settle`, and `executor.py`'s `_hold_close` at the sell and at the resolution) | An exit FILLED and its settlement shows a fee in an asset this ledger cannot subtract, or a fill that is not a sell (R2) | **Terminal**. Emitted once; the position is HELD and no longer reconciled (ruling A), and a `CLOSE` for it is refused (ruling B). A restart releases the hold by forgetting it, which is §1's amnesia rather than a resolution |
+> | `close_record_resolved`, outcome `settlement_timeout` (`executor.py`, the close-resolution line) | A close whose sell filled and whose settlement could not be read within `_SETTLEMENT_RETRY_BARS` of the symbol's own candles | **Terminal**, as the promotion of a condition that was **resolvable by observation** until then: each deferral is a `WARNING` (`close_settlement_deferred`) and a later successful read books it. This is the shape site 4's paragraph below prescribes -- a distinct marker first, promotion after N -- built with a count the executor holds in memory |
+>
+> **Two changes to emitters that already existed, for completeness.**
+> `close_sold_unpriced`'s `CRITICAL` is gone with `_sold_unpriced`, by the
+> project owner's Decision 2. And `close_sold_unbooked` now also takes an
+> unpriced sell against a position with no cost basis, by 3b-2a's PIN-1.
+>
+> **What survives:** the five sites, their categories, and the rule that a
+> condition's category is decided by what can clear it. None of the three
+> additions is one of the five sites. Whether any should be numbered into this
+> table is a decision this annotation does not take.
+
 **Self-clearing (4).** The refusal frees the budget the reconciler needs, so the
 condition resolves on its own. Escalate at a *distinct* marker and promote to
 terminal only if it fails to clear within N reconciliation cycles. Escalating a
@@ -91,6 +144,26 @@ line stops being read.
 >
 > *Arming condition, in caller terms:* **the halt flag's first writer**, which
 > is the first thing that needs any of §1's three parts to exist.
+
+> **ANNOTATED AT M5k: TWO PLACES FOR A CROSS-PASS FACT NOW EXIST, AND NEITHER
+> ANSWERS THE QUESTION ABOVE.** *"Resolving it needs a third place for the
+> count -- the position, a halt object, or somewhere not yet designed."* M5k
+> built one of each shape for other purposes. A mark on the POSITION:
+> `Position.settlement_hold`, written by `hold_settlement` and read by the
+> reconciliation pass to leave a held position out. And a per-symbol COUNT held
+> by the EXECUTOR: `_settlement_deferrals`, advanced only by that symbol's own
+> candles and read against `_SETTLEMENT_RETRY_BARS`. Both are in memory only.
+>
+> They are evidence that the driver's statelessness can be kept while a count
+> lives elsewhere; they are not a site-4 design, and nothing here chooses
+> between them. **The arming condition above is unchanged and did not fire**:
+> no halt flag was written in M5k, and §1's annotation records that the owner
+> ratified `CRITICAL` without one -- so its caller may never be written, which
+> is failure mode 2 in `CLAUDE.md`'s arming-condition rule. It is also outside
+> both documents the commit-time audit reads.
+>
+> **What survives:** the conflict as stated, both decisions, and the refusal
+> half of site 4.
 
 **Resolvable by observation (1).** The halt persists until a query succeeds. Retry
 the query on the reconciliation cadence; it costs one round trip against the
@@ -273,6 +346,16 @@ act on unknown state, which is what Q-C §4b already mandates in the same breath
 
 `CLAUDE.md` says so on the bullet itself, because the next reader will land on
 exactly this and read a contradiction.
+
+> **ANNOTATED AT M5k: TWO MORE `CLOSE` REFUSALS OF THE SAME OUT-OF-SCOPE KIND.**
+> `OrderExecutor.dispatch` refuses a `CLOSE` while a close record is pending
+> for the symbol (`close_pending`, the project owner's ruling) and a `CLOSE`
+> for a held position (`close_settlement_held`, ruling B), both before any leg
+> is read. Each refuses a double-sell of base already sold, not an exit, and
+> `CLAUDE.md` annotates both on the "exit must always be permitted" bullet.
+>
+> **What survives:** everything above. No limit gates a `CLOSE`; these, like
+> Class E, refuse to act on a venue state the bot already knows.
 
 > **M5h ADDS A PROPERTY THIS DOCUMENT'S MODEL OF `CRITICAL` DOES NOT HAVE: THE
 > WORDING IS PART OF THE CONTROL.** Nothing above is withdrawn — Class E is

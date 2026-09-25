@@ -29,6 +29,13 @@ Every number below is marked one of:
 written this way so a later reader cannot mistake a rationale for a sample, or a
 policy choice for a derivation.
 
+> **ANNOTATED AT M5k: SEVEN NUMBERS, SIX PLACEHOLDERS, ONE BOUNDED.** §7 adds
+> `_SETTLEMENT_RETRY_BARS`, the settlement retention bound the project owner
+> ruled at M5k, and it is a PLACEHOLDER. So *"Six numbers M5 introduces"* above
+> and the tally in the paragraph above are the M5-0 state and are left as
+> written. **What survives:** the three statuses, their definitions, and the
+> reason there are only three. §7 needed no fourth.
+
 There are deliberately only three statuses. A fourth was drafted for
 `dispatch_deadline_s` on the grounds that the coherence constraint *derives* it —
 and withdrawn: the constraint narrows it but cannot produce it, because `alpha` is
@@ -394,6 +401,44 @@ a warning when it means something.
 > **PLACEHOLDER — NOT MEASURED stands.** Nothing here samples the quantity the
 > number is about.
 
+> **ANNOTATED AT M5k, ON THREE COUNTS, AND THE STATUS DOES NOT MOVE.**
+>
+> **1. THE GUARD HAS FIRED, ONCE.** The M5j annotation above reads
+> *"`stage=position_stale` is **zero across the whole capture** … so
+> `_stale_positions` remains unexercised by **every** run to date"*. That was
+> true of its capture and is false of the next one. In
+> `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+> `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`,
+> `stage=position_stale` occurs **once**: `2026-09-24T19:25:00Z`, `pid=23540`,
+> an ETHUSDT `BUY` refused with *"1 open position(s) have not been fully
+> reconciled within 180.0s (BTCUSDT)"*. It is in the bytes that capture adds
+> to `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`,
+> where the count is zero. `docs/RUN_LEDGER.md` §19 records it.
+>
+> **2. THE COUPLING THIS SECTION WARNS OF HAS AN INSTANCE, `M5k-075`.** *"An
+> operator who lengthens their shortest bar must raise this by hand and
+> **nothing checks it**."* `M5k-075` records that the owner's working
+> `config.yaml` -- uncommitted, and not opened for this annotation -- sets
+> `180.0` against a shortest enabled timeframe of 5m, and
+> `ReconciliationBudget.dedup_interval` is that timeframe. A pass re-reads a
+> position only once its stamp is 300 s old, so a stamp reads stale for the
+> 120 s after 180 s on every interval while a position is open. REASONED from
+> the code and the config's text. The one refusal in item 1 is consistent with
+> it and does not measure it: the guard runs inside `evaluate`, so it can fire
+> only on a bar that brings a signal.
+>
+> **3. RULING A MAKES `POSITION_STALE` THE DESIGNED STEADY STATE OF A HELD
+> POSITION.** A held position is never re-stamped, so once its age passes this
+> value every entry is refused as `POSITION_STALE` for as long as it is held.
+> That is the signal-value cost the "too tight" paragraph names, accepted in
+> the ruling's own words: *"The un-cleared position will cross the staleness
+> boundary, transitioning entry refusal from `COMMITTED_RISK_UNKNOWN` to
+> `POSITION_STALE`."*
+>
+> **What survives:** the protects-against, both failure directions, the
+> measurement split, the working value and its status. **PLACEHOLDER — NOT
+> MEASURED stands**: one firing is not a sample of the quantity.
+
 ---
 
 ## 5. `risk.dispatch_deadline_s`
@@ -563,6 +608,27 @@ empirical input.
 > measured that enumeration and point query are different instruments. Ruled by
 > the reviewer under delegation, not by the project owner.
 
+> **ANNOTATED AT M5k: THE CLOSE NOW MAKES CALLS AFTER THE SELL, AND "OTOCO 5"
+> COUNTS ONLY THE CALLS BEFORE IT.** `M5k-103` MEASURED the executor's call
+> list on a close whose `MARKET` sell the venue did not price:
+> `[*FULL_CLOSE, "get_order", "get_my_trades"]`. A priced sell ends
+> `[*FULL_CLOSE, "get_my_trades"]`: every booking since `651d334` settles the
+> sell's fills once before it books. So an OTOCO close is five calls to the
+> sell and up to **seven** in all.
+>
+> **The two added calls are bounded by different budgets**, read from
+> `execution/executor.py`. The `get_order` re-read reuses the dispatch-budget
+> `CallBounds` sampled before the sell and is not re-sampled after it. The
+> `get_my_trades` settlement runs on `settlement_bounds`, which the composition
+> root builds as `reconcile_deadline_s` at one attempt, outside `D`. The
+> coherence check's settlement term reserves that second call's time. REASONED
+> from M5k-103's measured call list and the code; no run has timed either
+> call.
+>
+> **What survives:** the rule that `D` bounds the sequence and the per-call
+> share is derived from it; the five-against-four confirm-step question, still
+> UNRULED; and every figure above.
+
 > **ANNOTATED at M5h: `D` IS OVERRUN BY 1.0 s ON EVERY CLOSE, BY DESIGN, AND
 > THE OVERRUN IS NOW PINNED RATHER THAN MERELY KNOWN.** Nothing above is
 > withdrawn — `D = 9.0` is unchanged, its derivation is unchanged, and the
@@ -718,6 +784,75 @@ no order.
 > **Still NOT re-derived.** The constraint's arithmetic is unchanged and no
 > figure here moves. Both statuses stay PLACEHOLDER.
 
+> **ANNOTATED AT M5k: THE NUMBER NOW BOUNDS THREE THINGS.** The annotation
+> above counts two: the per-call `timeout_s` of a reconciliation call, and the
+> phase's total call count. The third is **the settlement fetch at every
+> booking site.** `engine/modes.py` builds the executor's `settlement_bounds`
+> as `timeout_s=settings.config.risk.reconcile_deadline_s, attempts=1`, so
+> Site A's settlement after the bot's own sell and Site B's at resolution both
+> run at `T_recon`. The reconciliation driver's settlement, made in
+> `_book_exits`, is bounded at `reconcile_deadline_s` and one attempt as well.
+> It runs outside the phase's `max_calls` (`M5k-060`), and the coherence
+> check's third term, `min(N_max, P_sim) x T_recon`, is what reserves its time.
+>
+> **What survives:** the value, its PLACEHOLDER status, and the two readings
+> above. A too-tight value now has a third cost beside the staleness one: a
+> settlement that times out defers the booking, and at Site B each deferral
+> spends one of §7's bars.
+
+---
+
+## 7. `_SETTLEMENT_RETRY_BARS` — the settlement retention bound
+
+> **Added at M5k's rotation.** The six sections above were written at M5-0;
+> this one records a number the project owner ruled at M5k (Variant L), in the
+> shape the others use.
+
+**Type:** a module constant, not a config field — `_SETTLEMENT_RETRY_BARS:
+Final = 5` in `execution/executor.py`, value read from the code. Its comment
+there: *"How many of the symbol's OWN candles a close whose sell FILLED may wait
+for its settlement before it is dropped unbooked at CRITICAL, outcome
+`settlement_timeout`. Ruled by the project owner: five bars of the symbol's
+timeframe, counted from the first deferral."*
+
+**What it counts.** `OrderExecutor._settlement_deferrals` maps a symbol to the
+number of that symbol's own candles seen since its close first deferred
+settlement. The first deferral at either booking site sets it; only a candle of
+that symbol advances it; `_release_close` clears it, and so does `_hold_close`,
+because a held close is not a deferral (R2). At the bound the pending record is
+dropped unbooked at `CRITICAL`, `close_record_resolved`, outcome
+`settlement_timeout`.
+
+**Protects against:** a filled close whose fee never becomes readable holding
+its pending record — and with it the symbol's `close_pending` refusal and the
+position's untrusted protection — for the life of the process.
+
+**Too tight costs:** a trade whose fills the venue would have returned a bar
+later is dropped unbooked, and an operator must enter it by hand. The ledger is
+then short until they do.
+
+**Too loose costs:** the symbol stays unable to close, and entries stay refused
+portfolio-wide on the untrusted position, for longer before anyone is told.
+
+**THE STALLED-FEED LIMIT, stated so it is not mistaken for a wall-clock
+bound.** Quoted from the tracker's comment: *"The count is of the symbol's own
+candles, so if that symbol's feed stops, its count stops too, and its record is
+held until the feed resumes or the process restarts -- while retries go on
+during other symbols' candles."* Five bars is 5 minutes on a 1m symbol and 75
+minutes on a 15m one, and unbounded on a symbol whose feed has stopped.
+
+**In memory only.** After a restart there is no `Position`, so a restored close
+classifies `POSITION_ABSENT`, fetches no settlement, and is released on the
+first candle; the count is not persisted and does not need to be.
+
+**Measurement.** How long the venue takes to return a filled order's fills from
+`myTrades` after the fill. Nothing in this repository has measured it: the only
+`myTrades` captures were read long after their fills.
+
+**Working value: 5.**
+
+**Status: PLACEHOLDER — NOT MEASURED.**
+
 ---
 
 ## The coherence constraint
@@ -765,6 +900,25 @@ the same minute.
 | 2 s | 6 s | 24 s | 12.0 s | 4.0 s |
 | **3 s** | **9 s** | **21 s** | **10.5 s** | **3.5 s** |
 | 5 s | 15 s | 15 s | 7.5 s | 2.5 s |
+
+> **ANNOTATED AT M5k: THE COMMITTED `config.yaml` HAS NOT HAD THIS SHAPE SINCE
+> 2026-08-27.** Read from the committed blob, `git cat-file -p
+> HEAD:config.yaml` (blob `362029e5e54aa259ece3758bd923bea8e141a0b8`): BTCUSDT/1m
+> **enabled**, ETHUSDT/5m **disabled**, `max_open_positions = 3`,
+> `dispatch_deadline_s = 9.0`, `reconcile_deadline_s = 3.0`. The commit that
+> changed it is `50691b3`, subject *"config: disable ETHUSDT for the first
+> supervised run"*; at its parent both pairs are enabled, read the same way.
+>
+> **So on the committed file `P_sim = 1`, not 2.** `T_min` is still 60 s and
+> the budget still 30 s. Under the check as it now reads -- the settlement term
+> is annotated at the formula above -- the committed values give
+> `1 x 9.0 + 3 x 3.0 + min(3, 1) x 3.0 = 21.0 s` against 30.0 s, the figure the
+> commit that added the term reports. The owner's working copy differs from the
+> committed file and is not read here.
+>
+> **What survives:** the table as arithmetic for two pairs that can close on
+> the same minute, which is still the case the check has to refuse or admit,
+> and every row of it for the two-term formula it was computed under.
 
 ### Where it is enforced
 
@@ -832,3 +986,33 @@ configure a longer shortest timeframe in config.yaml.
 The previous worked example used `10.0`, giving `2 x 10.0 + 3 x 3.0 = 29.0s` against
 a 30.0s budget; the constraint is `<=`, so 29.0 passes and the message would never
 have been emitted for its own numbers.
+
+> **ANNOTATED AT M5k: "THE MESSAGE BELOW IS NOW THE TEXT THE CODE ACTUALLY
+> EMITS" HAS BEEN FALSE SINCE `e511e6d`**, the commit whose subject begins
+> `feat(execution): refuse a second close while one is pending, count
+> settlement`. It added a settlement clause to the first sentence and two
+> remedies to the last. The text the code emits at HEAD, for this section's own
+> inputs -- `dispatch_deadline_s = 11.0`, both pairs enabled,
+> `reconcile_deadline_s = 3.0`, `max_open_positions = 3` -- rendered by
+> validating those values through `AppConfig` rather than transcribed:
+>
+> ```
+> risk.dispatch_deadline_s = 11.0 x 2 pair(s) that can close simultaneously, plus risk.reconcile_deadline_s = 3.0 x limits.max_open_positions = 3, plus settlement at risk.reconcile_deadline_s = 3.0 x 2 position(s) that can exit on one bar, is 37.0s. That exceeds 50% of the shortest enabled timeframe (BTCUSDT/1m = 60s, budget 30.0s).
+>
+> The signal handler runs inline on the candle pipeline, so a bar closing
+> while it is still working is missed and never backfilled -- and a gap
+> re-masks ATR to NaN long after warmup, disabling ATR stops on that pair.
+>
+> Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower
+> risk.limits.max_open_positions, enable fewer pairs, or configure a longer
+> shortest timeframe in config.yaml.
+> ```
+>
+> The first line is one line because the code builds it without a break. So
+> `11.0` is refused at 37.0 s where the block above says 31.0 s, and the
+> `10.0` of the paragraph above -- 29.0 s under two terms -- is now refused
+> too, at `20.0 + 9.0 + 6.0 = 35.0 s`.
+>
+> **What survives:** the choice of a breaching example, the middle paragraph
+> word for word, and the reason the example was rewritten in the first place.
+> The block above stays as the M5a text it was.

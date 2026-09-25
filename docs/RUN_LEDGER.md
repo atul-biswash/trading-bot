@@ -941,3 +941,359 @@ live in `CLAUDE.md`, and a reader looking for one is served by going there
 rather than by reading anything here as prescriptive."* Nothing above
 prescribes anything; the sentences are past-tense statements about bytes that
 existed at a stated time with a stated digest.
+
+## 16. The capture M5j's rotation read, recorded at M5k's
+
+Sections 16 to 19 were added at M5k's rotation. Every capture named in them is
+in `F:\trading bot\files\binance-trading-bot\m5j-evidence`, outside the
+repository, and every figure is a `grep -c` over the capture it names unless
+the sentence says otherwise.
+
+**The scope sentences at the top of this file describe sections 1 to 14.**
+Section 1's *"between 2026-07-23 and 2026-09-17"* and section 2's *"Every
+figure below was derived from a single frozen capture"* were true of those
+sections when written. Section 15 and these four each name their own capture,
+and together they carry the record to `2026-09-25T16:16:10Z`. This is added
+rather than written into sections 1 and 2, because this file is added to and
+never annotated.
+
+### The capture
+
+| Property | Value |
+|---|---|
+| file | `trading_bot.m5k-20260919T000000Z.log` |
+| bytes | 4,252,169 |
+| lines | 22,127 |
+| **SHA-256** | **`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`** |
+
+`docs/NEXT_MILESTONE.md`, `docs/QB_ESCALATION.md`, `docs/QC_PROTECTIVE_ORDERS.md`
+and `CLAUDE.md` all cite this digest as the capture M5j's rotation measured
+against. Until this section this file did not name it.
+
+### Continuity
+
+The capture section 15 names is a byte-exact prefix of this one:
+`head -c 4180801` of `trading_bot.m5k-20260919T000000Z.log` hashes to
+`bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182`. This
+capture adds **71,368 bytes and 346 lines**. OBSERVED.
+
+### What the added bytes hold
+
+One pid, the run section 15 described as in flight:
+
+| pid | first line | last line | lines | `engine_stopped` |
+|---|---|---|---:|---:|
+| 24772 | `2026-09-18T17:56:00Z` | `2026-09-19T04:01:01Z` | 346 | 0 |
+
+In the added bytes: 6 `order_placed`, 6 `close_planned` (all 6
+`decision=sell`), 6 `close_booked`, 0 `exit_booked`, 0 `decision=halt`, 0
+`stage=position_stale`, 0 `collaborator_failed`, 0
+`reconciliation_phase_failed`, 0 `diverged=1`, 0 `exit_book_refused`.
+
+### Whole-capture figures, with this digest
+
+94 `order_placed`; 75 `close_planned`, of which 74 `decision=sell`, 1
+`decision=already_closed` and **0 `decision=halt`**; 66 `close_booked` and 7
+`exit_booked`; 18 `exit_book_refused`; 11 `reconciliation_phase_failed`; 28
+`diverged=1`; 0 `engine_stopped`; 0 `stage=position_stale`; 0
+`collaborator_failed`. A search for the literal `leg TP reports FILLED` returns
+**1** line and `leg SL reports FILLED` returns **144**. The second is not the
+figure `162` quoted elsewhere for filled `SL` clauses: that one was counted
+over both of the classifier's clause forms, and this is one form only.
+
+### An earlier capture this file never named
+
+`trading_bot.live-20260917T182829Z.log`, 4,084,785 bytes, SHA-256
+`d0219fb3cecc9e9280b6df780b1d2b27331da3a61694cbfbc18dfe381a2bece4`, is a
+byte-exact prefix of the capture section 2 names: `head -c 4084785` of
+`trading_bot.final-20260917T185851Z.log` hashes to its digest. It holds no byte
+that capture does not, so it adds no observation; it is named so the evidence
+directory has no unrecorded log. OBSERVED.
+
+## 17. The capture of 2026-09-23
+
+### The capture
+
+| Property | Value |
+|---|---|
+| file | `trading_bot.p2a5-20260923T064334Z.log` |
+| bytes | 4,885,745 |
+| lines | 25,202 |
+| **SHA-256** | **`e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`** |
+
+M5k's commit bodies and `CLAUDE.md`'s protective-orders section cite this
+digest. Until this section this file did not name it.
+
+### Continuity
+
+`head -c 4252169` of this capture hashes to
+`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`, so the
+capture section 16 names is a byte-exact prefix. This one adds **633,576 bytes
+and 3,075 lines**. OBSERVED.
+
+### The runs in the added bytes
+
+| pid | first line | last line | lines | `engine_stopped` |
+|---|---|---|---:|---:|
+| 24772 | `2026-09-19T04:03:00Z` | `2026-09-19T09:42:02Z` | 235 | 0 |
+| 25080 | `2026-09-19T13:43:57Z` | `2026-09-19T22:26:46Z` | 275 | 1 |
+| 16216 | `2026-09-20T00:02:56Z` | `2026-09-22T04:36:00Z` | 1,940 | 1 |
+| 20408 | `2026-09-22T17:24:32Z` | `2026-09-23T06:20:02Z` | 525 | 0 |
+
+**Why pid 24772 ended without `engine_stopped` is not established.** Its last
+line is at `09:42:02Z` and nothing after it names that pid. The process began
+before the commit that added the marker, as `docs/NEXT_MILESTONE.md` recorded at
+M5j, which accounts for the absence of the marker and says nothing about how
+the process ended.
+
+**Pid 20408 had not logged `engine_stopped` when this capture was taken.**
+Section 19 shows it did so at `06:55:21Z`, after a `SIGINT`, twelve minutes
+after this capture's instant.
+
+**The commit deployed for any of these runs is not established.** Nothing in a
+log line names a commit.
+
+### Counts in the added bytes
+
+69 `order_placed`; 67 `close_planned`, all 67 `decision=sell`; 67
+`close_booked`; 3 `exit_booked`; 1 `reconciliation_phase_failed`; 0
+`decision=halt`; 0 `stage=position_stale`; 0 `collaborator_failed`; 0 new
+`exit_book_refused`; 0 new `diverged=1`. `leg TP reports FILLED` rises from 1
+line to **3**, and `leg SL reports FILLED` from 144 to 145.
+
+The three `exit_booked` lines:
+
+| time | pid | symbol | `order_id` | `quote_total` | `realised` |
+|---|---|---|---|---|---|
+| `2026-09-19T07:15:01Z` | 24772 | ETHUSDT | 3281823 | `1907.84362700` | `100.8738890000` |
+| `2026-09-20T15:30:01Z` | 16216 | BTCUSDT | 4293356 | `1727.82571360` | `-80.39116640` |
+| `2026-09-21T09:40:01Z` | 16216 | BTCUSDT | 4559541 | `1882.62346720` | `75.164021600000000000000000` |
+
+**Order 4559541's `realised` carries exponent -24**, where the other two carry
+-10 and -8. Its cause is UNMEASURED. It is not unique: the same exponent occurs
+on three other booking lines across the capture chain, and section 19 lists all
+four against the newest capture.
+
+### Whole-capture figures, with this digest
+
+163 `order_placed`; 142 `close_planned`, of which 141 `decision=sell`, 1
+`decision=already_closed` and **0 `decision=halt`**; 133 `close_booked` and 10
+`exit_booked`; 18 `exit_book_refused`; 12 `reconciliation_phase_failed`; 28
+`diverged=1`; 2 `engine_stopped`; 0 `stage=position_stale`; 0
+`collaborator_failed`. `scripts/run_census.py` over this capture reports 51
+distinct pids, 22 substantial.
+
+### Order 300642, recorded nowhere in the tree until now
+
+Every one of the capture's **18** `exit_book_refused` lines names ETHUSDT and
+`order_id=300642`, all written by `pid=7888` between `2026-09-10T03:36:02Z` and
+`04:03:02Z`, each giving the reason *"the fill is partial -- 0.36230000
+executed against a position of 0.73290000 -- so it is not booked and the
+position keeps its untrusted protection"*. The reconciliation line of the first
+such pass reads *"ETHUSDT leg SL reports EXPIRED with 0.36230000 executed"*, and
+its `TP` sibling *"was requested and does not rest: the point query reports
+EXPIRED"*. The same 18 lines are in section 2's capture.
+
+**What order 300642 was is not established.** No line carries the leg's
+`origQty`, so the capture cannot say whether the stop-loss leg was sized at the
+position and executed half of it, or was sized at the executed figure. No
+ETHUSDT `myTrades` capture exists. `docs/QC_PROTECTIVE_ORDERS.md` §10 carries
+the same observation against its unmeasured pending-leg partial fill.
+
+## 18. The two `myTrades` captures
+
+These are JSON reads of the venue's own trade records, not log captures. They
+are recorded here because they measure things this file had left open.
+
+### `my_trades_btcusdt.json`
+
+| Property | Value |
+|---|---|
+| bytes | 106,307 |
+| **SHA-256** | **`111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`** |
+| file modified | `2026-09-23T11:31:55Z` |
+| records | 306, every one BTCUSDT, one key set of 13 keys |
+| fill times | `2026-09-09T21:05:39.248Z` to `2026-09-23T11:17:01.969Z` |
+| orders | 215 distinct, 11 with more than one fill |
+| commission asset | `BTC` on 128 of 128 buyer fills; `USDT` on 178 of 178 seller fills |
+| commission | `0.00000000` on all 306 |
+
+How and when the venue was read is not recorded in the file; the modification
+time is the filesystem's, and M5k's commit bodies are what cite the digest.
+
+**It settles section 15's unmeasured fill time.** Order 3612839 appears once:
+`orderListId` 171948, a seller fill, `price` `80906.00000000`, `qty`
+`0.02308000`, `quoteQty` `1867.31048000`, `commission` `0.00000000` `USDT`,
+`time` `1789744858864`, which is **`2026-09-18T15:20:58.864Z`**. Section 15
+bounded the fill to the 119 seconds between the last pass reporting `active` at
+`15:19:03Z` and the pass that found it at `15:21:02Z`, and called the time
+UNMEASURED. It is now measured, and the fill fell **3.136 seconds** before the
+pass that discovered it. The quote quantity equals section 15's `quote_total`.
+And because the commission was zero, section 15's `realised=63.0300952000`,
+booked GROSS, is also the net figure for that trade. Section 15 stays as
+written: it recorded what the log held.
+
+### `my_trades_btcusdt_order_4293356.json`
+
+| Property | Value |
+|---|---|
+| bytes | 8,027 |
+| **SHA-256** | **`b02a4ef6385f0c188496f265ba487302bb15929dc9061077e741ac3977062a1b`** |
+| file modified | `2026-09-23T17:14:56Z` |
+| records | 23, all order 4293356, all BTCUSDT seller fills |
+| fill time | `2026-09-20T15:29:11.293Z` on all 23 |
+| commission | `0.00000000` `USDT` on all 23 |
+| summed `qty` | `0.02243000` |
+| summed `quoteQty` | `1727.82571360` |
+
+The summed quote quantity equals, by value and by exponent, the `quote_total`
+of the `exit_booked` line section 17 lists for this order at
+`2026-09-20T15:30:01Z`. The same 23 fills are present in the 306-record capture
+above.
+
+## 19. The capture taken at M5k's close
+
+### The capture
+
+| Property | Value |
+|---|---|
+| file | `trading_bot.m5k-close-20260925T182818Z.log` |
+| taken | `2026-09-25T18:28:18Z` |
+| bytes | 5,074,996 |
+| lines | 26,126 |
+| **SHA-256** | **`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`** |
+
+**The read was share-mode**, like section 15's: the source was opened
+`FileMode.Open`, `FileAccess.Read`, `FileShare.ReadWrite`, and copied whole.
+Nothing was written to it, truncated or moved. The source,
+`logs/trading_bot.log`, was last modified at `2026-09-25T16:16:10Z` by the
+filesystem's own time, and its size was 5,074,996 bytes both at an earlier
+metadata read during M5k's rotation and at the copy, so no writer appended to
+it between the two.
+
+### Continuity
+
+`head -c 4885745` of this capture hashes to
+`e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`, so the
+capture section 17 names is a byte-exact prefix. This one adds **189,251
+bytes and 924 lines**, of which 30 carry no pid: five start-up banners of six
+lines each. OBSERVED.
+
+### The runs in the added bytes
+
+| pid | first line | last line | lines | `engine_stopped` |
+|---|---|---|---:|---:|
+| 20408 | `2026-09-23T06:55:17Z` | `2026-09-23T06:55:21Z` | 2 | 1 |
+| 17260 | `2026-09-23T08:24:39Z` | `2026-09-23T16:13:00Z` | 183 | 1 |
+| 25024 | `2026-09-23T18:02:34Z` | `2026-09-24T03:58:40Z` | 374 | 1 |
+| 24572 | `2026-09-24T09:52:53Z` | `2026-09-24T12:49:02Z` | 108 | 1 |
+| 23540 | `2026-09-24T12:49:36Z` | `2026-09-25T07:49:25Z` | 185 | 1 |
+| 23236 | `2026-09-25T09:06:36Z` | `2026-09-25T16:16:10Z` | 42 | 1 |
+
+`Received SIGINT` appears **6** times in the added bytes, and every run in them
+logged `engine_stopped`. Pid 20408's first line here is its `SIGINT`. **No run
+was writing at this capture's instant**: the last line is pid 23236's
+`engine_stopped`.
+
+### Counts in the added bytes
+
+22 `order_placed`; 21 `close_planned`, all 21 `decision=sell`; 21
+`close_booked`; 1 `exit_booked`; 0 `decision=halt`; 0 `collaborator_failed`; 0
+`reconciliation_phase_failed`; and **1 `stage=position_stale`**.
+
+**`RefusalStage.POSITION_STALE` fired, for the first time in any capture this
+file names.** `2026-09-24T19:25:00Z`, `pid=23540`: an ETHUSDT `BUY` on 5m
+refused with *"1 open position(s) have not been fully reconciled within 180.0s
+(BTCUSDT); the ledger is not current enough for any limit to mean anything"*.
+Every earlier capture here counts it at zero.
+
+### M5k's events and keys, by content
+
+| Searched for | Lines in the added bytes |
+|---|---:|
+| `exit_settlement_held` | 0 |
+| `exit_quote_totals_disagree` | 0 |
+| `close_settlement_deferred` | 0 |
+| `exit_settlement_deferred` | 0 |
+| `settlement_timeout` | 0 |
+| `venue_quote_total_unavailable` | 0 |
+| `quote_total_source` | 0 |
+| booking lines carrying `fee=` and `fee_asset=` | **8** of 22 |
+
+The 22 booking lines split by pid, with no pid mixed:
+
+| pid | booking lines | carry `fee` and `fee_asset` | first | last |
+|---|---:|---|---|---|
+| 17260 | 7 | no | `2026-09-23T09:40:03Z` | `2026-09-23T15:38:02Z` |
+| 25024 | 7 | no | `2026-09-23T20:11:02Z` | `2026-09-24T03:22:02Z` |
+| 24572 | 3 | yes | `2026-09-24T10:38:02Z` | `2026-09-24T12:43:03Z` |
+| 23540 | 4 | yes | `2026-09-24T18:30:04Z` | `2026-09-25T06:45:03Z` |
+| 23236 | 1 (`exit_booked`) | yes | `2026-09-25T14:05:02Z` | `2026-09-25T14:05:02Z` |
+
+Every one of the eight carries `fee=0E-8 fee_asset=USDT fills=1` and a
+`filled_at`. The seven `close_booked` lines carry no `order_created_at`; the
+one `exit_booked` does.
+
+### Whether code at or after `651d334` wrote any of it
+
+**Yes, by the key, and the eight lines above are the evidence.** `651d334` is
+the commit whose subject begins `feat(accounting): exits book net of the
+venue's own fee`. `git grep -c '"fee_asset"'` over `src/` finds nothing at
+`milestone/M5j`, at `e511e6d` or at `f1c5af7` -- the commit before `651d334` --
+and finds 2 sites in `execution/executor.py` and 1 in
+`execution/reconciliation_driver.py` at `651d334`. So no commit before it
+writes that key, and the first line carrying it is:
+
+```
+2026-09-24T10:38:02Z | INFO     | pid=24572 | trading_bot.execution.executor | Closed BTCUSDT event=close_booked symbol=BTCUSDT order_id=5979512 quantity=0.02172000 quote_total=1808.51905800 fee=0E-8 fee_asset=USDT fills=1 filled_at=2026-09-24T10:38:02.370000+00:00 realised=-0.9667572000 candle_time=2026-09-24T10:37:59.999000+00:00
+```
+
+**And that line precedes the commit.** `651d334`'s committer date is
+`2026-09-24T23:46:41+06:00`, which is `17:46:41Z`, seven hours after the line.
+The repository's reflog shows HEAD at `e511e6d`, committed `09:29:07Z`, from
+then until `f1c5af7` at `17:35:53Z`, with no commit between. So pid 24572's
+three fee-bearing lines were written by code that **no commit then in this
+repository contained** -- code from a working tree, not from a commit. OBSERVED
+from the line times, the committer dates and the reflog. Pid 23540 began at
+`12:49:36Z`, also before `651d334` existed, and its four lines were written
+after it. That its code is what it loaded at start is REASONED, from Python
+importing its modules once at start, and not measured.
+
+**No line in the added bytes needs code at or after `c5dd7d5`.** From that
+commit every booking line spreads `quote_total_fields`, which writes
+`quote_total_source` beside `quote_total` on each of the three booking emitters.
+No added line carries it, and none of M5k's other six events appears.
+
+**So M5k's code, as committed, is not shown to have run.** The fee settlement
+ran, from uncommitted code for at least one process, on eight bookings whose fee
+was zero every time. No hold, deferral, fills supply, disagreement warning,
+settlement timeout or negative-total warning is recorded anywhere in this
+capture. **Which commit, if any, each run deployed is not established.**
+
+### The realised exponent, across the chain
+
+Booking lines' `realised` carries exponent -10 on 140 lines, -9 on 11, -8 on 10
+and **-24 on 4**, counted over the whole of this capture. The four at -24:
+
+| time | pid | event | `order_id` | `realised` |
+|---|---|---|---|---|
+| `2026-09-10T03:34:04Z` | 7888 | `close_booked` | 327933 | `5.201974900000000000000000` |
+| `2026-09-20T18:02:02Z` | 16216 | `close_booked` | 4347037 | `-5.235144100000000000000000` |
+| `2026-09-21T09:40:01Z` | 16216 | `exit_booked` | 4559541 | `75.164021600000000000000000` |
+| `2026-09-23T22:37:03Z` | 25024 | `close_booked` | 5731709 | `1.673428400000000000000000` |
+
+Each has seven significant decimal places followed by zeros to the 24th. The
+cause is UNMEASURED.
+
+### `scripts/run_census.py` over this capture
+
+56 distinct pids, 26 substantial; 185 `order_placed`, 163 `close_planned`, 154
+`close_booked`, 11 `exit_booked`, 18 `exit_book_refused`, 12
+`reconciliation_phase_failed`, 8 `engine_stopped`, 0 `collaborator_failed`.
+Whole-capture `decision=halt` is **0** of 163 close plans (162 `decision=sell`,
+1 `decision=already_closed`).
+
+### What sections 16 to 19 are
+
+Observations, like every section above them: past-tense statements about bytes
+with a stated digest, and no rule.

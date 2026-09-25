@@ -99,6 +99,24 @@ exists so a strategy can own its exits; portfolio limits still apply.
 `MARKET` is refused as a working type (MEASURED, `-1159`). `LIMIT` is refused in the
 pending-above slot (MEASURED, `-1158`).
 
+> **ANNOTATED AT M5k: Ruling A's cost depends on §3 placing every protective leg
+> inside one list (PIN-2, M5k-080: 144 of 148 observed EXPIRED, 0 live, capture
+> `trading_bot.p2a5-20260923T064334Z.log`, SHA-256
+> `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`).** Of the
+> 148 per-pass lines naming a FILLED protective leg, 144 show the sibling
+> `EXPIRED`, 4 did not read it, and 0 show it live. Ruling A stops reconciling a
+> HELD position, so a sibling that stayed live would be a resting sell for base
+> already sold that nothing watches. The project owner accepted that the venue
+> ends the sibling (Case 1) -- OBSERVED and DOCUMENTED, not contracted.
+>
+> So this section's leg set now carries a dependant it did not have: the
+> blocked trailing-stop item's condition in `docs/NEXT_MILESTONE.md` (*"whoever
+> amends Q-C §3's leg set"*) and `CLAUDE.md`'s condition on `build_placement`
+> guard the same premise from the document side and the code side.
+>
+> **What survives:** the leg types, both refusals above, and every measurement
+> in this section. Nothing here amends the leg set.
+
 **OTOCO — 16 parameters (MEASURED, T2 accepted):**
 
 ```
@@ -124,6 +142,23 @@ pendingClientOrderId
 ```
 
 Note the **plain `pending*` prefix**, not OTOCO's `pendingAbove*`/`pendingBelow*`.
+
+> **ANNOTATED AT M5k: `pendingQuantity` equals `workingQuantity` by
+> construction; on a fee-charging account whose BUY commission is taken in base
+> this asks to sell more than is held. REASONED; see CLAUDE.md's live block.**
+>
+> The denomination half is MEASURED. In the `myTrades` capture
+> `my_trades_btcusdt.json`, SHA-256
+> `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`, every BUY
+> fill carries its commission in the base asset (128 of 128, `BTC`) and every
+> SELL fill in the quote asset (178 of 178, `USDT`). Every commission in it is
+> `0.00000000`, so the capture establishes which asset the venue names and
+> nothing about the amount. That is why the consequence above is REASONED, and
+> why the project owner blocked live trading on it rather than on a measurement.
+>
+> **What survives:** both parameter sets, their MEASURED acceptance, and the
+> forbidden-field list. Nothing here changes what is sent; it records what the
+> equal quantities would mean on an account that charges a base-asset fee.
 
 **`TAKE_PROFIT` over `LIMIT_MAKER`, on one reason:** `LIMIT_MAKER` is post-only, so
 it carries an *additional* rejection mode at activation whose blast radius on the
@@ -221,6 +256,19 @@ dispatched as a bare SELL. On spot, the discretionary sell and a protective leg
 triggering moments later would both complete, and the second sells base no longer
 held.
 
+> **ANNOTATED AT M5k: Two refusals precede cancel → confirm → sell: a close
+> record already pending, and a held position. Both refuse a double-sell, not an
+> exit (CLAUDE.md).** Each is a reason string on `OrderExecutor.dispatch`'s
+> `dispatch_refused` line -- `close_pending`, then `close_settlement_held` --
+> checked before `_plan_close` runs, so no leg is read and nothing is cancelled.
+> The first is the project owner's ruling on a second `CLOSE` while the first
+> close's record is pending; the second is ruling B, for a position whose exit
+> FILLED and could not be booked (`Position.settlement_hold`, PIN-1).
+>
+> **What survives:** everything in the paragraph above and the whole sequence
+> below. Neither refusal is a limit, and neither changes what a `CLOSE` that
+> reaches the sequence does.
+
 **The sequence is cancel → confirm → sell, and the order is forced.**
 
 Sell-then-cancel leaves a window in which the position is flat and a protective
@@ -264,6 +312,26 @@ each leg, not merely `status`:
 - A leg executed partially → **UNMEASURED** (§10). Treat as `CRITICAL`, halt
   entries, do not sell. `FOK` removes partial fills from the entry path but not
   from a triggered protective leg.
+
+> **ANNOTATED AT M5k: 'record the exit' now spends one `get_my_trades` per
+> booking and books net of the exit fee; a foreign-asset fee or non-SELL fill
+> holds the position; a supply that fails at the sell defers to the resolution
+> path for at most five of the symbol's bars.**
+>
+> **Which branch each clause belongs to, because the list above has two.** On
+> "a leg executed in full" the executor sends nothing and books nothing -- an
+> already-closed position is the reconciler's to book -- so the one fetch on
+> that branch is the reconciliation driver's. The deferral in the last clause
+> belongs to the other branch, "no leg executed", after the bot's own `MARKET`
+> sell has filled. "Five of the symbol's bars" counts that symbol's own candles,
+> so a stalled feed stalls the count; see `docs/M5_NUMBERS.md` §7. The rulings
+> are R-a (exit fees only; the ledger stays gross of entry fees), R2 with rulings
+> A and B (the hold), and Decision 2 with Variant L (the deferral).
+>
+> **What survives:** the three-way decision above, the cancel-failure table, the
+> ordering argument, and the rule that the confirming query -- never the cancel
+> response -- decides what happens next. The partial-leg line is unchanged:
+> still UNMEASURED, still `CRITICAL`, still "do not sell".
 
 **The discretionary SELL is `MARKET`.** A `CLOSE` is a decision that the position
 should not be held; a limit that misses would leave it held and unprotected, which
@@ -649,6 +717,19 @@ materialised" is indistinguishable from the normal transient.
 latter, so it explains the phase, not the leg (MEASURED, T2).
 
 Moments: at boot, after each placement, per candle per open position.
+
+> **ANNOTATED AT M5k BY THE PROJECT OWNER'S RULING A: PER CANDLE PER UNHELD OPEN
+> POSITION.** The ruling, verbatim: *"Once `Position.unbookable_fee_mismatch` is
+> set, the reconciliation driver skips active protective checks, order queries,
+> and trade settlement on subsequent passes."* The flag is
+> `Position.settlement_hold` (PIN-1). A held position is left out of
+> `reconcile_open_positions`'s due set: it is not enumerated, point-queried,
+> settled or stamped, so its stamp ages until entries are refused as
+> `POSITION_STALE`. `CLAUDE.md` carries the full annotation at its two sites,
+> the polling decision and the handler-isolation section.
+>
+> **What survives:** the boot and post-placement moments, and the per-candle
+> moment for every position that is not held.
 
 Unprotected divergence → re-place once at the next generation; on failure
 `CRITICAL`, halt entries, **do not auto-close**. Re-placing is reversible; closing
@@ -1066,6 +1147,26 @@ port move together.
 - `_enforce` is blind to notional for MARKET and stop-market orders — pinned to M5.
 - Pending-leg partial fill — requires an irreversible fill. `FOK` removes it from
   the entry path only.
+
+  > **ANNOTATED AT M5k: One production observation bears on this and does not
+  > settle it: a leg reported `0.36230000` executed against a `0.73290000`
+  > position (capture `trading_bot.p2a5-20260923T064334Z.log`, SHA-256
+  > `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`).
+  > Whether that is a pending-leg partial or a quantity mismatch is not
+  > established.** The record is 18 `exit_book_refused` lines, every one
+  > ETHUSDT, `order_id=300642`, `pid=7888`, from `2026-09-10T03:36:02Z` to
+  > `04:03:02Z`, each giving the same reason: *"the fill is partial -- 0.36230000
+  > executed against a position of 0.73290000"*. The reconciliation line of the
+  > first of those passes names the leg and its status: *"ETHUSDT leg SL reports
+  > EXPIRED with 0.36230000 executed"*, its `TP` sibling *"does not rest: the
+  > point query reports EXPIRED"*. So a stop-loss leg ended `EXPIRED` having
+  > executed part of something. No line carries the leg's `origQty`, so the
+  > capture cannot say whether the leg was sized at the position or at the
+  > executed figure, and no ETHUSDT `myTrades` capture exists.
+  > `docs/RUN_LEDGER.md` §17 records it.
+  >
+  > **What survives:** the line above, UNMEASURED, and §4b's rule that a leg
+  > executed partially is not sold against.
 - The `PENDING_NEW` → `NEW` transition on a real fill — DOCUMENTED, never measured.
 
   > **STILL UNMEASURED, and one adjacent thing now IS.** `get_open_orders`
