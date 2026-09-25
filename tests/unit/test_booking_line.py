@@ -15,10 +15,10 @@ from decimal import Decimal
 from pathlib import Path
 from types import ModuleType
 
-from trading_bot.core.models import ExitSettlement, Fee
+from trading_bot.core.models import ExitSettlement, Fee, HeldExit
 from trading_bot.execution import executor as executor_module
 from trading_bot.execution import reconciliation_driver as driver_module
-from trading_bot.execution.booking_line import settlement_fields
+from trading_bot.execution.booking_line import hold_fields, settlement_fields
 
 D = Decimal
 FILLED_AT = datetime(2026, 9, 17, 9, 48, 5, 916000, tzinfo=timezone.utc)
@@ -131,3 +131,47 @@ def test_all_three_booking_lines_consume_the_helper() -> None:
     for module in (executor_module, driver_module):
         written = _dict_keys(module) & set(_SETTLEMENT_ONLY_KEYS)
         assert written == set(), f"{module.__name__} writes {sorted(written)} itself"
+
+
+#: FABRICATED: a BNB fee and a USDT fee on one order -- no captured SELL fill
+#: carries a non-USDT fee.
+HELD = HeldExit(
+    order_id="3189811",
+    cause="foreign_fee_asset",
+    reason="order 3189811 is charged in ['BNB', 'USDT']",
+    fees=(Fee(amount=D("0.00003000"), asset="BNB"), Fee(amount=D("0.10000000"), asset="USDT")),
+)
+
+
+def test_the_hold_line_names_order_asset_amount_and_what_a_restart_does() -> None:
+    """R2's one CRITICAL: what was held, each fee BESIDE its asset, and what to do.
+
+    MUTATION: drop the restart sentence, or any instruction below. Each
+    phrase is asserted against `resolution` alone, and none of them occurs in
+    the other fields, so no phrase is satisfied by a neighbour (`M5i-126`).
+    `quote_total` is OMITTED when unknown, never null.
+    """
+    fields = hold_fields(HELD, quote_asset="USDT", quantity=D("0.02314000"), quote_total=None)
+
+    assert fields["order_id"] == "3189811"
+    assert fields["cause"] == "foreign_fee_asset"
+    assert fields["quantity"] == D("0.02314000")
+    assert fields["fees"] == "0.00003000 BNB; 0.10000000 USDT"
+    assert fields["reason"] == HELD.reason
+    assert "quote_total" not in fields
+    resolution = fields["resolution"]
+    assert isinstance(resolution, str)
+    for phrase in (
+        "NOTHING WAS BOOKED",
+        "DO NOT SELL IT BY HAND",
+        "PORTFOLIO-WIDE",
+        "Enter this trade by hand, then restart",
+        "A restart releases the hold, because the position is not persisted",
+        "subtracts only USDT",
+    ):
+        assert phrase in resolution, phrase
+
+    with_total = hold_fields(
+        HELD, quote_asset="USDT", quantity=D("0.02314000"), quote_total=D("1772.00890360")
+    )
+    assert with_total["quote_total"] == D("1772.00890360")

@@ -1992,6 +1992,50 @@ class TestStaleness:
 
         assert assessment.stage is RefusalStage.POSITION_STALE
 
+    @pytest.mark.parametrize(
+        "age",
+        [
+            timedelta(0),
+            timedelta(seconds=179, microseconds=999999),
+            timedelta(seconds=180),
+            timedelta(seconds=180, microseconds=1),
+            timedelta(hours=1),
+        ],
+        ids=["fresh", "just_under", "at_bound", "just_over", "an_hour"],
+    )
+    def test_a_held_position_refuses_every_entry_across_the_staleness_boundary(
+        self, age: timedelta
+    ) -> None:
+        """RULING A's accepted consequence: COMMITTED_RISK_UNKNOWN, then POSITION_STALE, never admitted.
+
+        A HELD position (R2) is no longer reconciled, so its stamp stops and
+        ages across `max_position_staleness_s` -- 180 s, the model default.
+        The comparison is strict, so `at_bound` is still fresh. It starts
+        ACTIVE with a stop -- trusted and priced -- so only the hold's
+        `UNKNOWN` write can make it uncomputable: the three fresh ages are
+        what would be ADMITTED without it. MUTATION: delete that write, or
+        skip a held position in `committed_risk`.
+        """
+        manager, signal = self._manager_and_signal()
+        position = long_position(
+            symbol="ETHUSDT",
+            stop_loss=D("90"),
+            protection=ProtectionState.ACTIVE,
+            last_reconciled_at=NOW - age,
+        )
+        position.hold_settlement()
+        portfolio = Portfolio(free_quote=D("10000"), positions={"ETHUSDT": position})
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert not assessment.approved
+        expected = (
+            RefusalStage.POSITION_STALE
+            if age > timedelta(seconds=180)
+            else RefusalStage.COMMITTED_RISK_UNKNOWN
+        )
+        assert assessment.stage is expected
+
     def test_the_guard_is_not_gated_on_stop_loss_enabled(self) -> None:
         """THE ONE BEHAVIOUR CHANGE IN THIS COMMIT, pinned rather than left to
         the docstring.

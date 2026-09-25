@@ -36,7 +36,11 @@ from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
 from trading_bot.core.enums import ProtectionState
-from trading_bot.core.exceptions import ExchangeError, FeeUnresolvableError
+from trading_bot.core.exceptions import (
+    ExchangeError,
+    FeeFillsIncompleteError,
+    FeeUnresolvableError,
+)
 
 # A PRIVATE name, imported across modules deliberately. The alternative is a
 # second definition of "which protection states may be trusted", and two
@@ -46,9 +50,14 @@ from trading_bot.core.exceptions import ExchangeError, FeeUnresolvableError
 # consequence: admitting `ACTIVE` to it later quiets this warning for healthy
 # positions automatically, because the line and the refusal are then keyed off
 # the same fact. Making it public is a `core/` decision and is not taken here.
-from trading_bot.core.portfolio import _TRUSTED_PROTECTION, settle_exit
+from trading_bot.core.portfolio import _TRUSTED_PROTECTION, held_exit, settle_exit
 from trading_bot.execution.bookability import BookabilityOutcome, classify_bookability
-from trading_bot.execution.booking_line import settlement_fields
+from trading_bot.execution.booking_line import (
+    EVENT_SETTLEMENT_HELD,
+    HOLD_MESSAGE,
+    hold_fields,
+    settlement_fields,
+)
 from trading_bot.execution.reconciliation import (
     reconcile_open_positions,
     resolve_unresolved_legs,
@@ -498,9 +507,13 @@ class ReconciliationDriver:
         :func:`~trading_bot.core.portfolio.settle_exit` sums from them. Nothing
         else fetches: a diverged, partial, unpriced or cost-basis-less exit
         makes no call, and neither does a pass with no fill. A fetch that raises
-        from the exchange family, or a settlement the ledger refuses, SKIPS that
-        position at WARNING and the loop goes on; the position survives, so the
-        next pass retries. Anything else propagates to ``_PHASE_BOOKING`` with
+        from the exchange family, or a fill list the ledger refuses as
+        INCOMPLETE, SKIPS that position at WARNING and the loop goes on; the
+        position survives, so the next pass retries. A settlement the ledger
+        refuses TERMINALLY -- a fee in an asset it cannot subtract, or a fill
+        that is not a sell -- HOLDS the position instead, at CRITICAL, and no
+        later pass visits it (R2 with ruling A); it too survives, and the loop
+        goes on. Anything else propagates to ``_PHASE_BOOKING`` with
         its traceback. **The save runs in a ``finally``**, so exits booked
         earlier in a pass are persisted even when a later one raises -- which
         the orphan guard's ``raise`` used to prevent.
@@ -582,8 +595,11 @@ class ReconciliationDriver:
         """The exit's fills, settled -- or ``None``, having said why. Never raises those.
 
         Catches the exchange family around the FETCH only, and
-        ``FeeUnresolvableError`` around the SETTLEMENT only; both skip this
-        position at WARNING and leave it for the next pass. Anything else --
+        ``FeeUnresolvableError`` around the SETTLEMENT only. A fetch failure
+        and ``FeeFillsIncompleteError`` skip this position at WARNING and leave
+        it for the next pass. Any OTHER ``FeeUnresolvableError`` is terminal
+        (R2): the position is HELD, one CRITICAL says so, and ruling A keeps
+        every later pass away from it. Anything else --
         a programming error, a malformed record the mapper refuses --
         propagates to ``_PHASE_BOOKING`` with its traceback.
         """
@@ -614,11 +630,42 @@ class ReconciliationDriver:
                 quote_asset=self._portfolio.quote_asset,
                 executed_quantity=fill.filled_quantity,
             )
-        except FeeUnresolvableError as exc:
+        except FeeFillsIncompleteError as exc:
+            # WAITING CAN CURE THIS (Variant L), so it is refused at WARNING and
+            # the next pass retries it, exactly as before.
             self._refuse_booking(
                 symbol,
                 fill.order_id,
                 f"{exc} -- so it is not booked and the position keeps its untrusted protection",
+            )
+            return None
+        except FeeUnresolvableError as exc:
+            # R2: WAITING CANNOT. One fetch -- the one just made -- one CRITICAL,
+            # then HOLD on the Position. Ruling A's filter in
+            # `reconcile_open_positions` is what makes this the LAST pass that
+            # sees the position: nothing is remembered here (M5e).
+            position = self._portfolio.positions.get(symbol)
+            if position is None:
+                # Unreachable: the orphan guard ran before settlement. Refused,
+                # not held, because there is nothing to hold.
+                self._refuse_booking(symbol, fill.order_id, str(exc))
+                return None
+            held = held_exit(trades, order_id=fill.order_id, error=exc)
+            position.hold_settlement()
+            _log.critical(
+                HOLD_MESSAGE,
+                symbol,
+                extra={
+                    "event": EVENT_SETTLEMENT_HELD,
+                    "symbol": symbol,
+                    "site": "reconciliation",
+                    **hold_fields(
+                        held,
+                        quote_asset=self._portfolio.quote_asset,
+                        quantity=fill.filled_quantity,
+                        quote_total=fill.filled_quote_quantity,
+                    ),
+                },
             )
             return None
 

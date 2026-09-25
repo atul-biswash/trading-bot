@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import (
     AfterValidator,
@@ -667,6 +667,32 @@ class ExitSettlement(_Frozen):
     fill_count: int = Field(ge=1)
 
 
+class HeldExit(_Frozen):
+    """An exit that FILLED and that this ledger cannot book, as ONE value. R2.
+
+    Built by :func:`~trading_bot.core.portfolio.held_exit` from the fills
+    ``settle_exit`` refused terminally: a fee in an asset other than the quote
+    asset, or a fill that is not a sell. Waiting changes neither.
+
+    **NEVER STORED ON A POSITION.** The mark is ``Position.settlement_hold``, a
+    ``bool``, by the project owner's ruling PIN-1. This value exists so the one
+    CRITICAL the hold emits is rendered from one object, and so every amount in
+    it stays paired with its asset -- never a bare ``Decimal``.
+    """
+
+    order_id: str
+    #: WHICH terminal refusal. Taken from the exception's TYPE, never
+    #: re-derived from the fills, so ``settle_exit`` stays the single
+    #: discriminator.
+    cause: Literal["foreign_fee_asset", "non_sell_fill"]
+    #: ``str(exc)``, as ``settle_exit`` worded it.
+    reason: str = Field(min_length=1)
+    #: What the venue charged across the order's fills, summed PER ASSET --
+    #: amount paired with asset. Never empty: an empty fill list raises
+    #: ``FeeFillsIncompleteError`` before it can reach here.
+    fees: tuple[Fee, ...] = Field(min_length=1)
+
+
 class Position(BaseModel):
     """An open position and its protective levels. Mutable by design.
 
@@ -789,6 +815,18 @@ class Position(BaseModel):
     #: never, which is what a freshly opened position reports until the first
     #: reconciliation pass reaches it.
     last_reconciled_at: datetime | None = None
+    #: ``True`` once an exit of this position FILLED and was refused as
+    #: terminally unbookable -- R2, named by the project owner's ruling PIN-1.
+    #: ``False`` is true of every position at birth: an exit cannot precede its
+    #: position. Set once, by :meth:`hold_settlement`, and never cleared; the
+    #: mark is in memory only, so a restart releases it.
+    #:
+    #: Read by ``reconcile_open_positions`` (ruling A: a held position is not
+    #: reconciled) and by ``OrderExecutor`` (Site B's skip, and ruling B's
+    #: guard on a further ``CLOSE``), and by NOTHING on the risk path. A held
+    #: position stays counted in committed risk because its protection is
+    #: untrusted, not because of this field.
+    settlement_hold: bool = False
     stop_loss: Money | None = None
     take_profit: Money | None = None
     trailing_stop: Money | None = None
@@ -901,6 +939,24 @@ class Position(BaseModel):
         has to remember.
         """
         self.protection = protection
+
+    def hold_settlement(self) -> None:
+        """Mark this position's exit terminal and unbookable. R2, PIN-5.
+
+        **One method rather than two assignments**, for the reason
+        :meth:`record_reconciliation` gives: with ``validate_assignment`` on,
+        two statements are observable between each other.
+
+        **Protection FIRST, the mark LAST.** An interrupted write leaves an
+        untrusted, UNHELD position -- which is reconciled and retried -- never
+        a held one whose protection still reads trusted. Like
+        :meth:`record_reconciliation`'s ordering, this is UNPROVABLE by
+        mutation and is done for that reason rather than because a test
+        demands it; that the protection write HAPPENS is pinned, the order of
+        the two writes is not.
+        """
+        self.protection = ProtectionState.UNKNOWN
+        self.settlement_hold = True
 
 
 class SizingDecision(_Frozen):

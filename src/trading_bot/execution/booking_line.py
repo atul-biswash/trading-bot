@@ -27,19 +27,32 @@ VALUE; the exponent is the venue's in both sources.
 quantity, ``str`` for ids and ``.isoformat()`` times, ``int`` for the count.
 Nothing here performs I/O and nothing here logs; each caller emits its own line
 at its own level.
+
+**THE HOLD LINE LIVES HERE TOO** (R2): an exit that filled and cannot be
+booked is held at three sites, and :func:`hold_fields` is their one field set,
+for the reason ``settlement_fields`` is the booking lines'.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Final
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import datetime
     from decimal import Decimal
 
-    from trading_bot.core.models import ExitSettlement
+    from trading_bot.core.models import ExitSettlement, HeldExit
 
-__all__ = ["settlement_fields"]
+__all__ = ["EVENT_SETTLEMENT_HELD", "HOLD_MESSAGE", "hold_fields", "settlement_fields"]
+
+#: The event of the one CRITICAL an exit hold emits, at whichever site holds
+#: it -- the reconciliation driver, the executor's sell, or its resolution. R2.
+EVENT_SETTLEMENT_HELD: Final = "exit_settlement_held"
+#: Its message. ``%s`` is the symbol, so every site passes the same arguments.
+HOLD_MESSAGE: Final = (
+    "%s: an exit FILLED and cannot be booked -- NOTHING WAS BOOKED and the position is "
+    "HELD until an operator acts"
+)
 
 
 def settlement_fields(
@@ -62,4 +75,38 @@ def settlement_fields(
     }
     if order_created_at is not None:
         fields["order_created_at"] = order_created_at.isoformat()
+    return fields
+
+
+def hold_fields(
+    held: HeldExit, *, quote_asset: str, quantity: Decimal, quote_total: Decimal | None
+) -> dict[str, Decimal | str]:
+    """The hold line's fields, as ``extra=`` may carry them. R2.
+
+    ONE field set for the three sites that hold, rendered from one
+    :class:`~trading_bot.core.models.HeldExit`, so the line cannot disagree
+    with the refusal it reports. ``fees`` renders each amount BESIDE its
+    asset, never a bare ``Decimal``, and ``str()`` keeps the venue's exponent.
+    ``quote_total`` is OMITTED when the venue gave none -- never ``null``.
+    """
+    fields: dict[str, Decimal | str] = {
+        "order_id": held.order_id,
+        "cause": held.cause,
+        "quantity": quantity,
+        "fees": "; ".join(f"{fee.amount} {fee.asset}" for fee in held.fees),
+        "reason": held.reason,
+        "resolution": (
+            "THE EXIT FILLED and IT CANNOT BE BOOKED: the fees field names what the venue "
+            f"charged, and this ledger subtracts only {quote_asset} from a quote total with "
+            "no converter -- or a fill of this order is not a sell. NOTHING WAS BOOKED. THE "
+            "BASE IS ALREADY SOLD: DO NOT SELL IT BY HAND. The position is HELD in memory "
+            "with untrusted protection and is no longer reconciled, so ENTRIES ARE REFUSED "
+            "PORTFOLIO-WIDE until an operator acts -- as committed risk unknown at first, "
+            "then as a stale position once it ages. Enter this trade by hand, then restart. "
+            "A restart releases the hold, because the position is not persisted: after it the "
+            "trade is in the ledger only if it was entered by hand."
+        ),
+    }
+    if quote_total is not None:
+        fields["quote_total"] = quote_total
     return fields

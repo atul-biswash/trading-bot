@@ -4283,9 +4283,8 @@ class TestSettlement:
             [],
             [sell_trade(quantity=D("0.25"))],
             ExchangeConnectionError("timed out"),
-            [sell_trade(fee=_BTC_FEE)],
         ],
-        ids=["empty", "incomplete", "transport", "foreign_asset"],
+        ids=["empty", "incomplete", "transport"],
     )
     async def test_every_settlement_failure_after_the_sell_defers(
         self, answer: list[Trade] | Exception, caplog: pytest.LogCaptureFixture
@@ -4294,6 +4293,10 @@ class TestSettlement:
 
         FABRICATED answers. These replace P22's two drop-at-Site-A tests, which
         ruling 3 withdrew. MUTATION: drop unbooked, release the record, or book.
+
+        **The `foreign_asset` row LEFT at R2**: a fee this ledger cannot
+        subtract is terminal and is HELD, not deferred -- see
+        `test_a_foreign_fee_at_the_sell_holds_and_does_not_defer`.
         """
         writer = RecordingWriter()
         executor, _, portfolio = build(
@@ -4445,26 +4448,135 @@ class TestSettlement:
         assert len(_records(caplog, "close_settlement_deferred")) == 1
         assert _records(caplog, "close_record_resolved") == []
 
-    async def test_a_resolved_close_with_a_foreign_fee_drops_as_fee_unresolvable(
+    async def test_a_resolved_close_with_a_foreign_fee_holds(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """Waiting cannot change a fee's asset, so it is not retried. FABRICATED BTC fee.
+        """Site B, R2: waiting cannot change a fee's asset, so it is HELD -- not retried, not dropped.
 
-        MUTATION: retain it under the tracker like an incomplete list.
+        FABRICATED BTC fee. This read `..._drops_as_fee_unresolvable` until R2,
+        which removed that outcome. Starts ACTIVE -- P34's probe measured this
+        fixture reaching the hold as `'active'` -- so PIN-5's `UNKNOWN` write is
+        observable. MUTATION: restore the drop, retain it under the tracker, or
+        delete the hold's protection write.
         """
         executor, _, portfolio = build(
-            client=_settling_client([sell_trade(fee=_BTC_FEE)]), portfolio=_held()
+            client=_settling_client([sell_trade(fee=_BTC_FEE)]),
+            portfolio=_held(protection=ProtectionState.ACTIVE),
         )
-        executor._pending[SYMBOL] = _close()
+        record = _close()
+        executor._pending[SYMBOL] = record
+        position = portfolio.positions[SYMBOL]
+        assert position.protection is ProtectionState.ACTIVE
 
         with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
             await executor(candle())
 
-        (record,) = _records(caplog, "close_record_resolved")
-        assert record.outcome == "fee_unresolvable"  # type: ignore[attr-defined]
-        assert SYMBOL not in executor._pending
-        assert SYMBOL not in portfolio.positions
+        assert _records(caplog, "close_record_resolved") == []
+        assert executor._pending.get(SYMBOL) is record
+        assert portfolio.positions.get(SYMBOL) is position
+        assert position.protection is ProtectionState.UNKNOWN
+        assert position.settlement_hold is True
+        held = _records(caplog, "exit_settlement_held")
+        assert [(r.levelno, vars(r).get("site")) for r in held] == [
+            (logging.CRITICAL, "resolution")
+        ]
+        assert vars(held[0]).get("cause") == "foreign_fee_asset"
+        assert SYMBOL not in executor._settlement_deferrals
         assert portfolio.ledger is None
+
+    async def test_a_foreign_fee_at_the_sell_holds_and_does_not_defer(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site A, R2: the sell FILLED and its fee is BTC -- HELD, not deferred, and said once.
+
+        FABRICATED BTC fee. Starts ACTIVE -- P34's probe measured this fixture
+        reaching the hold as `'active'` -- so PIN-5's `UNKNOWN` write is
+        observable. The record stays in memory AND on disk: it is what refuses a
+        second sell. MUTATION: defer instead of holding, or delete the hold's
+        protection write.
+        """
+        writer = RecordingWriter()
+        executor, _, portfolio = build(
+            client=_settling_client([sell_trade(fee=_BTC_FEE)]),
+            portfolio=_held(protection=ProtectionState.ACTIVE),
+            persist=writer,
+        )
+        position = portfolio.positions[SYMBOL]
+        assert position.protection is ProtectionState.ACTIVE
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert getattr(executor._pending.get(SYMBOL), "kind", None) == "close"
+        assert SYMBOL in writer.symbols()
+        assert portfolio.positions.get(SYMBOL) is position
+        assert position.protection is ProtectionState.UNKNOWN
+        assert position.settlement_hold is True
+        assert _records(caplog, "close_settlement_deferred") == []
+        assert _records(caplog, "dispatch_refused") == []
+        held = _records(caplog, "exit_settlement_held")
+        assert [(r.levelno, vars(r).get("site")) for r in held] == [(logging.CRITICAL, "sell")]
+        assert vars(held[0]).get("cause") == "foreign_fee_asset"
+        assert vars(held[0]).get("fees") == "0.00000100 BTC"
+        assert SYMBOL not in executor._settlement_deferrals
+        assert portfolio.ledger is None
+
+    async def test_a_held_close_makes_no_venue_call_on_any_later_bar(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R2: a held close is skipped BEFORE `get_order`, on every bar, and says nothing more.
+
+        Nine bars, past `_SETTLEMENT_RETRY_BARS` -- a held close must never
+        time out into the unbooked drop. MUTATION: delete `__call__`'s skip.
+        """
+        client = _settling_client([sell_trade(fee=_BTC_FEE)])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            calls = list(client.venue_calls)
+            for minute in range(1, 10):
+                await executor(_bar(minute))
+
+        assert client.venue_calls == calls
+        assert SYMBOL in executor._pending
+        assert SYMBOL in portfolio.positions
+        assert len(_records(caplog, "exit_settlement_held")) == 1
+        assert _records(caplog, "close_record_resolved") == []
+
+    async def test_a_hold_after_deferrals_is_never_dropped_and_leaves_the_tracker(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Deferred twice, then HELD at Site B on bar 2: out of the count, never dropped.
+
+        The settlement answers transport at the sell and on bar 1, BTC on bar
+        2, and transport for ever after -- so a held record that were still
+        resolved would keep deferring, and one still counted would time out.
+        Bars 3 to 10 run past `_SETTLEMENT_RETRY_BARS`. FABRICATED answers.
+        MUTATION: delete the tracker pop, delete `__call__`'s skip, or restore
+        the drop.
+        """
+        timeout = ExchangeConnectionError("timed out")
+        client = _settling_client(timeout, timeout, [sell_trade(fee=_BTC_FEE)], timeout)
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        position = portfolio.positions[SYMBOL]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            await executor(_bar(1))
+            await executor(_bar(2))
+            # Read off the object, never re-looked-up: a KeyError is a crash.
+            assert position.settlement_hold is True
+            calls = list(client.venue_calls)
+            for minute in range(3, 11):
+                await executor(_bar(minute))
+
+        assert client.venue_calls == calls
+        assert SYMBOL in executor._pending
+        assert SYMBOL in portfolio.positions
+        assert SYMBOL not in executor._settlement_deferrals
+        assert _records(caplog, "close_record_resolved") == []
+        assert len(_records(caplog, "exit_settlement_held")) == 1
 
     @pytest.mark.parametrize(
         "failure", [ExchangeConnectionError("timed out"), []], ids=["transport", "empty"]
@@ -4538,3 +4650,48 @@ class TestSettlement:
         assert SYMBOL in executor._pending
         await executor(_bar(6))
         assert SYMBOL not in executor._pending
+
+
+class TestTheCloseGuard:
+    """Ruling B: a CLOSE for a HELD position is refused, before any read."""
+
+    async def test_a_close_on_a_reconciler_held_position_is_refused_before_any_read(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The reconciler-held case: a held position and NO close record.
+
+        `close_pending` cannot see it -- there is no record -- so only ruling
+        B's guard stands between this CLOSE and `_plan_close`, whose quiet legs
+        here plan SELL. MUTATION: delete the held guard.
+        """
+        client = _selling_client()
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        portfolio.positions[SYMBOL].hold_settlement()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert client.venue_calls == []
+        assert client.sold == []
+        assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["close_settlement_held"]
+        assert SYMBOL in portfolio.positions
+
+    async def test_a_close_on_an_executor_held_position_is_refused_once_as_close_pending(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The executor-held case holds a close record TOO: ONE refusal, `close_pending`.
+
+        The guard ORDER is the architect's: `close_pending` first leaves the
+        older guard unchanged and names the record. MUTATION: put the held
+        guard first -- the reason then reads `close_settlement_held`.
+        """
+        client = _settling_client([sell_trade(fee=_BTC_FEE)])
+        executor, _, _ = build(client=client, portfolio=_held())
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        assert len(client.sold) == 1
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), _bar(1))
+
+        assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["close_pending"]
+        assert len(client.sold) == 1

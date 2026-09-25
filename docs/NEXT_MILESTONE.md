@@ -366,6 +366,26 @@ no test drives the repetition.
 `execution/reconciliation_driver.py` or the `fee_unresolvable` branch of
 `_resolve_close`.**
 
+> **RESOLVED BY THE CLOSING COMMIT (2), by the project owner's ruling R2 with
+> rulings A and B.** One terminal outcome at both sites: a non-Incomplete
+> `FeeUnresolvableError` -- a fee in an asset this ledger cannot subtract, or
+> a fill that is not a sell, now the subclasses `FeeAssetUnresolvableError`
+> and `NonSellFillError` -- is fetched ONCE, logged ONCE at CRITICAL as
+> `exit_settlement_held`, and HELD: the position is kept, its protection
+> written `UNKNOWN`, and marked `Position.settlement_hold`, in memory. The
+> driver no longer reconciles a held position at all (ruling A), so there is
+> no second fetch and no repeating refusal; the executor keeps its close
+> record and skips it before any venue call, and the retention count leaves
+> it. A `CLOSE` for a held position is refused (ruling B). The
+> `fee_unresolvable` drop and its text are gone, and the one-pass pin named
+> above, `...[foreign_fee]`, is replaced by
+> `test_an_unbookable_settlement_is_held_after_one_fetch`, which drives the
+> second pass. Entries stay refused portfolio-wide throughout, as
+> `COMMITTED_RISK_UNKNOWN` and then `POSITION_STALE`. **What did NOT change:**
+> a restart releases the hold, because positions are not persisted, and the
+> outcome then converges on the unbooked drop -- the trade is in the ledger
+> only if an operator entered it by hand.
+
 ### F2. A restart after a deferred settlement -- UNMEASURED until the tests-only commit
 
 A close whose settlement is deferred keeps its pending record, and the store

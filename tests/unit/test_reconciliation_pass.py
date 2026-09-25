@@ -373,6 +373,37 @@ async def test_a_closed_position_is_not_visited() -> None:
     assert results == ()
 
 
+async def test_a_held_position_is_not_read_at_all() -> None:
+    """RULING A: a HELD position (R2) is left out of the due set -- no call, no stamp.
+
+    The held one is UNSTAMPED, so without the filter it is maximally due and
+    sorts FIRST, and its book is configured so the stub would answer rather
+    than raise: under the mutation the assertions below are what fail.
+    MUTATION: drop the `settlement_hold` filter from the due generator.
+    """
+    held = _position("BTCUSDT", stamp=None)
+    held.hold_settlement()
+    healthy = _position("ETHUSDT", stamp=None)
+    client = _StubClient(
+        {"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)], **_resting("ETHUSDT")}
+    )
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(held, healthy),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == ["ETHUSDT"]
+    assert [position.symbol for position, _assessment in results] == ["ETHUSDT"]
+    assert held.last_reconciled_at is None
+    assert held.protection is ProtectionState.UNKNOWN
+
+
 # --------------------------------------------------------------------------
 # The phase budget, and the last call it holds back
 # --------------------------------------------------------------------------

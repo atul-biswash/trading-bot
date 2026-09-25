@@ -57,6 +57,23 @@ class FeeFillsIncompleteError(FeeUnresolvableError):
     """
 
 
+class FeeAssetUnresolvableError(FeeUnresolvableError):
+    """A fill of the exit is charged in an asset other than the quote asset.
+
+    TERMINAL: waiting cannot change it. A separate type so the ledger's
+    refusal carries its cause as a TYPE, and a hold names it without
+    re-deriving it from the fills -- ``settle_exit`` stays the single
+    discriminator.
+    """
+
+
+class NonSellFillError(FeeUnresolvableError):
+    """A fill of the exit order is not a sell. TERMINAL: waiting cannot change it.
+
+    A separate type for :class:`FeeAssetUnresolvableError`'s reason.
+    """
+
+
 # --- Exchange ---------------------------------------------------------------
 class ExchangeError(TradingBotError):
     """Base class for exchange-related failures."""

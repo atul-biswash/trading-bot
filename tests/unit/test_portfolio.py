@@ -31,9 +31,14 @@ import pytest
 from pydantic import ValidationError
 
 from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
-from trading_bot.core.exceptions import FeeFillsIncompleteError, FeeUnresolvableError
+from trading_bot.core.exceptions import (
+    FeeAssetUnresolvableError,
+    FeeFillsIncompleteError,
+    FeeUnresolvableError,
+    NonSellFillError,
+)
 from trading_bot.core.models import Fee, Position, Trade
-from trading_bot.core.portfolio import Ledger, Portfolio, settle_exit
+from trading_bot.core.portfolio import Ledger, Portfolio, held_exit, settle_exit
 
 D = Decimal
 SYMBOL = "BTCUSDT"
@@ -441,12 +446,12 @@ _SETTLE_REFUSALS = [
     ((), FeeFillsIncompleteError),
     ((_fill("1", "0.02314000", "1772.00890360", order_id="999"),), FeeFillsIncompleteError),
     (FILLS_3189811[:1], FeeFillsIncompleteError),
-    ((_fill("1", "0.02314000", "1772.00890360", fee=_BNB),), FeeUnresolvableError),
+    ((_fill("1", "0.02314000", "1772.00890360", fee=_BNB),), FeeAssetUnresolvableError),
     (
         (FILLS_3189811[0], _fill("997265", "0.00369000", "282.57186060", fee=_BNB)),
-        FeeUnresolvableError,
+        FeeAssetUnresolvableError,
     ),
-    ((_fill("1", "0.02314000", "1772.00890360", side=OrderSide.BUY),), FeeUnresolvableError),
+    ((_fill("1", "0.02314000", "1772.00890360", side=OrderSide.BUY),), NonSellFillError),
 ]
 
 
@@ -462,6 +467,11 @@ def test_settle_exit_refuses_rather_than_guesses(
 
     MUTATION: raise the base class for everything, or accept a partial list.
     M5i-115: an unmet `pytest.raises` raises `Failed`, not `AssertionError`.
+
+    **The last three were `FeeUnresolvableError` exactly until R2**, which
+    gave each terminal refusal its own subclass so a hold names its cause
+    from the TYPE. `pytest.raises(FeeUnresolvableError)` is the ancestry
+    half and `type(...) is expected` the exact half, in one place.
     """
     with pytest.raises(FeeUnresolvableError) as excinfo:
         settle_exit(
@@ -469,6 +479,54 @@ def test_settle_exit_refuses_rather_than_guesses(
         )
 
     assert type(excinfo.value) is expected
+
+
+def test_held_exit_sums_each_asset_for_that_order_only() -> None:
+    """R2: the hold's fees are summed PER ASSET, over THIS order's fills only.
+
+    FABRICATED fees: no captured SELL fill carries a non-USDT fee. Order
+    3189811 pays BNB on two fills and USDT on a third; a fourth fill, of
+    ANOTHER order, pays BNB too. MUTATION: drop the `order_id` filter -- the
+    other order's BNB then lands in the sum -- or combine assets.
+    """
+    usdt = Fee(amount=D("0.10000000"), asset="USDT")
+    trades = (
+        _fill("1", "0.01000000", "765.77740000", fee=_BNB),
+        _fill("2", "0.01000000", "765.77740000", fee=Fee(amount=D("0.00002000"), asset="BNB")),
+        _fill("3", "0.00314000", "240.45410360", fee=usdt),
+        _fill("4", "0.01000000", "765.77740000", order_id="999", fee=_BNB),
+    )
+    with pytest.raises(FeeAssetUnresolvableError) as excinfo:
+        settle_exit(
+            trades, order_id="3189811", quote_asset="USDT", executed_quantity=D("0.02314000")
+        )
+
+    held = held_exit(trades, order_id="3189811", error=excinfo.value)
+
+    assert held.fees == (Fee(amount=D("0.00003000"), asset="BNB"), usdt)
+    assert held.order_id == "3189811"
+    assert held.cause == "foreign_fee_asset"
+    assert held.reason == str(excinfo.value)
+
+
+def test_a_held_position_still_counts_uncomputable() -> None:
+    """A HELD position frees NO risk: it stays counted, and it stays in equity.
+
+    Starts ACTIVE with a stop, so its committed risk is COMPUTABLE before the
+    hold -- the one start from which losing it is observable. MUTATION: skip a
+    held position in `committed_risk` or in `equity`.
+    """
+    position = _position().model_copy(
+        update={"protection": ProtectionState.ACTIVE, "stop_loss": D("98000")}
+    )
+    portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: position})
+    marks = {SYMBOL: D("100000")}
+    assert portfolio.committed_risk(marks) == (D("-45.14"), 0)
+
+    position.hold_settlement()
+
+    assert portfolio.committed_risk(marks) == (D("0"), 1)
+    assert portfolio.equity(marks) == D("1000") + AWKWARD_QTY * D("100000")
 
 
 def test_close_position_refuses_a_fee_in_another_asset() -> None:

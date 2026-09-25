@@ -365,6 +365,16 @@ authority did not mention, and a driver written on the assumption that the
 engine's isolation covered it would be relying on a guarantee from the wrong
 seam.
 
+> **ANNOTATED BY THE PROJECT OWNER'S RULING A AT M5k: "EVERY OPEN POSITION"
+> NOW EXCLUDES A HELD ONE.** The ruling, verbatim: *"Once
+> `Position.unbookable_fee_mismatch` is set, the reconciliation driver skips
+> active protective checks, order queries, and trade settlement on subsequent
+> passes."* The flag is `Position.settlement_hold` (PIN-1); the locked
+> polling decision carries the full annotation. **What survives here is the
+> whole of this paragraph's argument**: the driver still has to be a candle
+> subscriber, because it still reconciles every UNHELD position on any pair's
+> candle while `on_signal` skips quiet bars.
+
 **Isolation contains a failure; it does not report one, at any layer.** The
 consecutive-failure counter is fed from `_evaluate` only, so a permanently broken
 subscriber at *any* of the three produces a traceback every bar forever and
@@ -784,6 +794,23 @@ data.
 - **The placement shape branches four ways and the branch is irreducible.**
   `PERCENT_PRICE_BY_SIDE` refuses a whole list at submission, so a "never fills"
   dummy leg to force one shape is impossible.
+- **When one protective leg fills, its sibling ends with it -- OBSERVED, NOT
+  CONTRACTED, and ruling A's cost rests on it.** Accepted by the project owner
+  as Case 1 at M5k (PIN-2), recorded as `M5k-080`. MEASURED over the log
+  capture whose SHA-256 is
+  `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`: of 148
+  per-pass lines naming a FILLED protective leg, 144 show the sibling
+  `EXPIRED`, 4 did not read it, and 0 show it live. DOCUMENTED by the venue,
+  per the owner: an OCO expires the other order when one executes. **Nothing
+  in the tree contracts it** -- its only statement is a comment in
+  `classify_protection`, *"OCO semantics mean a triggered stop cancels its
+  target"*. It matters because of ruling A: a HELD position is no longer
+  reconciled, so a sibling leg that stayed live would be a resting sell for
+  base already sold that nothing watches, and nothing in `src/` cancels one.
+  It holds only while every protective leg is placed inside ONE order list.
+
+  *Arming condition:* **whoever next edits `build_placement` to place protective legs outside one OTOCO/OCO/OTO order list.**
+
 - **Take-profit without a stop is refused at config load, and that refusal is a
   JUDGEMENT about payoff shape, not a measurement.** Nothing downstream is unable
   to compute it and the exchange would accept it; this bot accepted it until M5a
@@ -1190,6 +1217,23 @@ data.
   failure mode than polling — a silently dead stream leaves us believing we are
   current, where polling's staleness is at least bounded by its own cadence. It
   would not remove the reconciler either; boot and divergence still need it.
+
+  > **ANNOTATED BY THE PROJECT OWNER'S RULING A AT M5k: EVERY OPEN POSITION
+  > EXCEPT A HELD ONE.** The ruling, verbatim: *"Once
+  > `Position.unbookable_fee_mismatch` is set, the reconciliation driver skips
+  > active protective checks, order queries, and trade settlement on
+  > subsequent passes."* The flag is named `Position.settlement_hold` by the
+  > owner's ruling PIN-1. A held position -- its exit FILLED and could not be
+  > booked (R2) -- is left out of `reconcile_open_positions`'s due set: no
+  > enumeration, no point query, no settlement, no stamp. Its stamp therefore
+  > ages, and entries are refused first as `COMMITTED_RISK_UNKNOWN`, then as
+  > `POSITION_STALE` once it passes `risk.max_position_staleness_s` -- the
+  > accepted consequence, in the ruling's words: *"The un-cleared position
+  > will cross the staleness boundary, transitioning entry refusal from
+  > `COMMITTED_RISK_UNKNOWN` to `POSITION_STALE`."* No entry is admitted at
+  > any instant between the two. **What survives:** every UNHELD position is
+  > still reconciled on any pair's candle, and the dedup and oldest-first
+  > rules above are unchanged.
 - **There is no static staleness guarantee — only what `last_reconciled_at`
   reports.** The shortest timeframe is a floor, not a bound: add the query's own
   latency, add every bar the budget skipped, add every bar that never arrived
@@ -1251,6 +1295,24 @@ data.
   > **The rule above is unchanged**: no *limit* gates a `CLOSE`. This is the
   > venue-state case it already scopes out, and the refusal lifts when the
   > record resolves.
+
+  > **ANNOTATED BY THE PROJECT OWNER'S RULING B AT M5k: A `CLOSE` FOR A HELD
+  > POSITION IS REFUSED, AND THAT TOO REFUSES A DOUBLE-SELL, NOT AN EXIT.** The
+  > ruling, verbatim: *"Refuse incoming `CLOSE` signals in `OrderExecutor` if
+  > the target position is flagged with `unbookable_fee_mismatch` (paralleling
+  > the active `close_pending` guard)."* The flag is named
+  > `Position.settlement_hold` by the owner's ruling PIN-1; the ruling's own
+  > name is kept above for traceability. A held position has an exit that
+  > already FILLED at the venue and could not be booked (R2): a fee in an
+  > asset this ledger cannot subtract, or a fill that is not a sell.
+  > `dispatch` refuses a further `CLOSE` for it with reason
+  > `close_settlement_held`, after the `close_pending` guard and before
+  > `_plan_close` runs, so no leg is read. The executor-held case also holds a
+  > close record and meets `close_pending` first -- one refusal, not two; this
+  > guard is what covers the reconciler-held case, which has no record. **The
+  > rule above is unchanged**: no *limit* gates a `CLOSE`. The exit has
+  > happened; the refusal lifts only with the position, at a restart, because
+  > the hold is in memory.
 - **R6: NO SPECULATIVE VENUE QUERY WHEN AN EXIT IS UNBOOKABLE, MISSING OR
   DIVERGED — AND SETTLING A CONFIRMED FILL IS NOT ONE.** Ruled by the project
   owner at M5k. R6 forbids a query made to search for an explanation:

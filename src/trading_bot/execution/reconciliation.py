@@ -584,7 +584,13 @@ async def reconcile_open_positions(
         (
             position
             for position in portfolio.open_positions
-            if _is_due(position, now=now, dedup_interval=dedup_interval)
+            # RULING A (the project owner, M5k): a HELD position -- its exit
+            # filled and cannot be booked, R2 -- is not reconciled. No
+            # enumeration, no point query, no settlement; it spends none of
+            # `max_calls` and its stamp stops, so it goes stale by design and
+            # refuses entries as POSITION_STALE once it does.
+            if not position.settlement_hold
+            and _is_due(position, now=now, dedup_interval=dedup_interval)
         ),
         key=lambda position: (
             position.last_reconciled_at is not None,

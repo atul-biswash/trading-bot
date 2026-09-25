@@ -3916,3 +3916,173 @@ class TestADeferredSettlementAcrossARestart:
         assert after is not None
         assert after.pending == ()
         assert after.ledger is None
+
+    async def test_a_held_close_is_released_unbooked_after_a_restart(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R2's RESTART: HOLD, PERSIST, RESTART, RELEASE -- the hold does not survive.
+
+        Root 1 closes through `dispatch`; the sell FILLS and its fee is BTC,
+        so Site A HOLDS: the position is marked and KEPT, the record stays in
+        memory and on disk. Root 2 boots from that store holding no `Position`
+        -- positions are not persisted -- so the mark is gone, `__call__` does
+        not skip the record, and its first candle resolves it as
+        `POSITION_ABSENT`: released unbooked at CRITICAL, `filled_and_released`.
+        FABRICATED BTC fee. MUTATION: defer at Site A instead of holding, or
+        release the record at the hold.
+        """
+        settings = write_settings(
+            tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
+        )
+        sold = Order(
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            status=OrderStatus.FILLED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY,
+            filled_quote_quantity=_BOOK_TOTAL,
+        )
+        btc_fill = Trade(
+            trade_id="1",
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            quantity=_BOOK_QTY,
+            price=D("79141.56"),
+            quote_quantity=_BOOK_TOTAL,
+            fee=Fee(amount=D("0.00000100"), asset="BTC"),
+            filled_at=NOW,
+        )
+        close = Signal(
+            symbol=SYMBOL, action=SignalAction.CLOSE, price=D("100"), timestamp=NOW, strategy="t"
+        )
+        exit_ok = RiskAssessment(
+            symbol=SYMBOL,
+            approved=True,
+            reason="ok",
+            stage=None,
+            intent=ExitIntent(
+                symbol=SYMBOL, side=OrderSide.SELL, quantity=_BOOK_QTY, reference_price=D("100")
+            ),
+        )
+
+        # ROOT 1: the sell fills, its fee is BTC, Site A HOLDS.
+        first = _ClosingRootClient(sell=sold, settlement=[btc_fill])
+        async with live_system(settings, client=first, stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=_BOOK_QTY,
+                entry_price=D("80700.00"),
+                entry_fill_price=_BOOK_ENTRY_FILL,
+                entry_bar_time=_BOOK_BAR,
+                protection=ProtectionState.UNKNOWN,
+                order_list_id=list_client_order_id(SYMBOL, _BOOK_BAR),
+                venue_order_list_id=255471,
+                stop_loss=D("79141.56"),
+                take_profit=D("83000.00"),
+            )
+            await system.executor.dispatch(close, exit_ok, candle())
+
+            assert first.calls.count("create_order") == 1
+            assert first.calls.count("get_my_trades") == 1
+            assert getattr(system.executor._pending.get(SYMBOL), "kind", None) == "close"
+            assert system.executor._settlement_deferrals == {}
+            assert system.portfolio.positions[SYMBOL].settlement_hold is True
+            assert system.portfolio.ledger is None
+
+        between = store.load()
+        assert between is not None
+        assert [(r.kind, r.symbol) for r in between.pending] == [("close", SYMBOL)]
+
+        # ROOT 2: a fresh boot from that store -- no Position, so no mark.
+        second = _ClosingRootClient(sell=sold, settlement=[])
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.execution.executor"):
+            async with live_system(settings, client=second, stream=FakeStream()) as system:
+                assert list(system.executor._pending) == [SYMBOL]
+                assert SYMBOL not in system.portfolio.positions
+
+                await system.executor(candle())
+
+                assert system.executor._pending == {}
+                assert system.portfolio.ledger is None
+
+        assert second.calls == ["get_order"]  # the close re-read, and no settlement
+        resolved = [
+            r
+            for r in caplog.records
+            if r.name == "trading_bot.execution.executor"
+            and getattr(r, "event", None) == "close_record_resolved"
+        ]
+        assert [(r.levelno, vars(r).get("outcome")) for r in resolved] == [
+            (logging.CRITICAL, "filled_and_released")
+        ]
+        after = store.load()
+        assert after is not None
+        assert after.pending == ()
+        assert after.ledger is None
+
+    async def test_a_reconciler_hold_leaves_nothing_on_disk(self, tmp_path: Path) -> None:
+        """R2 at the driver, through the root: the hold is IN MEMORY, and nothing reaches the store.
+
+        A venue-triggered stop fills and its fee is BNB, so the driver HOLDS
+        the position. There is no close record at this site and nothing is
+        booked, so the store holds nothing a restart could read back: after a
+        restart the trade is in the ledger only if an operator entered it.
+        FABRICATED BNB fee. MUTATION: refuse at WARNING instead of holding.
+        """
+        settings = write_settings(tmp_path)
+        leg = Order(
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.STOP_LOSS,
+            status=OrderStatus.FILLED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY,
+            filled_quote_quantity=_BOOK_TOTAL,
+            stop_price=D("79141.56"),
+            order_list_id="371839",
+            client_order_id=client_order_id(
+                SYMBOL, _BOOK_BAR, OrderListLeg.STOP_LOSS, generation=0
+            ),
+            created_at=NOW,
+        )
+        client = FakeRootClient(
+            own_open_orders=[leg],
+            my_trades=[
+                Trade(
+                    trade_id="1",
+                    order_id="777",
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=_BOOK_QTY,
+                    price=D("79141.56"),
+                    quote_quantity=_BOOK_TOTAL,
+                    fee=Fee(amount=D("0.00001000"), asset="BNB"),
+                    filled_at=NOW,
+                )
+            ],
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            position = Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=_BOOK_QTY,
+                entry_price=D("80700.00"),
+                entry_fill_price=_BOOK_ENTRY_FILL,
+                entry_bar_time=_BOOK_BAR,
+                protection=ProtectionState.UNKNOWN,
+                stop_loss=D("79141.56"),
+            )
+            system.portfolio.positions[SYMBOL] = position
+            await system.reconciler(engine_candle())
+
+            assert position.settlement_hold is True
+            assert system.portfolio.positions.get(SYMBOL) is position
+            assert system.portfolio.ledger is None
+
+        assert store.load() is None

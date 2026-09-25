@@ -201,6 +201,33 @@ def test_record_partial_reconciliation_does_not_clear_an_existing_stamp() -> Non
     assert pos.last_reconciled_at == at
 
 
+def test_hold_settlement_marks_protection_unknown_then_records_the_hold() -> None:
+    """R2, PIN-5: the hold writes UNKNOWN AND the mark, and leaves the stamp alone.
+
+    Starts ACTIVE and unheld, so each write is observable -- a fixture already
+    UNKNOWN could not tell the protection write from its absence. MUTATION:
+    delete the protection write, or the mark. The ORDER of the two writes is
+    unprovable, like `record_reconciliation`'s, and is not claimed.
+    """
+    at = datetime(2026, 7, 25, 12, 5, tzinfo=timezone.utc)
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.ACTIVE,
+        last_reconciled_at=at,
+    )
+    assert pos.settlement_hold is False  # true of every position at birth
+
+    pos.hold_settlement()
+
+    assert pos.protection is ProtectionState.UNKNOWN
+    assert pos.settlement_hold is True
+    assert pos.last_reconciled_at == at
+
+
 # --------------------------------------------------------------------------
 # Money fields refuse to be built from binary floats
 # --------------------------------------------------------------------------

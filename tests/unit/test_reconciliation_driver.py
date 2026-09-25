@@ -1450,19 +1450,22 @@ async def test_the_save_runs_when_a_later_position_raises() -> None:
 @pytest.mark.parametrize(
     "trades",
     [
-        [_trade(fee=Fee(amount=Decimal("0.00000100"), asset="BTC"))],
         [],
         [_trade(quantity=Decimal("0.02000000"))],
     ],
-    ids=["foreign_fee", "no_fills", "short_fills"],
+    ids=["no_fills", "short_fills"],
 )
 async def test_a_settlement_the_ledger_refuses_skips_and_keeps_the_position(
     trades: list[Trade], caplog: pytest.LogCaptureFixture
 ) -> None:
     """Ruling 5: caught around `settle_exit` at WARNING, and the position waits for a later pass.
 
-    FABRICATED rows. MUTATION: let `FeeUnresolvableError` propagate -- the
+    FABRICATED rows. MUTATION: let `FeeFillsIncompleteError` propagate -- the
     pass then logs a phase failure instead of a refusal -- or book anyway.
+
+    **The `foreign_fee` row LEFT at R2**: a fee in an asset this ledger
+    cannot subtract is terminal and is HELD, not refused -- see
+    `test_an_unbookable_settlement_is_held_after_one_fetch`.
     """
     portfolio = _portfolio(_booking_position())
     client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": trades})
@@ -1498,3 +1501,165 @@ async def test_a_lagging_fill_list_is_retried_and_books_on_the_next_pass() -> No
     assert "BTCUSDT" not in portfolio.positions
     assert portfolio.ledger is not None
     assert portfolio.ledger.realised_pnl == BOOK_EXACT
+
+
+# --------------------------------------------------------------------------
+# R2 with ruling A: a terminal refusal HOLDS the position, and no pass visits it again
+# --------------------------------------------------------------------------
+#: The two terminal refusals, FABRICATED -- no captured SELL fill carries a
+#: non-USDT fee, and none is a buy. Each is otherwise a complete fill of
+#: `_filled_leg`'s order, so only the refusal's cause differs.
+_TERMINAL = {
+    "foreign_fee": [_trade(fee=Fee(amount=Decimal("0.00000100"), asset="BTC"))],
+    "non_sell": [_trade().model_copy(update={"side": OrderSide.BUY})],
+}
+_CAUSE = {"foreign_fee": "foreign_fee_asset", "non_sell": "non_sell_fill"}
+
+
+def _held_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == "exit_settlement_held"]
+
+
+@pytest.mark.parametrize("refusal", ["foreign_fee", "non_sell"])
+async def test_an_unbookable_settlement_is_held_after_one_fetch(
+    refusal: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """R2 + RULING A: one fetch, one CRITICAL, the mark -- then nothing, on any later pass.
+
+    Pass 2 runs two minutes on, past the one-minute dedup interval, so the
+    position is DUE: only ruling A keeps the pass away from it. MUTATION:
+    refuse at WARNING instead of holding, or drop ruling A's filter.
+
+    **THE PROTECTION ASSERTION PINS THE STATE, NOT THE HOLD'S WRITE.** The
+    reconciliation pass already wrote `UNKNOWN` before `_book_exits` ran:
+    `classify_protection`'s filled-leg branch returns it, and the resolver's
+    verdicts are `UNKNOWN` or `DIVERGED` only. So this assertion CANNOT
+    detect deletion of `hold_settlement`'s protection write -- MEASURED by
+    P34's out-of-tree probe, `SITE C start=ACTIVE`, pre-hold `'unknown'`.
+    `test_the_driver_hold_writes_unknown_over_a_trusted_state` pins the write.
+    """
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": _TERMINAL[refusal]})
+    ticks = iter([NOW, NOW + timedelta(minutes=2)])
+    driver = _driver(portfolio, client, clock=lambda: next(ticks))
+
+    with caplog.at_level(logging.DEBUG):
+        await driver(_candle())
+
+        assert client.settled == ["777"]
+        lines = _held_lines(caplog)
+        assert len(lines) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        line = lines[0]
+        assert line.levelno == logging.CRITICAL
+        assert vars(line).get("cause") == _CAUSE[refusal]
+        assert vars(line).get("order_id") == "777"
+        assert position.settlement_hold is True
+        assert position.protection is ProtectionState.UNKNOWN
+        assert portfolio.positions["BTCUSDT"] is position
+        assert portfolio.ledger is None
+        asked, queried = list(client.asked), list(client.queried)
+
+        await driver(_candle())
+
+    assert client.asked == asked
+    assert client.queried == queried
+    assert client.settled == ["777"]
+    assert len(_held_lines(caplog)) == 1
+    assert [r for r in caplog.records if getattr(r, "event", None) == "exit_book_refused"] == []
+
+
+def _cancelled_leg() -> Order:
+    """The stop leg as the executor's close leaves it: CANCELED, nothing executed."""
+    return Order(
+        order_id="9",
+        symbol="BTCUSDT",
+        side=OrderSide.SELL,
+        type=OrderType.STOP_LOSS,
+        status=OrderStatus.CANCELED,
+        quantity=BOOK_QTY,
+        filled_quantity=Decimal("0"),
+        stop_price=STOP,
+        order_list_id=VENUE_LIST_ID,
+        client_order_id=client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0),
+    )
+
+
+async def test_a_held_position_with_cancelled_legs_is_never_escalated(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """RULING A precedes classification: a held position never reaches the DIVERGED escalation.
+
+    The executor-held shape -- its list cancelled by the close, nothing
+    resting, the stop point-queried as CANCELED -- classifies DIVERGED with no
+    fill, which escalates `exit_unbookable` at CRITICAL on EVERY pass for an
+    unheld position (P30's measurement). Two due passes here, and none of it
+    happens. MUTATION: drop ruling A's filter.
+    """
+    position = _booking_position()
+    position.hold_settlement()
+    sl = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    client = _StubClient({"BTCUSDT": []}, orders={sl: _cancelled_leg()})
+    ticks = iter([NOW, NOW + timedelta(minutes=2)])
+    driver = _driver(_portfolio(position), client, clock=lambda: next(ticks))
+
+    with caplog.at_level(logging.DEBUG):
+        await driver(_candle())
+        await driver(_candle())
+
+    assert [r for r in caplog.records if getattr(r, "event", None) == "exit_unbookable"] == []
+    assert (client.asked, client.queried, client.settled) == ([], [], [])
+
+
+async def test_the_driver_stores_nothing_across_passes() -> None:
+    """M5e: the hold is on the POSITION; the driver's own attributes are untouched by it.
+
+    MUTATION: remember the held symbol on the driver instead -- a new
+    attribute, whatever else it still does.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": _TERMINAL["foreign_fee"]}
+    )
+    driver = _driver(portfolio, client)
+    before = set(vars(driver))
+
+    await driver(_candle())
+
+    assert portfolio.positions["BTCUSDT"].settlement_hold is True
+    assert set(vars(driver)) == before
+
+
+@pytest.mark.parametrize("refusal", ["foreign_fee", "non_sell"])
+async def test_the_driver_hold_writes_unknown_over_a_trusted_state(
+    refusal: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """PIN-5 at the driver: `_settle`'s hold writes `UNKNOWN` over a TRUSTED state.
+
+    **A trusted state is UNREACHABLE at this site in production.** The
+    resolver's verdicts are `UNKNOWN` or `DIVERGED` only, and
+    `classify_protection`'s filled-leg branch returns `UNKNOWN`, so every
+    pass writes an untrusted state before `_book_exits` hands `_settle` a
+    fill. This test pins the write as DEFENCE IN DEPTH, per the project
+    owner's ruling PIN-5, by driving `_settle` directly below the pass --
+    precedent: `test_the_save_runs_when_a_later_position_raises`, which
+    drives `_book_exits` the same way. MUTATION: delete the protection write
+    from `hold_settlement`.
+    """
+    position = _booking_position().model_copy(update={"protection": ProtectionState.ACTIVE})
+    portfolio = _portfolio(position)
+    client = _StubClient({"BTCUSDT": []}, trades={"777": _TERMINAL[refusal]})
+    fill = ExitFill(order_id="777", filled_quantity=BOOK_QTY, filled_quote_quantity=BOOK_TOTAL)
+    driver = _driver(portfolio, client)
+    assert position.protection is ProtectionState.ACTIVE
+
+    with caplog.at_level(logging.DEBUG):
+        result = await driver._settle("BTCUSDT", fill)
+
+    assert result is None
+    assert position.protection is ProtectionState.UNKNOWN
+    assert position.settlement_hold is True
+    lines = _held_lines(caplog)
+    assert len(lines) == 1
+    assert lines[0].levelno == logging.CRITICAL
+    assert vars(lines[0]).get("cause") == _CAUSE[refusal]

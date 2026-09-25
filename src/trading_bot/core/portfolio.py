@@ -43,8 +43,13 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
-from trading_bot.core.exceptions import FeeFillsIncompleteError, FeeUnresolvableError
-from trading_bot.core.models import ExitSettlement, Fee, Money, Position
+from trading_bot.core.exceptions import (
+    FeeAssetUnresolvableError,
+    FeeFillsIncompleteError,
+    FeeUnresolvableError,
+    NonSellFillError,
+)
+from trading_bot.core.models import ExitSettlement, Fee, HeldExit, Money, Position
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Mapping, Sequence
@@ -119,8 +124,12 @@ def settle_exit(
     :raises FeeFillsIncompleteError: no fill carries ``order_id``, or the fills
         sum to a quantity other than ``executed_quantity``. Waiting can cure
         this, so callers retry it.
-    :raises FeeUnresolvableError: a fill is not a sell, or a fee is in an asset
-        other than ``quote_asset``. Waiting cannot cure this.
+    :raises NonSellFillError: a fill is not a sell. Waiting cannot cure this.
+    :raises FeeAssetUnresolvableError: a fee is in an asset other than
+        ``quote_asset``. Waiting cannot cure this.
+
+    Both terminal refusals are ``FeeUnresolvableError`` subclasses, so their
+    TYPE carries the cause a hold names -- see :func:`held_exit`.
     """
     fills = [trade for trade in trades if trade.order_id == order_id]
     if not fills:
@@ -129,12 +138,12 @@ def settle_exit(
             "has not finished indexing looks exactly like this"
         )
     if any(trade.side is not OrderSide.SELL for trade in fills):
-        raise FeeUnresolvableError(
+        raise NonSellFillError(
             f"order {order_id} carries a non-SELL fill; an exit settles sells only"
         )
     assets = {trade.fee.asset for trade in fills}
     if assets != {quote_asset}:
-        raise FeeUnresolvableError(
+        raise FeeAssetUnresolvableError(
             f"order {order_id} is charged in {sorted(assets)}; only {quote_asset} can be "
             "subtracted from a quote-denominated exit, and there is no converter"
         )
@@ -151,6 +160,28 @@ def settle_exit(
         quantity=quantity,
         filled_at=max(trade.filled_at for trade in fills),
         fill_count=len(fills),
+    )
+
+
+def held_exit(trades: Sequence[Trade], *, order_id: str, error: FeeUnresolvableError) -> HeldExit:
+    """The hold for an exit ``settle_exit`` refused terminally: its cause, and its fees.
+
+    R2. The fees are summed PER ASSET over the fills carrying ``order_id``,
+    each amount kept beside its asset -- no converter, so nothing is combined
+    across assets. ``cause`` comes from the refusal's TYPE: ``NonSellFillError``
+    is a non-sell fill, and every other terminal refusal is a foreign fee
+    asset. Never called with ``FeeFillsIncompleteError``, which callers catch
+    first because waiting can cure it.
+    """
+    totals: dict[str, Decimal] = {}
+    for trade in trades:
+        if trade.order_id == order_id:
+            totals[trade.fee.asset] = totals.get(trade.fee.asset, Decimal(0)) + trade.fee.amount
+    return HeldExit(
+        order_id=order_id,
+        cause="non_sell_fill" if isinstance(error, NonSellFillError) else "foreign_fee_asset",
+        reason=str(error),
+        fees=tuple(Fee(amount=amount, asset=asset) for asset, amount in sorted(totals.items())),
     )
 
 
