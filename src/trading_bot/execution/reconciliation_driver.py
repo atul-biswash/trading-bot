@@ -5,11 +5,17 @@ module's docstring places driving outside it in those words; this is where it
 lives, because driving is execution's job and a budget is the driver's to set.
 
 **It subscribes to CANDLES, not to signals.** Reconciliation runs over every
-open position on *any* pair's candle, so staleness is bounded by the shortest
-configured timeframe rather than by the slowest position's -- and ``on_signal``
-skips quiet bars, which is most of them. That places this on the provider's
-``_notify`` layer, the middle of the three isolation layers, and its isolation
-is what contains a failure here rather than the engine's.
+UNHELD open position on *any* pair's candle, so staleness is bounded by the
+shortest configured timeframe rather than by the slowest position's -- and
+``on_signal`` skips quiet bars, which is most of them. That places this on the
+provider's ``_notify`` layer, the middle of the three isolation layers, and its
+isolation is what contains a failure here rather than the engine's.
+
+**A HELD position is the exception, by the project owner's ruling A.** One
+whose exit filled and could not be booked (``Position.settlement_hold``) is left
+out of the pass entirely -- no enumeration, no point query, no settlement, no
+stamp -- so the bound above does not reach it: its stamp ages until
+``risk.max_position_staleness_s`` refuses entries as ``POSITION_STALE``.
 
 **It must never raise**, for the reason the signal handler must not: a
 subscriber that raises is caught and logged by ``_notify`` with no structured
@@ -240,8 +246,13 @@ class ReconciliationDriver:
     """Runs the pass and the resolver on every candle, and never raises.
 
     The candle is a **trigger, not a subject**: its symbol is ignored, because
-    reconciliation visits every open position on any pair's bar. It is carried
-    into the failure log so an operator can tell which bar a failure fell on.
+    reconciliation visits every UNHELD open position on any pair's bar. It is
+    carried into the failure log so an operator can tell which bar a failure
+    fell on.
+
+    A HELD position (``Position.settlement_hold``) is visited on no bar at all,
+    by the project owner's ruling A: ``reconcile_open_positions`` leaves it out
+    of the due set.
     """
 
     def __init__(

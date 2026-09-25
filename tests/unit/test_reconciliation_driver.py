@@ -317,9 +317,11 @@ async def test_resolution_gets_the_calls_the_pass_did_not_spend(
 
 
 async def test_the_candle_is_a_trigger_not_a_subject() -> None:
-    """Reconciliation visits every open position on ANY pair's bar, so a
+    """Reconciliation visits every UNHELD open position on ANY pair's bar, so a
     BTCUSDT candle reconciles the ETHUSDT position too. That is what bounds
-    staleness by the SHORTEST timeframe rather than the slowest position's."""
+    staleness by the SHORTEST timeframe rather than the slowest position's. A
+    held position is the exception (ruling A), pinned by
+    `test_a_held_position_is_not_read_at_all` in test_reconciliation_pass.py."""
     client = _StubClient(
         {"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)], "ETHUSDT": []},
         orders={
