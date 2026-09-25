@@ -1,18 +1,23 @@
 """Exchange-specific mapping: Binance REST payloads <-> domain models.
 
-Every **mapper** here is pure and free of I/O: given a Binance response (already
+Every **mapper** here is pure and free of I/O, save the two scoped log lines
+named below: given a Binance response (already
 parsed into Python dicts/lists by ``python-binance``) it returns one of the
 frozen, ``Decimal``-based domain models from :mod:`trading_bot.core.models`;
 given an :class:`OrderRequest` it produces the keyword arguments for a Binance
 order call. Keeping these transformations pure makes them exhaustively testable
 against recorded JSON with no mocking.
 
-**The one exception is :func:`translate_binance_error`, and the claim is scoped
-rather than quietly broken.** It emits a single ``ERROR`` log line when a code it
-classifies by message arrives with a message none of its rules recognise -- the
-alternative being to reclassify silently, which is the failure message-matching
-exists to prevent. It is still a pure function of its argument in every other
-respect: same input, same returned exception, no I/O on any classifying path.
+**There are two exceptions, and each claim is scoped rather than quietly
+broken.** :func:`translate_binance_error` emits a single ``ERROR`` log line when
+a code it classifies by message arrives with a message none of its rules
+recognise -- the alternative being to reclassify silently, which is the failure
+message-matching exists to prevent. :func:`to_order` emits one ``WARNING`` when
+the venue reports a negative ``cummulativeQuoteQty``, which it documents as
+unavailable -- the alternative being to carry a negative total that booking
+would read as present. Each is still a pure function of its argument in every
+other respect: same input, same returned value -- the exception, or the
+``Order`` -- and no I/O on any path that decides it.
 
 Money is parsed straight from Binance's decimal *strings* into
 :class:`decimal.Decimal` — never through ``float`` — so no precision is lost.
@@ -80,6 +85,15 @@ from trading_bot.utils.logger import get_logger
 _log = get_logger(__name__)
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+#: The ``event`` of :func:`to_order`'s one WARNING: the venue reported a
+#: negative ``cummulativeQuoteQty`` and the total was read as absent.
+_EVENT_QUOTE_TOTAL_UNAVAILABLE = "venue_quote_total_unavailable"
+#: Its ``reason``, naming the venue's documented meaning of a negative total.
+_REASON_QUOTE_TOTAL_UNAVAILABLE = (
+    "the venue documents a cummulativeQuoteQty below zero as data not available "
+    "for this order record"
+)
 
 # Binance error codes we can classify precisely; anything else falls through to
 # a generic ExchangeAPIError that carries the original code.
@@ -250,6 +264,12 @@ def to_venue_fill(raw: dict[str, Any]) -> VenueFill:
     currency, which is the interim stub ``CLAUDE.md`` forbids by name -- and
     worse here than there, because the call site would look wired.
 
+    **``quoteQty`` IS READ INSIDE THE SAME GUARD**, and for the reason the
+    guard exists: it is the figure a booking sums. Read by a bare subscript
+    outside it, a record missing the key raised ``KeyError``, which no
+    ``except ExchangeError`` above this mapper catches, so it escaped the
+    settlement fetch as an unclassified crash rather than a venue error.
+
     **AN UNREAD KEY IS SILENTLY IGNORED, AS EVERYWHERE IN THIS MODULE.** No
     mapper here does ``Model(**raw)``, so pydantic's ``extra`` setting never
     engages and a key the venue adds later arrives unnoticed. That is the
@@ -263,12 +283,13 @@ def to_venue_fill(raw: dict[str, Any]) -> VenueFill:
     looks like. It arrives as a JSON NUMBER and the identity form is a
     ``str``, which is :func:`to_order`'s convention for every id it carries.
 
-    :raises ExchangeAPIError: the record omits ``commission`` or
-        ``commissionAsset``.
+    :raises ExchangeAPIError: the record omits ``commission``,
+        ``commissionAsset`` or ``quoteQty``.
     """
     try:
         commission = raw["commission"]
         commission_asset = raw["commissionAsset"]
+        quote_quantity = raw["quoteQty"]
     except KeyError as exc:
         raise ExchangeAPIError(
             f"Malformed trade record for {raw.get('symbol')!r} "
@@ -285,7 +306,7 @@ def to_venue_fill(raw: dict[str, Any]) -> VenueFill:
         symbol=raw["symbol"],
         price=raw["price"],
         quantity=raw["qty"],
-        quote_quantity=raw["quoteQty"],
+        quote_quantity=quote_quantity,
         commission=commission,
         commission_asset=commission_asset,
         is_buyer=bool(raw["isBuyer"]),
@@ -561,8 +582,9 @@ def to_order(raw: dict[str, Any]) -> Order:
 
     **BOTH THE TOTAL AND THE QUOTIENT ARE CARRIED, and the derivation above is
     unchanged.** ``filled_quote_quantity`` is the wire's
-    ``cummulativeQuoteQty`` verbatim; ``average_price`` stays the quotient it
-    has always been. That is not redundancy: the division runs in the ambient
+    ``cummulativeQuoteQty`` verbatim, save a negative value (below);
+    ``average_price`` stays the quotient it has always been. That is not
+    redundancy: the division runs in the ambient
     ``decimal`` context, so a quotient that does not terminate is rounded to 28
     significant digits, and booking realised P&L needs the total the venue
     itself added up rather than a figure re-derived from a rounded one.
@@ -582,6 +604,26 @@ def to_order(raw: dict[str, Any]) -> Order:
     visible, where ``None`` from the quotient is not. It uses ``_opt_dec``
     rather than ``_dec(..., "0")`` precisely so an ABSENT key stays ``None``
     instead of becoming a reported zero.
+
+    **A NEGATIVE TOTAL IS ABSENT, by the project owner's Decision 3.** The
+    venue documents, for ``GET /api/v3/order``, that on some historical orders
+    ``cummulativeQuoteQty`` is below zero, meaning the data is not available at
+    this time. Carried verbatim it would be a PRESENT total, and a booking site
+    would credit a negative quote amount. So a value strictly below zero becomes
+    ``None`` -- the absent-key state exactly -- and ONE ``WARNING``, event
+    ``venue_quote_total_unavailable``, names the order and the raw value.
+    Downstream the verdict is ``NO_QUOTE_TOTAL``, never a negative booking. Zero
+    is unchanged: ``"0.00000000"`` is what a resting order reports, a real
+    quantity. The returned ``Order`` is identical to the one the same payload
+    gives with the key removed; the WARNING is the only difference.
+
+    **THE OTHER READ OF THE KEY IS LEFT AS IT IS.** ``cummulative`` above
+    defaults a missing key to zero for the division, and its guard
+    ``executed > 0 and cummulative > 0`` already yields ``average_price is
+    None`` for a negative total, so no negative price can arise from it. It is
+    left alone because it is already safe, and because the two reads answer
+    different questions: a zero default is right for a division and wrong for
+    the total, which is why they were separate reads in the first place.
 
     ``orderListId`` is ``-1`` for an order that belongs to no list. That is a
     sentinel rather than an identity, so it maps to ``None`` -- otherwise every
@@ -605,6 +647,26 @@ def to_order(raw: dict[str, Any]) -> Order:
     # `None` -- "the venue did not report it" -- and never become a zero the
     # venue never sent.
     filled_quote_quantity = _opt_dec(raw.get("cummulativeQuoteQty"))
+    if filled_quote_quantity is not None and filled_quote_quantity < 0:
+        # DECISION 3 (the project owner): the venue documents a total below zero
+        # as UNAVAILABLE, so it is read as absent -- never carried as a present,
+        # negative figure a booking site would credit. Strictly `< 0`: zero is
+        # what a resting order reports, and stays present.
+        _log.warning(
+            "%s order %s: the venue reported cummulativeQuoteQty %s, which it documents as "
+            "unavailable; the quote total is read as ABSENT",
+            raw["symbol"],
+            raw["orderId"],
+            raw["cummulativeQuoteQty"],
+            extra={
+                "event": _EVENT_QUOTE_TOTAL_UNAVAILABLE,
+                "symbol": raw["symbol"],
+                "order_id": str(raw["orderId"]),
+                "raw_quote_total": str(raw["cummulativeQuoteQty"]),
+                "reason": _REASON_QUOTE_TOTAL_UNAVAILABLE,
+            },
+        )
+        filled_quote_quantity = None
 
     price = _opt_dec(raw.get("price"))
     if price is not None and price == 0:

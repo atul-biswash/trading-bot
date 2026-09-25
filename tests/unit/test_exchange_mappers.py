@@ -2384,6 +2384,95 @@ class TestFilledQuoteQuantity:
                 filled_quote_quantity=65.05,  # type: ignore[arg-type]
             )
 
+    # ----------------------------------------------------------------------
+    # DECISION 3: a negative total is ABSENT. Every negative fixture below is
+    # FABRICATED -- no capture in this project holds a negative or an absent
+    # total. The venue's documentation of GET /api/v3/order says that for some
+    # historical orders the total is below zero, meaning the data is not
+    # available at this time.
+    # ----------------------------------------------------------------------
+
+    @pytest.mark.parametrize("raw_total", ["-1.00000000", "-0.00000001"])
+    def test_a_negative_total_is_absent_and_warned_once(
+        self, raw_total: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Decision 3: below zero is UNAVAILABLE, so it is read as absent.
+
+        FABRICATED: no capture holds a negative total. The venue documents one
+        on some historical order records as data not available at this time.
+        ``-0.00000001`` is the smallest negative at the venue's exponent, so a
+        test that only catches whole units cannot pass here.
+
+        MUTATION: remove the ``< 0`` mapping; drop the WARNING.
+        """
+        raw = {**ORDER_MARKET_FILLED, "cummulativeQuoteQty": raw_total}
+
+        with caplog.at_level("WARNING", logger=m.__name__):
+            order = m.to_order(raw)
+
+        assert order.filled_quote_quantity is None
+        records = [r for r in caplog.records if r.name == m.__name__]
+        assert len(records) == 1
+        record = records[0]
+        assert record.levelname == "WARNING"
+        assert vars(record).get("event") == "venue_quote_total_unavailable"
+        assert vars(record).get("symbol") == "BTCUSDT"
+        assert vars(record).get("order_id") == "123457"
+        # The raw value AS THE VENUE SENT IT, a string -- never a float.
+        assert vars(record).get("raw_quote_total") == raw_total
+        assert type(vars(record).get("raw_quote_total")) is str
+        assert "not available" in str(vars(record).get("reason"))
+
+    def test_a_reported_zero_stays_present_at_the_venues_exponent_unwarned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Strictly BELOW zero: ``"0.00000000"`` is what a resting order reports.
+
+        MUTATION: ``< 0`` becomes ``<= 0``.
+
+        The fixture carries the zero at exponent -8, as the venue sends it, so
+        a mutation that re-parses or normalises the zero is visible too.
+        """
+        assert ORDER_LIMIT_NEW["cummulativeQuoteQty"] == "0.00000000"
+
+        with caplog.at_level("WARNING", logger=m.__name__):
+            order = m.to_order(ORDER_LIMIT_NEW)
+
+        assert order.filled_quote_quantity is not None
+        assert order.filled_quote_quantity == Decimal(0)
+        assert order.filled_quote_quantity.as_tuple().exponent == -8
+        assert [r for r in caplog.records if r.name == m.__name__] == []
+
+    def test_a_positive_total_is_unchanged_and_unwarned(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """MUTATION: widen the branch to every value, or warn on every total."""
+        with caplog.at_level("WARNING", logger=m.__name__):
+            order = m.to_order(ORDER_MARKET_FILLED)
+
+        assert str(order.filled_quote_quantity) == "65.05000000"
+        assert [r for r in caplog.records if r.name == m.__name__] == []
+
+    def test_a_negative_total_parses_exactly_as_an_absent_one(self) -> None:
+        """The return value stays a PURE function of the payload.
+
+        FABRICATED: no capture holds a negative total; the venue documents one
+        as data not available at this time. The WARNING is the only difference
+        between the two parses -- every field of the returned ``Order`` is the
+        absent-key parse's, ``average_price`` included.
+
+        MUTATION: return the raw negative from the branch while still logging.
+        """
+        negative = {**ORDER_MARKET_FILLED, "cummulativeQuoteQty": "-1.00000000"}
+        absent = {k: v for k, v in ORDER_MARKET_FILLED.items() if k != "cummulativeQuoteQty"}
+
+        from_negative = m.to_order(negative)
+        from_absent = m.to_order(absent)
+
+        for field in Order.model_fields:
+            assert getattr(from_negative, field) == getattr(from_absent, field), field
+        assert from_negative == from_absent
+
 
 # --------------------------------------------------------------------------
 # myTrades fills -- CAPTURED, not fabricated
@@ -2603,6 +2692,27 @@ def test_a_record_missing_commission_asset_refuses() -> None:
 
     with pytest.raises(ExchangeAPIError, match="missing commissionAsset"):
         m.to_venue_fill(broken)
+
+
+def test_a_record_missing_quote_qty_refuses_as_a_venue_error() -> None:
+    """THE FIGURE A BOOKING SUMS, read inside the same guard as the fee.
+
+    Read by a bare subscript, a record missing ``quoteQty`` raised ``KeyError``,
+    which no ``except ExchangeError`` catches. Its sibling tests use
+    ``pytest.raises(ExchangeAPIError)``, under which a ``KeyError`` would
+    propagate as a CRASH rather than fail an assertion; so this one accepts
+    BOTH and asserts the type, making the escape a kill (M5i-115).
+
+    FAILS ON: reading ``quoteQty`` outside the guard.
+    """
+    broken = {k: v for k, v in MY_TRADE_SELL.items() if k != "quoteQty"}
+
+    with pytest.raises((ExchangeAPIError, KeyError)) as caught:
+        m.to_venue_fill(broken)
+
+    assert type(caught.value) is ExchangeAPIError, "a missing quoteQty escaped as KeyError"
+    assert "missing quoteQty" in str(caught.value)
+    assert "1129443" in str(caught.value)  # the trade id
 
 
 def test_a_float_in_a_money_position_is_rejected() -> None:

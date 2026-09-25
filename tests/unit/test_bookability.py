@@ -51,6 +51,7 @@ import pytest
 
 from trading_bot.core.enums import PositionSide, ProtectionState
 from trading_bot.core.models import Money, Position
+from trading_bot.exchange.models import to_order
 from trading_bot.execution.bookability import (
     BookabilityOutcome,
     BookabilityVerdict,
@@ -408,3 +409,50 @@ class TestABookableFill:
         verdict = _classify(position=_position(), filled_quote_quantity=quote)
 
         assert verdict.total is quote
+
+
+# --------------------------------------------------------------------------
+# Decision 3's consequence -- a negative venue total never books.
+# --------------------------------------------------------------------------
+
+
+def test_a_negative_venue_total_classifies_no_quote_total_never_bookable() -> None:
+    """THE FAIL-CLOSED CONSEQUENCE, pinned through the real adapter parse.
+
+    FABRICATED: no capture holds a negative total. The venue documents one on
+    some historical order records as data not available at this time, and
+    ``to_order`` reads it as absent (Decision 3).
+
+    EXPRESSIVE: every other fact is false -- the position is present, of EQUAL
+    quantity, and carries a cost basis -- so if the negative figure reached the
+    predicate as a present total, the verdict would be ``BOOKABLE`` with a
+    negative total. That is the booking this pins shut.
+
+    MUTATION: remove the ``< 0`` mapping in ``to_order``.
+    """
+    order = to_order(
+        {
+            "symbol": "BTCUSDT",
+            "orderId": 3612839,
+            "clientOrderId": "tb1-BTCUSDT-1786694400000-0-SL",
+            "time": 1_786_694_400_000,
+            "price": "0.00000000",
+            "origQty": "0.02257000",
+            "executedQty": "0.02257000",
+            "cummulativeQuoteQty": "-1.00000000",
+            "status": "FILLED",
+            "type": "STOP_LOSS",
+            "side": "SELL",
+        }
+    )
+    assert order.filled_quantity == QTY
+
+    verdict = _classify(
+        position=_position(),
+        filled_quantity=order.filled_quantity,
+        filled_quote_quantity=order.filled_quote_quantity,
+    )
+
+    assert verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL
+    assert verdict.outcome is not BookabilityOutcome.BOOKABLE
+    assert verdict.total is None

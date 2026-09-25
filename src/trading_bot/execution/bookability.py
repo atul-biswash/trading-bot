@@ -28,7 +28,9 @@ differently and the numbers were never the same fact twice.
   ``PendingCloseRecord`` carries none, so the figure is UNRECONSTRUCTABLE
   rather than merely unknown.
 * **Q** -- ``NO_QUOTE_TOTAL``. The venue reported a fill and gave no
-  ``cummulativeQuoteQty`` for it. There is no fallback: deriving a total by
+  ``cummulativeQuoteQty`` for it -- or gave a negative one, which the venue
+  documents as unavailable and the adapter's ``to_order`` reads as absent.
+  There is no fallback: deriving a total by
   multiplying an average price reintroduces the quotient error the exchange's
   own accounting does not have. **The booked figure is the venue's or there is
   no booked figure.**
