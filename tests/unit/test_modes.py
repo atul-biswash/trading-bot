@@ -2287,15 +2287,32 @@ class TestBootRefusalsReachTheCli:
         assert issubclass(exc_type, TradingBotError)
 
     def test_the_cli_exits_non_zero_without_a_traceback(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Driven through the real ``main``: parser, settings, logging, dispatch.
 
         The paper-mode refusal is the one that needs no client at all, so this
         stays hermetic while exercising the identical except-clause every other
         refusal lands in.
+
+        Startup provenance is replaced with an accepted verdict: ``main``
+        refuses ``run`` before dispatch otherwise, and this test's subject is
+        the refusal dispatch raises.
         """
+        import trading_bot.main as cli
         from trading_bot.main import main
+
+        class _AcceptedProvenance:
+            accepted = True
+            refusal_reasons: tuple[str, ...] = ()
+
+            def log_fields(self) -> dict[str, str | int | bool]:
+                return {"verdict": "accepted"}
+
+        monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: _AcceptedProvenance())
 
         path = tmp_path / "cli_config.yaml"
         path.write_text(

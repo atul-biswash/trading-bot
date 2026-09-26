@@ -190,6 +190,28 @@ def constructors(monkeypatch: pytest.MonkeyPatch) -> Iterator[list[str]]:
     assert reached == [], f"a client constructor was reached: {reached}"
 
 
+class _AcceptedProvenance:
+    """A startup-provenance verdict of accepted, for tests about what comes after it.
+
+    ``main`` refuses ``run`` unless provenance is accepted, and the test
+    process is an editable, uncommitted tree that never is. A test whose
+    subject is a guard AFTER that refusal needs it passed, or the guard is
+    never reached.
+    """
+
+    accepted = True
+    refusal_reasons: tuple[str, ...] = ()
+
+    def log_fields(self) -> dict[str, str | int | bool]:
+        return {"verdict": "accepted"}
+
+
+@pytest.fixture
+def accepted_provenance(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace ``main``'s provenance collector with an accepted verdict."""
+    monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: _AcceptedProvenance())
+
+
 @pytest.fixture
 def logging_setup(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     """Record ``setup_logging`` calls instead of reconfiguring the root logger.
@@ -269,7 +291,10 @@ def test_bot_mode_live_is_refused_at_startup(
 
 
 def test_cli_mode_live_is_refused_at_startup(
-    tmp_path: Path, logging_setup: list[object], caplog: pytest.LogCaptureFixture
+    tmp_path: Path,
+    logging_setup: list[object],
+    caplog: pytest.LogCaptureFixture,
+    accepted_provenance: None,
 ) -> None:
     """Route C: ``run --mode live`` over a config and environment of testnet.
 

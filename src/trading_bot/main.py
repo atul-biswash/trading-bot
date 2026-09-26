@@ -1,7 +1,9 @@
 """Command-line entry point.
 
 Responsibilities kept deliberately small: parse arguments, load & validate
-settings, initialise logging, then hand off to the appropriate runner. Heavy
+settings, initialise logging, record startup provenance -- and refuse ``run``
+when it does not establish a clean, installed, pushed commit -- then hand off
+to the appropriate runner. Heavy
 imports (engine, backtester) are deferred into the dispatch functions so
 ``python -m trading_bot --help`` stays fast and works without the full stack.
 
@@ -17,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import logging
 import signal
 import sys
 from typing import TYPE_CHECKING
@@ -30,9 +33,14 @@ from trading_bot.config.settings import (
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.exceptions import LiveTradingBlockedError, TradingBotError
 from trading_bot.utils.logger import get_logger, setup_logging
+from trading_bot.utils.provenance import Provenance, collect_provenance, refusal_message
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.engine.live_engine import TradingEngine
+
+_EVENT_BOOT_PROVENANCE = "boot_provenance"
+
+_PROVENANCE_GATED = frozenset({"run"})
 
 _BANNER = r"""
   ____  _                            ____        _
@@ -169,6 +177,17 @@ def _cmd_strategies() -> int:
     return 0
 
 
+def _log_provenance(log: logging.Logger, facts: Provenance) -> None:
+    """The boot line: ``INFO`` when accepted, ``ERROR`` when refused."""
+    fields = facts.log_fields()
+    log.log(
+        logging.INFO if facts.accepted else logging.ERROR,
+        "Startup provenance %s",
+        fields["verdict"],
+        extra={"event": _EVENT_BOOT_PROVENANCE, **fields},
+    )
+
+
 def main(argv: list[str] | None = None) -> int:
     """Program entry point. Returns a process exit code."""
     args = _build_parser().parse_args(argv)
@@ -192,6 +211,10 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(settings.config.logging)
     log = get_logger(__name__)
     log.info("%s", _BANNER)
+    facts = collect_provenance(settings.config_path, settings.config_sha256)
+    _log_provenance(log, facts)
+    if args.command in _PROVENANCE_GATED and not facts.accepted:
+        raise SystemExit(refusal_message(facts))
 
     try:
         if args.command == "run":
