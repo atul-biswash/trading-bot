@@ -1,134 +1,143 @@
-# Next milestone — M5k
+# Next milestone — M5l
 
-Written at M5j's rotation. **This is the single home for live open items.**
-Every item below was verified present in the tree at `4e30a25`; anything M5j
-closed has been struck rather than carried, and the strikes are listed so the
-removal is auditable rather than silent.
+Struck and repaired at M5k's rotation, in its first part. Every item below was
+re-verified by content against `ae8c914`; anything M5k closed is reduced to one
+index line naming the resolving commit and its findings, and its full text
+lives in git history and in `docs/PHASE_HISTORY.md`'s M5k entry. M5l's scope,
+priorities and new carried items are the rotation's second part. **This is the
+single home for live open items.**
 
 ---
 
-## Before M5k starts — the namespace
+## Before M5l starts — the namespace
 
-**IDs are `M5k-NNN`: three digits, zero-padded, starting at `M5k-001`.** Not
-letters. `CLAUDE.md` still describes an `M5d-A` scheme it has never used and
-carries an annotation saying so; the digit convention is the real one and this
-line is the only place it is prescribed, which is exactly the `phase_5_` shape
-one step inside the repository. **A rotation that rewrites this file must carry
-this paragraph forward.**
+**IDs are `M5l-NNN`: three digits, zero-padded, starting at `M5l-001`.** Not
+letters. `CLAUDE.md` prescribes the digit form in its rescued rule 2; this
+paragraph is carried forward so that a reader of this file meets it first.
+**A rotation that rewrites this file must carry this paragraph forward.**
 
-M5j allocated **50** ids, `M5j-001` through `M5j-050`, contiguous with no gaps
-and no duplicates, and every commit in the range carries a findings block.
-Verified at rotation by the documented extractor. The `M5k` namespace was
-confirmed empty by the same extractor before this file was written, so
-`M5k-001` is free.
+**M5k's range is closed by the tag `milestone/M5k`**, applied to the closing
+commit of M5k's rotation, and its count is read with one command rather than
+written here, once that tag exists:
+
+```
+.venv\Scripts\python.exe scripts/check_findings.py milestone/M5j..milestone/M5k M5k
+```
+
+It prints the declared, distinct and maximum ids, and every duplicate, gap,
+id cited but never declared, and commit with no block. The M5l namespace is to
+be confirmed empty by the same tool, over `milestone/M5k..HEAD`, before
+`M5l-001` is written.
 
 > **THE M5i RESERVED BLOCK IS STILL RESERVED.** `M5i-068`, `M5i-071` and
 > `M5i-073` are cited in the tree and declared nowhere. That is deliberate and
 > the extractors report it every time as `cited-not-declared`; it is not a
 > defect to be closed by inventing declarations for them.
 
+> **AND THREE MORE M5i IDS ARE UNRECORDED ANYWHERE (`M5k-018`).**
+> `scripts/check_findings.py` reports the M5i range's gaps as 68 through 73.
+> The reserved block accounts for three of them; `M5i-069`, `M5i-070` and
+> `M5i-072` appear in no commit message and no tracked file, and no document
+> mentions them. They are not to be invented either.
+
 ---
 
 ## THE CENTRAL FACT — read this before anything else
 
-**The bot has been running, and for three milestones nothing in the repository
-was pointed at the evidence.** M5j began by testing M5i's closing sentence —
-*"nothing has run"* — and it was false. `docs/RUN_LEDGER.md` now holds the
-census, with the command behind each figure and the digest of the capture it
-came from.
+**Nothing M5k added is shown to have run as committed, and the bot records
+nothing that could show it.** Measured against the capture
+`trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, taken at
+M5k's close; `docs/RUN_LEDGER.md` §19 holds its census:
 
-**What that changes for M5k is the standard of evidence, not the backlog.** A
-claim derived from a capture names its digest in the sentence that makes it, or
-it cannot age visibly — a sentence written three days before its own
-falsification said *"still true"* and named no bytes.
+- **No line logged by code as committed at or after `651d334` is shown to
+  exist.** Eight booking lines carry `fee=0E-8 fee_asset=USDT`, a key no commit
+  before `651d334` writes. The first is at `2026-09-24T10:38:02Z`, seven hours
+  before that commit existed, while the reflog held HEAD at `e511e6d`: the fee
+  settlement ran from uncommitted code (`M5k-123`). No line carries
+  `quote_total_source`, which every booking line writes from `c5dd7d5`, and
+  none of the six events M5k added appears.
+- **The bot records no commit** (`M5k-132`). Its startup banner is ASCII art
+  and a mode line, and no line in any capture names a commit, a version or a
+  dirty tree. `CLAUDE.md`'s deployment doctrine rules that this change, and
+  marks the banner NOT YET IMPLEMENTED.
+- **`RefusalStage.POSITION_STALE` fired once**, at `2026-09-24T19:25:00Z`
+  (`M5k-124`) — the first time in any capture.
+- **No run was writing when the capture was taken.** The bytes it adds to the
+  previous capture hold six runs, every one ending in `engine_stopped` after a
+  `SIGINT`; its last line is `pid=23236`'s, at `2026-09-25T16:16:10Z`.
+  `pid=24772`, still appending when M5j's rotation wrote this section, last
+  logged at `2026-09-19T09:42:02Z` and records no `engine_stopped`.
 
-**A run was in flight while this rotation was written.** `pid=24772` was still
-appending, position active, and the process predates the commit that added the
-clean-shutdown marker — so `event=engine_stopped` reads zero and will until the
-next restart. That is the marker's absence recording the process's age rather
-than an unexercised path.
+**The standard of evidence M5j set still holds.** A claim derived from a
+capture names its digest in the sentence that makes it, or it cannot age
+visibly.
 
 ---
 
-## M5k's PRIORITIES, IN THE OWNER'S RULED ORDER
+## RESOLVED AT M5k — one index line each
 
-### 1. The DIVERGED exit-booking gap — A5, `M5j-011`
+Each item's full text is in git history and in `docs/PHASE_HISTORY.md`'s M5k
+entry. An item resolved only in part is indexed here AND carried below with its
+residue and its condition.
 
-**The highest-value item and the one with the most design left in it.**
-`_book_exits` treats a `None` `ExitFill` as row 4, the ordinary healthy pass,
-and `continue`s silently. A pass whose only terminal leg is `DIVERGED` therefore
-books nothing, keeps a `Position` describing base the account may no longer
-hold, and refuses entries portfolio-wide with nothing stating why the ledger and
-the account have parted.
+- **Priority 1 / A5, the DIVERGED exit-booking gap** — resolved in code at
+  `3e444f0` (`M5k-004`–`M5k-009`): a diverged pass with no fill escalates at
+  `CRITICAL` instead of continuing. The residue is carried as A5.
+- **Priority 2, a gate-count self-verification helper** — resolved at
+  `2109bee` (`M5k-011`, `M5k-013`–`M5k-020`): `scripts/check_gate_counts.py`.
+- **Priority 4, the accounting architecture pass** — resolved for EXIT fees at
+  `45ffe31`, `9f3deb1`, `f1c5af7` and `651d334` (`M5k-021`–`M5k-035`,
+  `M5k-049`–`M5k-064`). The ENTRY half stays under `CLAUDE.md`'s live-trading
+  block and is carried as A1.
+- **A1, commission never reaching the ledger** — resolved for EXIT commission
+  at `651d334` (`M5k-094`, annotated here at `222bdf4`). The entry half is
+  carried as A1.
+- **A4, `venue_time` on an `exit_booked` line** — resolved at `651d334`, after
+  the rename at `f1c5af7`; the booking line's `filled_at` and
+  `order_created_at` are pinned by test (`M5k-067`).
+- **F1, the driver retrying a permanent fee refusal** — resolved at `d253cd5`
+  by R2 with rulings A and B (`M5k-078`).
+- **F2, a restart after a deferred settlement** — closed as MEASURED at
+  `db73b63` (`M5k-065`): the restored close is released unbooked at `CRITICAL`,
+  and the restart neither re-enters the retention nor books.
+- **`M5i-104`, the named test's unguarded unpack** — resolved at `c5dd7d5`
+  (`M5k-113`). The sweep is carried.
+- **`M5i-109`, two stale sentences in a test docstring** — resolved at
+  `c5dd7d5`, whose rewrite of the test removed the docstring; recorded in that
+  commit's arming audit.
 
-**A5 at the precision this rotation reached, and the two halves must not be read
-as one observation.** The **per-leg** `DIVERGED` branch HAS run: on 2026-09-18
-the `SL` leg reported `EXPIRED` and took it. **Position-level `DIVERGED` remains
-UNOBSERVED in production.** Re-derived against the capture whose SHA-256 is
-`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`, every
-`states=` value the reconciler has ever reported:
+---
 
-| `states=` | count |
-|---|---:|
-| `active=1` | 2849 |
-| `active=2` | 1261 |
-| `unknown=1` | 160 |
-| `diverged=1` | **28** |
-| `active=1,unknown=1` | 3 |
-
-**All 28 `diverged=1` records fall between `2026-08-27 04:07:02` and
-`04:38:02`; the identifier-space fix `3970968` is authored `05:47:28Z` the same
-day; zero follow it.** On 2026-09-18 the position-level assessment was
-`unknown=1`, because the sibling `TP` leg reported a fill and that branch returns
-first.
-
-**What it forecloses.** Row 4 carries two meanings today — *no leg reported a
-fill* and *a leg is terminal and unpriced* — and `ExitFill`'s own docstring makes
-that separation load-bearing. Booking from a `DIVERGED` leg would need a price
-the venue never gave, which is the `NO_QUOTE_TOTAL` path, so the honest options
-are **escalate** or **refuse loudly**, not book.
-
-> **ANNOTATED BY 3b-2b: the `NO_QUOTE_TOTAL` path now BOOKS**, from the sum of
-> the order's own fills (the 3b ruling), so it is no longer an example of not
-> booking. The conclusion stands on its own ground: a `DIVERGED` leg reported
-> no fill, so it has no fills to sum.
-
-### 2. A gate-count self-verification helper
-
-The 18 count sites are maintained by hand across two files and nothing checks
-them against a gate run. **It would be its own first customer**: one new
-`scripts/` module and its test move `ruff format` by two and `mypy` by one.
-
-**What it forecloses.** It can verify the sites agree with a run; it cannot
-distinguish a count site from a coincidental digit. Four hits in `CLAUDE.md` are
-not gate figures — a coincidental `118` in grep prose, a `+74.11` money bound, a
-`118` explicitly marked not-a-gate-figure, and a Q-C `:118` line citation — and
-a helper treating every digit as a site would demand edits to all four. The
-inverse rule stays human judgement.
+## CARRIED FROM M5k'S PRIORITIES
 
 ### 3. Regularising the arming conditions
 
-Partly done at this rotation; see the note under **Arming conditions** below.
-**Two conditions are left unparsed deliberately** and closing them needs a
-ruling rather than an edit.
-
-### 4. The accounting architecture pass
-
-The largest, and it **unblocks** the others rather than the reverse — A1, A4's
-rename and the true fill time all wait on it. It touches
-`exchange/models.py`, `core/models.py`, `execution/reconciliation.py` and
-`core/interfaces.py`, **two of which are the port**. The denomination invariant
-and the two-of-three rejection are locked in `CLAUDE.md` and bind whoever does
-it.
+Done at M5j's rotation for this file, and widened at M5k's by `CLAUDE.md`'s
+rule g, under which the audit reads every document that carries a condition.
+**Two conditions are left unparsed deliberately**, one in this file -- Q-C §3's
+leg set -- and one in `docs/QB_ESCALATION.md` -- the halt flag's first writer.
+Closing either needs a ruling rather than an edit. See the note under **Arming
+conditions** below, which carries the measured registers.
 
 ---
 
-## Arming conditions — regularised, with two deliberate exceptions
+## Arming conditions — the registers, with two deliberate exceptions
 
 `scripts/check_arming_conditions.py` keeps a parsed and an unparsed register and
-**exits non-zero while the unparsed register is non-empty**. At this rotation's
-start it read 22 candidates, 15 parsed and 7 unparsed, every failure for the
-same reason: the bold span named no backticked symbol.
+**exits non-zero while the unparsed register is non-empty**. Under `CLAUDE.md`'s
+rule g it is run on every document that carries a condition. MEASURED at M5k's
+rotation, on the tree this commit leaves:
+
+| document | candidates | parsed | unparsed |
+|---|---:|---:|---:|
+| `docs/NEXT_MILESTONE.md` | 20 | 19 | 1 |
+| `CLAUDE.md` | 2 | 2 | 0 |
+| `docs/QB_ESCALATION.md` | 1 | 0 | 1 |
+| `docs/QC_PROTECTIVE_ORDERS.md` | 0 | 0 | 0 |
+
+At M5j's rotation the tool read 22 candidates here, 15 parsed and 7 unparsed,
+every failure for the same reason: the bold span named no backticked symbol.
 
 **Six were regularised by naming the site they actually guard**, leaving 22
 candidates, **21 parsed and 1 unparsed**. Their targets were derived from the
@@ -140,16 +149,54 @@ is produced by `scripts/run_census.py`; and the two conditions reading *"whoever
 next edits that test"* name tests the surrounding prose already identifies, so
 the real node ids are used.
 
-**ONE IS LEFT UNPARSED ON PURPOSE, AND THAT IS THE CORRECT OUTCOME.** The
-trailing-stop block guards Q-C §3's leg set — a **contract document section**,
+**ONE IS LEFT UNPARSED IN THIS FILE ON PURPOSE, AND ONE IN
+`docs/QB_ESCALATION.md`, AND THAT IS THE CORRECT OUTCOME.** Corrected at M5k's
+rotation: this heading read *"ONE IS LEFT UNPARSED"* while priority 3 above
+read *"Two conditions are left unparsed deliberately"*, and the file
+contradicted itself. Measured across every document the audit reads, both are
+true of different scopes: one here, one in Q-B. The trailing-stop block guards
+Q-C §3's leg set — a **contract document section**,
 not a Python symbol. The honest target is `docs/QC_PROTECTIVE_ORDERS.md` §3,
 and backticking that path *would* satisfy the parser; it is left as it stands by
 ruling, because writing a path in to please a tool is writing for the tool.
+Q-B's condition names *"the halt flag's first writer"*, a writer that does not
+exist; its marker was normalised at M5k's rotation so the tool finds it, and it
+is accepted unparsed by ruling for the same reason.
 
 **So a non-zero exit is expected and is not a defect to regularise around.** The
-checker is reporting that one condition guards something its schema cannot
-express — which is the register doing its job. Widening the parser to accept a
+checker is reporting that two conditions, one per document, guard something its
+schema cannot express — which is the register doing its job. Widening the parser to accept a
 caller-phrase with no symbol is the alternative, and it is the owner's call.
+
+---
+
+## THE MODE-3 RECORD — what M5k's rotation pass found
+
+`CLAUDE.md`'s failure mode 3 is a condition that FIRES and nothing notices.
+M5k's rotation read every condition against every M5k commit that edited its
+named site. What it found is recorded here and not re-litigated:
+
+- **A5 and `M5i-065` fired UNAUDITED at `3e444f0`.** That commit edited
+  `_book_exits` -- row 4, the diverged escalation -- and its body carries no
+  arming-condition audit. It is the commit that closed A5's code gap.
+- **`M5i-065` fired UNAUDITED again at `f1c5af7`**, which edited the booking
+  line inside `_book_exits`. Its audit named A4, A5 and A6 and not `M5i-065`.
+- **`M5i-095` arguably fired at `3e444f0`**, whose
+  `test_the_escalation_books_nothing_and_saves_nothing` asserts
+  `portfolio.ledger is None` -- portfolio state -- to show that nothing was
+  booked.
+
+Every other firing in M5k was audited in the body of the commit that caused
+it: U7 at `e511e6d`, A1 at `193a5b9`, and A4, A5, A6, F1, F2, `M5i-065`,
+`M5i-095`, `M5i-104` and `M5i-109` at the commits their audits name.
+
+**The instrument, and why it was not `git log -L`.** Which commits edited a
+named function was measured by comparing that function's exact source
+segment, extracted with `ast`, at every M5k commit and at its parent. `git log
+-L` was tried first and missed an edit: its regex-range form did not report
+`f1c5af7`'s change to `_book_exits`, and with `--no-patch` it printed nothing
+at all. An instrument that under-reports firings produces exactly the silence
+mode 3 describes.
 
 ---
 
@@ -208,9 +255,15 @@ Carried, unfired.
 
 ### U4. The per-call share — `M5f-009`
 
-Carried, unfired.
+Carried. **Its condition was repaired at M5k's rotation, because it was
+spent.** It read *"whoever first sets `timeout_s`/`attempts` from config"*,
+and that FIRST had already happened before M5k: the fee commit's audit
+recorded it as `ReconciliationBudget.from_config`. A first that has happened
+can never fire again, so the item could only ever read as waiting. The item is
+about the DISPATCH per-call share, so the condition now names the one function
+that derives it.
 
-*Arming condition:* **whoever first sets `timeout_s`/`attempts` from config.**
+*Arming condition:* **whoever next edits `DispatchBudget.bounds_for_next_call` in `execution/dispatch_budget.py`.**
 
 ### U5. `BinanceRequestException`'s representation — `M5f-072`, `M5h-360`
 
@@ -226,7 +279,10 @@ which exists beyond a docstring stub.
 
 ### U7. Deleting `_CLOSE_SEQUENCE_CALLS` — `M5f-010`, `M5f-018`
 
-Carried, unfired. M5j did not touch `config/models.py` at all.
+Carried. It FIRED at M5k's `e511e6d`, which edited the coherence block to count
+settlement, and was REAFFIRMED there: `_CLOSE_SEQUENCE_CALLS` is not deleted,
+because deleting it depends on the unruled five-versus-four confirm-step
+question its own comment names.
 
 *Arming condition:* **whoever next edits `config/models.py`'s coherence block.**
 
@@ -234,36 +290,18 @@ Carried, unfired. M5j did not touch `config/models.py` at all.
 
 ## CARRIED FROM M5j
 
-### A1. Commission never reaches the ledger, and the gap is at the port
+### A1. ENTRY commission never reaches the ledger, and `to_order` discards the fee report
 
-**The wiring inside `core/portfolio.py` is COMPLETE**, on both limbs — `fee` is
-declared and consumed on four lines, two per limb. **The defect is that no
-commission figure ever arrives to pass.** `commission` occurs zero times in
-`src/`; `commissionAsset` zero times anywhere. `to_order` in
-`exchange/models.py` reads sixteen distinct wire keys and `fills` is not among
-them, so the venue's own fee report is discarded at the mapper.
-
-**The three call sites are not alike**: `_book_close` holds the whole `Order`,
-`_book_resolved_close` holds only a total, and `_book_exits` holds an
-`ExitFill`. **Site three reads `get_order` point queries, whose responses carry
-no fills array**, so it needs `myTrades` — a **new port method**, not a wider
-one.
-
-**Three rulings are locked in `CLAUDE.md`**: the denomination invariant, the
-rejection of the two-of-three fix on ledger-comparability grounds, and the
-prohibition on `fee=Decimal(0)` as an interim stub.
-
-> **ANNOTATED PER `M5k-094`: THE HEADING IS HALF STALE.** Since `651d334`,
-> whose subject begins `feat(accounting): exits book net of the venue's own
-> fee`, every EXIT's commission reaches the ledger: all three booking sites
-> call `close_position(..., fee=settlement.fee)` on the fills `get_my_trades`
-> returns -- the new port method this item names as the remedy. **What
-> survives:** ENTRY commission still never reaches the ledger, by the project
-> owner's ruling R-a, and `to_order` still discards the venue's `fills`
-> report; the ledger is net of exit fees and gross of entry fees. **The
-> condition below watches `to_order` alone**, and the exit half was
-> discharged by a route it does not name, so it never fired. `193a5b9`, the
-> first commit to edit `to_order`, REAFFIRMED it.
+**The EXIT half is resolved and indexed above**: since `651d334` every booking
+site books net of the fee `get_my_trades` settles. **What is carried is the
+residue.** ENTRY commission reaches the ledger at no site, by the project
+owner's ruling R-a, so the ledger is net of exit fees and gross of entry fees;
+and `to_order` in `exchange/models.py` still does not read the venue's `fills`
+report, so any `fills` array a response carries is discarded at the mapper.
+Netting the entry fee out of base quantity is the subject of
+`CLAUDE.md`'s live-trading block, which it waits on. The condition below
+watches `to_order` alone, and `193a5b9`, the first commit to edit it,
+REAFFIRMED it.
 
 *Arming condition:* **whoever next edits `to_order` in `exchange/models.py`** —
 the single site where the venue's commission is discarded, and the first site
@@ -279,7 +317,12 @@ are status and executed quantity.
 
 *Arming condition:* **whoever next edits `_refine` in
 `execution/reconciliation.py`**, the per-leg branch that reads a leg's terminal
-status, or whoever adds the first non-bot writer to a live account.
+status.
+
+The condition's second disjunct, *"or whoever adds the first non-bot writer to
+a live account"*, was removed at M5k's rotation: it named an event, not a
+caller, and the event had already occurred, on 2026-09-17, when M5j recorded
+an order list cancelled and its base sold by orders this bot did not place.
 
 ### A3. Two build-log headlines carry a claim their own annotation corrects
 
@@ -295,46 +338,19 @@ something a build log protects.
 caller that must decide whether a new entry's headline may state a claim the
 entry will later annotate.
 
-### A4. `venue_time` on an `exit_booked` line is the leg's CREATION time
+### A5. Position-level `DIVERGED` has never been observed in production — the residue of `M5j-011`
 
-`_exit_fill` assigns `venue_time=order.created_at`, and `to_order` derives that
-as `_first_ms(raw, "transactTime", "time", "updateTime")`. It is **neither a
-client-side clock nor the matching-engine execution time**, which lives in
-`myTrades.time` and does not cross this port.
-
-**The falsifying arithmetic needs no appeal to the code.** A booking line
-carried `venue_time=2026-09-18T13:29:00.594000+00:00` while the placement line
-for the same order list is stamped `13:29:02Z` — the value precedes the
-placement by 1.4 seconds, and a fill cannot precede the placement that created
-the order. A second instance: the 2026-09-15 booking at `23:39:02Z` carries
-`venue_time=22:40:00.521Z`, 59 minutes earlier.
-
-**The field is persisted**, so any holding period, detection latency or
-fill-time ordering computed from it is wrong by the position's whole lifetime.
-**The doctrine is locked in `CLAUDE.md`; the rename and the true fill time are
-scoped to priority 4.**
-
-*Arming condition:* **whoever next reads `ExitFill.venue_time` for anything
-other than display.**
-
-> **RESOLVED BY THE FEE COMMIT.** The condition fired and is discharged: the
-> field is renamed `ExitFill.order_created_at`, the true fill time is
-> fetched from `myTrades` and logged as `filled_at` on every booking line,
-> and the `venue_time` key is gone from `exit_booked`. **"Persisted" is
-> aligned** with the project owner's ruling: it meant durable execution
-> logging, never `data/state.json`, where the field never was.
->
-> **The rename itself landed one commit earlier**, in the preparatory commit
-> whose subject begins `feat(exchange): fetch fills by order id`, which fired
-> this condition and REAFFIRMED it rather than resolving it. What only the
-> fee commit supplies is `filled_at` -- the latest `myTrades.time` among the
-> exit order's fills -- so the fee commit is the one that resolves A4.
-
-### A5. `M5j-011`'s DIVERGED branch RAN — OBSERVED-ADJACENT, not observed
-
-See priority 1 above for the measured distribution. The branch was exercised and
-**the hazard did not fire**: booking survived only because the sibling `TP` leg
-took the fill branch and carried an `ExitFill`. **A sibling is not a mechanism.**
+**The code gap is closed and indexed above**: since `3e444f0` a pass whose
+position-level verdict is `DIVERGED` and whose legs reported no fill escalates
+at `CRITICAL`, `exit_unbookable`, instead of continuing. **What is carried is
+the evidence gap.** In `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`,
+`diverged=1` occurs 28 times, all between `2026-08-27 04:07:02` and `04:38:02`
+and so before the identifier-space fix `3970968`, and `exit_unbookable` occurs
+zero times: the escalation has never run. `M5k-005` measured why the hazard has
+not fired either: every line on which a requested leg did not rest also carried
+a sibling fill clause, so booking took the fill branch. **A sibling is not a
+mechanism.**
 
 *Arming condition:* **whoever next edits `_book_exits` in
 `execution/reconciliation_driver.py` or `_refine` in
@@ -350,8 +366,7 @@ between them. The warning refuses to *interpret the protection state*;
 `classify_bookability` reads four facts in the order `A > Q > P > C` and **none
 is a fill price**. **The remedy is wording, not control flow.**
 
-*Arming condition:* **whoever next edits `_report`'s warning text or
-`_book_exits`'s booking line.**
+*Arming condition:* **whoever next edits `_report`'s warning text in `execution/reconciliation_driver.py`, or the booking line: `_log_booked` in that file or `execution/booking_line.py`.**
 
 > **ANNOTATED BY 3b-2a: `classify_bookability` now reads `A > P > C > Q`**, by
 > the project owner's Decision 1; Q still refuses until 3b-2b. This item's
@@ -359,76 +374,13 @@ is a fill price**. **The remedy is wording, not control flow.**
 > condition above is REAFFIRMED: `_report`'s warning text and `_book_exits`'s
 > booking line are untouched.
 
----
-
-## OPENED BY THE FEE COMMIT
-
-### F1. HIGH -- the driver retries a permanent fee refusal on every pass
-
-**The reconciliation driver retries a non-Incomplete `FeeUnresolvableError`
-on every due pass, with no bound and no terminal outcome.** `_settle` in
-`execution/reconciliation_driver.py` catches it around `settle_exit`, logs
-`exit_book_refused` at WARNING and skips. The position survives with
-untrusted protection, so `COMMITTED_RISK_UNKNOWN` keeps entries refused
-PORTFOLIO-WIDE for as long as the position lives, and the next due pass
-fetches the same fills and refuses again. The condition cannot cure itself:
-it is a fee in an asset this ledger cannot subtract, or a fill that is not a
-sell.
-
-**The executor drops the same condition at CRITICAL after one bar.** The sell
-site defers it like every settlement failure, and on the next bar
-`_resolve_close` takes its `fee_unresolvable` branch and drops the position
-unbooked. Two sites, two outcomes, one fact. **It needs one ruled terminal
-outcome for both sites.**
-
-REASONED from the code. Pinned for ONE pass only, by
-`test_a_settlement_the_ledger_refuses_skips_and_keeps_the_position[foreign_fee]`;
-no test drives the repetition.
-
-*Arming condition:* **whoever next edits `_settle` in
-`execution/reconciliation_driver.py` or the `fee_unresolvable` branch of
-`_resolve_close`.**
-
-> **RESOLVED BY THE CLOSING COMMIT (2), by the project owner's ruling R2 with
-> rulings A and B.** One terminal outcome at both sites: a non-Incomplete
-> `FeeUnresolvableError` -- a fee in an asset this ledger cannot subtract, or
-> a fill that is not a sell, now the subclasses `FeeAssetUnresolvableError`
-> and `NonSellFillError` -- is fetched ONCE, logged ONCE at CRITICAL as
-> `exit_settlement_held`, and HELD: the position is kept, its protection
-> written `UNKNOWN`, and marked `Position.settlement_hold`, in memory. The
-> driver no longer reconciles a held position at all (ruling A), so there is
-> no second fetch and no repeating refusal; the executor keeps its close
-> record and skips it before any venue call, and the retention count leaves
-> it. A `CLOSE` for a held position is refused (ruling B). The
-> `fee_unresolvable` drop and its text are gone, and the one-pass pin named
-> above, `...[foreign_fee]`, is replaced by
-> `test_an_unbookable_settlement_is_held_after_one_fetch`, which drives the
-> second pass. Entries stay refused portfolio-wide throughout, as
-> `COMMITTED_RISK_UNKNOWN` and then `POSITION_STALE`. **What did NOT change:**
-> a restart releases the hold, because positions are not persisted, and the
-> outcome then converges on the unbooked drop -- the trade is in the ledger
-> only if an operator entered it by hand.
-
-### F2. A restart after a deferred settlement -- UNMEASURED until the tests-only commit
-
-A close whose settlement is deferred keeps its pending record, and the store
-persists it as a `PendingCloseRecord`: `kind`, `symbol`, `entry_bar_time`,
-`generation` and `quantity`. It carries no deferral count and no settlement,
-because the retention tracker is in-memory by ruling. After a restart there
-is no `Position`, so the resolution is predicted to classify the fill
-`POSITION_ABSENT` and drop the record unbooked at CRITICAL with the released
-text, making no settlement fetch and leaving the tracker empty -- provided
-another pair is tradeable, since a config whose every pair is excluded is
-refused at boot before the first candle.
-
-**That prediction is REASONED.** The nearest test,
-`test_no_position_in_memory_drops_unbooked_and_leaves_the_ledger_absent`,
-seeds `_pending` on a fresh executor. Nothing drives defer, persist through
-the real store, restore through a fresh root and resolve. **UNMEASURED until
-the tests-only commit that follows the fee commit.**
-
-*Arming condition:* **whoever next edits the restart branch of
-`_resolve_close` or the store's `PendingCloseRecord`.**
+> **THE CONDITION WAS RE-POINTED AT M5k's ROTATION, BECAUSE ITS SITE MOVED.** It
+> read *"whoever next edits `_report`'s warning text or `_book_exits`'s booking
+> line"*. The booking line left `_book_exits` at `651d334` for `_log_booked`,
+> and from `a534b31` its fields come from `execution/booking_line.py`
+> (`settlement_fields`, then `quote_total_fields`). A condition naming the old
+> site could no longer fire on an edit to the line it exists for. The item's
+> point is unchanged.
 
 ---
 
@@ -452,22 +404,22 @@ never ran or ran and failed**, because the write raises before it commits.
 state to distinguish two booking outcomes.** The state cannot separate them;
 only the label can.
 
-### `M5i-104`. An unguarded unpack turns a kill into a crash
+### `M5i-104`. Unguarded unpacks turn kills into crashes — the sweep, now 18 sites
 
-`test_a_partial_fill_with_no_cost_basis_still_goes_naked` does
-`(naked,) = _records(...)` with no prior non-emptiness assertion, so a mutation
-removing that record fails it at `ValueError` rather than at an assertion.
-**A 12-site sweep of the same pattern is deferred.**
+**The named test is resolved and indexed above.** A single-element tuple
+unpack of log records with no prior length assertion fails at `ValueError`, a
+crash, where a mutation removing the record should fail an assertion; `CLAUDE.md`'s
+rule i now prescribes the remedy. **The sweep is carried, and it has grown from
+the 12 sites M5i counted to 18.** MEASURED at `ae8c914`, with the instrument
+stated: lines matching `^\s*\(\s*\w+\s*,\s*\)\s*=` under `tests/` whose
+right-hand side reads log records (`_records(` or `caplog`), with no `assert
+len(` in the three lines before -- 16 in `tests/unit/test_executor.py` and 2 in
+`tests/unit/test_reconciliation_driver.py`. How M5i counted its 12 is not
+recorded, so the two figures are not the same instrument.
 
 *Arming condition:* **whoever next edits
 `test_a_partial_fill_with_no_cost_basis_still_goes_naked`, or runs a survey
 whose predicted killers include it.**
-
-> **RESOLVED FOR THE NAMED TEST BY 3b-2b; THE SWEEP STAYS DEFERRED.** The
-> condition fired both ways: the test was edited, and 3b-2b's ordering survey
-> predicted it among its killers. Its unpack is now a length assertion
-> followed by indexing, and under the four orderings that put C ahead of P it
-> failed as `AssertionError` -- a kill, MEASURED. The 12-site sweep is untouched.
 
 ### `M5i-126`. A substring assertion pins wherever its anchor occurs
 
@@ -506,21 +458,6 @@ run is not a path shown to be correct.
 *Arming condition:* **whoever next edits the abandoned-after-cancel branch in
 `_execute_close`**, which is the only caller that can reach it.
 
-### `M5i-109`. Two stale sentences in A1's docstring
-
-`test_a_complete_fill_the_venue_never_priced_reaches_the_naked_guard` names its
-sibling as `..._is_reported_as_partial_today`, which was renamed, and says *"the
-three tail exits"* where there are now four.
-
-*Arming condition:* **whoever next edits
-`test_a_complete_fill_the_venue_never_priced_reaches_the_naked_guard`.**
-
-> **RESOLVED BY 3b-2b.** The condition fired and is discharged: the test is
-> rewritten as
-> `test_a_complete_fill_the_venue_never_priced_books_from_its_fills_after_the_requery`,
-> because the `_sold_unpriced` branch it pinned was removed by the project
-> owner's Decision 2, and both stale sentences went with the old docstring.
-
 ---
 
 ## DECLARED TEST WEAKNESSES — known, and none is a defect
@@ -546,6 +483,9 @@ Standing.
 **The number moved and the weakness did not.** `getMessage()` assertions in
 `test_executor.py` went from **0** before M5i commit 1 to **7**. The `_log.*`
 call sites that serve one outcome each remain unpinned by construction.
+Re-measured at M5k's rotation, at `ae8c914`: `grep -c 'getMessage()'` over
+`tests/unit/test_executor.py` counts **6** lines. The instrument behind the
+earlier 7 is not recorded, so the difference is not established as a change.
 
 **Why that is not reassurance:** a message is safe while its call site serves
 ONE outcome, and nothing enforces that property.
@@ -554,11 +494,13 @@ ONE outcome, and nothing enforces that property.
 
 ## UNMEASURED — venue facts nothing in the tree can supply
 
-**Provenance: re-derived at M5j's rotation from a frozen capture whose SHA-256
-is `bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`** —
-4,252,169 bytes, 22,127 lines, of which every earlier capture in this milestone
-is a byte-exact prefix. The digest is named here because these figures move
-whenever the bot runs, and three of them moved inside M5j alone.
+**Provenance: re-derived at M5k's rotation from the frozen capture
+`trading_bot.m5k-close-20260925T182818Z.log`, whose SHA-256 is
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`** —
+5,074,996 bytes, 26,126 lines, of which every earlier capture in the evidence
+directory is a byte-exact prefix. The digest is named here because these
+figures move whenever the bot runs. X1, X2a and X3 below are records of M5j's
+closures and keep M5j's figures.
 
 ### X1. A take-profit HAS filled — OBSERVED, and STRUCK at `3ea87d8`
 
@@ -575,13 +517,14 @@ found the fill.
 `pid=26952`, BTCUSDT. It read as unobserved for two milestones because the
 search matched the enum's member name where the log carries its `.value`.
 
-### X2b. `HALT` has never occurred — zero across 75 close plans
+### X2b. `HALT` has never occurred — zero across 163 close plans
 
 **CARRIED, and the sole remaining unobserved venue fact.** Re-measured against
-the capture named above: `decision=halt` is **zero**, and the denominator
-reconciles as `decision=sell` 74 plus `decision=already_closed` 1. **The
-denominator moved three times inside one milestone** — 65, then 69, then 75 —
-which is why it is quoted with its capture rather than bare.
+the capture named above: `decision=halt` is **zero** (`grep -c`), and the
+denominator is `event=close_planned` **163** (`scripts/run_census.py`),
+reconciling as `decision=sell` 162 plus `decision=already_closed` 1. **The
+denominator moved from 75 at M5j's close to 163 at M5k's**, which is why it is
+quoted with its capture rather than bare.
 
 ### X3. `resolve_placement` has never run — STRUCK at `0992fa3`
 
@@ -597,22 +540,35 @@ unobserved branch.
 
 | Figure | Value | Instrument |
 |---|---|---|
-| order lists placed | **94** | `grep -c 'event=order_placed'` |
-| complete exits | **73** (66 `close_booked` + 7 `exit_booked`) | `grep -c` on each |
-| close plans | **75** | `grep -c 'event=close_planned'` |
+| order lists placed | **185** | `event=order_placed`, `scripts/run_census.py` |
+| complete exits | **165** (154 `close_booked` + 11 `exit_booked`) | `scripts/run_census.py` on each |
+| close plans | **163** | `event=close_planned`, `scripts/run_census.py` |
 | `decision=halt` | **0** | `grep -c 'decision=halt'` |
-| clauses naming a filled leg `TP` | **1** | both classifier forms |
-| clauses naming a filled leg `SL` | **162** | the same pattern for `SL` |
-| log events DEFINED in `src/` | **34** | `_EVENT_*` constants, `_WS_EVENT_*` excluded |
-| of those, absent from the capture | **18** | per-constant `grep -c`, zero |
-| of those, NEVER emitted by an exercised path | **17** | the 18 above, less `engine_stopped` |
+| clauses naming a filled leg `TP` | **3** | both classifier forms: `leg TP reports FILLED with`, and `leg TP reports <status> with <qty> executed` at a non-zero quantity |
+| clauses naming a filled leg `SL` | **164** (146 + 18) | the same two forms for `SL` |
+| log events DEFINED in `src/` | **39** (37 `_EVENT_*`, 2 public `EVENT_*`) | module-level string constants, by `ast`; `_WS_EVENT_*` excluded |
+| of those, absent from the capture | **22** | `event=<value>` absent |
+| of those, added at M5k | **6** | the six below, every one absent |
 | `RefusalStage` members defined | **14** | the enum body |
-| of those, unobserved | **9** | per-member `grep -c`, zero |
+| of those, unobserved | **8** | per-member `stage=<value>` absent |
 
-**`engine_stopped` is absent because the capture predates it, not because a path
-went unexercised** — the running process booted before the commit that added the
-marker. Both rows are printed because the instrument read the right property at
-the wrong instant, which is the failure `CLAUDE.md`'s instrument-time rule names.
+**The instrument was re-validated before it was trusted.** Run on M5j's capture,
+SHA-256 `bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`, the
+same script returns M5j's own figures: `TP` 1, `SL` 162 (144 + 18), and 9
+unobserved `RefusalStage` members. The "both classifier forms" in M5j's rows are
+therefore `reports FILLED with` and a non-`FILLED` status reported with a
+non-zero executed quantity -- the 18 are order 300642's `EXPIRED` leg.
+
+**What moved since M5j's close, and why.** The defined-events row rose from 34
+to 39: M5k added `exit_settlement_held`, `exit_quote_totals_disagree`,
+`close_settlement_deferred`, `exit_settlement_deferred`, `exit_unbookable` and
+`venue_quote_total_unavailable`, and removed `close_sold_unpriced`. Two of the
+six are public `EVENT_*` constants in `execution/booking_line.py`, which M5j's
+`_EVENT_*` instrument would not have seen (`M5k-127`); the instrument is widened
+here. `engine_stopped`, absent at M5j's
+close because its process predated the marker, is now observed 8 times, so the
+row that subtracted it is gone. `POSITION_STALE` left the unobserved stages
+(`M5k-124`).
 
 **The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE`,
 `_WS_EVENT_KLINE` and `_WS_EVENT_ERROR` in `exchange/websocket_client.py` match
@@ -626,16 +582,16 @@ capture**, which is the tool that produces every figure in this table.
 
 ## THE GATE BASELINE
 
-Measured by this rotation's own run, on this credentialed machine:
+Measured at M5k's rotation, at `ae8c914`, on this credentialed machine:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  122 files already formatted
-mypy                                   Success: no issues found in 76 source files
-pytest                                 1661 passed, 1 skipped
+ruff format --check src tests scripts  129 files already formatted
+mypy                                   Success: no issues found in 79 source files
+pytest                                 1822 passed, 1 skipped
 ```
 
-**`1661 passed, 1 skipped` is MEASURED.** `1658 passed, 4 skipped` is **DERIVED**
+**`1822 passed, 1 skipped` is MEASURED.** `1819 passed, 4 skipped` is **DERIVED**
 — that run minus the three `skipif(not HAS_CREDENTIALS)` integration tests,
 which move from the passed column to the skipped one. It has not been observed
 on this machine and must not be quoted as though it had.
@@ -666,11 +622,18 @@ the authority. Recorded here only as pointers:
   since M5f** — three rotations had run this step over that file and none caught
   it, while the same claim in `docs/QC_PROTECTIVE_ORDERS.md` was annotated at
   M5h.
-- **Step 5 — verify the tag RESOLVES**, never merely that it exists. At this
+- **Step 5 — verify the tag RESOLVES**, never merely that it exists. At M5j's
   rotation `milestone/M5j` was created pointing one commit short of the closing
   commit, and `git tag -l` reported success throughout.
 - **An arming condition names its CALLER, not an event** — and it is now audited
   at COMMIT time, not only here. `M5h-352` is why.
+- **The findings count is read, never written:**
+  `.venv\Scripts\python.exe scripts/check_findings.py <range> <namespace>`, over
+  the milestone's tagged range once the tag exists. It prints the declared,
+  distinct and maximum ids, and every duplicate, gap, id cited but never
+  declared, and commit with no block.
+- **Step 2's count sites:** `scripts/check_gate_counts.py`, run TWICE, outgoing
+  figures first -- `CLAUDE.md`'s rule l, and `M5k-125` is why.
 
 > **DO NOT MOVE A RULE INTO THIS FILE.** Step 3 rewrites it every rotation. At
 > M5i's rotation `CLAUDE.md` was found asserting that the grep-the-digits rule
