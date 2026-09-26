@@ -109,24 +109,26 @@ The owner ruled the three; their order is the architect's. Provenance comes
 first because without it no later run can say which code produced its
 evidence, and the other two are judged by that evidence.
 
-### P-1. Startup provenance: the commit and the dirty state at every boot
+### P-1. Startup provenance -- RESOLVED in code; no run has exercised it
 
-The bot records no commit (`M5k-132`). `main` in `src/trading_bot/main.py`
-logs `_BANNER`, which is ASCII art, and then the mode; no line in any capture
-names a commit, a version or a dirty tree. The owner's doctrine requires the
-banner to log `git rev-parse HEAD` and `git status --porcelain` on every boot.
+**Resolved by five commits:** `fdf8d7b` (the config's resolved path and the
+digest of the bytes parsed), `ac1162d` (the bounded git runner and the
+launch checkout), `d74f78b` (the install, RECORD and the verdict), `f8898de`
+(the boot line and the refusal in `main`) and `63d4615` (an unrecorded
+module refuses); findings `M5l-001`--`M5l-028`. `main` logs one
+`event=boot_provenance` line after the banner on every boot and refuses `run`
+unless the install is a VCS install whose RECORD verifies, the launch
+checkout is clean at the installed commit, and the config is tracked there.
+The bot got its own module, `utils/provenance.py`; `describe_vcs_state` was
+not moved and U8 did not fire. `trading_bot.__file__` is logged, as
+`module_file`. `CLAUDE.md`'s deployment doctrine carries the install
+procedure the refusal accepts.
 
-**The first design question is where the code lives.** `describe_vcs_state`
-already computes a tracked-and-clean fact, but it is `scripts/mutation_survey.py`'s
-function, called from that script's own `main`, and not the bot's. Whether to
-move it into the package or write the bot its own is P-1's to decide.
-
-**PROPOSED, not ruled:** the same boot line also logs `trading_bot.__file__`.
-That would make the editable-install trap (`M5k-137`) visible in every log: a
-run whose code resolves outside its deployment checkout would say so on its
-first line.
-
-*Arming condition:* **whoever next edits `_BANNER` or the startup block of `main` in `src/trading_bot/main.py`.**
+**What stays open is evidence, as for every M5l item:** no run has booted
+through it yet, so `boot_provenance` is absent from every capture. The
+condition that read *"whoever next edits `_BANNER` or the startup block of
+`main` in `src/trading_bot/main.py`"* fired at `f8898de`, was satisfied
+there, and is struck.
 
 ### P-2. Staleness against the reconciliation dedup interval
 
@@ -800,8 +802,8 @@ unobserved branch.
 | `decision=halt` | **0** | `grep -c 'decision=halt'` |
 | clauses naming a filled leg `TP` | **3** | both classifier forms: `leg TP reports FILLED with`, and `leg TP reports <status> with <qty> executed` at a non-zero quantity |
 | clauses naming a filled leg `SL` | **164** (146 + 18) | the same two forms for `SL` |
-| log events DEFINED in `src/` | **39** (37 `_EVENT_*`, 2 public `EVENT_*`) | module-level string constants, by `ast`; `_WS_EVENT_*` excluded |
-| of those, absent from the capture | **22** | `event=<value>` absent |
+| log events DEFINED in `src/` | **40** (38 `_EVENT_*`, 2 public `EVENT_*`) | module-level string constants, by `ast`; `_WS_EVENT_*` excluded |
+| of those, absent from the capture | **23** | `event=<value>` absent |
 | of those, added at M5k | **6** | the six below, every one absent |
 | `RefusalStage` members defined | **14** | the enum body |
 | of those, unobserved | **8** | per-member `stage=<value>` absent |
@@ -823,6 +825,15 @@ here. `engine_stopped`, absent at M5j's
 close because its process predated the marker, is now observed 8 times, so the
 row that subtracted it is gone. `POSITION_STALE` left the unobserved stages
 (`M5k-124`).
+
+**What moved at M5l P-1, corrected in place because both rows count the
+tree.** `boot_provenance`, `_EVENT_BOOT_PROVENANCE` in `main.py` from
+`f8898de`, is the one event added, taking the defined row from 39 to 40
+(re-counted by grep for module-level `_EVENT_*` and `EVENT_*` assignments: 38
+and 2). It is absent from the capture above, which predates it, so the absent
+row moves from 22 to 23 by the same instrument and the observed remainder is
+unchanged at 17. No capture was re-read; every other row is the capture's and
+is untouched.
 
 **The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE`,
 `_WS_EVENT_KLINE` and `_WS_EVENT_ERROR` in `exchange/websocket_client.py` match

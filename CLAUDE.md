@@ -252,7 +252,7 @@ src/trading_bot/
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
-  utils/         logger · helpers · instance_lock
+  utils/         logger · helpers · instance_lock · provenance
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py
@@ -1909,6 +1909,78 @@ data.
   harness's function, not the bot's. Until the banner lands, no log line can
   say which code a run loaded, and this rule is held by whoever launches the
   bot.
+
+  > **ANNOTATED BY M5l P-1: THE BANNER HAS LANDED, AND TWO SENTENCES ABOVE
+  > ARE NO LONGER TRUE** -- *"Nothing does today"* and *"Until the banner
+  > lands, no log line can say which code a run loaded"*. They stay standing
+  > because they were true when written. The commits, in order: `fdf8d7b`
+  > (C1, the config's resolved path and the digest of the bytes parsed),
+  > `ac1162d` (C2a-1, the bounded git runner and the launch checkout),
+  > `d74f78b` (C2a-2, the install, RECORD and the verdict), `f8898de` (C2b,
+  > the boot line and the refusal in `main`) and `63d4615` (C2c, an
+  > unrecorded module refuses).
+  >
+  > **What it does.** `main` logs one `event=boot_provenance` line
+  > immediately after the banner on EVERY subcommand, and refuses `run`
+  > before dispatch unless ALL hold: `install_kind=vcs`, `code_intact=true`,
+  > `checkout_dirty=false`, `commits_agree=true` and `config_tracked=true`,
+  > with the config's digest known. Any unknown refuses, and nothing
+  > disables it -- no flag, environment variable or config key. `strategies`
+  > and `backtest` log the line and are not refused: they touch no venue,
+  > store or lock.
+  >
+  > **How it meets the owner's wording.** `git rev-parse HEAD` and `git
+  > status --porcelain` run at every boot against the LAUNCH directory,
+  > which is where the config, `.env`, the store and the lock are read
+  > (`M5l-007`). The RUNNING code's commit is not asked of git: it is the
+  > PEP 610 `vcs_info.commit_id` pip recorded when it built the install from
+  > its own fresh clone (`M5l-004`), and the boot line says whether the two
+  > agree.
+  >
+  > **THE DEPLOYMENT INSTALL -- the only shape the refusal accepts.**
+  >
+  > 1. Clone this repository from GitHub and check out the pushed commit to
+  >    run, detached: `git clone <github url> <deployment clone>`, then
+  >    `git -C <deployment clone> checkout --detach <sha>`. A commit never
+  >    pushed cannot be cloned from GitHub, which is what makes the clone
+  >    the doctrine's "pushed" half.
+  > 2. Give it its OWN venv, inside the clone as `.venv`, which
+  >    `.gitignore` ignores, so the checkout stays clean.
+  > 3. Install by commit, NOT editable, from the deployment clone:
+  >    `pip install "binance-trading-bot @ git+file:///<deployment clone>@<sha>"`.
+  >    pip builds from its own fresh clone at `<sha>`, so the install records
+  >    that commit and cannot carry uncommitted edits.
+  > 4. Leave `config.yaml` as committed at `<sha>` and launch from the clone
+  >    with that venv's interpreter. A modified or untracked config refuses,
+  >    and so does a config outside the checkout.
+  >
+  > **FOUR FACTS THE REFUSAL RESTS ON.**
+  > - **A fresh clone cannot hit `M5l-024`'s shape.** With the repository's
+  >   `src` on `sys.path`, metadata resolves `src/binance_trading_bot.egg-info`
+  >   first, which has no `direct_url.json` -- but that directory is ignored
+  >   by `.gitignore`'s `*.egg-info/` and is never cloned, and a VCS install
+  >   builds in pip's own temporary clone. Any other copy of `trading_bot`
+  >   imported ahead of the install is caught by the shadow guard,
+  >   `os.path.samefile` between the distribution's `trading_bot/__init__.py`
+  >   and the imported one (`M5l-016`).
+  > - **`.pyc` IS NOT VERIFIED, by owner ruling** (`M5l-025`). RECORD lists
+  >   compiled files without hashes, so a modified `__pycache__` file would
+  >   load undetected. The threat model is accidental execution of the wrong
+  >   code, not tampering.
+  > - **A module RECORD does not list refuses** (`M5l-028`). Every `.py`
+  >   under the installed `trading_bot/` must have a RECORD row, or
+  >   `code_intact` is false with reason `unrecorded_file`; `__pycache__` and
+  >   `.pyc` are out of scope, as above. RECORD is parsed directly, because
+  >   `Distribution.files` silently drops a deleted file (`M5l-026`).
+  > - **On Windows only a `.exe` git is called**: found by `shutil.which`,
+  >   absolute as returned, and outside both the launch directory and the
+  >   checkout. Windows searches the working directory first unless
+  >   `NoDefaultCurrentDirectoryInExePath` is set, and returns a RELATIVE
+  >   path when it does (`M5l-018`, `M5l-022`); a `.cmd` or `.bat` runs
+  >   through `cmd.exe`, which re-parses the arguments.
+  >
+  > **What survives:** the doctrine entire, and the paragraph before this
+  > one's *"no deployment checkout has been built"*, which is still true.
 
 ---
 
