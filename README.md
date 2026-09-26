@@ -39,9 +39,10 @@ Reading this list first will save you time if it is not the tool you want.
 
 ## Build state — read this before running it
 
-**The bot places orders, books what they realise, and has done both against a
-real venue. It has not been run since M5g.** That is the honest headline, and
-both halves matter.
+**The bot places orders, books what they realise net of the venue's exit fee,
+and has done both against a real venue.** Live trading is refused at every entry
+point until entry fees are netted out of position quantities; Testnet is the
+only venue it will connect to.
 
 | Area | State |
 |---|---|
@@ -73,17 +74,22 @@ the list, re-queries each leg (because a leg can fill *during* the cancel), sell
 is never learned keeps its record and is re-observed on the next candle.
 
 **What has NOT happened is the thing to keep in view.** Supervised runs have
-taken **73 complete exits** across 94 order lists, and the log that records them
-is gitignored — `docs/RUN_LEDGER.md` holds the census, with the command behind
-each figure and the digest of the capture they came from. The paths added since
-M5h have still not run. After 94 placements and 73 closes, **a take-profit has
-filled** — once, on 2026-09-18, found by the reconciler one pass later — and
-**one of the three close-plan outcomes — `HALT` — has never
-occurred**, zero across 75 close plans; `ALREADY_CLOSED` occurred once, on
-2026-09-15, and the ambiguous-placement recovery ran on 2026-08-27. Those
-figures are measured against a capture whose SHA-256 is
-`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d`, and they
-move whenever the bot runs. See `docs/NEXT_MILESTONE.md`.
+taken **165 complete exits** — 154 `close_booked`, 11 `exit_booked` — across
+185 order lists, and the log that records them is gitignored.
+`docs/RUN_LEDGER.md` holds the census, with the command behind each figure and
+the digest of the capture it came from. **The paths added at M5k are not shown
+to have run**: no booking line in any capture carries `quote_total_source`,
+which every booking line writes from M5k's last commit, and none of the
+milestone's other new events appears. The fee settlement did run, eight times,
+and every fee it read was zero. **A take-profit has filled three times** — on
+2026-09-18, 2026-09-19 and 2026-09-21. **One of the three close-plan outcomes —
+`HALT` — has never occurred**, zero across 163 close plans. `ALREADY_CLOSED`
+occurred once, on 2026-09-15; the ambiguous-placement recovery ran on
+2026-08-27; and the staleness refusal fired once, on 2026-09-24. Those figures
+are measured against a capture whose SHA-256 is
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528` — events by
+`scripts/run_census.py`, the rest by `grep -c` — and they move whenever the bot
+runs. See `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
@@ -92,24 +98,26 @@ Eleven files are docstring-only placeholders: `execution/order_manager`,
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` exits with "not implemented yet".
 
-**Where protective orders will rest has been decided and written down** —
-`docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That contract is what M5
-builds, across six milestones: the vocabulary first, then the entry reference,
-the adapter, the ledger, dispatch, and the discretionary close. Only the fifth
-can cause a fill.
+**At M5-0's close, where protective orders would rest had been decided and
+written down** — `docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That
+contract was what M5 was to build, across six milestones: the vocabulary first,
+then the entry reference, the adapter, the ledger, dispatch, and the
+discretionary close. Only the fifth could cause a fill.
 
-**M5a, M5b and M5c are complete, and not one of them placed an order.** M5a built
+**By M5c's close M5a, M5b and M5c were complete, and not one of them had
+placed an order.** M5a built
 the vocabulary — the five safety fields on `RiskConfig`, of which **five of the
-six numbers are placeholders that have not been measured** and say so in those
+six numbers were placeholders that had not been measured** and said so in those
 words, because a rationale is not a sample — plus a config-load refusal for a
 dispatch budget that cannot fit the shortest bar, and three fixes to `_enforce`.
 M5b split the trade intent and widened the risk port.
 
-**M5c specified the adapter surface and did not build it, and that distinction is
-the honest headline.** It set out to build the order-list methods, the request
-mapper and the client-order-ID scheme; none of those exist. What it produced
-instead is the Binance error classifier — six families dispatched from a rule
-table, every classified error now carrying the exchange's own code — and four
+**M5c specified the adapter surface and did not build it, and that distinction
+was the honest headline at its close.** It set out to build the order-list
+methods, the request mapper and the client-order-ID scheme; at M5c's close none
+of those existed. What it produced
+instead was the Binance error classifier — six families dispatched from a rule
+table, every classified error from then on carrying the exchange's own code — and four
 Testnet probes that turned assumptions into measurements: the 36-character
 client-order-ID limit, the insufficient-balance message, the fact that cancelling
 one leg of an order list collapses the whole list, and the rule that **a client
@@ -118,8 +126,9 @@ released**. The first probe concluded the opposite of that last one and was
 corrected by a later arm; both readings are on the record.
 
 **M5d built the surface M5c specified, and placed exactly one order to prove
-it.** The adapter now maps a protective entry end to end — request type, filter
-enforcement per leg, parameter mapper, placement call, response mapper — plus
+it.** By M5d's close the adapter mapped a protective entry end to end —
+request type, filter enforcement per leg, parameter mapper, placement call,
+response mapper — plus
 the deterministic client-order-ID scheme the recovery path depends on. A single
 Testnet OTOCO was placed and cancelled within seconds: the venue accepted 15 of
 16 parameters straight from our own mapper and honoured every generated ID
@@ -127,14 +136,15 @@ byte-for-byte, and the same order answered the milestone's best open question by
 showing that pending protective legs **are** visible while still `PENDING_NEW`.
 Balances were identical before and after.
 
-**It still does not trade.** The port declaration and its first caller land
-together at M5e, because nothing yet calls a placement method and declaring an
-interface nobody uses is the failure this project has already paid for once.
+**At M5d's close it still did not trade.** The port declaration and its first
+caller were to land together at M5e — they landed at M5f — because nothing yet
+called a placement method and declaring an interface nobody uses is the failure
+this project had already paid for once.
 
-So the next milestone starts from a fully specified surface and an empty
-`execution/`. That is a better position than it sounds — every parameter set and
-error meaning it needs is now measured rather than assumed — but it is not
-progress toward a fill.
+So M5e started from a fully specified surface and an empty `execution/`. That
+was a better position than it sounds — every parameter set and error meaning it
+needed had been measured rather than assumed — but it was not progress toward a
+fill.
 
 ## Install
 
@@ -195,10 +205,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  126 files already formatted
-mypy                                   Success: no issues found in 78 source files
-pytest                                 1674 passed, 4 skipped
-                                       (1677 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  129 files already formatted
+mypy                                   Success: no issues found in 79 source files
+pytest                                 1819 passed, 4 skipped
+                                       (1822 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -207,9 +217,9 @@ pytest                                 1674 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `1674 passed, 4 skipped` on a machine without
-  them and `1677 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 1674 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `1819 passed, 4 skipped` on a machine without
+  them and `1822 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 1819 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -304,13 +314,19 @@ src/trading_bot/
   engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
   execution/     executor · placement · dispatch_budget · resolution
-                 · reconciliation · reconciliation_driver · order_manager†
+                 · reconciliation · reconciliation_driver · close_plan
+                 · bookability · booking_line · order_manager†
   backtesting/   engine† · portfolio† · metrics†
   paper/         simulator†
-  persistence/   database† · models†
+  persistence/   store · database† · models†
   notifications/ base† · telegram†
   utils/         logger · helpers
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
+                 · check_findings.py · check_gate_counts.py
+                 · check_arming_conditions.py · run_census.py
+                 · mutation_survey.py · abc_double_census.py
+                 · cancel_testnet_order_list.py · clear_testnet_holdings.py
+                 · probe_x1.py
 tests/           unit/ · integration/
 ```
 

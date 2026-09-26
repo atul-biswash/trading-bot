@@ -105,6 +105,17 @@ through an explicit converter**, and refuses rather than assuming when it can do
 neither. The same obligation binds any future figure with a currency: a
 conversion rate, a funding charge, a rebate.
 
+> **ANNOTATED AT M5k: THIS RULE IS NOW ENFORCED IN CODE FOR A FEE.** Two
+> mechanisms, each MEASURED from the tree. `Fee` in `core/models.py` is an
+> amount and its asset in one required value, so a fee cannot cross a boundary
+> without its denomination. And `Portfolio.close_position` takes `fee: Fee`,
+> with no default, and refuses a fee whose asset is not `quote_asset` with
+> `FeeUnresolvableError` *"before anything is written, for a symbol not held
+> as much as for one held"*, in its own docstring's words. There is no
+> converter, so the rule's refuse-rather-than-assume branch is the one built.
+> **What survives:** the rule entire, and its reach beyond fees -- a conversion
+> rate, a funding charge or a rebate still has no type and no guard.
+
 **It constrains work not yet written, which is why it is here rather than in a
 docstring.** Nothing in `src/` carries a commission today — `commission` occurs
 zero times there and `commissionAsset` zero times anywhere in the repository —
@@ -112,6 +123,17 @@ so there is no site to attach it to. It was ruled for `M5j-012`, whose item in
 `docs/NEXT_MILESTONE.md` records what the port would have to change; the
 invariant binds whoever does that work, and a bare `Decimal` fee crossing the
 port is the specific thing it forbids.
+
+> **ANNOTATED AT M5k: "Nothing in `src/` carries a commission today —
+> `commission` occurs zero times there" IS FALSE (`P45-F2`).** MEASURED:
+> `git grep -c -E 'commission|commissionAsset' HEAD -- src` finds **14 lines
+> in 4 files** -- 11 in `exchange/models.py` and one each in `core/models.py`,
+> `core/portfolio.py` and `execution/executor.py`. The work this paragraph
+> said was not yet written was written at M5k: `VenueFill` and
+> `get_my_trades` at the wire, `Fee` and `Trade` in the domain, and
+> `settle_exit` summing one order's fills for every booking site. **What
+> survives:** the invariant, and the reason it was put here rather than in a
+> docstring -- it still binds the ENTRY half, which nothing yet carries.
 
 **A FEE-AWARE LEDGER IS WIRED AT EVERY BOOKING SITE OR AT NONE — THE
 TWO-OF-THREE FIX IS REJECTED.** Ruled by the project owner at M5j. Two of
@@ -130,6 +152,18 @@ and closes the item that names the defect while leaving the defect exactly where
 it is. It is the shape this file warns about elsewhere — a proxy holding while
 the thing it stands for does not — and it is worse than leaving the call sites
 bare, because a bare call site still reads as unfinished.
+
+> **ANNOTATED AT M5k: BOTH RULINGS ARE DISCHARGED FOR EXIT FEES at `651d334`**,
+> the commit whose subject begins `feat(accounting): exits book net of the
+> venue's own fee`. All three booking sites -- the reconciliation driver's
+> `_book_exits`, the executor's own sell and its resolution -- settle the exit
+> order's fills and pass that settlement's fee to `close_position`, in the same
+> commit; `close_position`'s `fee` has no default, so a zero cannot be
+> threaded through as a stub. **What survives, and it is half of each:** the
+> ENTRY fee is booked at no site, by the project owner's ruling R-a, so the
+> two-of-three rejection's own test -- a ledger that matches an exchange
+> statement -- is not yet met. The ledger is partial-net by fee SIDE, not by
+> booking site, and the live-trading block below is what that half waits on.
 
 **The log sink is a third edge, and it is safe.** `JsonFormatter` serialises via
 `json.dumps(payload, default=str)`, so a `Decimal` reaches a JSON log line as a
@@ -211,13 +245,19 @@ src/trading_bot/
   engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
   execution/     executor · placement · dispatch_budget · resolution
-                 · reconciliation · reconciliation_driver · order_manager†
+                 · reconciliation · reconciliation_driver · close_plan
+                 · bookability · booking_line · order_manager†
   backtesting/   engine† · portfolio† · metrics†
   paper/         simulator†
-  persistence/   database† · models†
+  persistence/   store · database† · models†
   notifications/ base† · telegram†
   utils/         logger · helpers
-scripts/         check_testnet.py · download_data.py
+scripts/         check.py (the gate) · check_testnet.py · download_data.py
+                 · check_findings.py · check_gate_counts.py
+                 · check_arming_conditions.py · run_census.py
+                 · mutation_survey.py · abc_double_census.py
+                 · cancel_testnet_order_list.py · clear_testnet_holdings.py
+                 · probe_x1.py
 ```
 
 ### `__all__` declares importability, not authorship
@@ -824,6 +864,19 @@ data.
 - **`translate_binance_error` must match message text, not code.** `-2010` and
   `-2011` each carry several meanings, and `-2010 'Duplicate order sent.'` is a
   *success* signal under deterministic client order IDs.
+- **A NEGATIVE `cummulativeQuoteQty` IS AN ABSENT QUOTE TOTAL, NEVER A NEGATIVE
+  ONE.** The project owner's Decision 3 at M5k, verbatim: *"In `to_order` (and
+  wherever raw venue orders are parsed), evaluate `cummulativeQuoteQty`. If the
+  value is strictly less than zero (`< 0`), map `filled_quote_quantity` to
+  `None` and emit a structured `WARNING` identifying the order."* Its
+  rationale, in the owner's words: *"Binance venue documentation specifies
+  negative values indicate data unavailability on certain order records."* The
+  WARNING is `venue_quote_total_unavailable`, the mappers' second scoped
+  exception to purity. Zero stays present at the venue's exponent. Downstream
+  the verdict is `NO_QUOTE_TOTAL`, never a negative booking: MEASURED at M5k,
+  without the mapping a negative total classified `BOOKABLE` and would have
+  been credited (`M5k-091`). No capture holds a negative or an absent total, so
+  the state it defends is DOCUMENTED and not observed (`M5k-093`).
 - **`assessment.decision.rule is None` means "the limits passed", NOT
   "approved".** `RiskAssessment` has no `rule` field at all; the rule is reached
   through `decision`, and is doubly optional — `decision` may be `None`, and
@@ -1274,6 +1327,22 @@ data.
   > correct: Q-B §1 defines `CRITICAL` as including a halt flag on `Portfolio`,
   > which does not exist, and its N-cycle promotion needs cross-pass state, which
   > the driver deliberately refuses to hold. See `docs/QB_ESCALATION.md`, site 4.
+
+  > **ANNOTATED AT M5k: `CRITICAL` WITHOUT A HALT FLAG WAS RATIFIED BY THE
+  > PROJECT OWNER at `3e444f0` (`M5k-006`), and until now this file did not
+  > record it.** The body of that commit, whose subject begins
+  > `feat(execution): a diverged pass with no fill escalates`: *"Q-B SECTION 1
+  > DEFINES `CRITICAL` AS A LOG LINE AND A HALT FLAG. No halt flag exists
+  > anywhere in `src/`; this emits the log line alone. The departure is
+  > RATIFIED by ruling rather than repaired here, and it is the shape the ten
+  > existing `_log.critical` sites already take."* So of the two blockers
+  > above, the first -- Q-B's halt flag, which *"does not exist"* -- is no
+  > longer a defect a new `CRITICAL` site must repair; a `CRITICAL` here is the
+  > log line. `docs/QB_ESCALATION.md` §1 carries the same annotation.
+  > **What survives:** the second blocker, unchanged. Q-B's N-cycle promotion
+  > still needs cross-pass state the driver refuses to hold, so the escalation
+  > half of site 4 is still not built. And the refusal half has now fired once
+  > in production (`M5k-124`).
 - **An exit must always be permitted — that rule governs *limits*, not
   venue-state uncertainty.** A limit that could trap an open position would be a
   risk rule that creates risk, which is why no limit gates a `CLOSE`. It does
@@ -1388,6 +1457,107 @@ data.
   > remove `_sold_unpriced`. Route any trade query failure or incomplete fill
   > resolution at Site A directly through the standard deferral pathway to
   > Site B under the in-memory N = 5 bar retention ceiling."*
+
+- **THE LEDGER IS NET OF EXIT FEES AND GROSS OF ENTRY FEES.** Ruled by the
+  project owner at M5k as R-a, recorded in the fee commit's body -- the commit
+  whose subject begins `feat(accounting): exits book net of the venue's own
+  fee` -- as *"EXIT fees only: the ledger is net of exit fees and gross of
+  entry fees, a partial-net ledger by fee SIDE"*. Every booking subtracts the
+  exit order's settled fee; no site nets an entry commission, because entry-fee
+  netting is the live-trading block's own subject. So `realised_pnl` is
+  overstated by exactly the entry commissions, and a reader comparing it with
+  an exchange statement will find that gap and nothing else. **It is not the
+  two-of-three split the money rule rejects**: that was partial by booking
+  SITE, where no reader could tell which close path ran; this is partial by fee
+  SIDE, uniformly, and it is written here so it is not rediscovered as a
+  defect.
+
+- **ONE `Trade` PER FILL; AGGREGATION BELONGS TO THE LEDGER, BY SUMMING, NEVER
+  BY DIVIDING.** Decided at M5k by measurement, in the words of the commit that
+  widened the port, `feat(core): a fee that cannot lose its denomination`:
+  *"ONE `Trade` PER FILL, AND THE MEASUREMENT DECIDED IT RATHER THAN A
+  PREFERENCE. An aggregate per order would have to publish a weighted average
+  price, and `quote_quantity / quantity` reaches the 28-digit context precision
+  on 10 of the 11 multi-fill orders measured"* (`M5k-031`). So
+  `ExchangeClient.get_my_trades` returns one `Trade` per fill, and
+  `settle_exit` totals one order's fee, quote quantity and quantity by
+  addition. A figure that needs a unit price is derived by whoever needs it,
+  from whole fills, and says so; the adapter never rounds a total the ledger
+  must keep exact.
+
+- **A CLOSE WHOSE SETTLEMENT CANNOT BE READ IS RETAINED FOR FIVE OF ITS OWN
+  SYMBOL'S BARS, THEN DROPPED UNBOOKED AT `CRITICAL` -- N = 5, VARIANT L.**
+  Ruled by the project owner at M5k. `_SETTLEMENT_RETRY_BARS: Final = 5` in
+  `execution/executor.py`, whose comment reads: *"Ruled by the project owner:
+  five bars of the symbol's timeframe, counted from the first deferral."*
+  Empty fills, fills short of the executed quantity and transport failures are
+  retained (Variant L); at the bound the record is dropped as
+  `close_record_resolved`, outcome `settlement_timeout`, and an operator enters
+  the trade by hand. The count is in memory only: after a restart there is no
+  `Position`, so a restored close is released on its first candle. **THE
+  STALLED-FEED LIMIT, which is why "five bars" is not a wall-clock bound:** the
+  tracker's comment, *"The count is of the symbol's own candles, so if that
+  symbol's feed stops, its count stops too, and its record is held until the
+  feed resumes or the process restarts."* The number is PLACEHOLDER in
+  `docs/M5_NUMBERS.md` §7.
+
+- **AN EXIT THE LEDGER CANNOT BOOK IS HELD -- FETCHED ONCE, ONE `CRITICAL`, AND
+  NEVER RETRIED -- by the project owner's ruling R2 at M5k.** The ruling,
+  verbatim from the commit whose subject begins `feat(execution): hold an exit
+  the ledger cannot book`: *"R2 (locked): a non-Incomplete FeeUnresolvableError
+  -- a foreign-asset fee, or a non-SELL fill -- is terminal: one fetch, one
+  CRITICAL, then HOLD; the mark lives on Position, in memory; the driver stays
+  stateless (M5e); a restart releases the hold and converges on the unbooked
+  drop."* The mark is `Position.settlement_hold` (PIN-1, *"Use
+  `settlement_hold: bool = False` on `Position`"*). **The write order is
+  PIN-5's**, *"`hold_settlement` must set `position.protection =
+  ProtectionState.UNKNOWN`"*, and `hold_settlement` writes the protection
+  first and the mark last, so an interrupted write leaves an untrusted,
+  UNHELD position -- which is reconciled and retried -- never a held one whose
+  protection still reads trusted. Its docstring states that the order is
+  unprovable by mutation and pinned by no test; only that the write happens is
+  pinned. A held
+  position is no longer reconciled (ruling A), a `CLOSE` for it is refused
+  (ruling B), and entries are refused portfolio-wide, first as
+  `COMMITTED_RISK_UNKNOWN` and then as `POSITION_STALE`. **The restart
+  semantics are amnesia, not resolution**: positions are not persisted, so a
+  restart forgets the hold, and the trade is in the ledger only if an operator
+  entered it.
+
+  **"R2" NAMES TWO DIFFERENT RULINGS IN THIS FILE (`P45-F14`), and this bullet
+  is M5k's.** The M5h paragraph under Current state cites an earlier R2, from
+  the close-resolution work (C5c): *"R2's grounds were that the cost basis is
+  **unreconstructable** after a restart"*. That ruling is about whether a
+  resolved close may be booked after a restart; this one is about a fee the
+  ledger cannot subtract. Likewise "PIN-1" here means the naming ruling above;
+  3b-2a's PIN-1, *"Route directly to `_sold_unbooked`"*, is a different ruling
+  of the same label. Cite either by its content or its commit, never by the bare
+  label.
+
+- **A MISSING QUOTE TOTAL IS SUPPLIED FROM THE ORDER'S OWN FILLS, DECIDED AFTER
+  EVERY FACT THAT MAKES A CALL UNNECESSARY, AND THE VENUE'S TOTAL WINS WHEN IT
+  EXISTS.** Three rulings of the project owner at M5k, verbatim:
+  - Decision 1: *"Reorder the evaluation sequence for unpriced fills to assess
+    Actionable status (A), Quantity completeness (P), and Cost basis presence
+    (C) before spending a venue call on Missing Quote Total (Q)."*
+  - The 3b ruling: *"sum an order's fills' quote_quantity to supply a missing
+    total, and re-classify."*
+  - Decision 2: *"Deprecate and remove `_sold_unpriced`. Route any trade query
+    failure or incomplete fill resolution at Site A directly through the
+    standard deferral pathway to Site B under the in-memory N = 5 bar
+    retention ceiling."*
+
+  So `classify_bookability` reads `A > P > C > Q`: a diverged, partial or
+  cost-basis-less exit spends no venue call, and only then does an unpriced
+  whole fill spend the one `get_my_trades` that both settles its fee and
+  supplies its total. The verdict carries `total_source`, `"venue"` or
+  `"fills"`, and every booking line carries `quote_total_source`.
+  `require_bookable` is the single guard between re-classification and
+  `close_position` at all three sites. **When both figures exist, the venue's is
+  booked** and one `WARNING`, `exit_quote_totals_disagree`, names both. That
+  last clause is the architect's (H), reversible at one commit, and it is
+  recorded here beside the rulings because it decides which figure the ledger
+  holds.
 
 **Dependencies**
 - **`python-binance`**, not the official Binance connector — built-in Testnet
@@ -1632,6 +1802,16 @@ data.
   is taken from quote-denominated P&L and proceeds; no site in `src/`
   subtracts a fee from a quantity.
 
+  > **ANNOTATED AT M5k: THE QUOTED `fee: Decimal = Decimal(0),` IS FALSE
+  > (`P45-F3`).** `close_position` now declares `fee: Fee`, required, with no
+  > default -- MEASURED in `core/portfolio.py` -- and a fee in any asset but
+  > the quote asset is refused before it writes. **What survives, and it is
+  > the paragraph's point:** every quantity cited above is still sized from
+  > the ordered quantity, the only fee subtraction in `src/` is still from
+  > quote-denominated P&L and proceeds, and no site subtracts a fee from a
+  > quantity. `settle_exit` sums the exit order's fees; nothing nets an entry
+  > fee out of base.
+
   **REASONED, not measured.** If the venue deducts a BUY's commission from the
   base asset received, the account holds the ordered quantity minus that
   commission while every protective leg and every exit is sized from the
@@ -1749,10 +1929,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  126 files already formatted
-mypy                                   Success: no issues found in 78 source files
-pytest                                 1674 passed, 4 skipped
-                                       (1677 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  129 files already formatted
+mypy                                   Success: no issues found in 79 source files
+pytest                                 1819 passed, 4 skipped
+                                       (1822 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -1761,14 +1941,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `1677 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `1674 passed, 4 skipped` on a machine without them
+- `1822 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `1819 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 1674 and must not read it as a regression against a documented
-1677. Quote the count with its condition, never bare.
+runner will see 1819 and must not read it as a regression against a documented
+1822. Quote the count with its condition, never bare.
 
-Only the `1677` is measured here; `1674 passed, 4 skipped` is that run minus the
+Only the `1822` is measured here; `1819 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -1859,8 +2039,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 126 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 78 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 129 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 79 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -3709,6 +3889,30 @@ thresholds are still uncalibratable. See `docs/NEXT_MILESTONE.md`.
 >
 > See `docs/RUN_LEDGER.md`, which holds the census and states the boundary.
 
+> **ANNOTATED at M5k: `RefusalStage.POSITION_STALE` HAS FIRED (`M5k-124`), and
+> three sentences that say it has not are now false.** Each was true of the
+> evidence it named. They are, by content: the run-3 block's *"What has still
+> not run after FOUR runs is `resolve_placement` and
+> `RefusalStage.POSITION_STALE`"*; the M5g paragraph's *"`resolve_placement`
+> and `RefusalStage.POSITION_STALE` have still not run after four runs"*; and
+> the M5j annotation immediately above, *"`RefusalStage.POSITION_STALE` has
+> still not fired — `stage=position_stale` is zero"*.
+>
+> MEASURED in `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+> `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`:
+> `stage=position_stale` occurs **once**, at `2026-09-24T19:25:00Z`, `pid=23540`,
+> an ETHUSDT `BUY` refused because BTCUSDT *"have not been fully reconciled
+> within 180.0s"*. The capture section 19 of `docs/RUN_LEDGER.md` extends,
+> SHA-256 `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`,
+> counts it at zero.
+>
+> **What survives:** the run-2 block's *"`RefusalStage.POSITION_STALE` never
+> fired"*, which is scoped to run 2's 81 passes and is still true of them; the
+> Q-A sentence, since `collaborator_failed` is still zero across the newer
+> capture; and the lesson the run-3 block draws. With `resolve_placement`
+> having run on 2026-08-27, **both** of the paths those sentences named have now
+> run in production.
+
 **M5h closed the gap M5g opened, in 51 commits. The income statement survives a
 restart.** At M5g's close `close_position` had zero callers and
 `realised_today` returned `Decimal(0)` for ever; at M5h's it has **two**, the
@@ -3886,18 +4090,19 @@ whose SHA-256 is
 naming a filled `TP` leg against 162 naming a filled `SL` leg, the `SL` figure
 re-measured and unmoved.
 
-**`decision=halt` is the sole remaining unobserved venue fact.** Against this
-rotation's capture — SHA-256
-`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d` — it is
-**zero across 75 close plans**, and the denominator is quoted with its capture
+**At M5j's close `decision=halt` was the sole remaining unobserved venue
+fact.** Against that rotation's capture — SHA-256
+`bfc8ffddc494f288e710df00918507c7027bcfe538096def4d32172ed2af8d3d` — it was
+**zero across 75 close plans**, and the denominator was quoted with its capture
 because it moved three times inside one milestone.
 
 *The accounting item.* **`M5j-012` began as "three call sites omit `fee`" and
-ended as an architectural accounting item.** The wiring inside
-`core/portfolio.py` is complete on both limbs; what is missing is any figure to
-pass, because `to_order` reads sixteen wire keys and `fills` is not among them.
-Three rulings are locked above: the denomination invariant, the rejection of
-the two-of-three fix, and the prohibition on `fee=Decimal(0)` as a stub.
+ended as an architectural accounting item.** At M5j's close the wiring inside
+`core/portfolio.py` was complete on both limbs; what was missing was any figure
+to pass, because `to_order` read sixteen wire keys and `fills` was not among
+them. Three rulings were locked above: the denomination invariant, the
+rejection of the two-of-three fix, and the prohibition on `fee=Decimal(0)` as a
+stub.
 
 *Two tools, and one marker.* `scripts/run_census.py` mechanises the ledger's
 tables and **refuses a path under `logs/` before it reads a byte**;
@@ -3913,3 +4118,68 @@ in `src/` assigns `Position.protection` yet"* — falsified by M5f `8ca878e`, no
 by M5j. Its sibling in `docs/QC_PROTECTIVE_ORDERS.md` said the same thing and
 was annotated at M5h's rotation; this one was missed, because nothing compares
 two documents against each other.
+
+**M5k is complete, in 17 numbered commits and {ROTATION_N} rotation commits,
+with {FINDINGS_MAX} findings declared across `M5k-001`–`M5k-{FINDINGS_MAX}`,
+every commit carrying a block.** It closed the accounting gap M5j named: every
+exit now books net of the fee the venue charged, at all three booking sites or
+at none.
+
+*The fee arrives through a new port method, not the old mapper.*
+`get_my_trades` was modelled against a captured payload of thirteen keys, where
+the pinned library's own docstring shows nine and omits `orderId`. It returns
+one `Trade` per fill, carrying a `Fee` whose amount cannot be separated from its
+asset. `settle_exit` aggregates one order's fills by summing and never
+dividing. `close_position` takes that `Fee` as a required argument and refuses a
+fee in any asset but the quote asset. **The ledger is net of exit fees and
+gross of entry fees**, by the owner's ruling R-a.
+
+*What a booking cannot settle is held, not dropped and not retried.* A fee in a
+foreign asset, or a fill that is not a sell, is fetched once, logged once at
+`CRITICAL`, and marked `Position.settlement_hold`. The reconciler then stops
+visiting the held position (ruling A), a `CLOSE` for it is refused (ruling B),
+and entries stay refused, first as `COMMITTED_RISK_UNKNOWN` and then as
+`POSITION_STALE`. A restart releases the hold, because positions are not
+persisted.
+
+*A missing quote total is supplied from the order's own fills.* The
+bookability ladder is `A > P > C > Q` (Decision 1), so a partial or
+cost-basis-less exit spends no venue call. An unpriced whole fill is settled
+once and booked from its fills' summed quote quantity. Every booking line
+carries `quote_total_source`, and one `WARNING` names both figures when the
+venue's total and the fills disagree. `_sold_unpriced` is gone (Decision 2): a
+supply that fails at the bot's own sell defers to the resolution path, which
+retains it for at most five of that symbol's bars. A negative
+`cummulativeQuoteQty` is read as absent (Decision 3).
+
+*Live trading is refused at every entry point* until entry-fee deduction and
+base-quantity netting exist, and testnet reads only the testnet key slots. A
+second `CLOSE` while one is pending is refused, and the dispatch-budget check
+now counts the settlement fetch.
+
+**What ran, and from what code, as far as the log can say.** Against the
+capture `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, taken at
+M5k's close:
+
+- **Eight booking lines carry `fee=0E-8 fee_asset=USDT`**, a key no commit
+  before `651d334` writes. The first is at `2026-09-24T10:38:02Z`, `pid=24572`,
+  seven hours before `651d334` was committed, while the reflog held HEAD at
+  `e511e6d`. So the fee settlement first ran from uncommitted code (`M5k-123`).
+- **No run's banner says which code it loaded.** The startup banner is ASCII
+  art followed by *"Starting in TESTNET mode"*; no line in the capture records a
+  commit, a version or a dirty tree, and at no commit of this tree does the
+  bot log one. The three fee-writing pids' banners say exactly that and
+  nothing more.
+- **`RefusalStage.POSITION_STALE` fired for the first time in any capture**, at
+  `2026-09-24T19:25:00Z` (`M5k-124`).
+- **No capture holds a `quote_total_source` line**, which every booking line
+  writes from `c5dd7d5`, and none of M5k's other new events appears. So nothing
+  shows M5k's code, as committed, running.
+- **Every commission any capture records is `0.00000000`**: the 306 BTCUSDT
+  fills of the `myTrades` capture whose SHA-256 is
+  `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`, and the
+  fee on each of the eight lines above. Booking net of fees has never
+  subtracted a non-zero fee outside a test.
+
+See `docs/RUN_LEDGER.md` §19 and `docs/NEXT_MILESTONE.md`.
