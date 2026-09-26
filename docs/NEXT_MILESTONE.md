@@ -1,5 +1,33 @@
 # Next milestone — M5l
 
+## M5l's SCOPE — ruled by the project owner
+
+The ruling, verbatim:
+
+> "Verdict: Approved. Directives: The architectural live-trading block remains
+> strictly active. No live execution will be scheduled until a non-zero fee
+> capture is empirically established on a live-quoted venue and base-asset
+> quantity netting is fully implemented in the entry sizing pipeline. M5l
+> priorities: Startup VCS commit/dirty-state enforcement, configuration
+> validation alignment (`max_position_staleness_s` vs. timeframe dedup
+> intervals), and eliminating the unhedged/silent failure modes cataloged
+> across M5k."
+
+Where the bot may be run from is already ruled, by `CLAUDE.md`'s locked
+bullet *"THE BOT IS NEVER LAUNCHED FROM A DEVELOPMENT WORKING TREE"*, landed at
+`ae8c914`. It is pointed to here, not restated.
+
+**The milestone's shape is EVIDENCE-FIRST.** M5k's code is not shown to have
+run as committed -- see THE CENTRAL FACT below. So M5l's first run on known
+code executes from a deployment checkout of a pushed commit, per that
+doctrine. `docs/RUN_LEDGER.md` records its start -- the commit, the config's
+digest and the UTC instant -- before its evidence is read. Its census then
+answers, against the unobserved-surface table below, which of the 22 log
+events and the 8 `RefusalStage` members never observed at M5k's close it
+exercises. No such run has started as this is written.
+
+---
+
 Struck and repaired at M5k's rotation, in its first part. Every item below was
 re-verified by content against `ae8c914`; anything M5k closed is reduced to one
 index line naming the resolving commit and its findings, and its full text
@@ -75,6 +103,215 @@ visibly.
 
 ---
 
+## M5l's PRIORITIES — the owner's three, in the architect's order
+
+The owner ruled the three; their order is the architect's. Provenance comes
+first because without it no later run can say which code produced its
+evidence, and the other two are judged by that evidence.
+
+### P-1. Startup provenance: the commit and the dirty state at every boot
+
+The bot records no commit (`M5k-132`). `main` in `src/trading_bot/main.py`
+logs `_BANNER`, which is ASCII art, and then the mode; no line in any capture
+names a commit, a version or a dirty tree. The owner's doctrine requires the
+banner to log `git rev-parse HEAD` and `git status --porcelain` on every boot.
+
+**The first design question is where the code lives.** `describe_vcs_state`
+already computes a tracked-and-clean fact, but it is `scripts/mutation_survey.py`'s
+function, called from that script's own `main`, and not the bot's. Whether to
+move it into the package or write the bot its own is P-1's to decide.
+
+**PROPOSED, not ruled:** the same boot line also logs `trading_bot.__file__`.
+That would make the editable-install trap (`M5k-137`) visible in every log: a
+run whose code resolves outside its deployment checkout would say so on its
+first line.
+
+*Arming condition:* **whoever next edits `_BANNER` or the startup block of `main` in `src/trading_bot/main.py`.**
+
+### P-2. Staleness against the reconciliation dedup interval
+
+`risk.max_position_staleness_s` and the dedup interval are coupled by meaning
+and not by code, and `docs/M5_NUMBERS.md` §4 already says *"nothing checks
+it"*. The dedup interval is the shortest enabled timeframe:
+`ReconciliationBudget.from_config` builds `dedup_interval` from
+`shortest_ms`. A position is not re-read until its stamp is that old, so a
+staleness threshold at or below it refuses entries on a healthy system for
+part of every interval (`M5k-075`, REASONED). The guard has now fired once in
+production (`M5k-124`). P-2 is a config validation that refuses a
+`max_position_staleness_s` at or below the shortest enabled timeframe's dedup
+interval.
+
+**The model default would fail it.** MEASURED from the code:
+`config/models.py` declares `max_position_staleness_s: float = Field(180.0,
+gt=0)`. A 3m timeframe is 180 s, so under an at-or-below rule the default is
+refused by any configuration whose shortest enabled timeframe is 3m or
+longer, and passes only on 1m. The committed `config.yaml` enables BTCUSDT on
+1m alone, so it passes. `M5k-075` records a shortest timeframe of 5m in the
+owner's working copy, which would not. **Fixing the default -- a fixed figure,
+or one derived from the timeframe -- is P-2's design question.**
+
+*Arming condition:* **whoever next edits `config/models.py`'s coherence block.**
+
+This is U7's site, deliberately: the check belongs beside the coherence
+validator, and an edit there arms both items.
+
+### P-3. The silent and unhedged failure modes catalogued in M5k
+
+Each is its own carried item with its own condition, re-verified by content
+at `4544b3a`.
+
+#### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
+
+At the driver an unpriced exit whose fills cannot be read is reported only by
+`_settle`'s own lines, and none of them says the venue gave no quote total. So
+an operator cannot tell a failed supply from a failed settlement of a priced
+exit. REASONED from code.
+
+*Arming condition:* **whoever next edits `_settle` in `execution/reconciliation_driver.py` or the Q branch of `_book_exits` there.**
+
+#### P-3b. The driver re-refuses without bound where Site B stops at five (PIN-4, `M5k-104`)
+
+An unpriced exit whose fills read short is refused and fetched again on every
+due pass, with no bound, while the executor's resolution drops the same
+condition after `_SETTLEMENT_RETRY_BARS` of the symbol's own candles. Order
+300642's 18 identical refusals in 27 minutes are the shape, measured in the
+capture `docs/RUN_LEDGER.md` §17 names.
+
+*Arming condition:* **whoever next edits `_settle` in `execution/reconciliation_driver.py` or `_SETTLEMENT_RETRY_BARS` in `execution/executor.py`.**
+
+#### P-3c. A `require_bookable` raise after the sell is contained only by the signal handler (`M5k-110`)
+
+At Site A the guard runs after the `MARKET` sell has been sent, and `dispatch`
+catches nothing on the close path. So a raise there escapes to the engine's
+handler and is logged as `collaborator_failed`, far from the close it
+interrupted. It is unreachable under the ruled ladder; the orderings survey
+measured it escaping when the ladder is reordered.
+
+*Arming condition:* **whoever next edits `require_bookable` in `execution/bookability.py` or `_sell_and_book` in `execution/executor.py`.**
+
+#### P-3d. A held position emits no recurring line of its own (`M5k-083`)
+
+After its one `CRITICAL`, a held position's only recurring trace is each
+refused entry, and the `POSITION_STALE` refusal text does not name the hold.
+REASONED.
+
+*Arming condition:* **whoever next edits `hold_settlement` in `core/models.py` or `_stale_positions` in `risk/manager.py`.**
+
+#### P-3e. A close labelled BOOKED may have written nothing (`M5k-073`)
+
+`close_position` returns `Decimal(0)` for a symbol it does not hold, after its
+fee guard, so `_book_resolved_close` returns True having written nothing if it
+is ever reached without a position. A mutation bypassing the predicate
+measured the label; the unwritten ledger is REASONED from the early return.
+
+*Arming condition:* **whoever next edits `_book_resolved_close` in `execution/executor.py` or `close_position`'s absent-symbol return in `core/portfolio.py`.**
+
+#### P-3f. Eleven tests trip the disagreement warning without meaning to (`M5k-111`)
+
+Their close re-read is `_sold()` at `1810.57726950` against the default
+settlement fill at `51.25`, so `exit_quote_totals_disagree` fires in 13 tests
+where 2 intend it. No assertion reads the warning in the other 11, so a test
+asserting its absence would fail on all of them.
+
+*Arming condition:* **whoever next edits `_sold` or `_resolving_client` in `tests/unit/test_executor.py`.**
+
+#### P-3g. Nothing refuses a pair quoted outside the base currency (`M5k-102`)
+
+Both `_settle`s pass `quote_asset=self._portfolio.quote_asset` to
+`settle_exit`, and the only comparison of a pair's quote asset with the
+portfolio's is `engine/modes.py`'s holdings filter, which refuses nothing.
+MEASURED (code).
+
+*Arming condition:* **whoever next edits `_prime_pairs` in `engine/modes.py` or `settle_exit` in `core/portfolio.py`.**
+
+#### P-3h. Four realised figures carry exponent -24 (`M5k-121`)
+
+In the capture `docs/RUN_LEDGER.md` §19 names, orders 327933, 4347037,
+4559541 and 5731709 booked `realised` at exponent -24, against -10, -9 or -8
+on every other booking line. The cause is UNMEASURED. Realised P&L is
+computed from an entry term that is `entry_fill_price x quantity`, and
+`entry_fill_price` is itself a quotient, per `close_position`'s own docstring.
+
+*Arming condition:* **whoever next edits `_realised_from_total` in `core/portfolio.py` or `_open_position` in `execution/executor.py`, which sets `entry_fill_price`.**
+
+#### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
+
+`remainder = self._budget.max_calls - len(assessments)` covers the pass and
+the point queries only, so a phase may make up to `max_calls` plus one call
+per bookable exit. The coherence check's third term reserves the time; nothing
+in `src/` tracks request weight. MEASURED.
+
+*Arming condition:* **whoever next edits `ReconciliationBudget` in `execution/reconciliation_driver.py`.**
+
+#### P-3j. No end-to-end test drives a hold to stale (`M5k-090`'s limit)
+
+The staleness rows call `hold_settlement()` on a hand-built position. Nothing
+drives the driver's hold, the stopped stamp and the elapsed time together.
+REASONED.
+
+*Arming condition:* **whoever next edits `hold_settlement` in `core/models.py`, `_stale_positions` in `risk/manager.py`, or the held filter in `reconcile_open_positions` in `execution/reconciliation.py`.**
+
+---
+
+## OTHER NEW CARRIED ITEMS, AT M5k's CLOSE
+
+### N1. A held-then-released trade leaves no record across a restart
+
+F2's successor. A position is not persisted, so a restart releases a hold,
+and a close deferred before a restart is released unbooked after it
+(`M5k-065`). The trade is then in the ledger only if an operator entered it by
+hand, and nothing on disk records that it was ever held or deferred.
+
+*Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
+
+### N2. Whether Testnet takes fees in BNB -- UNMEASURED
+
+Every commission in every capture is `0.00000000`, so the BNB setting has
+never been observed to matter. It decides which asset an entry fee arrives in,
+which is the question entry-fee netting must answer first.
+
+*Arming condition:* **whoever next edits `calculate_position_size` in `risk/position_sizing.py` or `build_placement` in `execution/placement.py` to net an entry fee.**
+
+### N3. How soon `myTrades` returns a fill -- UNMEASURED
+
+The only `myTrades` captures were read long after their fills, so nothing
+measures the delay between a fill and its appearance there. That delay
+decides how often Site A defers a settlement it could have read a moment later.
+
+*Arming condition:* **whoever next edits `_settle` or `_defer_settlement` in `execution/executor.py`.**
+
+### N4. `_dec` launders a float past `Money` (`M5k-025`)
+
+`_dec` is `Decimal(str(value))`, so a float routed through it reaches a
+`Money` field as a `Decimal`, and `_reject_float` never fires on the wire path
+of any mapper that uses it. The scope was ratified by the owner: declared, not
+fixed. MEASURED.
+
+*Arming condition:* **whoever next edits `_dec` or `_opt_dec` in `exchange/models.py`.**
+
+### N5. Q-B's halt-flag condition may be stranded (`M5k-140`)
+
+Its caller is the halt flag's first writer, and the owner ratified `CRITICAL`
+without a halt flag (`M5k-006`), so that writer may never exist -- `CLAUDE.md`'s
+failure mode 2. Whether it is stranded is decided by whoever writes a halt, or
+rewrites the condition. REASONED.
+
+*Arming condition:* **whoever first adds a halt field to `Portfolio` in `core/portfolio.py`, or whoever next edits the halt-flag condition in `docs/QB_ESCALATION.md`.**
+
+### N6. Lifting the live-trading block
+
+The owner's ruling above names its two preconditions:
+- a non-zero fee capture empirically established on a live-quoted venue;
+- base-asset quantity netting fully implemented in the entry sizing pipeline.
+
+Neither exists. `CLAUDE.md`'s own live-block condition, on `Settings.__init__`
+and `_cmd_run`, still governs the mode resolution; this item governs the work
+the lift waits on.
+
+*Arming condition:* **whoever next edits `calculate_position_size` in `risk/position_sizing.py` or `build_placement` in `execution/placement.py`.**
+
+---
+
 ## RESOLVED AT M5k — one index line each
 
 Each item's full text is in git history and in `docs/PHASE_HISTORY.md`'s M5k
@@ -131,7 +368,7 @@ rotation, on the tree this commit leaves:
 
 | document | candidates | parsed | unparsed |
 |---|---:|---:|---:|
-| `docs/NEXT_MILESTONE.md` | 20 | 19 | 1 |
+| `docs/NEXT_MILESTONE.md` | 38 | 37 | 1 |
 | `CLAUDE.md` | 2 | 2 | 0 |
 | `docs/QB_ESCALATION.md` | 1 | 0 | 1 |
 | `docs/QC_PROTECTIVE_ORDERS.md` | 0 | 0 | 0 |
@@ -299,13 +536,19 @@ owner's ruling R-a, so the ledger is net of exit fees and gross of entry fees;
 and `to_order` in `exchange/models.py` still does not read the venue's `fills`
 report, so any `fills` array a response carries is discarded at the mapper.
 Netting the entry fee out of base quantity is the subject of
-`CLAUDE.md`'s live-trading block, which it waits on. The condition below
-watches `to_order` alone, and `193a5b9`, the first commit to edit it,
-REAFFIRMED it.
+`CLAUDE.md`'s live-trading block, which it waits on. Until M5k's rotation the
+condition below watched `to_order` alone, and `193a5b9`, the first commit to
+edit it, REAFFIRMED it; it now watches the entry-sizing sites.
 
-*Arming condition:* **whoever next edits `to_order` in `exchange/models.py`** —
-the single site where the venue's commission is discarded, and the first site
-any fee must cross.
+*Arming condition:* **whoever next edits `calculate_position_size` in `risk/position_sizing.py` or `build_placement` in `execution/placement.py`** —
+the entry-sizing and placement sites where an entry fee would first be netted.
+
+The condition was re-pointed at M5k's rotation. It read *"whoever next edits
+`to_order` in `exchange/models.py` — the single site where the venue's
+commission is discarded, and the first site any fee must cross"*. Exit fees no
+longer cross `to_order`: they cross `get_my_trades`, and `settle_exit` sums
+them. The residue this item carries is the entry half, which waits on sizing
+and placement rather than on the mapper.
 
 ### A2. A manual action and a venue-triggered fill are indistinguishable
 
@@ -389,7 +632,12 @@ is a fill price**. **The remedy is wording, not control flow.**
 ### `M5i-065`. The orphan guard raises silently
 
 `reconciliation_driver`'s orphan guard raises and nothing reports it. Pinned to
-the project owner at M5i and untouched since.
+the project owner at M5i, and unchanged in logic since: re-indented at
+`651d334`, when `_book_exits`'s loop moved under a `try`. MEASURED at M5k's
+rotation: the guard's lines differ in `git diff 651d334^ 651d334 --
+src/trading_bot/execution/reconciliation_driver.py` and in no line under `git
+diff -w` over the same range and path. This read *"untouched since"* until
+then.
 
 *Arming condition:* **whoever next edits the orphan guard or its caller in
 `_book_exits`.**
@@ -417,9 +665,15 @@ len(` in the three lines before -- 16 in `tests/unit/test_executor.py` and 2 in
 `tests/unit/test_reconciliation_driver.py`. How M5i counted its 12 is not
 recorded, so the two figures are not the same instrument.
 
-*Arming condition:* **whoever next edits
+*Arming condition:* **whoever next writes or edits a single-element unpack of `_records` in `tests/unit/test_executor.py`, or of `caplog.records` in `tests/unit/test_reconciliation_driver.py`.**
+
+The condition was re-pointed at M5k's rotation. It read *"whoever next edits
 `test_a_partial_fill_with_no_cost_basis_still_goes_naked`, or runs a survey
-whose predicted killers include it.**
+whose predicted killers include it"*, which names a test already resolved
+while the item carries a sweep of 18 others. The two helpers are where those
+sites read: 16 unpack `_records(...)` in `test_executor.py`, and 2 unpack a
+comprehension over `caplog.records` in `test_reconciliation_driver.py`, which
+has no `_records` helper.
 
 ### `M5i-126`. A substring assertion pins wherever its anchor occurs
 
