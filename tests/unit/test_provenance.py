@@ -521,6 +521,63 @@ def test_zero_hashed_record_entries_is_unknown(tmp_path: Path) -> None:
     assert "code_intact=unknown" in facts.refusal_reasons
 
 
+@pytest.mark.parametrize("name", ["trading_bot/extra.py", "trading_bot/strategies/extra.py"])
+def test_unrecorded_py_file_is_not_intact(tmp_path: Path, name: str) -> None:
+    """Test 31. A module added to the installed package after the install is not intact.
+
+    Every listed row still verifies, so a check of listed rows alone reports
+    intact (``M5l-028``); the added file is found only by looking for it.
+
+    MUTATION m23: skip the unrecorded scan. The check reports intact.
+    """
+    dist_info, init = _site(tmp_path / "site", direct_url=_vcs())
+    added = tmp_path / "site" / name
+    added.parent.mkdir(parents=True, exist_ok=True)
+    added.write_bytes(b"VALUE = 3\n")
+
+    check = provenance.verify_record(metadata.PathDistribution(dist_info))
+    assert check.intact is False
+    assert check.reason == "unrecorded_file"
+    assert check.checked == 2
+
+    root = _checkout(tmp_path)
+    facts = collect_provenance(
+        root / "config.yaml",
+        _SHA,
+        cwd=root,
+        module_file=init,
+        find_distribution=_finder(dist_info),
+        resolve=lambda _cwd: _outside_git(tmp_path),
+        runner=_clean_git(root),
+    )
+    assert facts.code_intact is False
+    assert "code_intact=false" in facts.refusal_reasons
+    assert facts.accepted is False
+
+
+def test_pycache_is_not_counted_as_unrecorded(tmp_path: Path) -> None:
+    """Test 32. Compiled files and ``__pycache__`` are out of scope (``M5l-025``).
+
+    A stray ``.pyc`` sits at the package's top as well as inside
+    ``__pycache__``, so a scan that counted ``.pyc`` would find one even
+    though it skips the cache directory.
+
+    MUTATION m24: count ``.pyc`` as unrecorded. The stray file refuses.
+    """
+    dist_info, _init = _site(tmp_path / "site", direct_url=_vcs())
+    package = tmp_path / "site" / "trading_bot"
+    (package / "__pycache__").mkdir()
+    (package / "__pycache__" / "__init__.cpython-312.pyc").write_bytes(b"\x00compiled")
+    (package / "__pycache__" / "main.cpython-312.pyc").write_bytes(b"\x00compiled")
+    (package / "stray.cpython-312.pyc").write_bytes(b"\x00compiled")
+
+    check = provenance.verify_record(metadata.PathDistribution(dist_info))
+
+    assert check.intact is True
+    assert check.reason is None
+    assert check.checked == 2
+
+
 def test_missing_direct_url_is_unknown_with_reason(tmp_path: Path) -> None:
     """Test 30. No ``direct_url.json`` -- the repository's ``src`` on ``sys.path`` (S0.4).
 

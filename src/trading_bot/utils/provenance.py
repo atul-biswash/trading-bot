@@ -126,7 +126,11 @@ class InstallFacts:
 
 @dataclass(frozen=True)
 class RecordCheck:
-    """RECORD verification: ``intact`` is ``None`` when nothing could be checked."""
+    """RECORD verification: ``intact`` is ``None`` when nothing could be checked.
+
+    ``reason`` says why when ``intact`` is ``None``, and for one ``False``: an
+    unlisted file, ``unrecorded_file``.
+    """
 
     intact: bool | None
     checked: int
@@ -451,6 +455,20 @@ def _record_digest(data: bytes) -> str:
     return base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
 
 
+def _unrecorded_files(dist: metadata.Distribution, recorded: set[str]) -> list[str]:
+    """Every ``.py`` under the installed package that RECORD has no row for."""
+    package = Path(str(dist.locate_file(_PACKAGE_PREFIX.rstrip("/"))))
+    unrecorded: list[str] = []
+    for path in package.rglob("*.py"):
+        relative = path.relative_to(package)
+        if "__pycache__" in relative.parts or not path.is_file():
+            continue
+        name = f"{_PACKAGE_PREFIX}{relative.as_posix()}"
+        if name not in recorded:
+            unrecorded.append(name)
+    return unrecorded
+
+
 def verify_record(dist: metadata.Distribution) -> RecordCheck:
     """Re-hash every ``trading_bot/`` RECORD row that carries a sha256.
 
@@ -461,6 +479,14 @@ def verify_record(dist: metadata.Distribution) -> RecordCheck:
     Python 3.12 that property filters its rows through ``skip_missing_files``:
     a file deleted after the install leaves the list silently, and a check
     built on it reports intact (``M5l-026``).
+
+    **AND A FILE RECORD DOES NOT LIST IS NOT INTACT EITHER.** Checking the
+    listed rows sees an edit and a deletion but never an ADDITION: a module
+    dropped into the installed package after the install is importable and
+    unlisted (``M5l-028``). So every ``.py`` under the installed
+    ``trading_bot/`` must have a row, hashed or not, or the check is ``False``
+    with reason ``unrecorded_file``. ``__pycache__`` and ``.pyc`` are out of
+    scope, as RECORD's ``.pyc`` rows are (``M5l-025``).
     """
     try:
         text = dist.read_text("RECORD")
@@ -469,9 +495,11 @@ def verify_record(dist: metadata.Distribution) -> RecordCheck:
     if text is None:
         return RecordCheck(None, 0, "record_missing")
     checked = 0
+    recorded: set[str] = set()
     for row in csv.reader(text.splitlines()):
         if len(row) < 2 or not row[0].startswith(_PACKAGE_PREFIX):
             continue
+        recorded.add(row[0])
         mode, _, value = row[1].partition("=")
         if mode != "sha256" or not value:
             continue
@@ -482,6 +510,8 @@ def verify_record(dist: metadata.Distribution) -> RecordCheck:
             return RecordCheck(False, checked, None)
         if _record_digest(data) != value:
             return RecordCheck(False, checked, None)
+    if _unrecorded_files(dist, recorded):
+        return RecordCheck(False, checked, "unrecorded_file")
     if checked == 0:
         return RecordCheck(None, 0, "record_unhashed")
     return RecordCheck(True, checked, None)
