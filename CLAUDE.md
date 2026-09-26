@@ -239,6 +239,7 @@ src/trading_bot/
                  · exceptions
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
+                 · ids
   data/          market_data · historical† · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
@@ -251,7 +252,7 @@ src/trading_bot/
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
-  utils/         logger · helpers
+  utils/         logger · helpers · instance_lock
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py
@@ -1873,6 +1874,42 @@ data.
   `settings.mode = mode_override` — and the third is the member that means
   real money.
 
+- **THE BOT IS NEVER LAUNCHED FROM A DEVELOPMENT WORKING TREE.** Ruled by the
+  project owner at M5k's rotation, verbatim: *"The bot must never be launched
+  from an active development working tree. Supervised Testnet sessions must
+  execute strictly from a dedicated, read-only deployment checkout or isolated
+  worktree pinned to a pushed, immutable commit SHA."*
+
+  **MEASURED, the reason (`M5k-123`).** In the capture
+  `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+  `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, eight
+  booking lines carry `fee_asset=`, a key no commit before `651d334` writes. The
+  first is at `2026-09-24T10:38:02Z`, `pid=24572`, seven hours before
+  `651d334`'s committer date, while the reflog held HEAD at `e511e6d` with no
+  commit between. So that run booked with code that no commit then contained,
+  and nothing in the tree records which code it was.
+
+  **REASONED, the trap a clean checkout does not avoid.** A development venv
+  with an EDITABLE install imports the development `src/` wherever it is run
+  from. MEASURED at M5k's rotation: this machine's `.venv` lists
+  `binance-trading-bot 0.1.0` as editable at this repository's path, and run
+  from an unrelated directory it resolves `trading_bot.__file__` to this
+  repository's `src/trading_bot/__init__.py`. So a pinned checkout started with
+  that interpreter would run the development tree's code while looking like the
+  pinned commit. A deployment checkout therefore needs **its OWN venv with a
+  NON-editable install**, and `trading_bot.__file__` must be shown to resolve
+  inside that checkout before a session counts. That the non-editable install
+  closes the gap is REASONED; no deployment checkout has been built.
+
+  **NOT YET IMPLEMENTED -- M5l: the banner.** The owner's ruling continues:
+  *"Ensure the startup banner explicitly logs `git rev-parse HEAD` and `git
+  status --porcelain` dirty state ... on every boot."* Nothing does today
+  (`M5k-132`). `main.py`'s banner is ASCII art and a mode line, no revision of
+  `main.py` ever logged a commit, and `describe_vcs_state` is the mutation
+  harness's function, not the bot's. Until the banner lands, no log line can
+  say which code a run loaded, and this rule is held by whoever launches the
+  bot.
+
 ---
 
 ## Quality gates — hard zero
@@ -2137,6 +2174,22 @@ They belong together because they share a failure mode: the tool reports
    run is the one a real survey does: mutate in place through the harness, whose
    out-of-tree snapshot is what makes that safe.
 
+   > **SUPERSEDED BY THE PROJECT OWNER AT M5k'S ROTATION: THE LAST SENTENCE
+   > ABOVE NO LONGER GOVERNS.** The ruling, verbatim: *"Formally supersedes Trap
+   > 4 based on `M5k-123`. Mutation surveys must execute strictly in isolated,
+   > throwaway worktrees. Mutating `src/` in-place within the primary working
+   > directory is permanently prohibited."* The rule that replaces it is under
+   > **Mutation-testing an anti-rot test**, beside `M5i-084`'s out-of-tree
+   > snapshot.
+   >
+   > **What survives, quoted:** *"A survey that appears to kill nothing is
+   > indistinguishable from one whose mutation never loaded"*, and *"a mutation
+   > run against a mirrored or relocated tree needs an UNMUTATED CONTROL ARM"*.
+   > Both apply to the throwaway worktree with full force, because a worktree is
+   > a relocated tree: that is why the replacing rule demands the import
+   > location be proven and a baseline taken there. Only *"mutate in place
+   > through the harness"* is withdrawn.
+
 ---
 
 ## Testing style
@@ -2155,6 +2208,20 @@ earlier test has left the root level low. `assert len(caplog.records) == 1`
 therefore passes for a file run alone and fails in the full suite — it did, for
 two tests, because `RiskManager.evaluate` emits its own `INFO` line. Filter with
 `[r for r in caplog.records if r.name == ...]`.
+
+**READ A LOG FIELD THROUGH `vars(record).get(key)`, AND ASSERT A LENGTH BEFORE
+INDEXING -- NEVER TUPLE-UNPACK.** Approved by the project owner at M5k's
+rotation. Both are about where a test fails, not whether it does. A direct
+attribute read, `record.fee_asset`, raises `AttributeError` when the field is
+absent; an unpack, `(record,) = records`, raises `ValueError` when the count is
+wrong. Both are crashes under `M5i-115`'s classification, so a mutation that
+drops the field or the line is reported as a crash rather than as a kill. Read
+the field with `vars(record).get(key)` and compare it, assert an omission as
+`key not in vars(record)`, and assert `len(records) == n` before indexing.
+Earned by `M5k-071` (two of five kills were crashes from direct attribute
+reads), `M5k-076` (the same mutations as assertion kills after the change) and
+`M5k-113` (a hardened unpack, killed as an assertion under the orderings that
+had crashed it).
 
 ### Asserting a classification: the exact type, and what ancestry is worth
 
@@ -2256,6 +2323,31 @@ copy is wanted. It is now a temp file outside the tree, its path printed before
 anything is written, KEPT when a restore fails, and a mismatch raises rather
 than returning. Mechanised in `scripts/mutation_survey.py`, so this is a
 description of what the harness does rather than a discipline to remember.
+
+**A MUTATION SURVEY RUNS ONLY IN A DISPOSABLE WORKTREE OUTSIDE THE REPOSITORY,
+AND NO RESULT COUNTS UNTIL THE IMPORT LOCATION IS PROVEN.** Ruled by the project
+owner at M5k's rotation, verbatim: *"Mutation surveys must execute strictly in
+isolated, throwaway worktrees. Mutating `src/` in-place within the primary
+working directory is permanently prohibited."* This supersedes harness trap 4's
+*"mutate in place through the harness"*, which is annotated where it stands.
+The procedure M5k ran from `f4a82bb` on, `M5k-090` being its first record:
+- a detached worktree at the commit under test, outside the repository, with
+  each changed file copied in and shown SHA-256-equal to the repository copy;
+- before any result counts, `trading_bot.__file__` and each mutated module's
+  `__file__` printed from that environment, and a pytest session hook
+  recording that `trading_bot` and the `tests` package resolve inside the
+  worktree on every run;
+- an unmutated baseline in the worktree, since a kill is a failure present
+  under the mutation and absent there;
+- every restore shown SHA-equal, and the worktree removed afterwards, with
+  `git worktree list` showing the main worktree only.
+
+**The measured reason is `M5k-123`.** On 2026-09-24 the bot booked with code
+that no commit then contained: a working tree was running. A primary working
+directory that a supervised run may be launched from is exactly the place a
+mutated `src/` must never exist, even for the length of one survey.
+`M5i-084`'s snapshot above still governs where the byte copy lives; this rule
+governs where the mutation happens.
 
 **A FENCE IS REWRITTEN PER COMMIT** — `M5i-125`. A verification script carried
 from the previous commit encodes *that* commit's allowed set, and the two
@@ -2484,6 +2576,18 @@ nothing.** A prediction that is wrong is the cheapest way this project has
 found to locate such a seam, so the response to one is to ask what the surprise
 implies about coverage — not to adjust the number and move on.
 
+**A MISS IS NOT SYMMETRIC: ONE THAT KILLS MORE IS RECORDED, ONE THAT KILLS
+FEWER HALTS THE SURVEY.** Approved by the project owner at M5k's rotation. A
+mutation that kills MORE tests than predicted is recorded as a finding, with its
+reach diagnosed. It is a reach error, and the extra kills are real coverage. One
+that kills FEWER halts the survey until each missing kill is explained, because
+an absent kill is indistinguishable from a mutation that never loaded -- the
+expensive direction this file already names. Earned by `M5k-115` (q13,
+predicted 2, observed 3: the rung was placed ahead of the venue rung as well)
+and `M5k-045` (20 predicted, 21 observed); by `M5k-074`, where the same
+mutation missed in both directions at once and would have halted under this
+rule; and, for the expensive direction, by `M5i-119` and `M5i-095`.
+
 **REASON FROM WHAT A THING REACHES, NEVER FROM WHAT IT IS FOR (M5h).** The
 single most productive error of M5h, four times, and it is not carelessness —
 each instance is a *plausible* inference from purpose that the tree declined to
@@ -2648,6 +2752,18 @@ rather than as a post-hoc explanation of a wrong number. **Mechanised, and it
 stays mechanised**: read the anchor out of the formatted file immediately before
 mutating, and assert its count.
 
+**AND THE FORMATTER RUNS BEFORE THE SURVEY, SO THE MUTATED BYTES ARE THE BYTES
+THAT WILL BE COMMITTED.** Approved by the project owner at M5k's rotation. The
+rule above protects the ANCHOR; this protects the RESULT. A layout change made
+after a survey changes the file every kill was measured on, and nothing in the
+survey's output records that it happened. So `ruff format` runs over the
+changed files before the first mutation, and any later layout change re-runs
+the mutations whose killers live in the changed file, on the final bytes.
+Earned at `222bdf4`: two calls in `test_executor.py` were collapsed to the
+formatter's layout after its survey, and m4 and m5, whose killers live there,
+had to be re-run in a fresh worktree -- they reproduced 1 and 3. From `c5dd7d5`
+the formatter check ran first.
+
 **An arm set that varies only one state cannot discriminate a state-dependent
 behaviour (M5c-I).** M5c's duplicate order-list probe ran nine arms, every one
 against a *terminated* original, and concluded that order lists are not
@@ -2735,6 +2851,41 @@ three gates must be green. Write the *why* in the commit body, not just the what
 I review via `git diff` — so keep mechanical changes (formatting, line endings,
 renames) in **separate commits** from semantic ones. Never mix them.
 
+**A DIFF OVER 1,500 CHANGED LINES HALTS, AND THE COMMIT IS SPLIT.** Ruled by the
+project owner at M5k's rotation, verbatim: *"Any diff exceeding 1,500 changed
+lines triggers an automatic halt and required commit split."* Changed lines
+are added plus deleted, counted by `git diff --numstat` over the commit's paths.
+The ceiling existed before only as a guide in task prompts, and three commits
+went over it under owner-authorised waivers: `M5k-049` (the fee work at 1,574,
+split into a preparatory commit and a fee commit), `M5k-054` (the fee commit,
+waived to 1,588) and `M5k-114` (`c5dd7d5`, 1,735, authorised for that commit
+only). **The ruling admits no waiver going forward**, so `M5k-114` is the last.
+It is a ceiling on reviewability, which is this section's first concern: a
+diff too long to review in one sitting is reviewed less than one that is not.
+
+**ANY TEXT A CHANGE MAKES FALSE IN A FILE IT IS AUTHORISED TO EDIT IS CORRECTED
+OR ANNOTATED IN PLACE, AND LISTED; IN A FILE IT IS NOT AUTHORISED TO EDIT, IT IS
+REPORTED AND THE WORK HALTS.** The standing clause, approved by the project
+owner at M5k's rotation. The listing is by content, before and after, in the
+report and the commit body. A docstring or comment the change falsifies is part
+of the change, and leaving it standing produces the tree this file keeps
+warning about: a sentence that reads as current and is not. The halt on an
+unauthorised file is what keeps an authorisation's fence meaningful. Earned by
+`M5k-088` (a docstring made false and left standing, because the change set
+did not name it), `M5k-089` (three made false, not one) and `M5k-108` (a
+commit that corrected true text beyond its authorisation, accepted after the
+fact).
+
+**EVERY `git diff` AND `git show` NAMES ITS PATHS, AND NEVER INCLUDES AN
+OWNER-HELD WORKING FILE.** Approved by the project owner at M5k's rotation. On
+this machine `config.yaml` is the owner's working copy: modified, never staged,
+and never opened. A bare `git diff` prints it, so every diff and show names the
+paths it means, and `config.yaml` is never among them; its identity is checked
+by digest alone. The committed blob may be read, with `git cat-file -p
+HEAD:config.yaml`, where an authorisation allows it. Earned by `M5k-046` and
+`M5k-050`: the gate reads the working file, not the committed one, and an owner
+hunk arrived between two prompts.
+
 **Docs rotation, at the end of every milestone:**
 
 1. Append the milestone to `docs/PHASE_HISTORY.md` — decisions and *why*,
@@ -2772,6 +2923,18 @@ renames) in **separate commits** from semantic ones. Never mix them.
    > A count describes the tree; when the tree moves the old number is simply
    > wrong. The figure will move again: re-derive it by grepping the digits
    > rather than trusting this line.
+
+   > **AT M5k's ROTATION: `scripts/check_gate_counts.py` RUNS TWICE, OUTGOING
+   > FIGURES FIRST.** Approved by the project owner. The tool verifies the
+   > structural count sites against figures it is given, and its REVIEW tier
+   > lists bare prose tokens equal to those same figures. So run with only the
+   > fresh figures it cannot see a prose line still holding the outgoing ones --
+   > `M5k-125`, MEASURED at P45, where it printed REVIEW `none` over four stale
+   > occurrences on three lines. The first run, with the figures the documents
+   > still hold, lists every prose line to edit; the second, after the edit and
+   > against a fresh gate run, must report every structural site ok. The two
+   > runs are the grep-the-digits rule and its inverse, mechanised as far as
+   > structure allows.
 3. Rewrite `docs/NEXT_MILESTONE.md` for the next milestone, carrying forward any
    open items that are still open. This is the single home for live open items.
 
@@ -2845,6 +3008,34 @@ renames) in **separate commits** from semantic ones. Never mix them.
    > documents commit whose fence is an empty `src/` path list. The manual form
    > is cheap enough to be worth having immediately, which is the argument for
    > writing the rule now and the tool later.
+
+   > **AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT
+   > THAT CARRIES AN ARMING CONDITION, NOT ONLY `docs/NEXT_MILESTONE.md`.**
+   > Approved by the project owner. The sentence above -- *"Before writing, grep
+   > `docs/NEXT_MILESTONE.md` for the symbols the commit is about to edit"* --
+   > names one file, and conditions live in three places: that file,
+   > `CLAUDE.md`, and the contracts under `docs/`. So before writing, the commit
+   > reads the conditions in `docs/NEXT_MILESTONE.md`, in `CLAUDE.md` and in
+   > every contract under `docs/` carrying one, and resolves or REAFFIRMS each
+   > that names a site it edits. `scripts/check_arming_conditions.py <document>`
+   > lists them per document, with their symbols, and fails closed on one it
+   > cannot parse.
+   >
+   > **Earned twice.** `M5k-087`: by `d253cd5` two conditions lived in
+   > `CLAUDE.md` -- the live-trading block's and `build_placement`'s -- where
+   > the audit sentence does not look. And `M5k-118`: `docs/QB_ESCALATION.md`'s
+   > halt-flag condition was written *"Arming condition, in caller terms:"*,
+   > which the checker does not match, so pointed at that file it reported zero
+   > candidates and exited clean. The marker is normalised at M5k's rotation,
+   > and the lesson is the tool's own: a register reporting only what it
+   > recognised prints a clean run over a document it cannot read. The
+   > condition is now FOUND and reported UNPARSED, for the same reason as Q-C
+   > §3's -- no backticked site in its bold span -- and is accepted as such by
+   > ruling.
+   >
+   > **What survives:** the rule entire -- the audit at commit time, the
+   > REAFFIRM outcome, reading conditions rather than grepping the file. Only its
+   > one-file scope is widened.
 4. **Re-read the contracts under `docs/` for prose this milestone superseded.**
    `QC_PROTECTIVE_ORDERS.md`, `QB_ESCALATION.md` and `M5_NUMBERS.md` are *decided
    documents*, not logs: a later decision can invalidate a paragraph in one of them
@@ -2982,6 +3173,17 @@ Findings:
 - <ID> -- <one line>. <MEASURED | REASONED | UNMEASURED>.
 ```
 
+> **ANNOTATED AT M5k'S ROTATION: `DOCUMENTED` IS A FOURTH MARK.** Approved by
+> the project owner. It is for a claim that rests on the venue's published
+> documentation and on nothing this project observed -- the mark Q-C has used
+> since it was written, and the one a finding needs when the venue documents a
+> rule the tree cannot measure. `M5k-080`'s OCO sibling expiry and Decision 3's
+> negative `cummulativeQuoteQty` are the M5k instances. A claim that is partly
+> observed and partly documented carries both marks, each on the part it
+> covers. The template's line becomes
+> `<MEASURED | REASONED | DOCUMENTED | UNMEASURED>`; the three-mark form above
+> and the sentence naming three marks are left as written.
+
 **`Findings: none` is mandatory, never an absent section.** An absent section is
 indistinguishable from a forgotten one, which is M5b's failure exactly. This is
 the same decision already locked for `RiskAssessment.stage` — *required but
@@ -3024,6 +3226,18 @@ silent, visible only to a reader holding both the chat and the log. When that
 happened in M5c the committed `PP` kept its ID and the chat-only one was renamed:
 annotate-never-delete applies to IDs too, and the copy on disk is the one with an
 identity to protect.
+
+**A RULING ID IS QUALIFIED BY THE PROMPT THAT GAVE IT -- `P33-PIN-1`, NEVER A
+BARE `PIN-1`.** The architect's, approved at M5k's rotation. Finding IDs are
+namespaced by milestone and checked by `scripts/check_findings.py`; ruling
+labels are not namespaced at all, and each prompt restarts them. M5k reused
+`PIN-1` for two different rulings -- the name `Position.settlement_hold` and
+3b-2a's route to `_sold_unbooked` -- and this file uses a bare `R2` for both
+M5h's cost-basis ruling and M5k's hold (`P45-F14`, `M5k-128`). A label that
+names two things is a citation nobody can follow. So a ruling is cited by its
+prompt-qualified label, by its content, or by the commit that records it --
+never by the bare label -- and the labels already written are disambiguated
+where they stand rather than renamed.
 
 **From M5d onward an ID names its milestone — `M5d-A`, `M5d-B`, and so on.** The
 paragraph above describes the flat sequence, and this supersedes it going
@@ -3285,6 +3499,23 @@ M5d's** — said plainly so a later reader does not credit the argument to a
 finding that never stated it.
 
 Ruled by the reviewer under delegation, not by the project owner.
+
+**A SEARCH FOR A SENTENCE A CHANGE MAY FALSIFY TOLERATES EMPHASIS AND LINE
+BREAKS -- AND DOES NOT STRIP `_`.** Approved by the project owner at M5k's
+rotation. A literal phrase finds a sentence only as it happens to be wrapped and
+marked up, so the search allows `*` and backticks between words and any run of
+whitespace, newlines included, where the phrase has a space. Earned by
+`M5k-089`: a line break after "every" and the emphasis on "*any*" hid a false
+docstring from both `M5k-088`'s search and the literal pattern that followed
+it; a widened pattern found it.
+
+**`_` is not emphasis for this purpose, and the tolerant search must not strip
+it.** It joins identifiers: stripped, `POSITION_STALE` becomes `POSITIONSTALE`,
+and a search for the identifier matches nothing. MEASURED at `6ef5aac`: the first
+tolerant search for sentences saying `POSITION_STALE` had not fired stripped
+`_` and returned no hit at all, over a file known to hold three. An empty result
+from a search that should have hits is the signal, and it is the same shape as
+a survey that kills nothing.
 
 **An authorisation states its precondition as a CHECK TO RUN FIRST, not as an
 instruction to whoever pastes it.** Three M5c findings share one shape -- MM, NN

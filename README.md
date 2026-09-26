@@ -305,9 +305,11 @@ corrected bar, and in backtest.
 ```
 src/trading_bot/
   main.py        CLI entry point (run · backtest · strategies)
-  core/          models · enums · interfaces (ports) · portfolio · exceptions
+  core/          models · enums · interfaces (ports) · portfolio · assessment
+                 · exceptions
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
+                 · ids
   data/          market_data · historical† · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
@@ -320,7 +322,7 @@ src/trading_bot/
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
-  utils/         logger · helpers
+  utils/         logger · helpers · instance_lock
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py

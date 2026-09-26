@@ -142,7 +142,7 @@ line stops being read.
 > place for the count — the position, a halt object, or somewhere not yet
 > designed — and choosing is not attempted here.
 >
-> *Arming condition, in caller terms:* **the halt flag's first writer**, which
+> *Arming condition:* **the halt flag's first writer**, which
 > is the first thing that needs any of §1's three parts to exist.
 
 > **ANNOTATED AT M5k: TWO PLACES FOR A CROSS-PASS FACT NOW EXIST, AND NEITHER
@@ -159,8 +159,12 @@ line stops being read.
 > between them. **The arming condition above is unchanged and did not fire**:
 > no halt flag was written in M5k, and §1's annotation records that the owner
 > ratified `CRITICAL` without one -- so its caller may never be written, which
-> is failure mode 2 in `CLAUDE.md`'s arming-condition rule. It is also outside
-> both documents the commit-time audit reads.
+> is failure mode 2 in `CLAUDE.md`'s arming-condition rule. Since M5k's
+> rotation the commit-time audit reads this document too (`CLAUDE.md`'s rule g),
+> and `scripts/check_arming_conditions.py` now finds the condition and reports
+> it UNPARSED, because its bold span names no backticked site -- accepted as
+> such by ruling, as Q-C §3's is -- while whether it is stranded is carried to
+> the next milestone's open items.
 >
 > **What survives:** the conflict as stated, both decisions, and the refusal
 > half of site 4.
