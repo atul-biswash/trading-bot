@@ -2,45 +2,96 @@
 
 ``CLAUDE.md``'s deployment doctrine rules that the bot is never launched from a
 development working tree, and that every boot logs the commit and dirty state
-of what it runs. This module gathers the facts for that one boot line.
+of what it runs. This module gathers the facts for that one boot line, and
+decides whether ``run`` may proceed.
 
-**THIS PART READS THE LAUNCH CHECKOUT**, from git in the working directory.
-The config, the secrets, the store and the lock are all resolved against the
-cwd (``M5l-007``), so the checkout the bot is launched from decides its
-behaviour even when the code was installed from elsewhere.
+**THREE SOURCES, BECAUSE NO ONE OF THEM IS ENOUGH.**
+
+* *The install*, from the distribution's PEP 610 ``direct_url.json``. A VCS
+  install records the commit pip built from a fresh clone, so it names the
+  installed code without git at runtime (``M5l-004``). An editable install says
+  so (``M5l-003``), which names the doctrine's trap directly.
+* *The installed files*, from RECORD. Every ``trading_bot/`` row carrying a
+  sha256 is re-hashed, so an installed tree edited after the install does not
+  pass for its commit (``M5l-017``). Compiled ``.pyc`` rows carry no hash and
+  are not covered (``M5l-025``, accepted: the threat is accidental execution of
+  the wrong code, not tampering).
+* *The launch checkout*, from git in the working directory. The config, the
+  secrets, the store and the lock are all resolved against the cwd
+  (``M5l-007``), so the checkout the bot is launched from decides its behaviour
+  even when the code was installed from elsewhere.
 
 **EVERY FAILURE IS UNKNOWN, AND UNKNOWN IS NEVER CLEAN.** A git call returns a
-tagged value, :class:`GitOutput` or :class:`GitUnknown`, and ``dirty_paths`` is
-empty only from a :class:`GitOutput` status read with zero entries.
+tagged value, :class:`GitOutput` or :class:`GitUnknown`, and ``dirty=false`` is
+derivable only from a :class:`GitOutput` status read with zero entries. What
+this module cannot establish renders as ``unknown`` and refuses.
+
+**NOTHING HERE CAN BE SWITCHED OFF.** No flag, environment variable or config
+key reaches :attr:`Provenance.refusal_reasons`.
 """
 
 from __future__ import annotations
 
+import base64
+import csv
+import hashlib
+import json
 import os
+import platform
 import re
 import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
+from importlib import metadata
 from pathlib import Path
+from typing import Final
+
+import trading_bot
 
 __all__ = [
+    "DISTRIBUTION_NAME",
     "GIT_TIMEOUT_S",
     "CheckoutFacts",
     "GitOutcome",
     "GitOutput",
     "GitUnknown",
+    "InstallFacts",
+    "InstallKind",
+    "Provenance",
+    "RecordCheck",
     "child_environment",
+    "classify_install",
     "collect_checkout",
+    "collect_provenance",
     "parse_porcelain",
+    "refusal_message",
     "resolve_git",
     "run_git",
+    "verify_record",
 ]
 
+DISTRIBUTION_NAME: Final = "binance-trading-bot"
 GIT_TIMEOUT_S = 5.0
 _GIT_PREFIX: tuple[str, ...] = ("-c", "core.fsmonitor=false", "--no-optional-locks")
+_PACKAGE_INIT: Final = "trading_bot/__init__.py"
+_PACKAGE_PREFIX: Final = "trading_bot/"
 _COMMIT = re.compile(r"[0-9a-f]{40}")
+_DIRTY_PATHS_SHOWN: Final = 20
+_JOIN: Final = ";"
+_NONE: Final = "none"
+_UNKNOWN: Final = "unknown"
+
+
+class InstallKind(str, Enum):
+    """How the distribution was installed, read from its ``direct_url.json``."""
+
+    EDITABLE = "editable"
+    VCS = "vcs"
+    DIR = "dir"
+    UNKNOWN = "unknown"
 
 
 @dataclass(frozen=True)
@@ -60,6 +111,26 @@ class GitUnknown:
 GitOutcome = GitOutput | GitUnknown
 GitRunner = Callable[[Path, Sequence[str], Path], GitOutcome]
 GitResolver = Callable[[Path], Path | GitUnknown]
+DistributionFinder = Callable[[str], metadata.Distribution]
+
+
+@dataclass(frozen=True)
+class InstallFacts:
+    """The install's kind, its commit when it records one, and why if unknown."""
+
+    kind: InstallKind
+    commit: str | None
+    reason: str | None
+    distribution: metadata.Distribution | None
+
+
+@dataclass(frozen=True)
+class RecordCheck:
+    """RECORD verification: ``intact`` is ``None`` when nothing could be checked."""
+
+    intact: bool | None
+    checked: int
+    reason: str | None
 
 
 @dataclass(frozen=True)
@@ -71,6 +142,122 @@ class CheckoutFacts:
     dirty_paths: tuple[str, ...] | None
     config_tracked: bool | None
     reasons: tuple[str, ...]
+
+
+def _tri(value: bool | None) -> str:
+    if value is None:
+        return _UNKNOWN
+    return "true" if value else "false"
+
+
+def _joined(items: Sequence[str]) -> str:
+    return _JOIN.join(items) if items else _NONE
+
+
+@dataclass(frozen=True)
+class Provenance:
+    """Every fact the boot line carries, and the verdict they imply.
+
+    ``None`` in any optional field means UNKNOWN, and every unknown refuses:
+    see :attr:`refusal_reasons`, the only place a verdict is decided.
+    """
+
+    install_kind: InstallKind
+    code_commit: str | None
+    code_intact: bool | None
+    code_files_checked: int
+    module_file: Path
+    checkout_root: Path | None
+    checkout_commit: str | None
+    dirty_paths: tuple[str, ...] | None
+    commits_agree: bool | None
+    config_path: Path | None
+    config_sha256: str | None
+    config_tracked: bool | None
+    python_version: str
+    package_version: str
+    unknown_reasons: tuple[str, ...]
+
+    @property
+    def checkout_dirty(self) -> bool | None:
+        """``False`` only from a status read that returned zero entries."""
+        if self.dirty_paths is None:
+            return None
+        return len(self.dirty_paths) > 0
+
+    @property
+    def refusal_reasons(self) -> tuple[str, ...]:
+        """Why ``run`` may not start; empty exactly when it may.
+
+        Accepted only if ALL hold: a VCS install, its RECORD intact, a clean
+        checkout, the checkout at the installed commit, a tracked config, and
+        the config's digest known. Each test is against the one accepting
+        value, so ``None`` -- unknown -- fails every one of them.
+        """
+        reasons: list[str] = []
+        if self.install_kind is not InstallKind.VCS:
+            reasons.append(f"install_kind={self.install_kind.value}")
+        if self.code_intact is not True:
+            reasons.append(f"code_intact={_tri(self.code_intact)}")
+        if self.checkout_dirty is not False:
+            reasons.append(f"checkout_dirty={_tri(self.checkout_dirty)}")
+        if self.commits_agree is not True:
+            reasons.append(f"commits_agree={_tri(self.commits_agree)}")
+        if self.config_tracked is not True:
+            reasons.append(f"config_tracked={_tri(self.config_tracked)}")
+        if self.config_sha256 is None:
+            reasons.append(f"config_sha256={_UNKNOWN}")
+        return tuple(reasons)
+
+    @property
+    def accepted(self) -> bool:
+        return not self.refusal_reasons
+
+    def log_fields(self) -> dict[str, str | int | bool]:
+        """The boot line's ``extra=`` fields: ``str`` and ``int`` values only.
+
+        A list is joined with a semicolon, which forces no quoting in the plain
+        sink where a space does (P55 S0.5): ordinary paths stay readable, and a
+        path containing a space quotes the whole field. At most
+        ``_DIRTY_PATHS_SHOWN`` dirty paths are named; ``dirty_count`` is the
+        total.
+        """
+        dirty_count: str | int = _UNKNOWN if self.dirty_paths is None else len(self.dirty_paths)
+        dirty_paths = (
+            _UNKNOWN if self.dirty_paths is None else _joined(self.dirty_paths[:_DIRTY_PATHS_SHOWN])
+        )
+        return {
+            "verdict": "accepted" if self.accepted else "refused",
+            "refusal_reasons": _joined(self.refusal_reasons),
+            "unknown_reasons": _joined(self.unknown_reasons),
+            "install_kind": self.install_kind.value,
+            "code_commit": self.code_commit or _UNKNOWN,
+            "code_intact": _tri(self.code_intact),
+            "code_files_checked": self.code_files_checked,
+            "module_file": str(self.module_file),
+            "checkout_root": _UNKNOWN if self.checkout_root is None else str(self.checkout_root),
+            "checkout_commit": self.checkout_commit or _UNKNOWN,
+            "checkout_dirty": _tri(self.checkout_dirty),
+            "dirty_count": dirty_count,
+            "dirty_paths": dirty_paths,
+            "commits_agree": _tri(self.commits_agree),
+            "config_path": _UNKNOWN if self.config_path is None else str(self.config_path),
+            "config_sha256": self.config_sha256 or _UNKNOWN,
+            "config_tracked": _tri(self.config_tracked),
+            "python_version": self.python_version,
+            "package_version": self.package_version,
+        }
+
+
+def refusal_message(facts: Provenance) -> str:
+    """The text ``main`` exits with when ``run`` is refused. ASCII, no trailing newline."""
+    return (
+        f"FATAL: startup provenance refused: {', '.join(facts.refusal_reasons)}.\n"
+        "The bot runs only from a VCS install of a pushed commit, launched from a clean "
+        "checkout of that same commit with a tracked config.\n"
+        "CLAUDE.md: THE BOT IS NEVER LAUNCHED FROM A DEVELOPMENT WORKING TREE. "
+        "Startup refused."
+    )
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -203,6 +390,103 @@ def parse_porcelain(stdout: bytes) -> tuple[str, ...] | None:
     return tuple(paths)
 
 
+def classify_install(module_file: Path, find_distribution: DistributionFinder) -> InstallFacts:
+    """Classify the install from ``direct_url.json``; never reads its ``url``.
+
+    **The ``url`` is never read**, because a VCS URL can carry credentials in
+    ``user:token@`` form and nothing read is at risk of being logged.
+
+    **THE SHADOW GUARD COVERS EVERY KIND BUT EDITABLE.** The distribution
+    found by name need not be the code imported: a copy of ``trading_bot``
+    earlier on ``sys.path`` imports instead while the metadata still names the
+    installed commit (``M5l-016``). So the file the distribution says it
+    installed must be the file imported, by ``os.path.samefile`` -- the same
+    file, not the same spelling. An editable install is exempt because its
+    files never live where the distribution points (``M5l-023``); it is
+    refused by its kind, so the exemption admits nothing.
+    """
+    unknown = InstallKind.UNKNOWN
+    try:
+        dist = find_distribution(DISTRIBUTION_NAME)
+    except metadata.PackageNotFoundError:
+        return InstallFacts(unknown, None, "no_distribution", None)
+    try:
+        raw = dist.read_text("direct_url.json")
+    except OSError:
+        return InstallFacts(unknown, None, "direct_url_unreadable", dist)
+    if raw is None:
+        return InstallFacts(unknown, None, "no_direct_url", dist)
+    try:
+        direct = json.loads(raw)
+    except ValueError:
+        return InstallFacts(unknown, None, "direct_url_unreadable", dist)
+    if not isinstance(direct, dict):
+        return InstallFacts(unknown, None, "direct_url_unreadable", dist)
+    dir_info = direct.get("dir_info")
+    if isinstance(dir_info, dict) and dir_info.get("editable") is True:
+        return InstallFacts(InstallKind.EDITABLE, None, None, dist)
+    try:
+        same = os.path.samefile(str(dist.locate_file(_PACKAGE_INIT)), module_file)
+    except OSError:
+        return InstallFacts(unknown, None, "shadow_check_failed", dist)
+    if not same:
+        return InstallFacts(unknown, None, "shadowed", dist)
+    vcs_info = direct.get("vcs_info")
+    if isinstance(vcs_info, dict):
+        commit = vcs_info.get("commit_id")
+        if (
+            vcs_info.get("vcs") == "git"
+            and isinstance(commit, str)
+            and _COMMIT.fullmatch(commit) is not None
+        ):
+            return InstallFacts(InstallKind.VCS, commit, None, dist)
+        return InstallFacts(unknown, None, "vcs_commit_invalid", dist)
+    if isinstance(dir_info, dict):
+        return InstallFacts(InstallKind.DIR, None, None, dist)
+    return InstallFacts(unknown, None, "direct_url_unrecognised", dist)
+
+
+def _record_digest(data: bytes) -> str:
+    """RECORD's hash encoding: urlsafe base64 of the sha256 digest, unpadded."""
+    return base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode("ascii")
+
+
+def verify_record(dist: metadata.Distribution) -> RecordCheck:
+    """Re-hash every ``trading_bot/`` RECORD row that carries a sha256.
+
+    Zero such rows is unknown, not intact: a check that examined nothing has
+    established nothing. A missing file or a mismatch is ``False``.
+
+    **RECORD IS READ HERE, NOT THROUGH ``Distribution.files``**, because on
+    Python 3.12 that property filters its rows through ``skip_missing_files``:
+    a file deleted after the install leaves the list silently, and a check
+    built on it reports intact (``M5l-026``).
+    """
+    try:
+        text = dist.read_text("RECORD")
+    except OSError:
+        text = None
+    if text is None:
+        return RecordCheck(None, 0, "record_missing")
+    checked = 0
+    for row in csv.reader(text.splitlines()):
+        if len(row) < 2 or not row[0].startswith(_PACKAGE_PREFIX):
+            continue
+        mode, _, value = row[1].partition("=")
+        if mode != "sha256" or not value:
+            continue
+        checked += 1
+        try:
+            data = Path(str(dist.locate_file(row[0]))).read_bytes()
+        except OSError:
+            return RecordCheck(False, checked, None)
+        if _record_digest(data) != value:
+            return RecordCheck(False, checked, None)
+    if checked == 0:
+        return RecordCheck(None, 0, "record_unhashed")
+    return RecordCheck(True, checked, None)
+
+
 def _parse_rev_parse(stdout: bytes) -> tuple[Path, str] | None:
     try:
         lines = stdout.decode("utf-8").splitlines()
@@ -275,3 +559,54 @@ def collect_checkout(
         if reason is not None:
             reasons.append(reason)
     return CheckoutFacts(root, commit, dirty_paths, tracked, tuple(reasons))
+
+
+def _agree(code_commit: str | None, checkout_commit: str | None) -> bool | None:
+    if code_commit is None or checkout_commit is None:
+        return None
+    return code_commit == checkout_commit
+
+
+def collect_provenance(
+    config_path: Path | None,
+    config_sha256: str | None,
+    *,
+    cwd: Path | None = None,
+    module_file: Path | None = None,
+    find_distribution: DistributionFinder = metadata.distribution,
+    resolve: GitResolver = resolve_git,
+    runner: GitRunner = run_git,
+) -> Provenance:
+    """Gather every fact the boot line carries. Never raises for an environment it meets."""
+    launch = Path.cwd() if cwd is None else cwd
+    module = Path(trading_bot.__file__) if module_file is None else module_file
+    install = classify_install(module, find_distribution)
+    reasons: list[str] = []
+    if install.reason is not None:
+        reasons.append(install.reason)
+    record = RecordCheck(None, 0, None)
+    if install.kind is InstallKind.VCS and install.distribution is not None:
+        record = verify_record(install.distribution)
+        if record.reason is not None:
+            reasons.append(record.reason)
+    checkout = collect_checkout(launch, config_path, resolve=resolve, runner=runner)
+    reasons.extend(checkout.reasons)
+    if config_sha256 is None:
+        reasons.append("config_sha256_unknown")
+    return Provenance(
+        install_kind=install.kind,
+        code_commit=install.commit,
+        code_intact=record.intact,
+        code_files_checked=record.checked,
+        module_file=module.resolve(),
+        checkout_root=checkout.root,
+        checkout_commit=checkout.commit,
+        dirty_paths=checkout.dirty_paths,
+        commits_agree=_agree(install.commit, checkout.commit),
+        config_path=config_path,
+        config_sha256=config_sha256,
+        config_tracked=checkout.config_tracked,
+        python_version=platform.python_version(),
+        package_version=trading_bot.__version__,
+        unknown_reasons=tuple(dict.fromkeys(reasons)),
+    )
