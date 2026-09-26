@@ -4350,8 +4350,8 @@ by M5j. Its sibling in `docs/QC_PROTECTIVE_ORDERS.md` said the same thing and
 was annotated at M5h's rotation; this one was missed, because nothing compares
 two documents against each other.
 
-**M5k is complete, in 17 numbered commits and {ROTATION_N} rotation commits,
-with {FINDINGS_MAX} findings declared across `M5k-001`–`M5k-{FINDINGS_MAX}`,
+**M5k is complete, in 17 numbered commits and 6 rotation commits,
+with 160 findings declared across `M5k-001`–`M5k-160`,
 every commit carrying a block.** It closed the accounting gap M5j named: every
 exit now books net of the fee the venue charged, at all three booking sites or
 at none.

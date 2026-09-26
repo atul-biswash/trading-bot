@@ -1297,3 +1297,57 @@ Whole-capture `decision=halt` is **0** of 163 close plans (162 `decision=sell`,
 
 Observations, like every section above them: past-tense statements about bytes
 with a stated digest, and no rule.
+
+## 20. The project owner's accounts, at M5k's close
+
+Sections 17 and 19 wrote three facts as *not established*, because no log line
+can establish them. The project owner supplied accounts at M5k's rotation. They
+are recorded here verbatim and attributed. **Each is the owner's account; no
+log in this file measures it**, and nothing here upgrades it to an observation.
+
+### Pid 24772, which ended without `engine_stopped` (section 17)
+
+Section 17: *"Why pid 24772 ended without `engine_stopped` is not
+established."* The owner's account:
+
+> "Ceased without an exit record due to an ungraceful process kill (external
+> terminal termination / system kill event) rather than an intercepted
+> `SIGINT`."
+
+What the capture shows is consistent with that and does not measure it:
+pid 24772's last line is at `2026-09-19T09:42:02Z`, no line after it names the
+pid, and no `Received SIGINT` line precedes that end.
+
+### Order 300642 (section 17)
+
+Section 17: *"What order 300642 was is not established."* The owner's account:
+
+> "Historical Testnet test artifact from prior test probe sequences,
+> pre-dating M5k's wire model and booking metadata schema."
+
+The 18 refusals naming it, recorded in section 17, are dated 2026-09-10,
+before M5k's first commit.
+
+### The run at M5k's close (section 19)
+
+Section 19: *"Which commit, if any, each run deployed is not established."* The
+owner's account:
+
+> "The current background run is not executing committed M5k code (evidenced
+> by zero `quote_total_source` emissions). It will be terminated and replaced
+> with a clean run pinned to M5k's closing release tag."
+
+**It does not establish which commit any run deployed**, and section 19's
+statement stands for the six runs it lists. The evidence the account cites is
+section 19's own count of zero `quote_total_source` lines. **One measurement
+belongs beside it, of metadata only:** at `2026-09-26T08:28:38Z`
+`logs/trading_bot.log` was 5,074,996 bytes, last written `2026-09-25T16:16:10Z`
+-- byte-for-byte the length section 19's capture copied. So no process has
+written to that log since section 19's last line, and "the current background
+run" is not a run this file has seen. Whether a run is writing elsewhere is not
+established here.
+
+### What this section is
+
+The owner's accounts, attributed, beside what the log does and does not show.
+No rule, and no observation promoted beyond what its instrument read.

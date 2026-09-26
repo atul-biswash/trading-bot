@@ -3418,3 +3418,249 @@ identifier-space fix is authored 05:47:28Z the same day, and zero follow it.
 
 **M5j's scope and its rulings were the project owner's. Everything else here was
 ruled by the reviewer under delegation.**
+
+## Phase 5 M5k — the fee reaches the ledger, and what cannot be booked is held
+
+M5j closed with the accounting item open: `close_position` took a fee and no
+fee ever arrived. M5k made the EXIT fee arrive, at all three booking sites in
+one commit, and decided what happens to an exit whose settlement the ledger
+cannot subtract: it is HELD, in the sense of d253cd5's subject, *"hold an exit
+the ledger cannot book"*. The ENTRY fee was not netted, by ruling. **23 commits
+including this one -- 17 numbered and 6 of rotation -- and 160 findings
+declared across `M5k-001`–`M5k-160`, every commit carrying a block.** Counted
+with `git log --oneline "milestone/M5j..HEAD"` and
+`scripts/check_findings.py milestone/M5j..HEAD M5k` before this entry was
+written, the last commit being this one.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `3e444f0` | A diverged pass with no fill escalated instead of continuing |
+| 2 | `2109bee` | The findings extractor became a tracked script, beside a count-site check |
+| 3 | `45ffe31` | The `myTrades` wire boundary, modelled against a captured payload |
+| 4 | `9f3deb1` | `Fee` and `Trade` in the domain, and the port method that carries them |
+| 5 | `8b55785` | Live trading blocked on fee netting; R6 rescoped to speculative queries |
+| 6 | `7e8ad65` | Live trading refused at every entry point; testnet keys only |
+| 7 | `67f1b81` | The integration credential gate counted the testnet pair only |
+| 8 | `e511e6d` | A second close refused while one is pending; settlement counted in the budget |
+| 9 | `f1c5af7` | Fills fetched by order id; `ExitFill.venue_time` renamed |
+| 10 | `651d334` | Exits booked net of the venue's own fee, at all three sites |
+| 11 | `db73b63` | The booking lines pinned, a net fee on disk, and a restart driven |
+| 12 | `a534b31` | One settlement field set on every booking line |
+| 13 | `d253cd5` | An exit the ledger cannot book held, and no longer reconciled |
+| 14 | `f4a82bb` | Three docstrings that still said "every open position" |
+| 15 | `193a5b9` | A negative quote total read as absent; a fill without `quoteQty` a venue error |
+| 16 | `222bdf4` | Partial and cost basis decided before a missing quote total |
+| 17 | `c5dd7d5` | A missing quote total booked from the order's own fills |
+
+**The rotation took six commits, this one included**:
+- `eecb22b`, step 4: three contracts annotated, four sections added to
+  `RUN_LEDGER.md`, and a capture taken at M5k's close;
+- `6ef5aac`, step 2: `CLAUDE.md` and `README.md` at M5k's close, in one
+  commit;
+- `ae8c914`: the method rules, the deployment doctrine, and a testnet-only
+  `.env.example`;
+- `4544b3a`, step 3 part 1: `NEXT_MILESTONE.md` struck and repaired;
+- `583e480`, step 3 part 2: `NEXT_MILESTONE.md` for M5l;
+- this commit, steps 1 and 5: this entry, the two `CLAUDE.md` placeholders,
+  the owner's accounts in `RUN_LEDGER.md`, and the tag.
+
+### What was built, in order
+
+**First the gap A5 named, and the tools.** A pass whose position-level verdict
+was `DIVERGED` and whose legs reported no fill had been treated as the ordinary
+healthy pass; from `3e444f0` it escalated at `CRITICAL`. `2109bee` made the
+findings extractor a tracked script, because its only copy had been prose
+inside a fence, and added the count-site check.
+
+**Then the fee, from the wire inward.** The `myTrades` record was modelled
+against a captured payload (`45ffe31`). The domain gained `Fee`, an amount
+inseparable from its asset, and `Trade`, one per fill, and the port gained
+`get_my_trades` (`9f3deb1`). The port learned to ask for one order's fills and
+the misleading `venue_time` was renamed (`f1c5af7`). Then every booking site
+settled the exit order's fills and booked net of the fee, in one commit
+(`651d334`); the lines were pinned (`db73b63`) and given one field set
+(`a534b31`).
+
+**Around it, the guards the fee made necessary.** Live trading was blocked in
+`CLAUDE.md` (`8b55785`) and refused in code at every entry point (`7e8ad65`).
+A second `CLOSE` while one was pending was refused, and the budget check
+counted the settlement fetch (`e511e6d`).
+
+**Then what a booking cannot settle.** A fee in a foreign asset, or a fill that
+is not a sell, was held on the position, no longer reconciled, and its `CLOSE`
+refused (`d253cd5`).
+
+**Last, the missing quote total.** A negative `cummulativeQuoteQty` was read as
+absent (`193a5b9`); the bookability ladder was reordered so that partial and
+cost basis are decided first (`222bdf4`); and an unpriced whole fill was booked
+from the sum of its own fills (`c5dd7d5`).
+
+### The decisions, and the alternatives rejected
+
+Rulings are cited by content or by the commit that records them, per
+`CLAUDE.md`'s rule k; bare labels are not reused.
+
+- **One `Trade` per fill, aggregation by summing, never dividing** (`9f3deb1`).
+  REJECTED: an aggregate per order, which would publish a weighted average price
+  -- `quote_quantity / quantity` reached the 28-digit context precision on 10 of
+  the 11 multi-fill orders measured (`M5k-031`).
+- **`Fee`, one required value** (`9f3deb1`). REJECTED: `fee` beside
+  `fee_asset`, two fields that had to agree and could each default to a value
+  denominating nothing -- the stub `CLAUDE.md` forbids, made unrepresentable
+  rather than discouraged.
+- **Money from the venue's raw string, not through `_dec`** (`45ffe31`).
+  REJECTED: `_dec`, which launders a float past `Money` (`M5k-025`); its defect
+  was declared, not fixed, by the owner's scope ruling.
+- **Exit fees only -- the ledger net of exit fees and gross of entry fees**
+  (the owner's R-a, recorded at `651d334`). REJECTED: full netting now, because
+  entry-fee netting is the live-trading block's own subject.
+- **Every booking site or none** (`651d334`), the M5j ruling applied.
+  REJECTED again: the two-of-three wiring.
+- **The settlement fetch inside an async `_book_exits`** (`651d334`), the
+  placement R6's rescope (`8b55785`) had left open.
+- **A retained close for five of its own symbol's bars, then dropped at
+  `CRITICAL`** (Variant L, N = 5, `651d334`). REJECTED: dropping on the first
+  failure, which forfeits a booking the next bar would have read, and retaining
+  without bound, which holds a symbol unable to close.
+- **An unbookable settlement HELD** (R2 with rulings A and B, as `d253cd5`
+  records them). REJECTED: the executor's drop after one bar and the driver's
+  retry on every pass -- the two outcomes F1 had found for one fact. Its name
+  is `Position.settlement_hold`, `d253cd5`'s PIN-1, chosen over the ruling's
+  own `unbookable_fee_mismatch` because "unbookable" already named three other
+  things (`M5k-082`).
+- **The sibling leg ends with its partner, accepted as observed** (`d253cd5`'s
+  PIN-2, Case 1). REJECTED: cancelling siblings in code, on 144 of 148 observed
+  expiries and none live (`M5k-080`).
+- **The ladder `A > P > C > Q`** (Decision 1, recorded at `222bdf4`).
+  REJECTED: `A > Q > P > C`, which spent a venue call before deciding facts
+  that make one unnecessary.
+- **`_sold_unpriced` removed; a failed supply at the sell defers** (Decision 2,
+  recorded at `c5dd7d5`). REJECTED: keeping an unpriced sell, whose line told
+  an operator a partial had filled in full (`M5k-096`).
+- **A negative total is absent** (Decision 3, recorded at `193a5b9`). REJECTED:
+  raising, and booking it -- it would have been credited (`M5k-091`).
+- **The live guard at every entry point** (`7e8ad65`). REJECTED: a guard in
+  `Settings.__init__` alone, which three entry points bypass by reassigning
+  `mode` after construction (`M5k-036`); and a `ConfigError`, which one script
+  turns into "Configuration error" and exit 2.
+- **`CRITICAL` without a halt flag** (ratified at `3e444f0`, `M5k-006`).
+  REJECTED: building the halt flag inside the commit that first needed it.
+- **The protection write in row 4 struck** (`3e444f0`). It had been predicted
+  inert and was not: the test suite is also a reader (`M5k-008`).
+- **Three commits over the 1,500-line guide, each waived by the owner**
+  (`M5k-049`, `M5k-054`, `M5k-114`); the rotation's rule h admits none after
+  them.
+
+### What measurement overturned
+
+- The library's own `get_my_trades` docstring showed nine keys and omitted
+  `orderId`; the venue sent thirteen (`M5k-021`).
+- Planned assertions that could not bite: a fixture where `quoteQty` equals
+  `price x qty` on every record (`M5k-029`), and a fee of zero on every record
+  (`M5k-032`). Measuring the fixture first changed the test both times.
+- A write predicted inert was not (`M5k-008`).
+- Twenty-one existing tests built a config the new check refused, not twenty
+  (`M5k-045`).
+- A skip blamed a missing tag when the tool had lost its working directory
+  (`M5k-017`).
+- A negative total would have booked (`M5k-091`), and a fill without
+  `quoteQty` raised `KeyError`, which no settlement handler caught (`M5k-092`).
+- A mutation's prediction reached further than its name (`M5k-115`), and
+  another missed in both directions (`M5k-074`).
+
+### The method rules adopted at this rotation
+
+The owner approved them in full, at `ae8c914`: the standing clause (a);
+mutation surveys only in disposable worktrees, superseding harness trap 4, on
+`M5k-123` (b); the formatter before the survey (c); tolerant searches that do
+not strip `_` (d); path-limited diffs that never include `config.yaml` (e);
+asymmetric prediction misses (f); a commit-time audit of every document that
+carries a condition (g); the 1,500-line ceiling, without waivers (h); log
+fields read through `vars(record).get` and asserted lengths (i); `DOCUMENTED` as
+a fourth mark (j); ruling ids qualified by prompt (k); and the count-site check
+run twice, outgoing figures first (l). **The deployment doctrine was ruled
+beside them**: the bot is never launched from a development working tree.
+
+### What did NOT happen
+
+- **No committed M5k code was shown to have run.** Eight booking lines carried
+  the fee fields, the first written seven hours before `651d334` was committed,
+  from code no commit then contained (`M5k-123`); no line carried
+  `quote_total_source` (`M5k-132`'s banner records no commit either).
+- **Every commission any capture recorded was `0.00000000`**, so net-of-fee
+  booking never subtracted a non-zero fee outside a test.
+- **Entry fees were not netted, and the live-trading block stood.**
+- **Position-level `DIVERGED` was never observed in production**, and neither
+  were the six events M5k added.
+- **The failure modes M5k catalogued were carried, not closed**: PIN-3 and
+  PIN-4 as `c5dd7d5` records them, `M5k-110`, `M5k-083`, `M5k-073`,
+  `M5k-111`, `M5k-102`, `M5k-121`, `M5k-060` and `M5k-090`'s limit, carried to
+  M5l as its P-3.
+
+### What the rotation's steps found
+
+- **Step 4** (`eecb22b`):
+  - M5_NUMBERS's refusal message was false since `e511e6d` (`M5k-116`);
+  - QB's "persistence is a stub" was false since M5h (`M5k-117`);
+  - QB's halt-flag condition was invisible to the checker (`M5k-118`);
+  - §15's fill time was measured (`M5k-119`);
+  - order 300642 had been recorded nowhere (`M5k-120`);
+  - four realised figures carried exponent -24 (`M5k-121`);
+  - five captures were missing from the ledger (`M5k-122`);
+  - K1's answer on what ran (`M5k-123`);
+  - POSITION_STALE's first firing (`M5k-124`).
+- **Step 2** (`6ef5aac`):
+  - the count checker was blind at rotation time (`M5k-125`);
+  - two false quotations of the tree (`M5k-126`);
+  - the census instrument missed two constants (`M5k-127`);
+  - ruling ids collided (`M5k-128`);
+  - README's headline contradicted itself (`M5k-129`);
+  - the architecture trees were stale (`M5k-130`);
+  - M5k-006's ruling was unrecorded (`M5k-131`);
+  - the bot records no commit (`M5k-132`).
+- **The method-rules commit** (`ae8c914`), `M5k-133` to `M5k-142`: trap 4
+  superseded, the waivers closed, QB's condition made visible but not parsed,
+  the template made testnet-only, and the venv trap.
+- **Step 3**, `M5k-143` to `M5k-154` (`4544b3a`, `583e480`):
+  - three conditions fired unaudited;
+  - a spent condition, an event-named disjunct and a moved site;
+  - a self-contradicting priority;
+  - the re-measured figures;
+  - M5l's scope;
+  - the staleness default measured against the check it would face;
+  - three repaired conditions and a named caller for Q-B's.
+- **Steps 1 and 5** (this commit), `M5k-155` to `M5k-160`:
+  - `M5k-149`'s mark annotated;
+  - the owner's accounts closing section 17's open items;
+  - M5j's POSITION_STALE sentence left standing;
+  - the commit count;
+  - the owner's third account set beside the log's metadata;
+  - M5j's own entry, which undercounted itself by the one rotation commit that
+    followed it.
+
+**A3 fired here, and the headline was checked against it.** A3's condition is
+*"whoever next appends a milestone entry to `docs/PHASE_HISTORY.md`"*, and the
+question it poses is whether a headline states a claim its entry later
+annotates. This one does not, read in the tree's own vocabulary: "the fee" is
+scoped to the EXIT fee in the entry's first sentence, and "what cannot be
+booked" is the phrase of `d253cd5`'s subject and of `CLAUDE.md`'s locked
+bullet *"AN EXIT THE LEDGER CANNOT BOOK IS HELD"*. The other unbooked outcomes
+-- a sell with no cost basis dropped, a settlement that timed out -- are
+separate decisions recorded above, not exceptions to the headline.
+
+### The historical figures in this entry
+
+**Pinned to their commits, not a live count.**
+- **At `c5dd7d5`**, the last numbered commit: `ruff format` 129 files, `mypy`
+  79 source files, 1822 passed and 1 skipped with Testnet credentials; 115
+  findings.
+- **At this rotation's gate**: the same 129 / 79 / 1822 passed, 1 skipped,
+  credentialed, since the rotation changed no `.py` file; 160 findings.
+- The capture the rotation measured is SHA-256
+  `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`.
+
+**M5k's scope and its rulings were the project owner's; the method rules were
+approved by the owner at the rotation; everything else was ruled by the
+architect or by the reviewer under delegation.**
