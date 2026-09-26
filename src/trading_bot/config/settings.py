@@ -13,7 +13,9 @@ by :func:`refuse_live_trading`.
 
 from __future__ import annotations
 
+import hashlib
 import os
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -85,11 +87,27 @@ def refuse_live_trading(mode: TradingMode) -> None:
 
 
 class Settings:
-    """Facade exposing resolved config + secrets to the rest of the app."""
+    """Facade exposing resolved config + secrets to the rest of the app.
 
-    def __init__(self, config: AppConfig, secrets: Secrets) -> None:
+    ``config_path`` and ``config_sha256`` say WHICH file was loaded and WHICH
+    bytes of it: the resolved path, and the SHA-256 of the single read that was
+    decoded and parsed. Both are ``None`` when a caller built the facade from an
+    already-parsed :class:`AppConfig`, and a reader must treat ``None`` as
+    unknown -- the startup provenance check refuses on it.
+    """
+
+    def __init__(
+        self,
+        config: AppConfig,
+        secrets: Secrets,
+        *,
+        config_path: Path | None = None,
+        config_sha256: str | None = None,
+    ) -> None:
         self.config = config
         self._secrets = secrets
+        self.config_path = config_path
+        self.config_sha256 = config_sha256
         # An explicit BOT_MODE in the environment wins over config.yaml.
         self.mode: TradingMode = secrets.bot_mode or config.mode
 
@@ -134,18 +152,47 @@ class Settings:
         return self._secrets.telegram_bot_token, self._secrets.telegram_chat_id
 
 
-def _load_yaml_config(path: str | Path) -> AppConfig:
+@dataclass(frozen=True)
+class _LoadedConfig:
+    """A parsed config together with the identity of the bytes it came from."""
+
+    config: AppConfig
+    path: Path
+    sha256: str
+
+
+def _read_config(path: str | Path) -> _LoadedConfig:
+    """Read the file ONCE, then hash, decode and parse those same bytes.
+
+    **One read, not two.** Hashing a second read would describe whatever the
+    file held a moment later, which is not necessarily what was parsed -- a
+    digest that can disagree with the configuration it claims to identify.
+
+    Decoding bytes rather than calling ``read_text`` drops universal-newline
+    translation, which YAML does not need: it treats CRLF and LF as the same
+    line break, and ``tests/unit/test_settings.py`` pins that.
+    """
     config_path = Path(path)
     if not config_path.is_file():
         raise ConfigError(f"Config file not found: {config_path}")
+    data = config_path.read_bytes()
     try:
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        raw = yaml.safe_load(data.decode("utf-8")) or {}
     except yaml.YAMLError as exc:  # pragma: no cover - defensive
         raise ConfigError(f"Could not parse {config_path}: {exc}") from exc
     try:
-        return AppConfig.model_validate(raw)
+        config = AppConfig.model_validate(raw)
     except ValidationError as exc:
         raise ConfigError(f"Invalid configuration in {config_path}:\n{exc}") from exc
+    return _LoadedConfig(
+        config=config,
+        path=config_path.resolve(),
+        sha256=hashlib.sha256(data).hexdigest(),
+    )
+
+
+def _load_yaml_config(path: str | Path) -> AppConfig:
+    return _read_config(path).config
 
 
 @lru_cache(maxsize=1)
@@ -153,9 +200,15 @@ def get_settings(config_path: str | None = None) -> Settings:
     """Load and cache application settings.
 
     The path is taken from the ``config_path`` argument, then the
-    ``BOT_CONFIG_PATH`` env var, then :data:`DEFAULT_CONFIG_PATH`.
+    ``BOT_CONFIG_PATH`` env var, then :data:`DEFAULT_CONFIG_PATH`. The facade
+    carries the resolved path and the digest of the bytes parsed.
     """
     path: str | Path = config_path or os.getenv("BOT_CONFIG_PATH") or DEFAULT_CONFIG_PATH
-    config = _load_yaml_config(path)
+    loaded = _read_config(path)
     secrets = Secrets()
-    return Settings(config=config, secrets=secrets)
+    return Settings(
+        config=loaded.config,
+        secrets=secrets,
+        config_path=loaded.path,
+        config_sha256=loaded.sha256,
+    )
