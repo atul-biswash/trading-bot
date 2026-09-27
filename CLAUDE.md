@@ -1061,6 +1061,18 @@ data.
   > all three legs or only the two protective ones is **UNRULED** and reserved
   > to the project owner; it decides 5 against 4. Ruled by the reviewer under
   > delegation, not by the project owner.
+
+  > **ANNOTATED AT M5l (`M5l-034`): *"On the shipped `config.yaml` the
+  > coherence constraint admits `D <= 10.5s`"* IS FALSE, and was before
+  > `9f364dd`.** The 10.5 s is the two-term formula at two pairs and
+  > `T_recon = 3.0`; the check has carried a third, settlement, term since
+  > `e511e6d`. RENDERED at `9f364dd` by validating the committed config
+  > through `AppConfig` with only `dispatch_deadline_s` varied, in memory:
+  > `D = 9.25` is accepted and `D = 9.26` refused. So the ceiling on the
+  > committed file is **9.25 s**, and the shipped `D = 9.0` sits 0.25 s under
+  > it. **What survives:** the rule entire -- the field bounds the whole
+  > sequence, is the only configured number, and the per-call share is
+  > derived from it -- and the M5f annotation above.
 - **A timed-out write is resolved by query, never by retry.**
   `BaseExchangeClient._call` already narrows placement to `idempotent=False`,
   retrying only `RateLimitError` — a 429 is rejected pre-acceptance, and an
@@ -2957,6 +2969,20 @@ by digest alone. The committed blob may be read, with `git cat-file -p
 HEAD:config.yaml`, where an authorisation allows it. Earned by `M5k-046` and
 `M5k-050`: the gate reads the working file, not the committed one, and an owner
 hunk arrived between two prompts.
+
+> **SUPERSEDED FROM `9f364dd`: *"On this machine `config.yaml` is the owner's
+> working copy: modified, never staged, and never opened"* IS NO LONGER TRUE.**
+> The owner committed the working copy as `9f364dd`, *"config: operator
+> settings for testnet runs"*, and pushed it; the committed blob's SHA-256 is
+> the working copy's own P54 baseline, `5e75b97a...`. So `config.yaml` is
+> **tracked, holds the operator settings, and is clean** -- in this checkout
+> and in any deployment checkout of a commit that includes it, which is what
+> the startup refusal needs (`config_tracked=true`, `checkout_dirty=false`).
+> It still holds **no secrets**; those live in `.env`, which is gitignored and
+> never committed. **What survives:** every diff and show still names its
+> paths, and an owner hunk can still arrive between two prompts -- one did,
+> as `9f364dd` itself, during P58 (`M5l-031`). A future owner edit makes the
+> file modified again, and the rule then applies to it as written.
 
 **Docs rotation, at the end of every milestone:**
 

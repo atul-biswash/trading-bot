@@ -800,6 +800,25 @@ no order.
 > settlement that times out defers the booking, and at Site B each deferral
 > spends one of §7's bars.
 
+> **ANNOTATED AT M5l: *"Working value: 3 s"* IS NOT THE COMMITTED VALUE FROM
+> `9f364dd`.** The owner's commit *"config: operator settings for testnet
+> runs"* sets `reconcile_deadline_s: 2.3` and enables ETHUSDT/5m beside
+> BTCUSDT/1m. **The status is unchanged: PLACEHOLDER -- NOT MEASURED.** 2.3
+> is not a sample of anything.
+>
+> **What 2.3 buys is budget, not measurement (`M5l-033`).** RENDERED by
+> validating the committed config at `9f364dd` through `AppConfig`, reading
+> the committed blob and writing nothing: accepted at `2 x 9.0 + 3 x 2.3 +
+> 2 x 2.3 = 29.5 s` against `0.5 x 60 = 30.0 s`. The same config with
+> `reconcile_deadline_s = 3.0`, in memory only, is REFUSED at 33.0 s, with
+> the check's own message. So 2.3 is the value that brings the committed
+> two-pair config inside the budget, with 0.5 s to spare, and the
+> "too tight" cost above -- timeouts that stop stamps advancing and defer
+> settlements -- is now the one to watch.
+>
+> **What survives:** everything above; 3 s stays the working value this
+> section reasoned about.
+
 ---
 
 ## 7. `_SETTLEMENT_RETRY_BARS` — the settlement retention bound
@@ -919,6 +938,32 @@ the same minute.
 > **What survives:** the table as arithmetic for two pairs that can close on
 > the same minute, which is still the case the check has to refuse or admit,
 > and every row of it for the two-term formula it was computed under.
+
+> **SUPERSEDED AT `9f364dd`: THE COMMITTED FILE HAS THIS SHAPE AGAIN.** The
+> annotation immediately above -- ETHUSDT/5m **disabled**, *"`P_sim = 1`, not
+> 2"*, 21.0 s -- was true of the blob it read and is false from the owner's
+> commit *"config: operator settings for testnet runs"*: both pairs are
+> enabled, so `P_sim = 2`, and `reconcile_deadline_s` is 2.3. The same
+> supersession covers the formula annotation's *"On the committed
+> single-pair `config.yaml` the check reads 21.0 s"*. RENDERED at `9f364dd`,
+> three terms: `2 x 9.0 + 3 x 2.3 + 2 x 2.3 = 29.5 s` against 30.0 s,
+> accepted; at `T_recon = 3.0` refused at 33.0 s (`M5l-033`, and §6).
+>
+> **AND THE `10.5 s` CEILING IS FALSE, independently of this commit
+> (`M5l-034`).** Four places in this document state that the constraint
+> *admits* `D <= 10.5 s` on the shipped config: §5's *"On the shipped config
+> the constraint admits `D <= 10.5 s`"*, its *"Against `D = 10.5 s` -- the
+> **ceiling** the constraint admits on the shipped config"*, the correction
+> block's *"reads **10.5 s** on the shipped row"*, and the refusal section's
+> *"`9.0` sits **1.5 s under the 10.5 s ceiling**"*. That is the two-term
+> formula at `T_recon = 3.0`; the check has had a settlement term since
+> `e511e6d`. RENDERED at `9f364dd`, varying only `dispatch_deadline_s` in
+> memory: 9.25 accepted, 9.26 refused. **The ceiling on the committed config
+> is 9.25 s**, and `D = 9.0` sits 0.25 s under it. One annotation for all
+> four, because they are one claim.
+>
+> **What survives:** the table as two-term arithmetic, as above, and every
+> percentage §5 computes from 10.5 s as arithmetic on that number.
 
 ### Where it is enforced
 

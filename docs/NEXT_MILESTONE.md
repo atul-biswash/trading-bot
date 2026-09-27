@@ -68,6 +68,14 @@ be confirmed empty by the same tool, over `milestone/M5k..HEAD`, before
 > `M5i-072` appear in no commit message and no tracked file, and no document
 > mentions them. They are not to be invented either.
 
+> **`9f364dd` IS BLOCKLESS, KNOWN AND DECLARED (`M5l-031`).**
+> `scripts/check_findings.py` reports `blockless commits : [9f364dd]` on every
+> run over a range that contains it, and exits non-zero for it. It is the
+> owner's commit *"config: operator settings for testnet runs"*, pushed during
+> P58 with no `Findings:` block; pushed, so it cannot be amended. That is
+> deliberate to leave standing and the extractors will report it every time;
+> it is not a defect to be closed by rewriting history or by inventing a block.
+
 ---
 
 ## THE CENTRAL FACT — read this before anything else
