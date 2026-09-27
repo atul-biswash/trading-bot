@@ -128,8 +128,9 @@ class InstallFacts:
 class RecordCheck:
     """RECORD verification: ``intact`` is ``None`` when nothing could be checked.
 
-    ``reason`` says why when ``intact`` is ``None``, and for one ``False``: an
-    unlisted file, ``unrecorded_file``.
+    ``reason`` says why whenever ``intact`` is not ``True``: ``record_missing``
+    or ``record_unhashed`` for ``None``; ``record_mismatch``,
+    ``record_file_missing`` or ``unrecorded_file`` for ``False``.
     """
 
     intact: bool | None
@@ -139,13 +140,20 @@ class RecordCheck:
 
 @dataclass(frozen=True)
 class CheckoutFacts:
-    """What git reports about the launch directory's checkout."""
+    """What git reports about the launch directory's checkout.
+
+    ``reasons`` holds causes of UNKNOWN values only. ``dirty_cause`` and
+    ``tracked_cause`` say why ``dirty_paths`` and ``config_tracked`` are not
+    the accepting value, whether that value is unknown or known and refusing.
+    """
 
     root: Path | None
     commit: str | None
     dirty_paths: tuple[str, ...] | None
     config_tracked: bool | None
     reasons: tuple[str, ...]
+    dirty_cause: str | None
+    tracked_cause: str | None
 
 
 def _tri(value: bool | None) -> str:
@@ -164,6 +172,13 @@ class Provenance:
 
     ``None`` in any optional field means UNKNOWN, and every unknown refuses:
     see :attr:`refusal_reasons`, the only place a verdict is decided.
+
+    **TWO INVARIANTS ON THE REASON FIELDS (``M5l-030``).** ``unknown_reasons``
+    holds causes of UNKNOWN values only -- never the cause of a check that
+    ran and failed. And every predicate that refuses is followed in
+    :attr:`refusal_reasons` by its cause, ``<field>_cause=<cause>``, taken
+    from ``causes``. ``causes`` defaults to empty, so a verdict built
+    without them still refuses on the same predicates.
     """
 
     install_kind: InstallKind
@@ -181,6 +196,7 @@ class Provenance:
     python_version: str
     package_version: str
     unknown_reasons: tuple[str, ...]
+    causes: tuple[tuple[str, str], ...] = ()
 
     @property
     def checkout_dirty(self) -> bool | None:
@@ -198,19 +214,25 @@ class Provenance:
         the config's digest known. Each test is against the one accepting
         value, so ``None`` -- unknown -- fails every one of them.
         """
-        reasons: list[str] = []
+        refusing: list[tuple[str, str]] = []
         if self.install_kind is not InstallKind.VCS:
-            reasons.append(f"install_kind={self.install_kind.value}")
+            refusing.append(("install_kind", self.install_kind.value))
         if self.code_intact is not True:
-            reasons.append(f"code_intact={_tri(self.code_intact)}")
+            refusing.append(("code_intact", _tri(self.code_intact)))
         if self.checkout_dirty is not False:
-            reasons.append(f"checkout_dirty={_tri(self.checkout_dirty)}")
+            refusing.append(("checkout_dirty", _tri(self.checkout_dirty)))
         if self.commits_agree is not True:
-            reasons.append(f"commits_agree={_tri(self.commits_agree)}")
+            refusing.append(("commits_agree", _tri(self.commits_agree)))
         if self.config_tracked is not True:
-            reasons.append(f"config_tracked={_tri(self.config_tracked)}")
+            refusing.append(("config_tracked", _tri(self.config_tracked)))
         if self.config_sha256 is None:
-            reasons.append(f"config_sha256={_UNKNOWN}")
+            refusing.append(("config_sha256", _UNKNOWN))
+        cause = dict(self.causes)
+        reasons: list[str] = []
+        for field, value in refusing:
+            reasons.append(f"{field}={value}")
+            if field in cause:
+                reasons.append(f"{field}_cause={cause[field]}")
         return tuple(reasons)
 
     @property
@@ -507,9 +529,9 @@ def verify_record(dist: metadata.Distribution) -> RecordCheck:
         try:
             data = Path(str(dist.locate_file(row[0]))).read_bytes()
         except OSError:
-            return RecordCheck(False, checked, None)
+            return RecordCheck(False, checked, "record_file_missing")
         if _record_digest(data) != value:
-            return RecordCheck(False, checked, None)
+            return RecordCheck(False, checked, "record_mismatch")
     if _unrecorded_files(dist, recorded):
         return RecordCheck(False, checked, "unrecorded_file")
     if checked == 0:
@@ -536,15 +558,16 @@ def _config_tracked(
     ``:(top,literal)`` anchors the path at the checkout's top whatever the
     working directory, and ``--full-name`` prints it the same way, so the
     answer is compared byte for byte: empty is untracked, the path is tracked.
+    The second value is the cause whenever the first is not ``True``.
     """
     if not _within(config_path, root):
-        return False, None
+        return False, "config_outside_checkout"
     relative = Path(os.path.relpath(config_path, root)).as_posix()
     outcome = runner(git, ["ls-files", "-z", "--full-name", "--", f":(top,literal){relative}"], cwd)
     if isinstance(outcome, GitUnknown):
         return None, outcome.reason
     if outcome.stdout == b"":
-        return False, None
+        return False, "config_untracked"
     if outcome.stdout == relative.encode("utf-8") + b"\0":
         return True, None
     return None, "ls_files_unparseable"
@@ -560,35 +583,48 @@ def collect_checkout(
     """At most three git calls against ``cwd``; every failure is unknown."""
     git = resolve(cwd)
     if isinstance(git, GitUnknown):
-        return CheckoutFacts(None, None, None, None, (git.reason,))
+        return _unknown_checkout(git.reason)
     head = runner(git, ["rev-parse", "--show-toplevel", "HEAD"], cwd)
     if isinstance(head, GitUnknown):
-        return CheckoutFacts(None, None, None, None, (head.reason,))
+        return _unknown_checkout(head.reason)
     parsed = _parse_rev_parse(head.stdout)
     if parsed is None:
-        return CheckoutFacts(None, None, None, None, ("rev_parse_unparseable",))
+        return _unknown_checkout("rev_parse_unparseable")
     root, commit = parsed
     if _within(git, root.resolve()):
-        return CheckoutFacts(None, None, None, None, ("git_untrusted_path",))
+        return _unknown_checkout("git_untrusted_path")
     reasons: list[str] = []
     status = runner(git, ["status", "--porcelain=v1", "-z", "--untracked-files=normal"], cwd)
     dirty_paths: tuple[str, ...] | None
+    dirty_cause: str | None
     if isinstance(status, GitUnknown):
         dirty_paths = None
-        reasons.append(status.reason)
+        dirty_cause = status.reason
+        reasons.append(dirty_cause)
     else:
         dirty_paths = parse_porcelain(status.stdout)
+        dirty_cause = None
         if dirty_paths is None:
-            reasons.append("status_unparseable")
+            dirty_cause = "status_unparseable"
+            reasons.append(dirty_cause)
+        elif dirty_paths:
+            dirty_cause = "uncommitted_changes"
     tracked: bool | None
+    tracked_cause: str | None
     if config_path is None:
-        tracked = None
-        reasons.append("config_path_unknown")
+        tracked, tracked_cause = None, "config_path_unknown"
     else:
-        tracked, reason = _config_tracked(git, cwd, root, config_path, runner)
-        if reason is not None:
-            reasons.append(reason)
-    return CheckoutFacts(root, commit, dirty_paths, tracked, tuple(reasons))
+        tracked, tracked_cause = _config_tracked(git, cwd, root, config_path, runner)
+    if tracked is None and tracked_cause is not None:
+        reasons.append(tracked_cause)
+    return CheckoutFacts(
+        root, commit, dirty_paths, tracked, tuple(reasons), dirty_cause, tracked_cause
+    )
+
+
+def _unknown_checkout(reason: str) -> CheckoutFacts:
+    """Nothing about the checkout is known, for one reason."""
+    return CheckoutFacts(None, None, None, None, (reason,), reason, reason)
 
 
 def _agree(code_commit: str | None, checkout_commit: str | None) -> bool | None:
@@ -614,15 +650,17 @@ def collect_provenance(
     reasons: list[str] = []
     if install.reason is not None:
         reasons.append(install.reason)
-    record = RecordCheck(None, 0, None)
+    record = RecordCheck(None, 0, "install_not_vcs")
     if install.kind is InstallKind.VCS and install.distribution is not None:
         record = verify_record(install.distribution)
-        if record.reason is not None:
+        if record.intact is None and record.reason is not None:
             reasons.append(record.reason)
     checkout = collect_checkout(launch, config_path, resolve=resolve, runner=runner)
     reasons.extend(checkout.reasons)
     if config_sha256 is None:
         reasons.append("config_sha256_unknown")
+    agree = _agree(install.commit, checkout.commit)
+    causes = _causes(install, record, checkout, agree, config_sha256)
     return Provenance(
         install_kind=install.kind,
         code_commit=install.commit,
@@ -632,11 +670,40 @@ def collect_provenance(
         checkout_root=checkout.root,
         checkout_commit=checkout.commit,
         dirty_paths=checkout.dirty_paths,
-        commits_agree=_agree(install.commit, checkout.commit),
+        commits_agree=agree,
         config_path=config_path,
         config_sha256=config_sha256,
         config_tracked=checkout.config_tracked,
         python_version=platform.python_version(),
         package_version=trading_bot.__version__,
         unknown_reasons=tuple(dict.fromkeys(reasons)),
+        causes=causes,
     )
+
+
+def _causes(
+    install: InstallFacts,
+    record: RecordCheck,
+    checkout: CheckoutFacts,
+    agree: bool | None,
+    config_sha256: str | None,
+) -> tuple[tuple[str, str], ...]:
+    """The cause of every fact that is not its accepting value, keyed by field."""
+    causes: dict[str, str] = {}
+    if install.kind is not InstallKind.VCS:
+        causes["install_kind"] = install.reason or f"{install.kind.value}_install"
+    if record.intact is not True and record.reason is not None:
+        causes["code_intact"] = record.reason
+    if checkout.dirty_cause is not None:
+        causes["checkout_dirty"] = checkout.dirty_cause
+    if agree is False:
+        causes["commits_agree"] = "commit_mismatch"
+    elif agree is None:
+        causes["commits_agree"] = (
+            "code_commit_unknown" if install.commit is None else "checkout_commit_unknown"
+        )
+    if checkout.config_tracked is not True and checkout.tracked_cause is not None:
+        causes["config_tracked"] = checkout.tracked_cause
+    if config_sha256 is None:
+        causes["config_sha256"] = "config_sha256_unknown"
+    return tuple(causes.items())

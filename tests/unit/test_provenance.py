@@ -578,6 +578,173 @@ def test_pycache_is_not_counted_as_unrecorded(tmp_path: Path) -> None:
     assert check.checked == 2
 
 
+def _record_case(tmp_path: Path, cause: str) -> Provenance:
+    """A clean, tracked, agreeing collection whose installed files fail ``cause``."""
+    dist_info, init = _site(tmp_path / "site", direct_url=_vcs(), hashed=cause != "record_unhashed")
+    package = tmp_path / "site" / "trading_bot"
+    if cause == "record_mismatch":
+        (package / "main.py").write_bytes(b"VALUE = 2\n")
+    elif cause == "record_file_missing":
+        (package / "main.py").unlink()
+    elif cause == "unrecorded_file":
+        (package / "extra.py").write_bytes(b"VALUE = 3\n")
+    root = _checkout(tmp_path)
+    return collect_provenance(
+        root / "config.yaml",
+        _SHA,
+        cwd=root,
+        module_file=init,
+        find_distribution=_finder(dist_info),
+        resolve=lambda _cwd: _outside_git(tmp_path),
+        runner=_clean_git(root),
+    )
+
+
+@pytest.mark.parametrize("cause", ["record_mismatch", "record_file_missing", "unrecorded_file"])
+def test_false_check_cause_is_not_an_unknown_reason(tmp_path: Path, cause: str) -> None:
+    """Test 33. A check that RAN AND FAILED is not unknown, and says why where it refuses.
+
+    Invariant I1 (``M5l-030``): ``unknown_reasons`` holds causes of unknown
+    values only. Every other fact here is known and accepting, so nothing is
+    unknown and the field must be empty; the failed check's cause is named
+    beside its predicate in ``refusal_reasons`` instead.
+
+    MUTATION m25: route a failed check's cause into ``unknown_reasons``.
+    MUTATION m26: drop ``code_intact``'s cause from ``refusal_reasons``.
+    """
+    facts = _record_case(tmp_path, cause)
+
+    assert facts.code_intact is False
+    assert facts.unknown_reasons == ()
+    assert facts.log_fields()["unknown_reasons"] == "none"
+    assert facts.refusal_reasons == ("code_intact=false", f"code_intact_cause={cause}")
+
+
+def _dirty_case(tmp_path: Path) -> Provenance:
+    root = _checkout(tmp_path)
+    return _collect(tmp_path, git=_clean_git(root, status=b" M config.yaml\0"))
+
+
+def _timeout_case(tmp_path: Path) -> Provenance:
+    root = _checkout(tmp_path)
+    git = _clean_git(root)
+    git.outcomes["status"] = GitUnknown("git_timeout")
+    return _collect(tmp_path, git=git)
+
+
+def _mismatch_case(tmp_path: Path) -> Provenance:
+    root = _checkout(tmp_path)
+    return _collect(tmp_path, git=_clean_git(root, commit=_COMMIT_B))
+
+
+def _outside_case(tmp_path: Path) -> Provenance:
+    config = tmp_path / "elsewhere" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("mode: testnet\n", encoding="utf-8")
+    return _collect(tmp_path, config_path=config)
+
+
+def _untracked_case(tmp_path: Path) -> Provenance:
+    root = _checkout(tmp_path)
+    git = _clean_git(root)
+    git.outcomes["ls-files"] = GitOutput(b"")
+    return _collect(tmp_path, git=git)
+
+
+def _no_digest_case(tmp_path: Path) -> Provenance:
+    root = _checkout(tmp_path)
+    dist_info, init = _site(tmp_path / "site", direct_url=_vcs())
+    return collect_provenance(
+        root / "config.yaml",
+        None,
+        cwd=root,
+        module_file=init,
+        find_distribution=_finder(dist_info),
+        resolve=lambda _cwd: _outside_git(tmp_path),
+        runner=_clean_git(root),
+    )
+
+
+def _editable_case(tmp_path: Path) -> Provenance:
+    source = tmp_path / "src" / "trading_bot" / "__init__.py"
+    source.parent.mkdir(parents=True)
+    source.write_bytes(_PACKAGE["trading_bot/__init__.py"])
+    dist_info, _init = _site(
+        tmp_path / "editable_site",
+        direct_url={"url": "file:///src", "dir_info": {"editable": True}},
+        files={},
+    )
+    return _collect(tmp_path, module_file=source, find=_finder(dist_info))
+
+
+def _shadowed_case(tmp_path: Path) -> Provenance:
+    shadow = tmp_path / "shadow" / "trading_bot" / "__init__.py"
+    shadow.parent.mkdir(parents=True)
+    shadow.write_bytes(_PACKAGE["trading_bot/__init__.py"])
+    return _collect(tmp_path, module_file=shadow)
+
+
+_REFUSING_CASES: dict[str, tuple[Callable[[Path], Provenance], str, str]] = {
+    "editable": (_editable_case, "install_kind=editable", "editable_install"),
+    "shadowed": (_shadowed_case, "install_kind=unknown", "shadowed"),
+    "record_mismatch": (
+        lambda p: _record_case(p, "record_mismatch"),
+        "code_intact=false",
+        "record_mismatch",
+    ),
+    "record_file_missing": (
+        lambda p: _record_case(p, "record_file_missing"),
+        "code_intact=false",
+        "record_file_missing",
+    ),
+    "unrecorded_file": (
+        lambda p: _record_case(p, "unrecorded_file"),
+        "code_intact=false",
+        "unrecorded_file",
+    ),
+    "record_unhashed": (
+        lambda p: _record_case(p, "record_unhashed"),
+        "code_intact=unknown",
+        "record_unhashed",
+    ),
+    "dirty": (_dirty_case, "checkout_dirty=true", "uncommitted_changes"),
+    "git_timeout": (_timeout_case, "checkout_dirty=unknown", "git_timeout"),
+    "commit_mismatch": (_mismatch_case, "commits_agree=false", "commit_mismatch"),
+    "config_outside": (_outside_case, "config_tracked=false", "config_outside_checkout"),
+    "config_untracked": (_untracked_case, "config_tracked=false", "config_untracked"),
+    "no_digest": (_no_digest_case, "config_sha256=unknown", "config_sha256_unknown"),
+}
+
+
+@pytest.mark.parametrize("case", list(_REFUSING_CASES))
+def test_every_refusal_names_its_cause(tmp_path: Path, case: str) -> None:
+    """Test 34. Every refusing predicate is followed by its cause (invariant I2, ``M5l-030``).
+
+    Each case drives one refusing predicate through the real collector and
+    asserts its cause. Then EVERY predicate the verdict carries -- including
+    the ones a case refuses on incidentally, such as an editable install's
+    unknown ``code_intact`` -- must be followed immediately by a
+    ``<field>_cause=`` entry.
+
+    MUTATION m26: drop ``code_intact``'s cause. Every case where
+    ``code_intact`` refuses fails, incidentally or not.
+    """
+    build, predicate, cause = _REFUSING_CASES[case]
+    facts = build(tmp_path)
+    reasons = list(facts.refusal_reasons)
+    field = predicate.split("=", 1)[0]
+
+    assert facts.accepted is False
+    assert predicate in reasons
+    assert f"{field}_cause={cause}" in reasons
+    predicates = [r for r in reasons if "_cause=" not in r]
+    assert len(predicates) * 2 == len(reasons)
+    for index, entry in enumerate(reasons):
+        if "_cause=" not in entry:
+            assert index + 1 < len(reasons)
+            assert reasons[index + 1].startswith(f"{entry.split('=', 1)[0]}_cause=")
+
+
 def test_missing_direct_url_is_unknown_with_reason(tmp_path: Path) -> None:
     """Test 30. No ``direct_url.json`` -- the repository's ``src`` on ``sys.path`` (S0.4).
 
