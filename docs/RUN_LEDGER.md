@@ -1726,6 +1726,12 @@ re-masks ATR to NaN long after warmup"* (`config/models.py`). That is true of
 a NaN value in the series and not of a missed bar, which leaves no NaN
 (`M5l-064`).
 
+> **ANNOTATED AT M5l (P68, C16): THE REFUSAL TEXT NO LONGER SAYS THAT.** C16
+> replaced it with *"A lost bar leaves no NaN to warn anyone: the indicators
+> count rows, not time, so SMA and ATR silently span the gap."* It also
+> replaced *"is missed"* with the queue, which holds a late bar until it is
+> handled (`M5l-073`). **What survives:** everything this section measured.
+
 **The delay from the library's first error to the bot's warning is 229 s**,
 from `13:53:03Z` to `13:56:52Z`. MEASURED.
 - **Its cause in code.** The library logs each transient error itself and

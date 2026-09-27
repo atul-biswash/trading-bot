@@ -761,23 +761,28 @@ class AppConfig(_Model):
         settlement = exiting * reconcile_s
         budget = _exact_seconds(_PIPELINE_HEADROOM) * t_min_s
 
-        if dispatch + reconcile + settlement <= budget:
+        total = dispatch + reconcile + settlement
+        if total <= budget:
             return self
 
+        # Every figure is printed EXACTLY, never rounded: with `:.1f` a total a
+        # hair over the budget read "30.0s ... budget 30.0s" (`M5l-065`).
         shortest = min(enabled, key=lambda pair: timeframe_to_ms(pair.timeframe))
         raise ValueError(
-            f"risk.dispatch_deadline_s = {self.risk.dispatch_deadline_s} x {p_sim} pair(s) "
-            f"that can close simultaneously, plus risk.reconcile_deadline_s = "
-            f"{self.risk.reconcile_deadline_s} x limits.max_open_positions = {n_max}, "
-            f"plus settlement at risk.reconcile_deadline_s = "
-            f"{self.risk.reconcile_deadline_s} x {exiting} position(s) that can exit on one "
-            f"bar, is {dispatch + reconcile + settlement:.1f}s. That exceeds "
+            f"risk.dispatch_deadline_s = {dispatch_s} x {p_sim} pair(s) that can close "
+            f"simultaneously = {dispatch}s, plus risk.reconcile_deadline_s = {reconcile_s} x "
+            f"limits.max_open_positions = {n_max} = {reconcile}s, plus settlement at "
+            f"risk.reconcile_deadline_s = {reconcile_s} x {exiting} position(s) that can exit on "
+            f"one bar = {settlement}s, is {total}s. That exceeds "
             f"{_PIPELINE_HEADROOM:.0%} of the shortest enabled timeframe "
-            f"({shortest.symbol}/{shortest.timeframe} = {t_min_s:.0f}s, budget {budget:.1f}s).\n"
+            f"({shortest.symbol}/{shortest.timeframe} = {t_min_s}s, budget {budget}s).\n"
             "\n"
             "The signal handler runs inline on the candle pipeline, so a bar closing\n"
-            "while it is still working is missed and never backfilled -- and a gap\n"
-            "re-masks ATR to NaN long after warmup, disabling ATR stops on that pair.\n"
+            "while it is still working waits in the stream's queue and is handled late;\n"
+            "if the wait lasts long enough for that queue to fill, the socket is torn\n"
+            "down and every bar still queued is lost and never backfilled. A lost bar\n"
+            "leaves no NaN to warn anyone: the indicators count rows, not time, so SMA\n"
+            "and ATR silently span the gap.\n"
             "\n"
             "Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower\n"
             "risk.limits.max_open_positions, enable fewer pairs, or configure a longer\n"

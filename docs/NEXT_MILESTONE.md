@@ -274,6 +274,12 @@ validator, and an edit there arms both items.
 >    > `f2182a6`; now 0 are. `test_every_exact_boundary_configuration_is_accepted`
 >    > pins it. **What survives:** *"prints one decimal"*, since the message
 >    > still renders `:.1f` until C16.
+>
+>    > **ANNOTATED AT M5l (P68, C16): ITEM 3 IS RESOLVED.** *"prints one
+>    > decimal"* is no longer true, and neither is the note above that it
+>    > survives. The refusal now prints each duration, each product, the
+>    > total and the budget exactly, for example *"is 30.02s"*.
+>    > `test_the_refusal_prints_the_exact_sum_and_its_terms` pins it.
 > 4. **`M5l-049`'s stale docstring still stands.** `ReconciliationBudget.from_config`
 >    in `execution/reconciliation_driver.py` says *"splitting ``T_recon`` into a
 >    per-attempt share would be a tail claim that the only samples in existence

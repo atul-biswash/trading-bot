@@ -661,6 +661,41 @@ class TestDispatchBudgetCoherence:
                 risk=RiskConfig(dispatch_deadline_s=9.01, reconcile_deadline_s=2.4),
             )
 
+    def test_the_refusal_prints_the_exact_sum_and_its_terms(self) -> None:
+        """`18.02 + 7.2 + 4.8 = 30.02`, printed as 30.02, never rounded to 30.0.
+
+        Rounded, this refusal read "is 30.0s ... budget 30.0s", a total that
+        looked equal to the budget it exceeded (`M5l-065`).
+
+        MUTATION: restore `:.1f` on the total -- the message reads "is 30.0s"
+        and the first assertion fails.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m")],
+                risk=RiskConfig(dispatch_deadline_s=9.01, reconcile_deadline_s=2.4),
+            )
+        message = str(excinfo.value)
+        assert "is 30.02s. That exceeds" in message
+        assert "= 18.02s" in message
+        assert "= 7.2s" in message
+        assert "= 4.8s" in message
+        assert "budget 30.0s" in message
+
+    def test_the_refusal_says_what_a_lost_bar_does(self) -> None:
+        """A late bar waits in the queue; a lost one leaves no NaN (`M5l-063`).
+
+        The sentence this replaced said a late bar "is missed", and that a gap
+        re-masks ATR to NaN. The first is wrong because the bar is queued and
+        handled late (`M5l-073`). The second is wrong because the indicators
+        count rows and a missing bar leaves no NaN row (`M5l-064`).
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")])
+        message = str(excinfo.value)
+        assert "missed" not in message
+        assert "row" in message
+
 
 # --------------------------------------------------------------------------
 # Assignment guard: config is loaded once and never mutated

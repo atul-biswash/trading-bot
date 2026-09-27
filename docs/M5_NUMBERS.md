@@ -1127,3 +1127,28 @@ have been emitted for its own numbers.
 > **What survives:** the choice of a breaching example, the middle paragraph
 > word for word, and the reason the example was rewritten in the first place.
 > The block above stays as the M5a text it was.
+
+> **ANNOTATED AT M5l (P68, C16): THE M5k BLOCK ABOVE IS NO LONGER WHAT THE
+> CODE EMITS, AND ITS "the middle paragraph word for word" NO LONGER
+> SURVIVES.** C16 prints every term and the total exactly, never rounded
+> (`M5l-065`). It also replaced the middle paragraph, whose *"is missed"* and
+> *"a gap re-masks ATR to NaN"* were both wrong (`M5l-073`, `M5l-064`).
+> Rendered through `AppConfig` for the same inputs, and not transcribed:
+>
+> ```
+> risk.dispatch_deadline_s = 11.0 x 2 pair(s) that can close simultaneously = 22.0s, plus risk.reconcile_deadline_s = 3.0 x limits.max_open_positions = 3 = 9.0s, plus settlement at risk.reconcile_deadline_s = 3.0 x 2 position(s) that can exit on one bar = 6.0s, is 37.0s. That exceeds 50% of the shortest enabled timeframe (BTCUSDT/1m = 60s, budget 30.0s).
+>
+> The signal handler runs inline on the candle pipeline, so a bar closing
+> while it is still working waits in the stream's queue and is handled late;
+> if the wait lasts long enough for that queue to fill, the socket is torn
+> down and every bar still queued is lost and never backfilled. A lost bar
+> leaves no NaN to warn anyone: the indicators count rows, not time, so SMA
+> and ATR silently span the gap.
+>
+> Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower
+> risk.limits.max_open_positions, enable fewer pairs, or configure a longer
+> shortest timeframe in config.yaml.
+> ```
+>
+> **What survives:** the breaching example, its total of 37.0 s, the
+> remedies word for word, and both blocks above as the text they were.
