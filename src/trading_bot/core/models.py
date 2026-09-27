@@ -913,11 +913,13 @@ class Position(BaseModel):
 
         **This is the first deliberate use of the ordering ruled unprovable
         above.** That ruling prefers "never reconciled" to "reconciled but
-        stale" for a write interrupted between the two fields; this method
-        produces exactly that state on purpose and durably, for a position
-        whose protective legs could not all be resolved. The state the ordering
-        was chosen to favour therefore becomes observable -- and testable --
-        for the first time.
+        stale" for a write interrupted between the two fields. For a position
+        never stamped, this method produces exactly that state, on purpose and
+        durably, when its protective legs could not all be resolved. The state
+        the ordering was chosen to favour therefore becomes observable -- and
+        testable -- for the first time. For a position stamped before, it
+        leaves the earlier stamp, which can only understate how current the
+        new ``protection`` is.
 
         Note precisely what that does and does not buy, because the tempting
         over-statement is one notch stronger than the truth: the *ordering*
@@ -931,12 +933,19 @@ class Position(BaseModel):
         ``record_reconciliation(..., stamp=False)`` learns nothing about why.
         This name says what happened, and greps as the deliberate case.
 
-        **The consequence is the point, not a side effect.** An unstamped
-        position is maximally stale by every reader of
-        ``last_reconciled_at``, is always due, and sorts first -- so the next
-        pass visits it before anything else and the reservation fires early
-        enough to leave a query for it. The stamp is the state; nothing else
-        has to remember.
+        **The consequence is the point, not a side effect, and it depends on
+        whether the position was ever stamped** (``M5l-076``).
+        - A position never stamped keeps ``None``. It is maximally stale by
+          every reader of ``last_reconciled_at``, always due, and sorted
+          first, so the next pass visits it before anything else and the
+          reservation fires early enough to leave a query for it.
+        - A position stamped by an earlier pass keeps that stamp, and it goes
+          on ageing. It is due again once older than the dedup interval, and
+          it sorts by that old stamp: ahead of every position a pass has since
+          refreshed, but behind any unstamped one. The staleness guard reads
+          it as stale once it is older than the bound.
+
+        The stamp is the state; nothing else has to remember.
         """
         self.protection = protection
 

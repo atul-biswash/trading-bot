@@ -287,6 +287,14 @@ validator, and an edit there arms both items.
 >    P59's 300 samples (`M5l-039`). It is in `src/`, which no M5l documents
 >    commit may edit.
 >
+>    > **ANNOTATED AT M5l (P68, C18): ITEM 4 IS RESOLVED.** *"still stands"*
+>    > is no longer true. The docstring now reads *"a tail claim the samples
+>    > cannot support: P59's 300 readings came from one session on one host
+>    > (``M5l-039``, maximum 0.467 s)"*. C18 also fixed the same claim in
+>    > `RiskManager._stale_positions` (`M5l-070`), the status of
+>    > `reconcile_deadline_s` (`M5l-071`), and `record_partial_reconciliation`'s
+>    > account of an old stamp (`M5l-076`).
+>
 > **One sentence above went stale at `9f364dd`, and is annotated here:**
 > *"The committed `config.yaml` enables BTCUSDT on 1m alone"*. The committed
 > config also enables ETHUSDT on 5m. Its conclusion survives: the shortest

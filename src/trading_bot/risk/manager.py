@@ -680,11 +680,17 @@ class RiskManager(RiskManagerPort):
 
         **MECHANISM WITHOUT A MEASURED NUMBER.** The bound is
         ``risk.max_position_staleness_s``, whose status is **PLACEHOLDER -- NOT
-        MEASURED** and is untouched here. Its floor is ``p99(T_recon) +
-        T_min``, ``T_recon`` is itself a placeholder, and the only latency
-        samples in existence are six bimodal readings that bound nothing. So
-        this is enforced arithmetic on an unmeasured threshold -- strictly
-        better than an unenforced one, strictly worse than a measured one.
+        MEASURED** and is untouched here. ``T_recon`` is measured for one
+        session only: P59's 300 readings came from one session on one host
+        (``M5l-039``, maximum 0.467 s), which says nothing about another day.
+        What a healthy feed lets this guard see is derived rather than
+        measured: it samples the stamp only on a candle, after the reconciler
+        has run on it, so the age it reads is at most one shortest bar plus
+        the time from that candle's close to this clock read, plus one bar
+        for each consecutive bar the position was due and not refreshed
+        (``M5l-066``). The floor that implies is unruled. So this is
+        enforced arithmetic on an unmeasured threshold -- strictly better
+        than an unenforced one, strictly worse than a measured one.
         """
         bound = self._config.max_position_staleness_s
         stale: list[str] = []

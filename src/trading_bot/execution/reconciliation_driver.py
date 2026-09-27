@@ -207,8 +207,10 @@ class ReconciliationBudget:
         **``attempts = 1`` is FORCED, and what makes it safe is different from
         what makes it forced.** Forced: ``attempts x timeout_s <= T_recon``
         admits exactly one attempt at the full deadline, and splitting
-        ``T_recon`` into a per-attempt share would be a tail claim that the only
-        samples in existence -- six, bimodal, from one host -- cannot support.
+        ``T_recon`` into a per-attempt share would be a tail claim the samples
+        cannot support: P59's 300 readings came from one session on one host
+        (``M5l-039``, maximum 0.467 s), which says nothing about a second
+        attempt's share on another day.
         Safe: **the retry is not removed, it moves to the CADENCE.** A transient
         connection failure leaves the position unstamped, so it sorts first and
         is re-read on the next bar. The retry still exists; it is one bar long

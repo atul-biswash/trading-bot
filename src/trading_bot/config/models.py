@@ -360,7 +360,11 @@ class RiskConfig(_Model):
     #: a single slow read so it cannot consume the reserved floor and starve the
     #: rest of the pass.
     #:
-    #: **PLACEHOLDER -- NOT MEASURED.**
+    #: **MEASURED, ONE SESSION** (``M5l-039``): P59 timed 300 of the three
+    #: calls reconciliation makes, in one session on one host, and the maximum
+    #: was 0.467 s. The default here is 3.0 s. The committed ``config.yaml``
+    #: sets 2.3 s, kept by the project owner on that data. One session says
+    #: nothing about another day's tail.
     reconcile_deadline_s: float = Field(3.0, gt=0)
 
     @model_validator(mode="after")
