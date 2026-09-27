@@ -322,7 +322,7 @@ src/trading_bot/
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
-  utils/         logger · helpers · instance_lock
+  utils/         logger · helpers · instance_lock · provenance
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py
