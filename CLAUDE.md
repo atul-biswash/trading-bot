@@ -2022,6 +2022,19 @@ data.
   > supervised run has yet been made from a deployment clone, and steps 4 to 8
   > above were added at P61 from P59's measurements.
 
+  > **ANNOTATED AT M5l (P63): *"no supervised run has yet been made from a
+  > deployment clone"* IS FALSE, AND WAS FALSE WHEN WRITTEN.** The block above
+  > was committed at `2026-09-27T13:02:37Z`. By then two `run`s had already
+  > been made from a deployment clone at `9f364dd`, before C4: pid 20112,
+  > `03:48:10Z` to `03:48:26Z`, and pid 12808, `03:50:32Z` to `04:16:20Z`,
+  > which placed no order. Nobody recorded them, and they were read only at P62
+  > (`M5l-050`). That clone is retired, and `docs/RUN_LEDGER.md` section 22
+  > records it. Then M5l's evidence run started from a fresh clone at `06089d5`:
+  > pid 21520 at `2026-09-27T13:30:56Z`, whose start `docs/RUN_LEDGER.md`
+  > section 21 records. **What survives:** steps 4 to 8 above, added at P61
+  > from P59's measurements. The evidence run is the first to follow all of
+  > them.
+
 ---
 
 ## Quality gates — hard zero

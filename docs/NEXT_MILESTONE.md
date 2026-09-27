@@ -26,6 +26,15 @@ answers, against the unobserved-surface table below, which of the 22 log
 events and the 8 `RefusalStage` members never observed at M5k's close it
 exercises. No such run has started as this is written.
 
+> **ANNOTATED AT M5l (P63): *"No such run has started as this is written"* IS
+> NO LONGER TRUE.** It was true when `583e480` wrote it. The run started at
+> `2026-09-27T13:30:56Z`: pid 21520, from `F:\trading bot\deploy\06089d5e01cb`
+> at `06089d5`, and `docs/RUN_LEDGER.md` section 21 records its start. Two
+> earlier runs, pids 20112 and 12808, came from a deployment clone at
+> `9f364dd`, before C4, with no start record (`M5l-050`); section 22 records
+> them. **What survives:** the rest of this paragraph. The census against the
+> table below has not been taken.
+
 ---
 
 Struck and repaired at M5k's rotation, in its first part. Every item below was
@@ -137,6 +146,20 @@ through it yet, so `boot_provenance` is absent from every capture. The
 condition that read *"whoever next edits `_BANNER` or the startup block of
 `main` in `src/trading_bot/main.py`"* fired at `f8898de`, was satisfied
 there, and is struck.
+
+> **ANNOTATED AT M5l (P63): THE HEADING'S *"no run has exercised it"* AND
+> *"no run has booted through it yet"* ARE NO LONGER TRUE.** Both were true
+> when `5cac7ae` wrote them. The provenance check has now accepted six boots
+> from deployment clones:
+> - at `9f364dd`, before C4: pids 22740, 20112 and 12808 (`M5l-050`,
+>   `docs/RUN_LEDGER.md` section 22);
+> - at `06089d5`: the dry boot pid 22088 and the evidence run pid 21520
+>   (section 21);
+> - plus P59's scratch-clone boot at `1f4a718` (`M5l-041`).
+>
+> **What survives:** *"`boot_provenance` is absent from every capture"*. No
+> capture has been taken since those boots, and the lines are in the clones'
+> own logs, not in any capture.
 
 ### P-2. Staleness against the reconciliation dedup interval
 
