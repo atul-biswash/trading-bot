@@ -260,6 +260,57 @@ async def test_a_fresh_stamp_is_not_re_read() -> None:
     assert position.last_reconciled_at == NOW - timedelta(seconds=10)
 
 
+async def test_a_stamp_exactly_one_interval_old_is_not_due() -> None:
+    """The comparison is STRICT: a stamp exactly `dedup_interval` old waits a bar.
+
+    That strictness is why passes over one position run one or two bars
+    apart, as measured at M5l's evidence run: 21 at one bar, 33 at two
+    (`M5l-056`). Before this test, every stamp in this file sat far from the
+    boundary, so `>` could become `>=` and fail nothing (`M5l-069`).
+
+    MUTATION: `>` -> `>=` -- the position becomes due, it is enumerated, and
+    the first assertion fails.
+    """
+    position = _position("BTCUSDT", stamp=NOW - DEDUP)
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+
+    results = await reconcile_open_positions(
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == []
+    assert results == ()
+
+
+async def test_a_stamp_one_microsecond_past_the_interval_is_due() -> None:
+    """The other side of the same boundary: one microsecond older is due.
+
+    Abstains from the `>` -> `>=` mutation by design, since both operators
+    make it due. What it pins is that the boundary sits AT the interval and
+    not a tick later.
+    """
+    position = _position("BTCUSDT", stamp=NOW - DEDUP - timedelta(microseconds=1))
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+
+    await reconcile_open_positions(
+        portfolio=_portfolio(position),
+        client=client,
+        now=NOW,
+        dedup_interval=DEDUP,
+        max_calls=3,
+        timeout_s=None,
+        attempts=None,
+    )
+
+    assert client.asked == ["BTCUSDT"]
+
+
 async def test_a_never_reconciled_position_is_read() -> None:
     """`None` re-reads. A DEDUP decision only: one call, and it cannot be wrong.
     What `None` means for the STALENESS REFUSAL is a separate open ruling and
