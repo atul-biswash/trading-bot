@@ -233,10 +233,62 @@ or one derived from the timeframe -- is P-2's design question.**
 This is U7's site, deliberately: the check belongs beside the coherence
 validator, and an edit there arms both items.
 
+> **ADDED AT M5l (P65): FOUR FACTS FOR P-2's DESIGN, THE SECOND OF THEM FOR
+> THE OWNER'S RULING.**
+>
+> 1. **`M5l-056`: the strict `>` in `_is_due`.** In
+>    `execution/reconciliation.py`: `return now - position.last_reconciled_at >
+>    dedup_interval`. MEASURED at M5l's evidence run, with a position open and
+>    a 1m shortest timeframe: inter-pass gaps were about 60 s 21 times and
+>    about 120 s 33 times. So in practice a position is re-read up to two
+>    dedup intervals apart. A staleness bound between one and two intervals
+>    refuses entries on a healthy system too, so *"at or below the dedup
+>    interval"* is not the whole unsafe range. The same run's outage added one
+>    gap of 300 s (`M5l-055`, P-3l).
+> 2. **The locked decision, contradicted by measurement since M5g, is for the
+>    owner's ruling.** `CLAUDE.md`, *Fills are observed by polling*:
+>    *"Reconciliation runs over **every** open position on **any** pair's
+>    candle, so staleness is bounded by the *shortest* configured timeframe
+>    rather than the slowest position's."* Two measurements contradict it: run
+>    2's gaps of 119 to 121 s (`docs/M5_NUMBERS.md` §4) and `M5l-056`'s. The
+>    locked bullet after it already says *"The shortest timeframe is a floor,
+>    not a bound"*, but it names latency, skipped budget and dropped bars as
+>    the causes, not the dedup comparison. Whether to annotate the locked
+>    text, change `>` to `>=`, or dedup against a shorter interval is the
+>    owner's call.
+> 3. **The coherence validator compares floats and prints one decimal.** In
+>    `config/models.py` it tests `if dispatch + reconcile + settlement <=
+>    budget:` with every term a `float` product, and the refusal prints `{dispatch
+>    + reconcile + settlement:.1f}s` against `budget {budget:.1f}s`.
+>    MEASURED through `AppConfig` on the committed config (`M5l-065`): of 120
+>    configurations whose total is exactly 30.0 s in decimal, 9 are refused,
+>    each with a message reading *"is 30.0s. That exceeds 50% … budget
+>    30.0s"*. D = 9.4 with T_recon = 2.24 is one. The committed config, at
+>    29.5 s, is unaffected. The coherence block is this item's arming site.
+> 4. **`M5l-049`'s stale docstring still stands.** `ReconciliationBudget.from_config`
+>    in `execution/reconciliation_driver.py` says *"splitting ``T_recon`` into a
+>    per-attempt share would be a tail claim that the only samples in existence
+>    -- six, bimodal, from one host -- cannot support."* It has been false since
+>    P59's 300 samples (`M5l-039`). It is in `src/`, which no M5l documents
+>    commit may edit.
+>
+> **One sentence above went stale at `9f364dd`, and is annotated here:**
+> *"The committed `config.yaml` enables BTCUSDT on 1m alone"*. The committed
+> config also enables ETHUSDT on 5m. Its conclusion survives: the shortest
+> enabled timeframe is still 1m, so the default passes.
+
 ### P-3. The silent and unhedged failure modes catalogued in M5k
 
 Each is its own carried item with its own condition, re-verified by content
 at `4544b3a`.
+
+> **ANNOTATED AT M5l (P65): TRUE OF P-3a TO P-3j, NOT OF P-3k OR P-3l.** Both
+> were catalogued at M5l, not M5k. P-3k was added at `06089d5` and P-3l by
+> the commit that writes this annotation, each against the tree of its own
+> commit. Neither was re-verified at `4544b3a`, which predates both. P-3k
+> should have carried this note when it landed. **What survives:** the
+> heading's scope for P-3a to P-3j, and the rule that each item carries its
+> own condition.
 
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
@@ -360,6 +412,29 @@ snapshots; the holding and its exclusion were MEASURED in that instance
 (`M5l-036`). No protective fill in such a window has been observed.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
+
+#### P-3l. A market-data outage stops reconciliation (`M5l-055`)
+
+A market-data outage stops reconciliation, because passes are driven by candle
+arrival: at M5l's evidence run no pass ran for 300 s against a 180 s staleness
+bound while list 333832 was open, and no line reported it (M5l-055).
+Venue-side protection stayed in force; what is lost is the bot's knowledge of
+the position.
+
+**Not a gate on live trading**, by the project owner's ruling at P65.
+
+What the outage also cost, measured at P65 and recorded in
+`docs/RUN_LEDGER.md` §23:
+- The bot's disconnect warning came 229 s after the library's first error,
+  because its consumer read nothing in between (`M5l-060`).
+- A queue overflow discards every message queued behind the first error
+  (`M5l-061`).
+- Three BTCUSDT/1m bars and one ETHUSDT/5m bar were never received and never
+  backfilled (`M5l-062`).
+- The row-count SMA(50) behind the next death cross spanned the gap
+  undetected (`M5l-063`).
+
+*Arming condition:* **whoever next changes what triggers a reconciliation pass -- `ReconciliationDriver.__call__` in `execution/reconciliation_driver.py`, registered by `provider.on_candle` in `live_system` in `engine/modes.py` -- or the market-data reconnect path, `_run` in `exchange/websocket_client.py`.**
 
 ---
 

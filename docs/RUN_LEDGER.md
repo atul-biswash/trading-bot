@@ -1691,6 +1691,67 @@ arrivals are about 60 s apart either way, so roughly half fall on the "not
 yet due" side and the pass waits a second bar. That mechanism is REASONED from
 the code; the distribution is MEASURED.
 
+### The outage, measured further at P65 (`M5l-060` to `M5l-064`)
+
+Read from this section's capture and from the code: the tree at `ac07ebb`,
+and python-binance 1.0.37's `binance/ws/reconnecting_websocket.py`.
+
+**The bars that closed between `13:52:01Z` and `13:57:01Z`:**
+
+| pair | bar close | state | basis |
+|---|---|---|---|
+| BTCUSDT/1m | `13:52:59.999Z` | UNMEASURED | It would arrive before the `13:53:03Z` error. If dispatched, the position was not yet due (last stamp `13:52:01Z`, strict `>` 60 s) and the strategy signalled nothing, so it leaves no line either way. |
+| BTCUSDT/1m | `13:53:59.999Z`, `13:54:59.999Z`, `13:55:59.999Z` | never received, never backfilled | Any of them, dispatched, would find the position due and log a pass; none is logged before `13:57:01Z`. The provider's docstring: *"Gaps are not backfilled."* |
+| ETHUSDT/5m | `13:54:59.999Z` | never received, never backfilled | the same basis |
+| BTCUSDT/1m | `13:56:59.999Z` | received live | the `13:57:01Z` pass; no other bar closes that minute |
+
+REASONED from the code and from the pass lines on each side (`M5l-062`).
+There is also no pass at `13:56:52Z`, when the consumer resumed, so it
+dispatched no closed candle before it raised.
+
+**ATR was not re-masked, because it was not computed.** The configuration's
+stops are `percent`, and the ATR bridge runs only for `stop_loss.type='atr'`
+(`risk/manager.py`, the `ATR_UNAVAILABLE` branch). A missed bar would not have
+re-masked it either:
+- the provider omits the bar's row rather than inserting NaN;
+- `true_range` takes `close.shift(1)`, a row shift, so each range is taken
+  against the previous row's close;
+- `sma` uses `values.rolling(period)`, an integer window, so it counts rows,
+  not time.
+
+**So the SMA(50) behind the `14:30:01Z` death cross that closed list 333832
+spanned the missing bars**: 50 rows over about 53 or 54 minutes, and nothing
+detected it (`M5l-063`). The coherence validator's refusal text says *"a gap
+re-masks ATR to NaN long after warmup"* (`config/models.py`). That is true of
+a NaN value in the series and not of a missed bar, which leaves no NaN
+(`M5l-064`).
+
+**The delay from the library's first error to the bot's warning is 229 s**,
+from `13:53:03Z` to `13:56:52Z`. MEASURED.
+- **Its cause in code.** The library logs each transient error itself and
+  pushes an error dict onto the queue its kline messages share. The branch is
+  commented *"reports errors and continue loop"*. The bot learns of a
+  disconnect only when `_run` in `exchange/websocket_client.py` dequeues such
+  a dict, and it raises on the first one it reads.
+- **What the warning shows.** It names `ConnectionClosedError`, which is the
+  dict pushed at `13:53:03Z`. So the consumer read nothing from `13:53:03Z`
+  to `13:56:52Z` (REASONED).
+- **What held it is UNMEASURED.** The library logged one failed connect, at
+  `13:53:04Z`, and no further attempt, though its retry schedule logs every
+  failure. By `13:56:52Z` it had enqueued 100 messages, so it had reconnected
+  and was receiving while the consumer did not drain (`M5l-060`).
+
+**What `BinanceWebsocketQueueOverflow` drops**, from the library source:
+1. The read loop raises it when a received message finds the queue at 100, so
+   that message is never enqueued.
+2. The exception falls to the loop's broad handler, commented *"reports errors
+   and break the loop"*. It logs `Unknown exception`, pushes one error dict and
+   breaks, so nothing more is read from that socket.
+3. The bot then dequeues in order, raises on the first error dict it meets and
+   leaves the socket's context. Every message queued behind that dict is
+   discarded with the socket, and the provider backfills none of them
+   (`M5l-061`).
+
 ### The venue cross-check (GET only)
 
 Read after the run stopped, from the clone's root with the clone's
