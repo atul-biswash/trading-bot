@@ -26,7 +26,7 @@ trading:
       enabled: true
     - symbol: ETHUSDT
       timeframe: 5m
-      enabled: false
+      enabled: true
 
 data:
   # Market-data provider (see data/market_data.py). At startup each enabled pair
@@ -156,7 +156,7 @@ risk:
                                     # production -- which is what M5h's C4b logs.
                                     # No timing figure is written here, because
                                     # none has been observed.
-  reconcile_deadline_s: 3.0         # PLACEHOLDER -- NOT MEASURED. One order-list
+  reconcile_deadline_s: 2.3         # PLACEHOLDER -- NOT MEASURED. One order-list
                                     # query, so a slow read cannot starve the pass.
 
 backtesting:
