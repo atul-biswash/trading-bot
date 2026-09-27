@@ -27,6 +27,18 @@ instruction, and the judgement calls they bear on — whether a document is wron
 whether a leg filled, whether anything should be run again — were reserved at
 the time of writing and remain so.
 
+> **ANNOTATED AT M5l (P63): TWO SENTENCES ABOVE DO NOT DESCRIBE SECTIONS 21
+> AND 22.** *"This file is a record of observations taken from
+> `logs/trading_bot.log` between 2026-07-23 and 2026-09-17"*: section 21's
+> run writes to `F:\trading bot\deploy\06089d5e01cb\logs\trading_bot.log` and
+> section 22's to the retired clone's own log, not to this repository's, and
+> the date range already ended short of sections 15 to 20. *"Every figure in it
+> was produced by a command that is printed beside it"*: section 21's start
+> fields are copied from the run's `boot_provenance` line, as the project
+> owner supplied them, and no command produced them. **What survives:** the
+> file still asserts no rule and corrects no other document, and every other
+> figure in sections 21 and 22 carries its instrument.
+
 ---
 
 ## 2. The artefact and its digest
@@ -1351,3 +1363,129 @@ established here.
 
 The owner's accounts, attributed, beside what the log does and does not show.
 No rule, and no observation promoted beyond what its instrument read.
+
+## 21. M5l's evidence run: the start record
+
+`docs/NEXT_MILESTONE.md`: *"`docs/RUN_LEDGER.md` records its start -- the
+commit, the config's digest and the UTC instant -- before its evidence is
+read."* This section is that record. The deviation below says what was read
+before it was committed.
+
+### The start fields
+
+The project owner's figures, copied from the run's `boot_provenance` line.
+
+| Field | Value |
+|---|---|
+| UTC instant | `2026-09-27T13:30:56Z` |
+| pid | `21520` |
+| code_commit | `06089d5e01cb88f5f4b7b3833d2c87684714ea74` |
+| config_sha256 | `5e75b97a8270e4a7ec503b1adc1d0dd7e78fc537b3213b08c990d518dda0503d` |
+| clone | `F:\trading bot\deploy\06089d5e01cb`, the only unretired deployment clone for this account |
+| log | `F:\trading bot\deploy\06089d5e01cb\logs\trading_bot.log` |
+
+The clone was built at P62 by `CLAUDE.md`'s deployment procedure, steps 1 to
+8, from GitHub at `06089d5`, with its own venv and a VCS install whose
+`direct_url.json` records `commit_id` `06089d5e01cb88f5f4b7b3833d2c87684714ea74`.
+Its log also holds a dry boot of `strategies`, `pid=22088` at
+`2026-09-27T13:24:21Z`, `verdict=accepted`, which placed nothing and is not
+this run. The previous clone was retired first; section 22 records it.
+
+### The store
+
+| Property | Value | Instrument |
+|---|---|---|
+| source | the development tree's `data/state.json` | |
+| source SHA-256 | `A7F459CCC605021DD5CA9F7F70A9A77FE11879646D99B845C8B2919C438377F6` | `Get-FileHash -Algorithm SHA256` |
+| copy in the clone | `data/state.json`, SHA-256 equal to the source | the same |
+| retired development copy | `data/state.json.retired-20260927T132301Z`, same SHA-256 | the same |
+
+The retired clone's store has the same SHA-256, so every store this account
+has had since `2026-09-26T10:03:03Z` held the same bytes.
+
+### The objectives
+
+Quoted from `docs/NEXT_MILESTONE.md`'s evidence-first paragraph, as it stood
+at `06089d5`:
+
+> "**The milestone's shape is EVIDENCE-FIRST.** M5k's code is not shown to have
+> run as committed -- see THE CENTRAL FACT below. So M5l's first run on known
+> code executes from a deployment checkout of a pushed commit, per that
+> doctrine. `docs/RUN_LEDGER.md` records its start -- the commit, the config's
+> digest and the UTC instant -- before its evidence is read. Its census then
+> answers, against the unobserved-surface table below, which of the 22 log
+> events and the 8 `RefusalStage` members never observed at M5k's close it
+> exercises. No such run has started as this is written."
+
+The paragraph names no stop criterion. Its "22 log events" is 23 by the table
+it points to, which counts `boot_provenance` since P-1.
+
+### The deviation
+
+**This record was not committed before the run's log was read.** At about
+`2026-09-27T13:35:37Z`, on the owner's request for a status check, the last
+eight lines of the run's log were read. They held the `BUY` signal on
+BTCUSDT at `13:34:01Z`, the placement of order list `333832`
+(`tb1-BTCUSDT-1790516039999-0-L`), and a `reconciliation_pass` at `13:35:01Z`
+reading `states="active=1"`. The run's `boot_provenance` line was read at the
+same time for its instant. The start fields above come from that boot line
+and are unaffected: the line was written at the run's start and nothing read
+afterwards can change it. No census of the run has been taken.
+
+### What this section is
+
+A start record, and a statement of what was read before it. No rule, and no
+figure from the run's evidence.
+
+## 22. The retired clone's runs, and the owner's manual actions -- RECORDED AFTER THE FACT
+
+Everything here happened before this section was written, and none of it had a
+start record. The runs were read at P62, before the clone was retired.
+
+### The retired clone
+
+| Property | Value | Instrument |
+|---|---|---|
+| path | `F:\trading bot\deploy\bot.retired-20260927T132030Z`, renamed at P62 from `F:\trading bot\deploy\bot` | `Rename-Item`, then `Test-Path` on both names |
+| HEAD | `9f364ddd5391da5cbb63a7bb0e8892bbbe39b3b3`, detached, BEFORE `c2cab79` (C4) | `git -C <clone> rev-parse HEAD` |
+| log SHA-256 | `9D13F525CA44B4B8CFEDC0F287AD98E4099AADE1A17A8831E49263B73450EDE6`, 46 lines, equal before and after the rename | `Get-FileHash -Algorithm SHA256`; `Get-Content` count |
+| store SHA-256 | `A7F459CCC605021DD5CA9F7F70A9A77FE11879646D99B845C8B2919C438377F6` | `Get-FileHash -Algorithm SHA256` |
+
+Every `boot_provenance` line in that log reads `verdict=accepted
+install_kind=vcs code_commit=9f364ddd5391da5cbb63a7bb0e8892bbbe39b3b3
+code_intact=true code_files_checked=68 checkout_dirty=false
+commits_agree=true
+config_sha256=5e75b97a8270e4a7ec503b1adc1d0dd7e78fc537b3213b08c990d518dda0503d
+config_tracked=true`.
+
+### The runs in its log
+
+| pid | first line | last line | what it did |
+|---|---|---|---|
+| 22740 | `2026-09-27T03:47:17Z` | `2026-09-27T03:47:17Z` | a `boot_provenance` line only |
+| 20112 | `2026-09-27T03:48:09Z` | `2026-09-27T03:48:26Z` | `run`; at `03:48:14Z` `boot_symbol_blocked` for BTCUSDT, `order_list_id=317428`, `list_order_status=EXECUTING`; `Received SIGINT` at `03:48:24Z`, `engine_stopped clean_shutdown=True` |
+| 12808 | `2026-09-27T03:50:32Z` | `2026-09-27T04:16:20Z` | `run`; at `03:50:35Z` 0.02151000 BTC found as an unmanaged holding; a BTCUSDT `BUY` refused at `unmanaged_holding` at `04:10:00Z`; no order placed; `Received SIGINT` at `04:16:18Z`, `engine_stopped clean_shutdown=True` |
+
+Instrument: `Select-String -Pattern 'pid=<pid> '` over the retired log, first
+and last match. The first line of pids 20112 and 12808 is the banner, one
+second before their `boot_provenance` line.
+
+### The owner's manual actions
+
+**The cancel of list 317428's legs at `2026-09-27T03:50:23.068Z`** (`M5l-044`).
+The retired log brackets it from presence: the list was `EXECUTING` at
+`03:48:14Z` (pid 20112), no bot process wrote between `03:48:26Z` and
+`03:50:32Z`, and at `03:50:35Z` pid 12808 found the base as an unmanaged
+holding. **Who cancelled it, and with what tool, is not confirmed by the owner
+as of this section**, and nothing here attributes it.
+
+**The sale, orderId 6943472**, which the owner attributed at P61 to
+`scripts/clear_testnet_holdings.py --symbol BTCUSDT --execute`. Read at P62 by
+`get_order` and `get_my_trades`: `SELL` `MARKET`, `FILLED`, 0.02151000 at
+`2026-09-27T12:51:43.253Z`, client id prefixed `x-HNA2TXFJ`, one fill, trade
+1822758, price 84,971.00, quote 1,827.72621000, commission 0.00000000 `USDT`.
+
+### What this section is
+
+Runs and actions recorded after they happened, with the instrument beside each
+figure. No rule, and no attribution the owner has not given.
