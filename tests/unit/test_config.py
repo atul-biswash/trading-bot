@@ -608,6 +608,59 @@ class TestDispatchBudgetCoherence:
         settings = get_settings(str(Path(__file__).resolve().parents[2] / "config.yaml"))
         assert settings.config.risk.dispatch_deadline_s == 9.0
 
+    def test_every_exact_boundary_configuration_is_accepted(self) -> None:
+        """A total exactly equal to the budget passes, for all 120 of M5l-065's grid.
+
+        The grid: two 1m pairs (`P_sim` 2, `T_min` 60 s, budget 30 s), the
+        default cap of 3, `D` from 9.00 to 14.99 and `T_recon` from 0.01 to 6.99
+        in hundredths, keeping every pair where `2 x D + 5 x T_recon` is exactly
+        30 in decimal. `D` starts at 9.00 so the transport envelope
+        (`10 <= D + 1.0`) never refuses first.
+
+        MEASURED at `f2182a6`, before exact arithmetic: 9 of the 120 were
+        refused, because a float sum such as `2 x 9.4 + 5 x 2.24` lands a hair
+        above 30.0 (`M5l-065`). The failures are listed, not merely counted, so
+        a regression names the configurations it broke.
+
+        MUTATIONS: restore float arithmetic (9 fail); make `<=` a `<` (120
+        fail); bypass the conversion helper for the reconcile term with a raw
+        `Decimal(float)`, whose binary expansion lands above the decimal value
+        for some `T_recon`.
+        """
+        hundredth = Decimal("0.01")
+        cases = [
+            (d_cents * hundredth, t_cents * hundredth)
+            for d_cents in range(900, 1500)
+            for t_cents in range(1, 700)
+            if 2 * d_cents * hundredth + 5 * t_cents * hundredth == Decimal(30)
+        ]
+        assert len(cases) == 120
+        refused: list[str] = []
+        for dispatch, reconcile in cases:
+            try:
+                _app_config(
+                    pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m")],
+                    risk=RiskConfig(
+                        dispatch_deadline_s=float(dispatch),
+                        reconcile_deadline_s=float(reconcile),
+                    ),
+                )
+            except ValidationError:
+                refused.append(f"D={dispatch} T_recon={reconcile}")
+        assert refused == [], f"{len(refused)} exact-boundary configuration(s) refused: {refused}"
+
+    def test_a_total_one_hundredth_over_the_budget_is_refused(self) -> None:
+        """`2 x 9.01 + 5 x 2.4 = 30.02` against 30: the boundary still binds.
+
+        The companion to the grid test above, so exact arithmetic cannot be
+        satisfied by a comparison that stopped refusing anything.
+        """
+        with pytest.raises(ValidationError, match="exceeds 50%"):
+            _app_config(
+                pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m")],
+                risk=RiskConfig(dispatch_deadline_s=9.01, reconcile_deadline_s=2.4),
+            )
+
 
 # --------------------------------------------------------------------------
 # Assignment guard: config is loaded once and never mutated

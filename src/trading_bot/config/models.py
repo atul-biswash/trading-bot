@@ -34,7 +34,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 from trading_bot.core.enums import (
     PositionSizingMethod,
@@ -610,6 +610,30 @@ _TRANSPORT_OVERRUN_TOLERANCE_S = 1.0
 _CLOSE_SEQUENCE_CALLS = 3
 
 
+#: pydantic's own ``float`` -> ``Decimal`` conversion, the one this module's
+#: docstring describes for ``Decimal`` fields.
+_DECIMAL = TypeAdapter(Decimal)
+
+
+def _exact_seconds(value: float) -> Decimal:
+    """``value`` as the decimal written in ``config.yaml``, for exact comparison.
+
+    **Called only by :meth:`AppConfig._check_dispatch_budget_fits_the_bar`.**
+    The durations stay ``float`` fields: they are timeouts the transport
+    consumes as floats, and no money touches them. What must be exact is one
+    comparison, a sum against a budget, and float products can refuse a total
+    exactly at the budget -- MEASURED, 9 of 120 such configurations refused
+    before this helper existed (``M5l-065``).
+
+    **The conversion is pydantic's, not a new one.** It is the conversion config
+    load already applies to every ``Decimal`` field, via the value's shortest
+    repr, so ``2.24`` becomes ``Decimal("2.24")``. So this opens no new
+    ``float`` -> ``Decimal`` boundary: it is the config-load boundary, run by
+    the same code, at the same moment.
+    """
+    return _DECIMAL.validate_python(value)
+
+
 class AppConfig(_Model):
     """Root config object — the fully parsed ``config.yaml``."""
 
@@ -706,6 +730,12 @@ class AppConfig(_Model):
         the reconciliation stamp, so the second invocation on a coinciding
         minute finds every stamp fresh and does nothing. Dispatch does, because
         two pairs can each emit a signal on the same minute.
+
+        **THE ARITHMETIC IS EXACT.** Every term is a ``Decimal``: each duration
+        through :func:`_exact_seconds`, ``T_min`` from integer milliseconds, and
+        the headroom through the same helper. With ``float`` products a total
+        exactly equal to the budget could be refused -- MEASURED, 9 of 120 such
+        configurations were (``M5l-065``) -- so ``<=`` meant less than it said.
         """
         enabled = self.trading.enabled_pairs
         if not enabled:
@@ -720,14 +750,16 @@ class AppConfig(_Model):
             # differently.
             return self
 
-        t_min_s = min(timeframe_to_ms(pair.timeframe) for pair in enabled) / 1000
+        t_min_s = Decimal(min(timeframe_to_ms(pair.timeframe) for pair in enabled)) / 1000
         p_sim = len(enabled)
         n_max = self.risk.limits.max_open_positions
         exiting = min(n_max, p_sim)
-        dispatch = p_sim * self.risk.dispatch_deadline_s
-        reconcile = n_max * self.risk.reconcile_deadline_s
-        settlement = exiting * self.risk.reconcile_deadline_s
-        budget = _PIPELINE_HEADROOM * t_min_s
+        dispatch_s = _exact_seconds(self.risk.dispatch_deadline_s)
+        reconcile_s = _exact_seconds(self.risk.reconcile_deadline_s)
+        dispatch = p_sim * dispatch_s
+        reconcile = n_max * reconcile_s
+        settlement = exiting * reconcile_s
+        budget = _exact_seconds(_PIPELINE_HEADROOM) * t_min_s
 
         if dispatch + reconcile + settlement <= budget:
             return self

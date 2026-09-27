@@ -265,6 +265,15 @@ validator, and an edit there arms both items.
 >    each with a message reading *"is 30.0s. That exceeds 50% … budget
 >    30.0s"*. D = 9.4 with T_recon = 2.24 is one. The committed config, at
 >    29.5 s, is unaffected. The coherence block is this item's arming site.
+>
+>    > **ANNOTATED AT M5l (P68, C15): THE ARITHMETIC HALF IS RESOLVED.**
+>    > *"compares floats"* and *"with every term a `float` product"* are no
+>    > longer true. Every term is now a `Decimal`: each duration goes through
+>    > `_exact_seconds`, which is pydantic's own conversion, and `T_min` comes
+>    > from integer milliseconds. *"of 120 … 9 are refused"* was true at
+>    > `f2182a6`; now 0 are. `test_every_exact_boundary_configuration_is_accepted`
+>    > pins it. **What survives:** *"prints one decimal"*, since the message
+>    > still renders `:.1f` until C16.
 > 4. **`M5l-049`'s stale docstring still stands.** `ReconciliationBudget.from_config`
 >    in `execution/reconciliation_driver.py` says *"splitting ``T_recon`` into a
 >    per-attempt share would be a tail claim that the only samples in existence
