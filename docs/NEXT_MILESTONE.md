@@ -261,6 +261,38 @@ REASONED.
 
 *Arming condition:* **whoever next edits `hold_settlement` in `core/models.py`, `_stale_positions` in `risk/manager.py`, or the held filter in `reconcile_open_positions` in `execution/reconciliation.py`.**
 
+#### P-3k. A restart orphans an ordinary open position (`M5l-045`, `M5l-044`)
+
+Positions are memory-only, so a clean shutdown or a power cut leaves an open
+position no later process owns. After a restart the symbol is blocked while its
+list rests; a protective fill in that window is never booked, so the daily-loss
+halt undercounts; once the list completes or is cancelled, the base asset
+becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
+
+**It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
+capture and base-asset netting. The owner's M5l ruling, quoted at the head of
+this file, keeps *"The architectural live-trading block"* *"strictly active"*
+and names those two as what live execution waits on; this third was added to
+them by the owner at P61. Its place in P-3 is the same ruling's third
+priority, *"eliminating the unhedged/silent failure modes"*.
+
+**It is not N1.** N1 reads: *"A position is not persisted, so a restart
+releases a hold, and a close deferred before a restart is released unbooked
+after it (`M5k-065`)."* That covers a held position and a deferred close. This
+is an ordinary protected position with no hold and no close, which no item
+covered until now (`M5l-045`).
+
+**The worked instance is `M5l-044`:** bot entry 6688668, list 317428, left
+protected by a clean shutdown on 2026-09-26; its legs were cancelled
+unexecuted at 2026-09-27T03:50:23.068Z, and the 0.02151 BTC it bought sat as an
+unmanaged holding until the owner sold it with
+`scripts/clear_testnet_holdings.py`. The blocked symbol, the
+unbooked fill and the unmanaged holding are REASONED from `live_system`'s boot
+snapshots; the holding and its exclusion were MEASURED in that instance
+(`M5l-036`). No protective fill in such a window has been observed.
+
+*Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
+
 ---
 
 ## OTHER NEW CARRIED ITEMS, AT M5k's CLOSE
@@ -317,6 +349,10 @@ The owner's ruling above names its two preconditions:
 Neither exists. `CLAUDE.md`'s own live-block condition, on `Settings.__init__`
 and `_cmd_run`, still governs the mode resolution; this item governs the work
 the lift waits on.
+
+**A third gate stands beside the two, added by the owner at P61:** the restart
+gap, P-3k -- an open position that a restart leaves unowned. It carries its own
+arming condition there, and the condition below does not watch it.
 
 *Arming condition:* **whoever next edits `calculate_position_size` in `risk/position_sizing.py` or `build_placement` in `execution/placement.py`.**
 
