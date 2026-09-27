@@ -1962,7 +1962,23 @@ data.
   >    `pip install "binance-trading-bot @ git+file:///<deployment clone>@<sha>"`.
   >    pip builds from its own fresh clone at `<sha>`, so the install records
   >    that commit and cannot carry uncommitted edits.
-  > 4. Leave `config.yaml` as committed at `<sha>` and launch from the clone
+  > 4. Copy `.env` to the clone's root by hand (`M5l-042`). `Secrets` reads
+  >    `env_file=".env"` relative to the launch directory, and `.env` is
+  >    gitignored, so no clone carries it and none can commit it.
+  > 5. Copy `data/state.json` from the development tree into the clone's
+  >    `data/`, show the two SHA-256-equal, record that digest, and rename the
+  >    development copy to `state.json.retired-<UTC>` so no second store for
+  >    the account survives beside it (`M5l-035`, `M5l-037`).
+  > 6. Only one deployment clone runs at a time on one account, and which one
+  >    is recorded in `docs/RUN_LEDGER.md` (`M5l-021`, carried open): the
+  >    instance lock is resolved against the launch directory, so two clones
+  >    do not exclude each other.
+  > 7. Before any evidence is read, record the run's start in
+  >    `docs/RUN_LEDGER.md` -- `code_commit`, `config_sha256` and the UTC
+  >    instant, all three taken from the `boot_provenance` line.
+  > 8. Log captures and census tools read `<clone>\logs\trading_bot.log`, not
+  >    the development tree's log.
+  > 9. Leave `config.yaml` as committed at `<sha>` and launch from the clone
   >    with that venv's interpreter. A modified or untracked config refuses,
   >    and so does a config outside the checkout.
   >
@@ -1993,6 +2009,18 @@ data.
   >
   > **What survives:** the doctrine entire, and the paragraph before this
   > one's *"no deployment checkout has been built"*, which is still true.
+
+  > **ANNOTATED AT M5l (P61): *"no deployment checkout has been built"* IS NO
+  > LONGER TRUE, here or in the paragraph before, and nor is this block's
+  > *"which is still true"*.** At P59 a deployment clone was built in scratch
+  > from GitHub at `1f4a718`, with its own venv and a VCS install, and booted
+  > `strategies`: `verdict=accepted`, `install_kind=vcs`, `code_intact=true`
+  > over 68 files, `commits_agree=true`, `config_tracked=true`, and the clone
+  > clean after the boot and with a run's files present (`M5l-041`). So the
+  > paragraph before's *"That the non-editable install closes the gap is
+  > REASONED"* is now MEASURED for that clone. **What survives:** no
+  > supervised run has yet been made from a deployment clone, and steps 4 to 8
+  > above were added at P61 from P59's measurements.
 
 ---
 

@@ -36,6 +36,20 @@ policy choice for a derivation.
 > written. **What survives:** the three statuses, their definitions, and the
 > reason there are only three. §7 needed no fourth.
 
+> **ANNOTATED AT M5l (P61): SEVEN NUMBERS, FIVE PLACEHOLDERS, ONE MEASURED FOR
+> ONE SESSION, ONE BOUNDED.** §6, `reconcile_deadline_s`, is now MEASURED,
+> ONE SESSION: 300 samples of the three calls reconciliation makes, in one
+> Testnet session from one machine (`M5l-038`, `M5l-039`). "One session" is a
+> scope on the MEASURED status, not a fourth status -- its provenance line
+> names the sample, the date and the method, which is the definition above.
+> **Four sentences elsewhere that call `T_recon` unmeasured are superseded by
+> it, one annotation for all four because they are one claim:** this
+> section's *"`T_recon` is itself unmeasured"*; §4's *"`T_recon` is itself
+> PLACEHOLDER"* and its *"The only latency samples in existence are M5e probe
+> 2's six `get_open_orders` timings"*; and §5's *"`T_recon` is itself
+> unmeasured"*. **What survives:** every other status in this file, and §4's
+> and §5's arguments, which never depended on the value's size.
+
 There are deliberately only three statuses. A fourth was drafted for
 `dispatch_deadline_s` on the grounds that the coherence constraint *derives* it —
 and withdrawn: the constraint narrows it but cannot produce it, because `alpha` is
@@ -818,6 +832,58 @@ no order.
 >
 > **What survives:** everything above; 3 s stays the working value this
 > section reasoned about.
+
+> **ANNOTATED AT M5l (P61): MEASURED, ONE SESSION; WORKING VALUE 2.3 s, KEPT
+> BY THE OWNER ON THAT DATA.** Annotated in place; nothing above is rewritten.
+>
+> **The measurement re-points (`M5l-038`).** *"Measurement:
+> `v3_get_order_list` latency distribution against Testnet"* names a call
+> reconciliation does not make. At `1f4a718` a pass makes, per position, one
+> `get_own_open_orders(symbol)` (GET `openOrders`, `reconciliation.py`'s
+> `reconcile_open_positions`), one `get_order(symbol, client_order_id)` (GET
+> `order`) per unresolved leg in `resolve_unresolved_legs`, and one
+> `get_my_trades(symbol, order_id)` (GET `myTrades`) per bookable exit in the
+> driver's `_settle`. Those three are what is measured. The coherence table's
+> `T_recon` row, *"one `v3_get_order_list` per position"*, is re-pointed the
+> same way.
+>
+> **The result (`M5l-039`).** Measured through the bot's own `BinanceClient`,
+> `attempts=1`, 100 samples of each call at least 1 s apart, BTCUSDT, Testnet,
+> one session from this machine's network, 2026-09-27T04:18:47Z to
+> 04:20:37Z, peak `x-mbx-used-weight-1m` 825. openOrders p50 0.156 s, p99
+> 0.467 s; order p50 0.162 s, p99 0.460 s; myTrades p50 0.416 s, p99 0.458 s.
+> **Max 0.467 s over all 300; zero errors, zero timeouts; zero samples over
+> 2.3 s and zero over 3.0 s.** Bimodal, at about 0.15 s and 0.44 s -- the
+> same shape as M5e probe 2's six timings.
+>
+> **The status changes from PLACEHOLDER -- NOT MEASURED to MEASURED, ONE
+> SESSION.** One session from one network says nothing about tails under
+> load or from another host, which is what "one session" scopes out.
+>
+> **The working value is 2.3 s, and the project owner kept it on that data.**
+> 2.3 remains a choice rather than a sample -- it is what fits the committed
+> config's budget -- and the data shows it clears the observed maximum by
+> about 4.9x.
+>
+> **The budget's reconciliation terms bound the worst-case pass exactly
+> (`M5l-046`).** Per pass the enumeration and the point queries share
+> `max_calls = max_open_positions` calls, and settlement adds at most
+> `min(N_max, P_sim)`, each call at `T_recon` with one attempt: `(N_max +
+> min(N_max, P_sim)) x T_recon`, 11.5 s on the committed config, which is the
+> coherence check's two reconciliation terms with nothing over. The call cap
+> can defer completing a two-leg position to a later pass; it cannot lengthen
+> one. At P59's p99 the realistic pass is about 2.3 s against that 11.5 s.
+>
+> **Superseded above by this block, each listed by content:** the
+> *"Measurement:"* line; *"Working value: 3 s."*; *"Status: PLACEHOLDER --
+> NOT MEASURED."*; the M5e block's *"a tail claim the six bimodal samples
+> cannot support"* (300 samples now exist, and the argument for one attempt
+> is unchanged) and its *"Both statuses stay PLACEHOLDER"* (this one no
+> longer); the M5k block's *"What survives: the value, its PLACEHOLDER
+> status"*; and the block immediately above's *"The status is unchanged:
+> PLACEHOLDER -- NOT MEASURED"* and *"3 s stays the working value this
+> section reasoned about"*. **What survives:** every reason above, the
+> too-tight and too-loose costs, and *"2.3 is not a sample of anything"*.
 
 ---
 
