@@ -245,6 +245,18 @@ validator, and an edit there arms both items.
 >    refuses entries on a healthy system too, so *"at or below the dedup
 >    interval"* is not the whole unsafe range. The same run's outage added one
 >    gap of 300 s (`M5l-055`, P-3l).
+>
+>    > **ANNOTATED AT M5l (P68, C19): THE LAST TWO SENTENCES ARE WRONG
+>    > (`M5l-067`).** The C17 test now pins the strict `>`, and the measured
+>    > gaps stand. But *"A staleness bound between one and two intervals
+>    > refuses entries on a healthy system too"* confuses the gap between
+>    > passes with the age the guard reads. The guard reads the stamp only in
+>    > `evaluate`, after the reconciler on the same candle. So on a healthy
+>    > feed it sees at most one bar plus the time from that candle's close to
+>    > its read, plus one bar for each bar the position was due and not
+>    > refreshed (`M5l-066`). The 300 s outage gap is sampled by no read,
+>    > because no candle arrived (`M5l-068`). **What survives:** the
+>    > measurement, and that the at-or-below rule is not by itself the floor.
 > 2. **The locked decision, contradicted by measurement since M5g, is for the
 >    owner's ruling.** `CLAUDE.md`, *Fills are observed by polling*:
 >    *"Reconciliation runs over **every** open position on **any** pair's
@@ -256,6 +268,28 @@ validator, and an edit there arms both items.
 >    the causes, not the dedup comparison. Whether to annotate the locked
 >    text, change `>` to `>=`, or dedup against a shorter interval is the
 >    owner's call.
+>
+>    > **ANNOTATED AT M5l (P68, C19): STILL OPEN, AND THE CORRECTED TEXT
+>    > OFFERED AT P68 DOES NOT FIT THE CODE (`M5l-081`).** P68 offered a
+>    > re-ruled text whose deferral clauses say *"about 3·T when the per-pass
+>    > call cap defers it"* and *"plus one T for a call-cap deferral"*.
+>    >
+>    > MEASURED by driving the real pass and resolver:
+>    > - With three open positions -- an oldest healthy one, one whose
+>    >   protective legs are absent, and a newest due one -- the newest was
+>    >   deferred on two consecutive bars.
+>    > - Its stamp reached 181 s at `T` = 60 s before it was read.
+>    >
+>    > So on a healthy feed `k` reaches 2, where the text allows 1. A position's
+>    > own partial reconciliation followed by a neighbour's deferral reaches it
+>    > the same way (REASONED). With at most two positions -- the committed
+>    > config's two enabled pairs -- `k` is at most 1.
+>    >
+>    > So nothing was added to `CLAUDE.md`'s locked text, and the floor P68
+>    > specified (`2.5·T + 1.0 s + 5 s`, which assumes `k <= 1`) was not built.
+>    > Still open, for the owner: the locked text, the floor (derived at P67
+>    > STEP 0 as `T + H + k·T`, with `k` now shown to reach 2 at three
+>    > positions), the default, and the 180 s rationale (`M5l-072`).
 > 3. **The coherence validator compares floats and prints one decimal.** In
 >    `config/models.py` it tests `if dispatch + reconcile + settlement <=
 >    budget:` with every term a `float` product, and the refusal prints `{dispatch
@@ -312,6 +346,9 @@ at `4544b3a`.
 > should have carried this note when it landed. **What survives:** the
 > heading's scope for P-3a to P-3j, and the rule that each item carries its
 > own condition.
+>
+> **AND P-3m AND P-3n (P68, C19)**, both catalogued at M5l by the commit
+> that adds them, and likewise not re-verified at `4544b3a`.
 
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
@@ -444,6 +481,15 @@ bound while list 333832 was open, and no line reported it (M5l-055).
 Venue-side protection stayed in force; what is lost is the bot's knowledge of
 the position.
 
+> **ANNOTATED AT M5l (P68, C19): *"against a 180 s staleness bound"*
+> COMPARES THE GAP WITH A BOUND THE GUARD NEVER APPLIED THERE (`M5l-074`,
+> the class of `M5l-068`).** The guard reads the stamp only in `evaluate`, on
+> a candle, after the reconciler. No candle arrived in the window, so nothing
+> was evaluated. When candles resumed, the reconciler ran first and refreshed
+> the stamp before any read. **What survives:** the outage, its 300 s, and
+> that no line reported it. What was lost is still the bot's knowledge of the
+> position, not a refusal.
+
 **Not a gate on live trading**, by the project owner's ruling at P65.
 
 What the outage also cost, measured at P65 and recorded in
@@ -458,6 +504,28 @@ What the outage also cost, measured at P65 and recorded in
   undetected (`M5l-063`).
 
 *Arming condition:* **whoever next changes what triggers a reconciliation pass -- `ReconciliationDriver.__call__` in `execution/reconciliation_driver.py`, registered by `provider.on_candle` in `live_system` in `engine/modes.py` -- or the market-data reconnect path, `_run` in `exchange/websocket_client.py`.**
+
+#### P-3m. A call-cap deferral logs nothing (`M5l-075`)
+
+When the per-pass call cap stops before a due position, that position is not
+read and nothing says so. A pass that read one of two due positions logs
+`positions=1 queries=2`, exactly like a pass with one position, so no capture
+can count a deferral. MEASURED (code, and both captures). It matters more
+since `M5l-081`: a healthy position can be deferred on consecutive bars once
+three positions are open and one has absent legs, and the only trace of that
+would be a staleness refusal.
+
+*Arming condition:* **whoever next edits the call cap in `reconcile_open_positions` in `execution/reconciliation.py`, or `_report` in `execution/reconciliation_driver.py`.**
+
+#### P-3n. Is the confirm-step question ruled? (`M5l-077`) -- FOR THE OWNER
+
+U7 below calls the five-versus-four confirm-step question *"unruled"*.
+`config.yaml`'s comment on `dispatch_deadline_s` says *"RULED at M5h: the
+confirm step queries the TWO PROTECTIVE LEGS ONLY, so a full close is FOUR
+calls"*. MEASURED: the two disagree. Which one stands decides whether
+`_CLOSE_SEQUENCE_CALLS` can go, and that is U7's subject.
+
+*Arming condition:* **whoever next edits `_CLOSE_SEQUENCE_CALLS` in `config/models.py`, or rules on U7.**
 
 ---
 
@@ -650,6 +718,21 @@ mode 3 describes.
 ---
 
 ## UNRULED — reserved to the project owner
+
+### U9. OPEN OWNER RULING: how the fee-capture gate is met -- added at M5l (P68)
+
+How the gate *"a non-zero fee capture empirically established on a
+live-quoted venue"* is met, given Testnet commission is zero on every fill
+(`M5l-054`):
+- (i) a read-only mainnet key fetching existing trades;
+- (ii) one minimum-size mainnet order, under its own ruling;
+- (iii) rewording the gate.
+
+It is N6's first precondition. MEASURED: every commission in every capture
+this tree holds is `0.00000000`, including the six fills of M5l's evidence
+run, so no Testnet run can meet it as worded.
+
+*Arming condition:* **whoever next edits `refuse_live_trading` in `config/settings.py`, or rules on N6's first precondition.**
 
 ### U8. The harness: refuse, or report? — `M5i-096`
 

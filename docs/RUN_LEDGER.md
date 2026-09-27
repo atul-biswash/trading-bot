@@ -1684,6 +1684,17 @@ differenced, gaps up to 400 s bucketed. The two longer gaps, 3,841 s and
 arrived in the window, and no escalation line exists to follow it. The
 2026-09-17 gap was 184 s; this one is 300 s.
 
+> **ANNOTATED AT M5l (P68, C19): *"No refusal followed, because no signal
+> arrived in the window"* IMPLIES A REFUSAL WAS POSSIBLE, AND IT WAS NOT
+> (`M5l-068`).** The staleness guard reads the stamp only in `evaluate`, on
+> a candle, after the reconciler has run on it. No candle arrived in the
+> window, so nothing could be evaluated. When candles resumed, the
+> reconciler refreshed the stamp before any read. The 2026-09-17 gap probably
+> differs in kind: `docs/M5_NUMBERS.md` §4 records it as a connection-failure
+> cluster between successful passes, and a pass can only fail if a candle
+> triggered it (REASONED). **What survives:** every measurement in this
+> paragraph.
+
 **The 120 s gaps are the dedup comparison.** `_is_due` in
 `execution/reconciliation.py` returns `now - position.last_reconciled_at >
 dedup_interval`, a strict comparison against 60 s. Two consecutive candle
