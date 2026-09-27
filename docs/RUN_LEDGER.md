@@ -1432,10 +1432,34 @@ same time for its instant. The start fields above come from that boot line
 and are unaffected: the line was written at the run's start and nothing read
 afterwards can change it. No census of the run has been taken.
 
+### The end record
+
+Recorded before any census of the run.
+
+| Field | Value | Instrument |
+|---|---|---|
+| stop instant | `2026-09-27T16:53:22Z`, `SIGINT` | the project owner |
+| flat at stop | yes: the last close booked at `16:43:03Z`, order `7007486`, and nothing was entered after it | the project owner |
+| log bytes | 23,625, last written `2026-09-27T16:53:23Z` | `Get-Item` |
+| log lines | 115 in all; 101 carry `pid=21520` | `Get-Content` count; `pid=21520` match |
+| log SHA-256 | `C1471D3C3B61A1F765B339BFC83AF549C71BBB92821310F158C8B4FF85BC089F` | `Get-FileHash -Algorithm SHA256` |
+| `engine_stopped clean_shutdown=True` for pid 21520 | present, once | `Select-String` |
+
+The log's last line, verbatim:
+
+```
+2026-09-27T16:53:23Z | INFO     | pid=21520 | trading_bot.engine.live_engine | Trading engine stopped event=engine_stopped clean_shutdown=True
+```
+
+The owner states the run was flat at stop, so no position was left for
+`docs/NEXT_MILESTONE.md` P-3k's restart gap. That state is the owner's
+account; this record does not measure it.
+
 ### What this section is
 
-A start record, and a statement of what was read before it. No rule, and no
-figure from the run's evidence.
+A start record, a statement of what was read before it, and the end record.
+No rule, and no figure from the run's evidence beyond the log's own size,
+digest and last line.
 
 ## 22. The retired clone's runs, and the owner's manual actions -- RECORDED AFTER THE FACT
 
