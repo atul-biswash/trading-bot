@@ -44,6 +44,16 @@ and has done both against a real venue.** Live trading is refused at every entry
 point until entry fees are netted out of position quantities; Testnet is the
 only venue it will connect to.
 
+> **ANNOTATED AT M5l (P65): LIVE TRADING WAITS ON THREE GATES, NOT ONE.**
+> *"until entry fees are netted out of position quantities"* names one
+> condition. The project owner's M5l ruling also requires *"a non-zero fee
+> capture empirically established on a live-quoted venue"*. And `06089d5`
+> added a third gate: the restart gap, where a restart leaves an open position
+> no process owns (`M5l-045`). All three are in `docs/NEXT_MILESTONE.md`, N6
+> and P-3k. Every commission recorded so far is zero, on Testnet
+> (`M5l-054`). **What survives:** the refusal at every entry point, and
+> Testnet as the only venue.
+
 | Area | State |
 |---|---|
 | Config, typed domain, `Decimal`-safe money | ✅ built |
@@ -90,6 +100,25 @@ are measured against a capture whose SHA-256 is
 `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528` — events by
 `scripts/run_census.py`, the rest by `grep -c` — and they move whenever the bot
 runs. See `docs/NEXT_MILESTONE.md`.
+
+> **ANNOTATED AT M5l (P65): *"The paths added at M5k are not shown to have
+> run: no booking line in any capture carries `quote_total_source`"* IS NO
+> LONGER TRUE.** M5l's evidence run, pid 21520, ran from a deployment clone at
+> `06089d5`, and the bot's own boot line verifies the commit. It wrote three
+> `close_booked` lines carrying `quote_total_source=venue` and
+> `fee=0E-8 fee_asset=USDT`, in the capture whose SHA-256 is
+> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`
+> (`M5l-053`, `docs/RUN_LEDGER.md` §23). Each of the three reconciles exactly
+> against the venue's fills (`M5l-054`).
+>
+> That capture is another log, not an extension of the one named above, so
+> the figures in this paragraph are not re-summed. It adds 3 order lists, 3
+> `close_booked` and 3 close plans, all `decision=sell`, to a count kept
+> separately. **What survives:**
+> - that none of M5k's other new events appears, in either capture;
+> - that every fee read is zero, in both;
+> - `HALT` at zero;
+> - and every figure above, as a measurement of the capture it names.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
