@@ -38,6 +38,10 @@ the time of writing and remain so.
 > owner supplied them, and no command produced them. **What survives:** the
 > file still asserts no rule and corrects no other document, and every other
 > figure in sections 21 and 22 carries its instrument.
+>
+> **AND SECTION 23 (P64).** Its capture is of the deployment clone's log,
+> not of `logs/trading_bot.log`, and it is dated 2026-09-27. Every figure
+> there carries its command.
 
 ---
 
@@ -1420,6 +1424,12 @@ at `06089d5`:
 The paragraph names no stop criterion. Its "22 log events" is 23 by the table
 it points to, which counts `boot_provenance` since P-1.
 
+> **ANNOTATED AT P64: THE SENTENCE ABOVE MISREADS THE PARAGRAPH.** The
+> paragraph counts events *"never observed at M5k's close"*, and at that close
+> 22 was right, because `boot_provenance` did not exist until `f8898de`. The
+> table's 23 includes that one event, added after the close. Both figures are
+> correct in their own scope, and section 23's census reports against all 23.
+
 ### The deviation
 
 **This record was not committed before the run's log was read.** At about
@@ -1431,6 +1441,9 @@ reading `states="active=1"`. The run's `boot_provenance` line was read at the
 same time for its instant. The start fields above come from that boot line
 and are unaffected: the line was written at the run's start and nothing read
 afterwards can change it. No census of the run has been taken.
+
+> **ANNOTATED AT P64: *"No census of the run has been taken"* IS NO LONGER
+> TRUE.** It was taken after the end record below, and section 23 holds it.
 
 ### The end record
 
@@ -1503,6 +1516,14 @@ The retired log brackets it from presence: the list was `EXECUTING` at
 holding. **Who cancelled it, and with what tool, is not confirmed by the owner
 as of this section**, and nothing here attributes it.
 
+> **ANNOTATED AT P64: THE OWNER HAS NOW ATTRIBUTED IT (`M5l-052`).** The
+> owner's answer at P64 was option A: the owner cancelled it, with
+> `scripts/cancel_testnet_order_list.py`, the tree's only list-cancelling
+> tool. That script writes nothing to any log, so this is the owner's account
+> and no log measures it. The bracket above is consistent with it. That
+> `M5l-044` "attributes the sale and not the cancel" was true of the answer
+> it had; this is the attribution it lacked.
+
 **The sale, orderId 6943472**, which the owner attributed at P61 to
 `scripts/clear_testnet_holdings.py --symbol BTCUSDT --execute`. Read at P62 by
 `get_order` and `get_my_trades`: `SELL` `MARKET`, `FILLED`, 0.02151000 at
@@ -1513,3 +1534,205 @@ as of this section**, and nothing here attributes it.
 
 Runs and actions recorded after they happened, with the instrument beside each
 figure. No rule, and no attribution the owner has not given.
+
+## 23. M5l's evidence run: the census and the venue cross-check
+
+### The capture
+
+| Property | Value |
+|---|---|
+| file | `trading_bot.m5l-evidence-run-pid21520.log`, in the evidence directory beside section 19's capture |
+| source | `F:\trading bot\deploy\06089d5e01cb\logs\trading_bot.log` |
+| taken | `2026-09-27T16:59:56Z`, the file's creation time |
+| bytes | 23,625 |
+| lines | 115 |
+| **SHA-256** | **`c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`** |
+
+The read was share-mode (`FileShare.ReadWrite`) and the copy was made whole,
+with `FileMode.CreateNew`. The source's SHA-256 before the copy and the
+capture's after it are equal, and both equal section 21's end record. So the
+log did not change between the end record and the census. **This capture is
+not a continuation of section 19's**: it is another log, so no prefix
+relation exists or is claimed.
+
+### The census tool
+
+Command, from the repository root:
+
+```
+.venv/Scripts/python.exe scripts/run_census.py "F:/trading bot/files/binance-trading-bot/m5j-evidence/trading_bot.m5l-evidence-run-pid21520.log"
+```
+
+Output, verbatim, exit 0:
+
+```
+==========================================================================
+CAPTURE
+==========================================================================
+  path   : F:\trading bot\files\binance-trading-bot\m5j-evidence\trading_bot.m5l-evidence-run-pid21520.log
+  bytes  : 23625
+  lines  : 115
+  sha256 : c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f
+
+==========================================================================
+PID CENSUS  [sha256 c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f]
+==========================================================================
+  distinct pids          : 2
+  substantial (>= 100 lines): 1
+  first line carrying pid= : 2026-09-27T13:24:21Z | INFO     | pid=22088 | trading_bot.main | 
+
+==========================================================================
+PER-PID LINE COUNTS  [sha256 c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f]
+==========================================================================
+  pid=21520    lines=101     substantial
+  pid=22088    lines=2       
+
+==========================================================================
+PER-EVENT TOTALS  [sha256 c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f]
+==========================================================================
+  58      reconciliation_pass
+  6       intent_dispatched
+  3       close_booked
+  3       close_planned
+  3       close_window_open
+  3       order_placed
+  2       boot_provenance
+  1       boot_assets_excluded
+  1       engine_stopped
+
+==========================================================================
+TOTALS  [sha256 c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f]
+==========================================================================
+  distinct events   : 9
+  event records     : 80
+  distinct pids     : 2
+  substantial runs  : 1
+```
+
+**Pid 21520 alone.** Pid 22088 is P62's dry boot. Its 2 lines are a banner
+and one `boot_provenance`. So pid 21520 accounts for every per-event total
+above except one `boot_provenance`: `reconciliation_pass` 58,
+`intent_dispatched` 6 (3 `BUY`, 3 `CLOSE`), `order_placed` 3, `close_planned`
+3, `close_window_open` 3, `close_booked` 3, `boot_provenance` 1,
+`boot_assets_excluded` 1, `engine_stopped` 1. Instrument: `Select-String`
+for `| pid=21520 |`, then `event=(\w+)` grouped. The run logged no
+`risk_refused`, no `stage=`, no `exit_booked` and no
+`reconciliation_untrusted` line (`Select-String`, count 0 each). Every one of
+its 58 passes reads `positions=1 calls=1 queries=2 states="active=1"`.
+
+### The trades
+
+| list | entry leg filled | protective legs | close | sell order | realised |
+|---|---|---|---|---|---|
+| `333832` | `13:34:00.953Z`, 0.02126000 at 85,064.74 | both `CANCELED`, 0 executed | death cross, `14:30:01Z` | `6970269` at 84,723.53 | `-7.2541246000` |
+| `334985` | `15:33:04.691Z`, 0.02138000 at 84,594.01 | both `CANCELED`, 0 executed | death cross, `15:44:01Z` | `6991638` at 84,486.68 | `-2.2947154000` |
+| `335369` | `16:15:00.934Z`, 0.02139000 at 84,564.00 | both `CANCELED`, 0 executed | death cross, `16:43:01Z` | `7007486` at 84,450.02 | `-2.43803220` |
+
+Realised is copied from each `close_booked` line. Everything else is from the
+venue cross-check below. All three exits came from the bot's own `CLOSE`
+sequence, and no protective leg filled. Each `close_planned` reads
+`decision=sell`, with `elapsed_s` of 0.297809, 0.831214 and 0.323905.
+
+### The objectives
+
+Against the evidence-first paragraph section 21 quotes, and against the rows
+P62 named as reachable under this configuration:
+
+| Objective or row | Result | Evidence |
+|---|---|---|
+| a first run on known code, from a deployment checkout of a pushed commit | OBSERVED | pid 21520's `boot_provenance`, section 21: `verdict=accepted`, `code_commit=06089d5e01cb88f5f4b7b3833d2c87684714ea74`, `checkout_dirty=false`, `commits_agree=true` |
+| its start recorded before its evidence is read | NOT MET | section 21's deviation (`M5l-051`) |
+| M5k's code, as committed, running | OBSERVED (`M5l-053`) | three `close_booked` lines carrying `quote_total_source=venue`, e.g. `2026-09-27T14:30:03Z \| INFO \| pid=21520 \| trading_bot.execution.executor \| Closed BTCUSDT event=close_booked symbol=BTCUSDT quote_total=1801.22224780 quote_total_source=venue realised=-7.2541246000 order_id=6970269 quantity=0.02126000 fee=0E-8 fee_asset=USDT fills=1 filled_at=2026-09-27T14:30:01.888000+00:00 order_created_at=2026-09-27T14:30:01.888000+00:00 candle_time=2026-09-27T14:29:59.999000+00:00` |
+| of the 23 events absent at M5k's close (22 then defined, plus `boot_provenance`): `boot_provenance` | OBSERVED | the line above |
+| the other 22 | NOT OBSERVED | not among the census's events |
+| `close_settlement_deferred`, `close_record_resolved` | NOT OBSERVED | each sell's settlement read succeeded on its first attempt, so there was no deferral and nothing to resolve |
+| `exit_settlement_deferred` | NOT OBSERVED | no protective leg filled, so the driver booked no exit |
+| `close_cancel_already_terminal` | NOT OBSERVED | each cancel found its list live: every `close_planned` reads `sl_status=NEW` and `tp_status=NEW` |
+| `entry_fill_absent`, `debit_from_requested_limit` | NOT OBSERVED | each entry leg filled |
+| the six events M5k added | NOT OBSERVED | none is in the census; no fee in a foreign asset, no disagreeing totals, no missing quote total, no protective fill |
+| the 8 unobserved `RefusalStage` members | NOT OBSERVED, all 8 | the run refused nothing: 0 `risk_refused` and 0 `stage=` lines |
+| `decision=halt` | NOT OBSERVED | 3 `close_planned`, all `decision=sell` |
+
+### WARNING, ERROR and CRITICAL
+
+Pid 21520 logged 5 `WARNING`, 4 `ERROR` and 0 `CRITICAL` lines. Instrument:
+`Select-String` for `\| <LEVEL>\s+\|` over pid 21520's lines. All nine,
+grouped:
+
+- `WARNING`, 1: `2026-09-27T13:31:00Z | WARNING  | pid=21520 | trading_bot.engine.modes | 499 asset(s) are EXCLUDED FROM EQUITY -- no enabled USDT pair prices them, so equity is UNDERSTATED by their combined value, which cannot be computed here. Set logging.level to DEBUG for the per-asset list. event=boot_assets_excluded excluded_count=499 quote_asset=USDT`
+- `WARNING`, 3, one per close, differing only in list, quantity and time: `2026-09-27T14:30:01Z | WARNING  | pid=21520 | trading_bot.execution.executor | Cancelling protection to close BTCUSDT; the position is unprotected from here event=close_window_open symbol=BTCUSDT venue_order_list_id=333832 quantity=0.02126000 candle_time=2026-09-27T14:29:59.999000+00:00`; then `334985` at `15:44:02Z` and `335369` at `16:43:01Z`.
+- The stream outage, 4 `ERROR` and 1 `WARNING`:
+  - `2026-09-27T13:53:03Z | ERROR    | pid=21520 | binance.ws.reconnecting_websocket | ConnectionClosedError (sent 1011 (internal error) keepalive ping timeout; no close frame received)`
+  - `2026-09-27T13:53:03Z | ERROR    | pid=21520 | binance.ws.reconnecting_websocket | BinanceWebsocketClosed (Connection closed. Reconnecting...)`
+  - `2026-09-27T13:53:04Z | ERROR    | pid=21520 | binance.ws.reconnecting_websocket | Failed to connect to websocket: [Errno 11001] getaddrinfo failed`
+  - `2026-09-27T13:56:52Z | ERROR    | pid=21520 | binance.ws.reconnecting_websocket | Unknown exception: BinanceWebsocketQueueOverflow (Message queue size 100 exceeded maximum 100)`
+  - `2026-09-27T13:56:52Z | WARNING  | pid=21520 | trading_bot.exchange.websocket_client | Market-data stream disconnected (ConnectionClosedError); reconnecting in 4.6s (attempt 1)`
+
+### The reconciliation cadence, and the outage (`M5l-055`, `M5l-056`)
+
+The run held a position in three windows: `13:34Z`–`14:30Z`, `15:33Z`–`15:44Z`
+and `16:15Z`–`16:43Z`. Within them the gaps between consecutive passes were
+about 60 s 21 times and about 120 s 33 times, plus one gap of 300 s.
+Instrument: pass timestamps from `event=reconciliation_pass` lines,
+differenced, gaps up to 400 s bucketed. The two longer gaps, 3,841 s and
+1,861 s, are flat periods with nothing due.
+
+**The 300 s gap is the outage**: from `13:52:01Z` to `13:57:01Z`, while list
+`333832` was open. No line of any kind was logged between `13:53:04Z` and
+`13:56:52Z`, and passes resumed at `13:57:01Z`. 300 s exceeds
+`risk.max_position_staleness_s = 180.0`. No refusal followed, because no signal
+arrived in the window, and no escalation line exists to follow it. The
+2026-09-17 gap was 184 s; this one is 300 s.
+
+**The 120 s gaps are the dedup comparison.** `_is_due` in
+`execution/reconciliation.py` returns `now - position.last_reconciled_at >
+dedup_interval`, a strict comparison against 60 s. Two consecutive candle
+arrivals are about 60 s apart either way, so roughly half fall on the "not
+yet due" side and the pass waits a second bar. That mechanism is REASONED from
+the code; the distribution is MEASURED.
+
+### The venue cross-check (GET only)
+
+Read after the run stopped, from the clone's root with the clone's
+interpreter and `.env`. The calls: `v3_get_order_list` for each list;
+`get_order` and `get_my_trades` for each leg and each sell.
+
+| order | client id | side / type | status | executed | fill price | quote | commission |
+|---|---|---|---|---|---|---|---|
+| `6954831` | `tb1-BTCUSDT-1790516039999-0-W` | BUY `LIMIT` | `FILLED` | 0.02126000 | 85,064.74 | 1,808.47637240 | 0.00000000 BTC |
+| `6954832` | `…-0-SL` | SELL `STOP_LOSS` | `CANCELED` | 0 | | | |
+| `6954833` | `…-0-TP` | SELL `TAKE_PROFIT` | `CANCELED` | 0 | | | |
+| `6970269` | `tb1-BTCUSDT-1790516039999-0-CL` | SELL `MARKET` | `FILLED` | 0.02126000 | 84,723.53 | 1,801.22224780 | 0.00000000 USDT |
+| `6989029` | `tb1-BTCUSDT-1790523179999-0-W` | BUY `LIMIT` | `FILLED` | 0.02138000 | 84,594.01 | 1,808.61993380 | 0.00000000 BTC |
+| `6989030` | `…-0-SL` | SELL `STOP_LOSS` | `CANCELED` | 0 | | | |
+| `6989031` | `…-0-TP` | SELL `TAKE_PROFIT` | `CANCELED` | 0 | | | |
+| `6991638` | `tb1-BTCUSDT-1790523179999-0-CL` | SELL `MARKET` | `FILLED` | 0.02138000 | 84,486.68 | 1,806.32521840 | 0.00000000 USDT |
+| `6999320` | `tb1-BTCUSDT-1790525699999-0-W` | BUY `LIMIT` | `FILLED` | 0.02139000 | 84,564.00 | 1,808.82396000 | 0.00000000 BTC |
+| `6999321` | `…-0-SL` | SELL `STOP_LOSS` | `CANCELED` | 0 | | | |
+| `6999322` | `…-0-TP` | SELL `TAKE_PROFIT` | `CANCELED` | 0 | | | |
+| `7007486` | `tb1-BTCUSDT-1790525699999-0-CL` | SELL `MARKET` | `FILLED` | 0.02139000 | 84,450.02 | 1,806.38592780 | 0.00000000 USDT |
+
+All three lists read `listOrderStatus=ALL_DONE`, `listStatusType=ALL_DONE`
+and `contingencyType=OTO`, with three orders each. Every order had at most one
+fill.
+
+**No commission was non-zero.** All six fills, the three buys in BTC and the
+three sells in USDT, carry `0.00000000`. So this run cannot satisfy the
+live-trading precondition *"a non-zero fee capture empirically established on
+a live-quoted venue"*.
+
+**Every booked close reconciles exactly, in `Decimal`** (`M5l-054`). For each
+close: the sell's summed `quoteQty` equals `close_booked`'s `quote_total`,
+and equals the sell's `cummulativeQuoteQty`. Its summed `qty` equals the
+entry's and the logged `quantity`. Its summed commission, `0E-8`, equals the
+logged `fee`. And `sell quote - sell fee - entry quote` equals the logged
+`realised` by value: `-7.25412460`, `-2.29471540` and `-2.43803220` against
+the logged `-7.2541246000`, `-2.2947154000` and `-2.43803220`. The first two
+differ only in exponent. The three total **`-11.98687220`** USDT, gross of
+entry fees, which were zero.
+
+### What this section is
+
+A census of one frozen capture and a read of the venue, each figure beside
+its instrument. No rule. The objectives' results are observations, and what
+they mean for the milestone is reserved.

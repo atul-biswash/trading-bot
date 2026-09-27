@@ -35,6 +35,23 @@ exercises. No such run has started as this is written.
 > them. **What survives:** the rest of this paragraph. The census against the
 > table below has not been taken.
 
+> **ANNOTATED AT M5l (P64): TWO MORE STATEMENTS HERE ARE NO LONGER TRUE.**
+> *"M5k's code is not shown to have run as committed"*: pid 21520, at
+> `06089d5`, wrote three `close_booked` lines carrying
+> `quote_total_source=venue` (`M5l-053`). The block above's *"The census …
+> has not been taken"*: it was taken after the run stopped at `16:53:22Z`, and
+> `docs/RUN_LEDGER.md` §23 holds it.
+>
+> Its answer, against the capture whose SHA-256 is
+> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`: of the
+> 22 log events never observed at M5k's close, **none**. Of `boot_provenance`,
+> added after that close, **yes**. Of the 8 `RefusalStage` members, **none**:
+> the run refused nothing.
+>
+> **What survives:** that this run started from a deployment checkout of a
+> pushed commit, and that its start is recorded. That record was committed
+> after the log was first read (`M5l-051`).
+
 ---
 
 Struck and repaired at M5k's rotation, in its first part. Every item below was
@@ -114,6 +131,27 @@ M5k's close; `docs/RUN_LEDGER.md` §19 holds its census:
   `pid=24772`, still appending when M5j's rotation wrote this section, last
   logged at `2026-09-19T09:42:02Z` and records no `engine_stopped`.
 
+> **ANNOTATED AT M5l (P64): THE HEADLINE AND THE FIRST TWO BULLETS ARE NO
+> LONGER TRUE.** Each was true of the capture named above, and each bullet's
+> claims about that capture still are.
+>
+> - **"Nothing M5k added is shown to have run as committed"**, and the first
+>   bullet's *"No line carries `quote_total_source`"*: pid 21520 ran from a
+>   deployment clone at `06089d5`, verified by its `boot_provenance` line. It
+>   wrote three `close_booked` lines carrying `quote_total_source=venue` and
+>   `fee=0E-8 fee_asset=USDT`, in the capture whose SHA-256 is
+>   `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`
+>   (`M5l-053`, `docs/RUN_LEDGER.md` §23). Each one reconciles exactly against
+>   the venue's fills (`M5l-054`). None of the six events M5k added appears
+>   there either.
+> - **"The bot records no commit"** and *"marks the banner NOT YET
+>   IMPLEMENTED"*: false since `f8898de`, which added `boot_provenance` after
+>   the banner on every boot. It was false when M5l's P-1 landed, not because
+>   of any run. `CLAUDE.md`'s doctrine carries the P-1 annotation.
+>
+> **What survives:** the `POSITION_STALE` bullet and the no-writer bullet, both
+> scoped to that capture, and the standard of evidence below.
+
 **The standard of evidence M5j set still holds.** A claim derived from a
 capture names its digest in the sentence that makes it, or it cannot age
 visibly.
@@ -160,6 +198,13 @@ there, and is struck.
 > **What survives:** *"`boot_provenance` is absent from every capture"*. No
 > capture has been taken since those boots, and the lines are in the clones'
 > own logs, not in any capture.
+
+> **ANNOTATED AT M5l (P64): THAT SURVIVING CLAUSE IS NO LONGER TRUE.** The
+> capture of pid 21520's log, SHA-256
+> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`, holds
+> two `boot_provenance` lines: pid 22088's dry boot and pid 21520's run
+> (`docs/RUN_LEDGER.md` §23). **What survives:** P-1's code, and that every
+> boot it has seen from a deployment clone was accepted.
 
 ### P-2. Staleness against the reconciliation dedup interval
 
@@ -909,6 +954,16 @@ payload, not log events.
 
 *Arming condition:* **whoever next runs `scripts/run_census.py` against a newer
 capture**, which is the tool that produces every figure in this table.
+
+> **FIRED AT M5l (P64), AND REAFFIRMED.** The tool was run against the capture
+> of pid 21520's log, SHA-256
+> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`. That
+> is another log, from the deployment clone, and not an extension of the
+> capture this table measures, so no row here is re-derived. Every row stays
+> scoped to its digest. That capture's own answers are in `docs/RUN_LEDGER.md`
+> §23: `boot_provenance` observed, the other 22 absent events and all 8
+> stages not, and 3 close plans, all `decision=sell`. The condition stands for
+> the next capture that extends this one.
 
 ---
 

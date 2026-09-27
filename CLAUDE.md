@@ -4553,3 +4553,25 @@ M5k's close:
   subtracted a non-zero fee outside a test.
 
 See `docs/RUN_LEDGER.md` §19 and `docs/NEXT_MILESTONE.md`.
+
+> **ANNOTATED AT M5l (P64): TWO OF THE BULLETS ABOVE ARE NO LONGER TRUE, AND
+> ONE CLAUSE WAS FALSE BEFORE ANY RUN.**
+>
+> - *"at no commit of this tree does the bot log one"* has been false since
+>   `f8898de`. From that commit `main` logs `event=boot_provenance`, with the
+>   commit and the dirty state, after the banner on every boot. The bullet's
+>   claims about the capture stay true of that capture.
+> - *"No capture holds a `quote_total_source` line … So nothing shows M5k's
+>   code, as committed, running"* is false since M5l's evidence run. Pid 21520
+>   ran from a deployment clone at `06089d5`. Its capture,
+>   `trading_bot.m5l-evidence-run-pid21520.log` with SHA-256
+>   `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`,
+>   holds three `close_booked` lines carrying `quote_total_source=venue` and
+>   `fee=0E-8 fee_asset=USDT` (`M5l-053`, `docs/RUN_LEDGER.md` §23). None of
+>   M5k's six other new events appears there either.
+>
+> **What survives:**
+> - The M5k capture's own figures, and the first bullet's account of `M5k-123`.
+> - *"Every commission any capture records is `0.00000000`"*: the evidence run's
+>   six fills are zero too (`M5l-054`). *"Booking net of fees has never
+>   subtracted a non-zero fee outside a test"* is unchanged.
