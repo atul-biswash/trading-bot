@@ -511,6 +511,30 @@ at `4544b3a`.
 >
 > **AND P-3o (P71, C20b)**, on the same terms.
 
+> **THE OWNER'S P-3 ORDER, ruled at M5l P76 (C27).** The work runs in this
+> order:
+>
+> 1. **P-3k**, design first. The design decides where P-3b's retry state
+>    lives and whether `Position` carries P-3h's entry quote total.
+> 2. **P-3g.**
+> 3. **P-3o, merged with P-3i and with P-3m's deferral log**, using sketch
+>    (a): `max_calls = max(max_open_positions, L + 1)`.
+> 4. **P-3l.**
+> 5. The remaining SILENT and DOC items, in P75's order: P-3e, P-3d with
+>    P-3j, P-3a with P-3b, P-3c, P-3h, then P-3f. P-3n is not in this list,
+>    because it goes to U7 (below).
+>
+> **Merges of the work, not of the entries:**
+>
+> - P-3a with P-3b: the same `_settle`, and one design for the Q path's
+>   refusal lines and its bound.
+> - P-3d with P-3j: the same hold-to-stale path. P-3j's end-to-end test is the
+>   natural test for P-3d's new line.
+> - P-3n into U7: it is a ruling, not code.
+>
+> Each entry keeps its text and its arming condition until the work that
+> resolves it lands.
+
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
 At the driver an unpriced exit whose fills cannot be read is reported only by
@@ -617,6 +641,14 @@ and names those two as what live execution waits on; this third was added to
 them by the owner at P61. Its place in P-3 is the same ruling's third
 priority, *"eliminating the unhedged/silent failure modes"*.
 
+> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"Live trading
+> additionally stays blocked until an open position survives a restart,
+> clean or by power cut, with its protective fills booked to the ledger."*
+> Until P76 the tree recorded this gate only as the owner's addition at P61,
+> in reported speech (`M5l-099`). The ruling also states what lifting it
+> requires: survival of both a clean restart and a power cut, AND the
+> protective fills booked.
+
 **It is not N1.** N1 reads: *"A position is not persisted, so a restart
 releases a hold, and a close deferred before a restart is released unbooked
 after it (`M5k-065`)."* That covers a held position and a deferred close. This
@@ -652,6 +684,11 @@ the position.
 > position, not a refusal.
 
 **Not a gate on live trading**, by the project owner's ruling at P65.
+
+> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"The market-data outage
+> is not a gate on live trading, because venue-side protection remains in
+> force through it."* Until P76 the tree recorded the P65 ruling above only
+> in reported speech (`M5l-099`).
 
 What the outage also cost, measured at P65 and recorded in
 `docs/RUN_LEDGER.md` §23:
@@ -703,6 +740,23 @@ U7 below calls the five-versus-four confirm-step question *"unruled"*.
 confirm step queries the TWO PROTECTIVE LEGS ONLY, so a full close is FOUR
 calls"*. MEASURED: the two disagree. Which one stands decides whether
 `_CLOSE_SEQUENCE_CALLS` can go, and that is U7's subject.
+
+> **ADDED AT M5l P76 (C27): WHAT `docs/PHASE_HISTORY.md`'s M5h ENTRY SAYS,
+> next to U7's *"the unruled five-versus-four confirm-step question"*.**
+> Quoted verbatim; nothing is ruled here.
+>
+> - The M5h commit table, row 31: *"| 31 | `f6ec6d1` | The close is four
+>   calls, and there is no per-call share |"*
+> - The M5h prose: *"Q-C §4b's cancel → confirm → sell, built as specified:
+>   one cancel collapses the list, the confirming query re-reads per leg
+>   because it must see a leg that filled *during* the cancel, and the sell
+>   is `MARKET` under a derivable close id so a timed-out sell is resolvable
+>   by asking."*
+>
+> The build log says the close is four calls, and so does `config.yaml`'s
+> comment. U7 calls the question unruled. The prose says "per leg" without
+> saying which legs. **For the owner:** whether the M5h text is the ruling
+> U7 lacks. P-3n merges into U7 (the P-3 order above).
 
 *Arming condition:* **whoever next edits `_CLOSE_SEQUENCE_CALLS` in `config/models.py`, or rules on U7.**
 
