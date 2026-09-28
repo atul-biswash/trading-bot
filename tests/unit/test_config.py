@@ -563,8 +563,15 @@ class TestDispatchBudgetCoherence:
     def test_a_longer_shortest_timeframe_admits_the_same_deadline(self) -> None:
         """T_min is the SHORTEST enabled timeframe, so the same three pairs fit
         once none of them is on a 1-minute bar: budget 150s against 36.0s.
+
+        The staleness bound is raised to its floor at this shape,
+        `(1.5 + 2) x 300 + 6 = 1056 s`, so the sibling staleness check, added
+        after this test, cannot be the thing that refuses it.
         """
-        _app_config(pairs=[("BTCUSDT", "5m"), ("ETHUSDT", "5m"), ("SOLUSDT", "15m")])
+        _app_config(
+            pairs=[("BTCUSDT", "5m"), ("ETHUSDT", "5m"), ("SOLUSDT", "15m")],
+            risk=RiskConfig(max_position_staleness_s=1056.0),
+        )
 
     def test_zero_enabled_pairs_is_vacuous_here_and_refused_at_boot(self) -> None:
         """NOT an oversight, and not to be "fixed" into a refusal.
@@ -695,6 +702,83 @@ class TestDispatchBudgetCoherence:
         message = str(excinfo.value)
         assert "missed" not in message
         assert "row" in message
+
+
+class TestStalenessBoundCoversAHealthyFeed:
+    """`max_position_staleness_s >= (1.5 + k_max) x T + 1.0 s + 5 s` at config load.
+
+    `k_max = n - 1`, `n = min(max_open_positions, enabled pairs)`, and `T` is
+    the shortest enabled timeframe. Every case keeps the coherence check
+    satisfied, so the staleness check is the only thing that can refuse.
+    """
+
+    def test_the_committed_shape_is_accepted_at_180_against_156(self) -> None:
+        """BTCUSDT/1m and ETHUSDT/5m, cap 3, T_recon 2.3: n = 2, k_max = 1,
+        floor 2.5 x 60 + 6 = 156, and the default 180 passes."""
+        config = _app_config(
+            pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")],
+            risk=RiskConfig(reconcile_deadline_s=2.3),
+        )
+        assert config.risk.max_position_staleness_s == 180.0
+
+    def test_a_bound_exactly_at_the_floor_is_accepted(self) -> None:
+        """156 at a floor of 156. MUTATION: `>=` -> `>` refuses it."""
+        _app_config(
+            pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")],
+            risk=RiskConfig(reconcile_deadline_s=2.3, max_position_staleness_s=156.0),
+        )
+
+    def test_one_millisecond_below_the_floor_is_refused(self) -> None:
+        """155.999 against 156: refused, and the message names the floor."""
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")],
+                risk=RiskConfig(reconcile_deadline_s=2.3, max_position_staleness_s=155.999),
+            )
+        message = str(excinfo.value)
+        assert "risk.max_position_staleness_s = 155.999s is below the 156.0s" in message
+        assert "BTCUSDT/1m" in message
+
+    def test_three_pairs_at_1m_refuse_180_at_216(self) -> None:
+        """n = 3, k_max = 2: floor 3.5 x 60 + 6 = 216, so 180 is refused.
+
+        D and T_recon are lowered so the coherence check passes: 3 x 5.0 +
+        3 x 1.0 + 3 x 1.0 = 21 against 30, with `requests_timeout_s = 6`
+        inside the transport envelope. MUTATION: fix k_max at 1 -- the floor
+        becomes 156 and 180 passes.
+        """
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")],
+                risk=RiskConfig(dispatch_deadline_s=5.0, reconcile_deadline_s=1.0),
+                exchange=ExchangeConfig(requests_timeout_s=6),
+            )
+        assert "is below the 216.0s" in str(excinfo.value)
+
+    def test_a_single_position_cap_gives_a_floor_of_96(self) -> None:
+        """max_open_positions = 1 on two 1m pairs: n = 1, k_max = 0, floor
+        1.5 x 60 + 6 = 96. Here the CAP binds n, not the pair count."""
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m")],
+                risk=RiskConfig(
+                    reconcile_deadline_s=2.3,
+                    max_position_staleness_s=95.999,
+                    limits=RiskLimitsConfig(max_open_positions=1),
+                ),
+            )
+        assert "is below the 96.0s" in str(excinfo.value)
+
+    def test_mixed_timeframes_use_the_shortest(self) -> None:
+        """ETHUSDT/5m listed before BTCUSDT/1m, bound 170: T is 60, not 300.
+
+        MUTATION: use the longest enabled timeframe -- the floor becomes
+        2.5 x 300 + 6 = 756 and 170 is refused.
+        """
+        _app_config(
+            pairs=[("ETHUSDT", "5m"), ("BTCUSDT", "1m")],
+            risk=RiskConfig(reconcile_deadline_s=2.3, max_position_staleness_s=170.0),
+        )
 
 
 # --------------------------------------------------------------------------

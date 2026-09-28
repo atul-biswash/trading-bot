@@ -96,6 +96,15 @@ risk:
                                     # shortest bar and RAISE THIS BY HAND -- nothing
                                     # checks it, and a value that fires on a healthy
                                     # system trains you to ignore the line.
+                                    #
+                                    # ANNOTATED at M5l (C20): "nothing checks it" is
+                                    # no longer true. Config load refuses a value
+                                    # below (1.5 + n - 1) x T + 1.0 s + 5 s, T the
+                                    # shortest enabled timeframe and n =
+                                    # min(max_open_positions, enabled pairs): 156 s
+                                    # for this pair list, so 180 passes. "Raise this
+                                    # by hand" still stands: nothing raises it for
+                                    # you, and a floor refusal names the minimum.
   dispatch_deadline_s: 9.0          # PLACEHOLDER -- NOT MEASURED. Bounds the WHOLE
                                     # dispatch sequence, worst case a FOUR-call
                                     # CLOSE. THERE IS NO PER-CALL SHARE, derived or

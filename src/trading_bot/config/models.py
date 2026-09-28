@@ -291,14 +291,47 @@ class RiskConfig(_Model):
     #: refused, in **seconds**. A duration compared against the age of a
     #: reconciliation stamp, so ``float`` rather than ``Decimal``.
     #:
-    #: **Its meaning is coupled to the shortest enabled timeframe; its type is
-    #: not.** The working value is 3x that timeframe -- a policy choice, "two
-    #: consecutive budget skips are normal", not a derivation. Lengthen your
-    #: shortest bar and this needs raising **by hand**: nothing checks it, and a
-    #: value that fires on a healthy system is the worse failure, because an
-    #: operator who sees the line every bar stops reading it.
+    #: **Its meaning is coupled to the shortest enabled timeframe, and a floor
+    #: is now checked at config load** by
+    #: :meth:`AppConfig._check_staleness_bound_covers_a_healthy_feed`. A value
+    #: that fires on a healthy system is the worse failure, because an operator
+    #: who sees the line every bar stops reading it.
     #:
-    #: **PLACEHOLDER -- NOT MEASURED.**
+    #: **The floor is DERIVED.** The guard reads a position's stamp only in
+    #: ``evaluate``, after the reconciler has run on the same candle
+    #: (``M5l-066``). So on a healthy feed the age it reads is at most:
+    #: - one shortest bar ``T``, because a pass skips a position only while
+    #:   its stamp is not yet older than ``T``;
+    #: - plus the time from that candle's close to the read, which the
+    #:   coherence check bounds at ``0.5 x T`` plus the 1.0 s transport overrun;
+    #: - plus one ``T`` for each consecutive bar the per-pass call cap defers the
+    #:   position. With the same positions open, that is at most ``n - 1`` in
+    #:   a row, ``n`` being ``min(max_open_positions, enabled pairs)``:
+    #:   derived from the pass's oldest-first order, and measured for ``n`` =
+    #:   2, 3 and 4 at 3 calls (``M5l-084``).
+    #: With a 5 s margin that is ``(1.5 + n - 1) x T + 1.0 s + 5 s``: 156 s on
+    #: the committed two-pair 1m config, so 180 passes.
+    #:
+    #: **"With the same positions open" is a real condition, and it does not
+    #: always hold.** A position opening on a slot another has just freed has
+    #: no stamp, so it sorts FIRST. If its legs are absent on its first read,
+    #: it defers the healthy position once more: an FOK entry that did not
+    #: fill expires the whole list, and that is an ordinary event. MEASURED at
+    #: ``n`` = 2 with 3 calls: two consecutive deferrals, the healthy stamp at
+    #: 181 s (``M5l-088``). So this floor bounds the churn-free healthy case
+    #: only, and whether to widen it is unruled.
+    #:
+    #: **The bound holds only while** ``max_open_positions >= 1 + L``, ``L``
+    #: being a position's protective-leg count, 2 with a take-profit. Below
+    #: that, a neighbour whose legs are all absent can never be completed,
+    #: and a healthy position behind it goes unread without bound (``M5l-086``).
+    #: Nothing checks that relation.
+    #:
+    #: The old rationale, *"two consecutive budget skips are normal"*, named no
+    #: mechanism in this code and did not hold under strict dedup (``M5l-072``).
+    #:
+    #: **The 180 s default is PLACEHOLDER -- NOT MEASURED**; only its floor is
+    #: derived.
     max_position_staleness_s: float = Field(180.0, gt=0)
     #: Deadline for the **whole dispatch sequence** -- worst case a three-call
     #: ``CLOSE`` -- in seconds. The only configured number of the two; the
@@ -614,6 +647,12 @@ _TRANSPORT_OVERRUN_TOLERANCE_S = 1.0
 _CLOSE_SEQUENCE_CALLS = 3
 
 
+#: Seconds of margin in the staleness floor, above everything the derivation
+#: counts. A policy choice, not a measurement: it absorbs close-to-receipt
+#: delivery latency, which no config term bounds, and nothing else.
+_STALENESS_MARGIN_S = 5
+
+
 #: pydantic's own ``float`` -> ``Decimal`` conversion, the one this module's
 #: docstring describes for ``Decimal`` fields.
 _DECIMAL = TypeAdapter(Decimal)
@@ -791,4 +830,69 @@ class AppConfig(_Model):
             "Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower\n"
             "risk.limits.max_open_positions, enable fewer pairs, or configure a longer\n"
             "shortest timeframe in config.yaml."
+        )
+
+    @model_validator(mode="after")
+    def _check_staleness_bound_covers_a_healthy_feed(self) -> AppConfig:
+        """Refuse a staleness bound that a healthy feed can reach.
+
+        ``max_position_staleness_s >= (1 + alpha + k_max) x T_min +
+        overrun + margin``, where ``k_max = n - 1`` and ``n =
+        min(max_open_positions, enabled pairs)``. With ``alpha = 0.5``, the
+        1.0 s overrun and a 5 s margin, that is ``(1.5 + k_max) x T + 6 s``.
+
+        **Each term is a bound the code already enforces.** One ``T`` because
+        a pass skips a position only while its stamp is not yet older than
+        ``T``. ``alpha x T`` plus the overrun because the coherence check
+        bounds one candle's handling, which is what lies between its close
+        and ``evaluate``'s clock read. ``k_max x T`` because the per-pass call
+        cap can defer a healthy position on at most ``n - 1`` consecutive
+        bars on a healthy feed while the same positions stay open
+        (``M5l-084``). A position opening on a freed slot sorts first while
+        unstamped and can add one more deferral (``M5l-088``), so this floor
+        bounds the churn-free case. The margin absorbs delivery latency,
+        which no config term bounds.
+
+        **Only the HEALTHY case is bounded.** A failed call, or a neighbour
+        whose legs are never completed, lets a stamp age without bound
+        (``M5l-085``), and catching that is the guard's purpose. So is
+        ``max_open_positions < 1 + L`` (``M5l-086``), which this does not
+        check.
+
+        After its two siblings: an incoherent budget is refused first, with
+        its own message. Vacuous with no enabled pairs, for the coherence
+        check's reason.
+        """
+        enabled = self.trading.enabled_pairs
+        if not enabled:
+            return self
+
+        t_min_s = Decimal(min(timeframe_to_ms(pair.timeframe) for pair in enabled)) / 1000
+        n = min(self.risk.limits.max_open_positions, len(enabled))
+        k_max = n - 1
+        headroom = _exact_seconds(_PIPELINE_HEADROOM)
+        overrun = _exact_seconds(_TRANSPORT_OVERRUN_TOLERANCE_S)
+        floor = (1 + headroom + k_max) * t_min_s + overrun + _STALENESS_MARGIN_S
+        bound = _exact_seconds(self.risk.max_position_staleness_s)
+        if bound >= floor:
+            return self
+
+        shortest = min(enabled, key=lambda pair: timeframe_to_ms(pair.timeframe))
+        raise ValueError(
+            f"risk.max_position_staleness_s = {bound}s is below the {floor}s a healthy feed "
+            f"can reach: (1 + {headroom} + {k_max}) x {t_min_s}s + {overrun}s + "
+            f"{_STALENESS_MARGIN_S}s = {floor}s, where {t_min_s}s is the shortest enabled "
+            f"timeframe ({shortest.symbol}/{shortest.timeframe}), {headroom} is the coherence "
+            f"headroom, {k_max} = n - 1 with n = min(limits.max_open_positions = "
+            f"{self.risk.limits.max_open_positions}, {len(enabled)} enabled pair(s)) = {n}, "
+            f"{overrun}s is the transport overrun and {_STALENESS_MARGIN_S}s the margin.\n"
+            "\n"
+            "The guard reads a position's stamp only on a candle, after reconciliation,\n"
+            "so on a healthy feed the stamp can be up to one bar old, plus that candle's\n"
+            "handling, plus one bar for each pass the call cap defers it. A bound below\n"
+            "that refuses entries while nothing is wrong.\n"
+            "\n"
+            f"Set risk.max_position_staleness_s to at least {floor}; "
+            f"{3 * t_min_s + (k_max * t_min_s)} (3 x T plus one T per possible deferral) "
+            "is a round value above it."
         )

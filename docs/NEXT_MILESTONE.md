@@ -219,6 +219,19 @@ production (`M5k-124`). P-2 is a config validation that refuses a
 `max_position_staleness_s` at or below the shortest enabled timeframe's dedup
 interval.
 
+> **ANNOTATED AT M5l (P70, C20): THE VALIDATION BUILT IS NOT THE ONE PLANNED
+> HERE.** The rule planned above, refusing a value *"at or below the shortest
+> enabled timeframe's dedup interval"*, is too low: the guard reads a stamp
+> up to one bar old plus that candle's handling, plus a bar per call-cap
+> deferral (`M5l-066`, `M5l-084`). C20 refuses a value below
+> `(1.5 + n - 1) x T + 1.0 s + 5 s`, with `n = min(max_open_positions, enabled
+> pairs)` -- 156 s on the committed config. It is exact, through C15's
+> helper. So the next paragraph's *"passes only on 1m"* narrows: the 180 s
+> default passes at a 1m shortest bar only while `n <= 2` (216 s at
+> `n = 3`), and at 2m the floor is already 186 s. **What survives:** that it
+> is a config-load validation beside the coherence check, and that the
+> default's fate is P-2's design question.
+
 **The model default would fail it.** MEASURED from the code:
 `config/models.py` declares `max_position_staleness_s: float = Field(180.0,
 gt=0)`. A 3m timeframe is 180 s, so under an at-or-below rule the default is
@@ -290,6 +303,14 @@ validator, and an edit there arms both items.
 >    > Still open, for the owner: the locked text, the floor (derived at P67
 >    > STEP 0 as `T + H + k·T`, with `k` now shown to reach 2 at three
 >    > positions), the default, and the 180 s rationale (`M5l-072`).
+>    >
+>    > > **ANNOTATED AT M5l (P70, C20): *"the floor"* AND *"the 180 s
+>    > > rationale"* ARE NO LONGER OPEN.** The floor is built, with
+>    > > `k_max = n - 1` per the owner's P69 ruling, and it is 156 s on the
+>    > > committed config. The 180 s docstring now states that derivation.
+>    > > **What stays open:** the locked text, and whether the floor should
+>    > > widen for position churn, which adds one deferral beyond `n - 1`
+>    > > (`M5l-088`). The default stays at 180 s, PLACEHOLDER.
 > 3. **The coherence validator compares floats and prints one decimal.** In
 >    `config/models.py` it tests `if dispatch + reconcile + settlement <=
 >    budget:` with every term a `float` product, and the refusal prints `{dispatch

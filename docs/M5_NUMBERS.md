@@ -313,6 +313,25 @@ than an omission — a value that fires on a healthy system trains an operator t
 skim the line, which is the worse failure direction, and it is then unavailable as
 a warning when it means something.
 
+> **ANNOTATED AT M5l (P70, C20): *"nothing checks it"* IS NO LONGER TRUE, here
+> or where item 2 of the M5k block below quotes it.** Config load now refuses
+> a value below `(1.5 + n - 1) x T + 1.0 s + 5 s`, where:
+> - `T` is the shortest enabled timeframe;
+> - `n` is `min(max_open_positions, enabled pairs)`;
+> - the terms are one bar, the coherence check's half-bar of handling plus the
+>   1.0 s transport overrun, one bar per call-cap deferral, and a 5 s margin.
+>
+> That is 156 s on the committed config (`M5l-084`), and the floor above's
+> `60 s + T_recon` is superseded by it. The 5m working copy `M5k-075`
+> describes would now be refused at load, not refuse entries at run time.
+>
+> **The floor bounds the churn-free healthy case only.** A position opening on
+> a freed slot sorts first while unstamped and can add one more deferral
+> (`M5l-088`).
+>
+> **What survives:** that the value must be raised by hand, since nothing
+> raises it for you, and that too tight is the worse direction.
+
 **Status: PLACEHOLDER — NOT MEASURED.**
 
 > **IT NOW HAS A READER, AND THE INSTRUCTION ABOVE WAS NOT CARRIED OUT.**
