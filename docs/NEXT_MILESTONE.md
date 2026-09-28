@@ -395,6 +395,41 @@ validator, and an edit there arms both items.
 >
 > **What survives:** the locked-decision question, and the default's value.
 
+> **ANNOTATED AT M5l (P72, C23): THE DEFAULT IS RULED; P-2 STAYS OPEN ON ONE
+> CLAUSE OF ITS LOCKED TEXT.**
+>
+> - **The default: RULED, kept at 180 s.** The owner rules it kept because it
+>   passes the derived floor on the committed config (180 s against 156 s).
+>   A configuration it does not fit is refused at load, and the refusal
+>   names a value to set: *"Set risk.max_position_staleness_s to at least"*
+>   the floor, in `_check_staleness_bound_covers_a_healthy_feed`. Its status
+>   stays PLACEHOLDER, since keeping a value does not measure it. This makes
+>   three sentences above no longer true: *"The default: STILL OPEN"*, *"the
+>   default's value"* in the survival line above, and the P-2 body's
+>   *"Fixing the default -- a fixed figure, or one derived from the
+>   timeframe -- is P-2's design question"*, with the C20 annotation's
+>   *"the default's fate is P-2's design question"*.
+> - **Item 2, the locked decision: STILL OPEN, on one clause.** The owner's
+>   re-ruled text, offered at P72 as C23, was not added to `CLAUDE.md`. One
+>   clause disagrees with P72's STEP 0 (`M5l-092`): *"Churn ... can add
+>   deferrals, up to n in a row as measured at M5l"*. In the stress arm, a
+>   newcomer's take-profit filled before its first read. At `n = 3`, under
+>   the 216 s bound that is `n = 3`'s floor, the healthy position was then
+>   deferred on four consecutive bars, which is `n + 1`. Its stamp reached
+>   242 s and then 302 s, and it was read on the fifth bar. Every other
+>   clause agrees with STEP 0 and with the code. That includes *"the guard
+>   refuses every entry once any stamp exceeds the configured bound"*:
+>   `_stale_positions` appends any position whose stamp is `None` or older
+>   than the bound, and `evaluate` refuses if the list is non-empty. No entry
+>   was admitted while any stamp exceeded the bound, in any of the six
+>   measured runs.
+> - **The C20 annotation's *"position churn, which adds one deferral beyond
+>   `n - 1`"* understates.** The same stress arm
+>   added two deferrals beyond `n - 1`. Recorded here, not corrected.
+>
+> **What survives:** the locked-decision question, now narrowed to how many
+> deferrals churn can add in a row. P-2 is not closed.
+
 ### P-3. The silent and unhedged failure modes catalogued in M5k
 
 Each is its own carried item with its own condition, re-verified by content
