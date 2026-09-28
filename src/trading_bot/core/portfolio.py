@@ -542,6 +542,33 @@ class Portfolio(BaseModel):
         self.free_quote = self.free_quote - cost
         self.positions[position.symbol] = position
 
+    def restore_position(self, position: Position) -> None:
+        """Insert a position restored at boot: UNKNOWN, and with NO debit.
+
+        The project owner's R1: a persisted position is reconciled against the
+        venue at boot and restored. **No debit, and that is the whole
+        difference from :meth:`open_position`.** At boot :attr:`free_quote` is
+        seeded from the venue's own balance, which already reflects the quote
+        that left the account for this entry; debiting it again would count the
+        entry twice (``M5l-108``).
+
+        **UNKNOWN, whatever the caller supplied.** A restored position is
+        trusted only once the reconciler has seen its protection resting, as
+        every position is; ``THE EXECUTOR CONSTRUCTS EVERY Position WITH
+        ProtectionState.UNKNOWN`` binds this construction too.
+
+        :raises ValueError: ``position.symbol`` is already held. A restore onto
+            a held symbol would overwrite a position silently. Refused before
+            anything is written.
+        """
+        if position.symbol in self.positions:
+            raise ValueError(
+                f"restore_position: {position.symbol} is already held; a restore would "
+                "overwrite that position silently"
+            )
+        position.protection = ProtectionState.UNKNOWN
+        self.positions[position.symbol] = position
+
     def close_position(
         self,
         symbol: str,
@@ -716,6 +743,59 @@ class Portfolio(BaseModel):
         # symbol that has left `positions`.
         del self.positions[symbol]
 
+        return pnl
+
+    def book_restored_exit(
+        self,
+        position: Position,
+        *,
+        exit_quote_total: Decimal,
+        fee: Fee,
+        filled_at: datetime,
+    ) -> Decimal:
+        """Book an exit that filled while the bot was down: the LEDGER only.
+
+        Returns the realised P&L, net of ``fee``, exactly as
+        :meth:`close_position` computes it -- through :meth:`_realised_from_total`
+        and the same fee subtraction, never a second copy of that arithmetic.
+
+        **NO CREDIT, and that is the whole difference from
+        :meth:`close_position`.** At boot :attr:`free_quote` is seeded from the
+        venue's own balance, read after the fill, so the proceeds are already in
+        it; crediting them again would count the exit twice (``M5l-108``).
+
+        **Booked to the FILL's UTC day, by the project owner's R4.**
+        ``filled_at`` is the venue's fill time, and :meth:`record_realised_pnl`
+        rolls and accrues against it as it would against a live booking. A
+        caller booking several must do so in ascending ``filled_at``.
+
+        **The position is not in the book, and must not be.** It is the exit of
+        a position the venue has already closed; one held here would be booked
+        and still counted. So a ``position`` whose symbol is held is refused.
+
+        **Nothing is written until everything that can fail has run**, as in
+        :meth:`close_position`: the fee's asset, the symbol, the aware time and
+        the arithmetic all run first, and the one write is the accrual.
+
+        :raises FeeUnresolvableError: ``fee`` is not in :attr:`quote_asset`.
+        :raises ValueError: the symbol is held; ``filled_at`` is naive; or the
+            position has no ``entry_fill_price``, as :meth:`_realised_from_total`
+            states.
+        """
+        if fee.asset != self.quote_asset:
+            raise FeeUnresolvableError(
+                f"book_restored_exit takes a fee in {self.quote_asset}; given {fee.amount} "
+                f"{fee.asset}, and there is no converter"
+            )
+        if position.symbol in self.positions:
+            raise ValueError(
+                f"book_restored_exit: {position.symbol} is held; a restored exit belongs to "
+                "a position the venue has already closed, and booking one still held would "
+                "count it twice"
+            )
+        _require_aware("filled_at", filled_at)
+        pnl = self._realised_from_total(position, exit_quote_total) - fee.amount
+        self.record_realised_pnl(pnl, now=filled_at)
         return pnl
 
     @staticmethod

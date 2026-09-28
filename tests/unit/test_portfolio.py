@@ -28,6 +28,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
+from freezegun import freeze_time
 from pydantic import ValidationError
 
 from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
@@ -546,3 +547,152 @@ def test_close_position_refuses_a_fee_in_another_asset() -> None:
     assert SYMBOL in portfolio.positions
     assert portfolio.free_quote == D("1000")
     assert portfolio.ledger is None
+
+
+# --------------------------------------------------------------------------
+# Boot restoration's primitives -- the owner's R1, R4; I6, I7, I8
+# --------------------------------------------------------------------------
+#: A fill made while the bot was down, two days before the frozen "now" below.
+FILL_AT = datetime(2026, 7, 25, 9, 0, tzinfo=timezone.utc)
+
+
+class TestRestorePosition:
+    """A restored position enters the book as UNKNOWN and costs nothing."""
+
+    def test_a_restored_position_costs_no_debit(self) -> None:
+        """I8: the seeded balance already reflects the entry (``M5l-108``).
+
+        MUTATION: debit ``quantity x entry_price`` as ``open_position`` would.
+
+        **The balance must exceed that debit, 2234.43 here**, or the mutation
+        is caught by ``free_quote``'s ``ge=0`` guard as a ``ValidationError``
+        rather than by this assertion as a wrong value (``M5l-117``).
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+
+        portfolio.restore_position(_position())
+
+        assert portfolio.free_quote == D("10000")
+        assert SYMBOL in portfolio.positions
+
+    def test_a_restored_position_enters_unknown_whatever_it_carried(self) -> None:
+        """I6. The fixture carries ACTIVE, so the write is observable.
+
+        MUTATION: set ``ProtectionState.ACTIVE`` instead of ``UNKNOWN``.
+        """
+        position = _position()
+        position.protection = ProtectionState.ACTIVE
+        portfolio = Portfolio(free_quote=D("10000"))
+
+        portfolio.restore_position(position)
+
+        assert portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+
+    def test_a_restore_onto_a_held_symbol_is_refused(self) -> None:
+        """A restore would otherwise overwrite a held position silently."""
+        held = _position()
+        portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: held})
+
+        with pytest.raises(ValueError, match="already held"):
+            portfolio.restore_position(_position())
+
+        assert portfolio.positions[SYMBOL] is held
+        assert portfolio.free_quote == D("1000")
+
+
+class TestBookRestoredExit:
+    """An exit that filled while the bot was down: the ledger only, on the fill's day."""
+
+    def test_a_restored_exit_leaves_free_quote_untouched(self) -> None:
+        """I7: the seeded balance already holds the proceeds (``M5l-108``).
+
+        MUTATION: credit ``exit_quote_total - fee`` as ``close_position`` would.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+
+        pnl = portfolio.book_restored_exit(
+            _position(), exit_quote_total=AWKWARD_TOTAL, fee=USDT_ZERO_FEE, filled_at=FILL_AT
+        )
+
+        assert pnl == AWKWARD_PNL
+        assert portfolio.free_quote == D("1000")
+        assert portfolio.realised_today(FILL_AT) == AWKWARD_PNL
+
+    @freeze_time("2026-07-27 09:00:00")
+    def test_a_restored_exit_books_to_the_fills_utc_day(self) -> None:
+        """R4: the fill's day, not the day the bot came back.
+
+        MUTATION: book with ``now=datetime.now(timezone.utc)``. The clock is
+        frozen two days after the fill, so that books to the wrong day.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+
+        portfolio.book_restored_exit(
+            _position(), exit_quote_total=AWKWARD_TOTAL, fee=USDT_ZERO_FEE, filled_at=FILL_AT
+        )
+
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.pnl_date == FILL_AT.date()
+
+    def test_the_realised_figure_equals_the_close_paths(self) -> None:
+        """Parity with ``close_position`` for the same inputs, fee included.
+
+        MUTATION: compute the entry term again here with a rounding change
+        rather than through ``_realised_from_total``. The entry fill below has
+        nine decimal places, so its cost does not survive rounding to eight.
+        """
+        long_entry = D("100000.123456789")
+        fee = Fee(amount=D("0.00123000"), asset="USDT")
+        closing = Portfolio(
+            free_quote=D("1000"), positions={SYMBOL: _position(entry_fill=long_entry)}
+        )
+        restoring = Portfolio(free_quote=D("1000"))
+
+        closed = closing.close_position(SYMBOL, exit_quote_total=AWKWARD_TOTAL, now=NOW, fee=fee)
+        restored = restoring.book_restored_exit(
+            _position(entry_fill=long_entry), exit_quote_total=AWKWARD_TOTAL, fee=fee, filled_at=NOW
+        )
+
+        assert restored == closed
+        assert closing.ledger is not None
+        assert restoring.ledger is not None
+        assert restoring.ledger.realised_pnl == closing.ledger.realised_pnl
+
+    def test_a_held_symbol_is_refused(self) -> None:
+        """A position still in the book would be booked and still counted."""
+        portfolio = Portfolio(free_quote=D("1000"), positions={SYMBOL: _position()})
+
+        with pytest.raises(ValueError, match="is held"):
+            portfolio.book_restored_exit(
+                _position(), exit_quote_total=AWKWARD_TOTAL, fee=USDT_ZERO_FEE, filled_at=FILL_AT
+            )
+
+        assert portfolio.ledger is None
+
+    def test_a_fee_outside_the_quote_asset_is_refused(self) -> None:
+        """The money rule, as ``close_position`` enforces it."""
+        portfolio = Portfolio(free_quote=D("1000"))
+
+        with pytest.raises(FeeUnresolvableError, match="fee in USDT"):
+            portfolio.book_restored_exit(
+                _position(),
+                exit_quote_total=AWKWARD_TOTAL,
+                fee=Fee(amount=D("0.00000100"), asset="BTC"),
+                filled_at=FILL_AT,
+            )
+
+        assert portfolio.ledger is None
+
+    def test_a_naive_fill_time_is_refused(self) -> None:
+        """A naive time would be read as local and move the booked day."""
+        portfolio = Portfolio(free_quote=D("1000"))
+
+        with pytest.raises(ValueError, match="filled_at"):
+            portfolio.book_restored_exit(
+                _position(),
+                exit_quote_total=AWKWARD_TOTAL,
+                fee=USDT_ZERO_FEE,
+                filled_at=FILL_AT.replace(tzinfo=None),
+            )
+
+        assert portfolio.ledger is None

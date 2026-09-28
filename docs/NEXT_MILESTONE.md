@@ -1428,6 +1428,33 @@ Unchanged from M5h.
 
 ---
 
+## Standing authorities for commits -- added at M5l P78b (C29)
+
+**The standing docstring authority, ruled by the project owner at M5l P78b,
+verbatim:**
+
+> "STANDING DOCSTRING AUTHORITY, owner's ruling at M5l P78b, for this and every
+> later commit:
+> - A commit may correct or annotate docstring and comment text that it makes
+>   false in any src/ file. It may not change code.
+> - Verify it per such file: ast.dump of the module with every docstring removed
+>   is identical before and after, and every changed line outside a docstring is
+>   a comment line.
+> - Report each verification.
+> - Record the ruling verbatim in NEXT_MILESTONE beside the annotation
+>   authority, in this commit."
+
+**The annotation authority it was to sit beside is recorded nowhere in the
+tree (`M5l-116`).** MEASURED at P78b: no document, and no commit message, has
+ever contained the phrase. It has lived only in the owner's prompts, which is
+the shape this project has recorded several times, of a rule held outside the
+repository. As the prompts state it (P70 and P71, reported here, not quoted),
+it covers `README.md`, `docs/NEXT_MILESTONE.md`, `docs/M5_NUMBERS.md`,
+`docs/RUN_LEDGER.md`, and `CLAUDE.md` except its locked-decision text, with
+per-prompt extensions for named `src/` docstrings and `config.yaml` comment
+lines. The standing docstring authority above widens it for `src/` docstrings
+and comments; it does not touch the documents' half.
+
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 
 The five steps live in `CLAUDE.md`'s **Git workflow** section and that file is

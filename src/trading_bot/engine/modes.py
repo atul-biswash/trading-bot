@@ -1441,6 +1441,16 @@ async def live_system(
                     truth at every instant, and a closure that reads it cannot
                     be behind. A cached copy can only ever be equal or wrong.
 
+                    **ANNOTATED AT M5l P78b (C29): "reached only from
+                    ``close_position``" IS NO LONGER TRUE.** The one writer is
+                    still ``record_realised_pnl``, now reached from
+                    ``close_position`` and from
+                    ``Portfolio.book_restored_exit``, which books an exit that
+                    filled while the bot was down to the ledger only. Both
+                    write the in-memory portfolio, so the conclusion stands:
+                    ``portfolio.ledger`` is current truth at every instant, and
+                    a closure that reads it cannot be behind.
+
                     **THIS IS ALSO WHAT MAKES A CLOSE ONE ATOMIC SAVE.** The
                     close's completion drops the symbol from ``_pending`` and
                     calls this once; the deletion and the accrual are now in the
