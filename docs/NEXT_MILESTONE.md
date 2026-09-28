@@ -458,6 +458,41 @@ validator, and an edit there arms both items.
 > precondition. P-2 is not closed. The commits it rests on so far are
 > `f20e839`, `90355df`, `cf37cda`, `9f188c4` and this one.
 
+> **ANNOTATED AT M5l (P74, C26): P-2 IS CLOSED.** The owner's re-ruled text,
+> with "on a healthy feed" restored to the age bound and a sentence added for
+> a feed gap, is annotated onto `CLAUDE.md`'s locked decision *Fills are
+> observed by polling*. Every clause has a supporting code line or declared
+> finding. So these sentences are no longer true:
+>
+> - *"P-2 is not closed"*, here and in C23's annotation;
+> - *"Item 2, the locked decision: STILL OPEN"*, in C22's, C23's and C24's
+>   annotations;
+> - item 2's *"Whether to annotate the locked text, change `>` to `>=`, or
+>   dedup against a shorter interval is the owner's call"*, and item 1's
+>   *"Whether to change it to `>=` goes with item 2"*. Both are ruled: the
+>   locked text is annotated, and it keeps the strict `>`.
+>
+> The commits that resolved P-2:
+>
+> - `f20e839` (C20): the staleness floor;
+> - `90355df` (C20b): the `L + 1` call-cap precondition;
+> - `cf37cda` (C22): the item-by-item record;
+> - `9f188c4` (C23): the default, kept at 180 s;
+> - `40a9e67` (C24): the owner's rule for locked text;
+> - `127be9a` (C25): the churn wording at `M5l-094`'s sites;
+> - this commit: the locked text.
+>
+> The earlier items stand as recorded by C22: `517348f` (C17), `25dbc61`
+> (C15), `5d6f115` (C16) and `6e7c9f2` (C18).
+>
+> **What survives:** nothing of P-2 is carried. Its neighbours are:
+>
+> - P-3m, where a deferral still logs nothing;
+> - P-3o, where the call cap is still the position limit;
+> - P-3l, where a feed gap is still unreported.
+>
+> Each keeps its own item and arming condition.
+
 ### P-3. The silent and unhedged failure modes catalogued in M5k
 
 Each is its own carried item with its own condition, re-verified by content

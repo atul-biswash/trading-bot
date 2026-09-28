@@ -1300,6 +1300,52 @@ data.
   > any instant between the two. **What survives:** every UNHELD position is
   > still reconciled on any pair's candle, and the dedup and oldest-first
   > rules above are unchanged.
+
+  > **RE-RULED BY THE PROJECT OWNER AT M5l (P74, C26).** The ruling, verbatim:
+  >
+  > "Reconciliation runs, on any pair's candle, over every open position not
+  > held under ruling A. A position is re-read once its stamp is strictly
+  > older than the shortest enabled timeframe T. The staleness guard samples
+  > the stamp only in `evaluate`, after reconciliation on the same candle, so
+  > on a healthy feed the age it observes is at most T plus the time from the
+  > candle's close to that read, plus one T for each consecutive call-cap
+  > deferral of that position (M5l-066); after a feed gap the first candle can
+  > find the stamp as old as the gap (M5l-095). Without position churn, and
+  > because configuration load refuses max_open_positions below L + 1, a
+  > healthy feed allows at most n - 1 consecutive deferrals, n being
+  > min(max_open_positions, enabled pairs) (M5l-084); the config-load floor on
+  > max_position_staleness_s is sized from that bound so the guard does not
+  > fire on a healthy, churn-free system. Churn, a position opening on a freed
+  > slot and sorting first while unstamped, can add deferrals beyond n - 1
+  > (measured up to n + 1, M5l-092); no bound is claimed for it. What is
+  > guaranteed is that any stamp over the configured bound refuses every entry
+  > (risk/manager.py, _stale_positions and the POSITION_STALE refusal in
+  > evaluate), measured with no entry admitted over the bound in every churn
+  > arm and in the gap arm (M5l-092, M5l-095). The cost of churn is refused
+  > entries and later detection of fills, never an entry admitted over the
+  > bound. A failed call, or a neighbour whose legs never resolve, lets the
+  > stamp age without bound; catching that is the guard's purpose."
+  >
+  > **What it supersedes:**
+  > - The bullet's "so staleness is bounded by the *shortest* configured
+  >   timeframe rather than the slowest position's". A bound exists only on
+  >   a healthy feed, and it adds the handling time and one bar per call-cap
+  >   deferral. P-2 item 2 in `docs/NEXT_MILESTONE.md` had carried the
+  >   contradiction since M5g.
+  > - *"a position is re-read only once its stamp is older than the shortest
+  >   timeframe"* is sharpened to *strictly* older (`_is_due`'s `>`).
+  > - The user-data paragraph's *"polling's staleness is at least bounded by
+  >   its own cadence"* (`M5l-097`). It was false before this ruling: a failed
+  >   call or unresolved legs let a stamp age without bound (`M5l-085`), and a
+  >   feed gap is sampled whole (`M5l-095`). Polling's staleness is
+  >   *visible* -- the stamp ages where the guard reads it -- not bounded.
+  >
+  > **What survives:** the trigger (any pair's candle, not the position's own
+  > bar), the dedup by `last_reconciled_at`, oldest-stamp-first visiting, ruling
+  > A's exclusion, and the user-data stream's deferral with its other reasons.
+  > A silently dead stream still leaves the bot believing it is current. The
+  > next bullet's *"The shortest timeframe is a floor, not a bound"* is
+  > consistent with this ruling and unchanged.
 - **There is no static staleness guarantee — only what `last_reconciled_at`
   reports.** The shortest timeframe is a floor, not a bound: add the query's own
   latency, add every bar the budget skipped, add every bar that never arrived
