@@ -370,6 +370,8 @@ at `4544b3a`.
 >
 > **AND P-3m AND P-3n (P68, C19)**, both catalogued at M5l by the commit
 > that adds them, and likewise not re-verified at `4544b3a`.
+>
+> **AND P-3o (P71, C20b)**, on the same terms.
 
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
@@ -547,6 +549,23 @@ calls"*. MEASURED: the two disagree. Which one stands decides whether
 `_CLOSE_SEQUENCE_CALLS` can go, and that is U7's subject.
 
 *Arming condition:* **whoever next edits `_CLOSE_SEQUENCE_CALLS` in `config/models.py`, or rules on U7.**
+
+#### P-3o. The call cap is the position limit (`M5l-086`, `M5l-087`)
+
+The pass cap max_calls equals max_open_positions, so a configuration with
+max_open_positions < L + 1 cannot complete a position with L unresolved legs
+(M5l-086, M5l-087). C20b refuses such configurations at load; decoupling the
+cap from the position limit, and counting it in the budget, is the real fix
+and needs its own Phase 1. C20b therefore refuses max_open_positions = 1 in
+every configuration; decoupling restores single-position operation.
+
+> **ANNOTATED AT M5l (P71, C20b), for precision: "in every configuration"
+> means every configuration with a protective leg enabled.** With both the
+> stop-loss and the take-profit disabled, `L = 0` and a cap of 1 is
+> accepted. Two tests rely on that. **What survives:** every configuration
+> that protects its positions needs a cap of at least `L + 1`.
+
+*Arming condition:* **whoever next changes how `ReconciliationBudget.from_config` in `execution/reconciliation_driver.py` sets `max_calls`.**
 
 ---
 

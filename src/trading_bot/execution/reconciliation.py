@@ -562,6 +562,18 @@ async def reconcile_open_positions(
     weakness in the rule. See ``docs/NEXT_MILESTONE.md`` item 13 for the config
     relation this implies, which nothing validates.
 
+    .. note::
+
+       **ANNOTATED AT M5l (C20b): "which nothing validates" IS NO LONGER TRUE.**
+       ``max_calls`` is ``max_open_positions``, and config load now refuses
+       ``max_open_positions < L + 1``, with ``L`` the enabled protective legs,
+       in ``AppConfig._check_the_call_cap_can_complete_a_position``.
+       MEASURED below it: at one call, neither a stop-only nor a
+       stop-and-target position is ever completed, and its exit is never
+       booked (``M5l-087``). **What survives:** the arithmetic above, and that
+       the call cap and the position limit are one number. Decoupling them is
+       P-3o's.
+
     **``L`` is DISCOVERED BY VISITING, not predicted**, and the reservation
     takes effect from the next iteration. It protects work already identified
     rather than work forecast, which is what lets it exist without lookahead.

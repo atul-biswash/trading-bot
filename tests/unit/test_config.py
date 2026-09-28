@@ -532,10 +532,19 @@ class TestDispatchBudgetCoherence:
         settlement. MUTATION: count settlement as `P_sim x T` -- 21.0 + 3.0 +
         9.0 = 33.0, refused, and this fails. `requests_timeout_s=8` keeps the
         transport check (`8 <= 7.0 + 1.0`) from refusing the config first.
+
+        Protection is disabled so a cap of 1 stays legal: with a stop and a
+        take-profit enabled, the call-cap check (added after this test)
+        requires a cap of at least 3.
         """
         config = _app_config(
             pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")],
-            risk=RiskConfig(dispatch_deadline_s=7.0, limits=RiskLimitsConfig(max_open_positions=1)),
+            risk=RiskConfig(
+                dispatch_deadline_s=7.0,
+                limits=RiskLimitsConfig(max_open_positions=1),
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(enabled=False),
+            ),
             exchange=ExchangeConfig(requests_timeout_s=8),
         )
         assert config.risk.limits.max_open_positions == 1
@@ -757,7 +766,11 @@ class TestStalenessBoundCoversAHealthyFeed:
 
     def test_a_single_position_cap_gives_a_floor_of_96(self) -> None:
         """max_open_positions = 1 on two 1m pairs: n = 1, k_max = 0, floor
-        1.5 x 60 + 6 = 96. Here the CAP binds n, not the pair count."""
+        1.5 x 60 + 6 = 96. Here the CAP binds n, not the pair count.
+
+        Protection is disabled so a cap of 1 stays legal under the call-cap
+        check, which requires 3 with a stop and a take-profit enabled.
+        """
         with pytest.raises(ValidationError) as excinfo:
             _app_config(
                 pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m")],
@@ -765,6 +778,8 @@ class TestStalenessBoundCoversAHealthyFeed:
                     reconcile_deadline_s=2.3,
                     max_position_staleness_s=95.999,
                     limits=RiskLimitsConfig(max_open_positions=1),
+                    stop_loss=StopLossConfig(enabled=False),
+                    take_profit=TakeProfitConfig(enabled=False),
                 ),
             )
         assert "is below the 96.0s" in str(excinfo.value)
@@ -779,6 +794,55 @@ class TestStalenessBoundCoversAHealthyFeed:
             pairs=[("ETHUSDT", "5m"), ("BTCUSDT", "1m")],
             risk=RiskConfig(reconcile_deadline_s=2.3, max_position_staleness_s=170.0),
         )
+
+
+class TestTheCallCapCanCompleteAPosition:
+    """`max_open_positions >= L + 1`, `L` the enabled protective legs.
+
+    The reconciler's per-pass call budget IS `max_open_positions`, and a
+    position whose legs have all left the book needs one enumeration plus `L`
+    point queries to complete (`M5l-086`, `M5l-087`). No pairs are enabled in
+    the refusal cases, so the coherence and staleness checks are vacuous and
+    only this one can refuse.
+    """
+
+    def test_the_committed_shape_is_accepted(self) -> None:
+        """Stop and take-profit (L = 2) with the default cap of 3."""
+        config = _app_config(
+            pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")],
+            risk=RiskConfig(reconcile_deadline_s=2.3),
+        )
+        assert config.risk.limits.max_open_positions == 3
+
+    def test_two_legs_with_a_cap_of_two_are_refused(self) -> None:
+        """L = 2 needs 3 calls. MUTATION: fix L at 1 -- the minimum becomes 2
+        and this cap passes."""
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=2)))
+        message = str(excinfo.value)
+        assert "risk.limits.max_open_positions = 2 is below 3" in message
+        assert "daily-loss limit never counts it" in message
+        assert "at least 3" in message
+
+    def test_two_legs_with_a_cap_of_one_are_refused(self) -> None:
+        """L = 2 with a single call: the pass spends it enumerating."""
+        with pytest.raises(ValidationError, match="max_open_positions = 1 is below 3"):
+            _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=1)))
+
+    def test_a_stop_only_config_with_a_cap_of_two_is_accepted(self) -> None:
+        """L = 1 (stop only) needs 2 calls, so a cap of 2 passes."""
+        config = _app_config(
+            risk=RiskConfig(
+                take_profit=TakeProfitConfig(enabled=False),
+                limits=RiskLimitsConfig(max_open_positions=2),
+            )
+        )
+        assert config.risk.limits.max_open_positions == 2
+
+    def test_a_cap_of_exactly_l_plus_one_is_accepted(self) -> None:
+        """L = 2, cap 3: the boundary. MUTATION: `>=` -> `>` refuses it."""
+        config = _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=3)))
+        assert config.risk.limits.max_open_positions == 3
 
 
 # --------------------------------------------------------------------------
