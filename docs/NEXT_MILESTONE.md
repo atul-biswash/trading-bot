@@ -430,6 +430,34 @@ validator, and an edit there arms both items.
 > **What survives:** the locked-decision question, now narrowed to how many
 > deferrals churn can add in a row. P-2 is not closed.
 
+> **ANNOTATED AT M5l (P73, C24): THE CHURN CLAUSE IS RESOLVED; P-2 STAYS OPEN
+> ON A MISSING PRECONDITION.**
+>
+> - **The owner's rule for locked text:** locked text states enforced
+>   guarantees and derived bounds with their preconditions, never counts
+>   measured in adversarial arms as limits.
+> - **The churn clause is resolved.** The owner's P73 text says churn *"can
+>   add deferrals beyond n - 1 (measured up to n + 1, M5l-092); no bound is
+>   claimed for it"*. That agrees with `M5l-092`.
+> - **Item 2, the locked decision: STILL OPEN, on one clause.** P73's text,
+>   offered as C24, was not added to `CLAUDE.md`. Its sentence *"so the age it
+>   observes is at most T plus the time from the candle's close to that read,
+>   plus one T for each consecutive call-cap deferral of that position"*
+>   states a derived bound without its precondition, a healthy feed. The
+>   finding it rests on carries that precondition: `M5l-066` reads *"so on a
+>   healthy feed the age it observes is at most one bar plus the handling
+>   time"*. MEASURED at P73 (`M5l-095`), with the real pass, resolver and
+>   `evaluate`: after a 360 s gap with no candle, a neighbour whose
+>   take-profit filled during the gap was visited first. On the first candle
+>   after the gap, the healthy position was deferred once, and `evaluate`
+>   read its stamp at 361 s, where the clause allows 121 s. The guarantee
+>   held: `evaluate` refused as `position_stale`. Every other clause has a
+>   supporting code line or declared finding.
+>
+> **What survives:** the locked-decision question, narrowed to the bound's
+> precondition. P-2 is not closed. The commits it rests on so far are
+> `f20e839`, `90355df`, `cf37cda`, `9f188c4` and this one.
+
 ### P-3. The silent and unhedged failure modes catalogued in M5k
 
 Each is its own carried item with its own condition, re-verified by content
