@@ -60,6 +60,27 @@ callers, so its schema would be written against assumptions the milestone that
 gives it a writer has not made. **No fill price of any kind** -- entry or exit
 -- because booking is piece 2's and its source is not ruled.
 
+**ANNOTATED AT M5l P78 (C28): "No ``Position``" ABOVE IS SUPERSEDED BY THE
+PROJECT OWNER'S R1, AND THE LIST OF WHAT IT HOLDS GAINS A FOURTH ENTRY.** R1:
+persist what we requested per open position, and reconcile each record against
+the venue at boot. So the store now also holds:
+
+* **The open positions** -- :class:`PositionRecord`, one per open position,
+  carrying the seven requested fields ``PendingRecord`` carries and no more.
+  The owner's R2: the record holds only requested values. The inclusion test
+  is unchanged.
+
+The two grounds above part company. *"a live list's economics are
+venue-derivable"* still holds, and it is why nothing the venue reports is
+stored: the entry's fill is re-fetched at boot (R2). *"a persisted position
+the venue has since closed makes ``has_position`` true for nothing"* is
+answered by resolution rather than by absence: boot resolves every record
+against the venue before anything reads ``has_position`` (R1). **What
+survives:** the inclusion test, and every other exclusion in the paragraph
+above, the fill price among them. **Nothing writes or reads a
+:class:`PositionRecord` yet**: the writers and the boot step are later
+commits, and this sentence goes false when the first of them lands.
+
 **THE LEDGER IS ABSENT, NOT ZERO, UNTIL A FIRST ACCRUAL, and the distinction
 is load-bearing.** Absent means *nothing has ever been booked*; ``0`` would
 mean *accruals netted to zero*. Those are different facts and a reader acting
@@ -150,6 +171,7 @@ __all__ = [
     "PendingCloseRecord",
     "PendingRecord",
     "PersistedState",
+    "PositionRecord",
     "StoreCorruptError",
     "load",
     "save",
@@ -162,7 +184,22 @@ DEFAULT_STORE_PATH = Path("data/state.json")
 
 #: Bumped only when a shape change cannot be read by the previous version.
 #: Adding an optional key is additive and does not move it.
-SCHEMA_VERSION = 1
+#:
+#: **BUMPED TO 2 AT M5l P78 (C28), by the project owner's Q1(a), for a key the
+#: previous version COULD read.** ``positions`` is additive, and a version-1
+#: build would load a file carrying it -- and then erase it on its next
+#: whole-file save, because :func:`load` reads named keys and ignores the rest
+#: (``M5l-107``). So the rule above gains a second trigger: a shape a previous
+#: build would read and then silently lose. This build reads every version in
+#: :data:`_READABLE_SCHEMAS`, 1 as well as 2.
+SCHEMA_VERSION = 2
+
+#: Every version :func:`load` accepts. **A TUPLE, NOT A SET**: membership is
+#: then tested by ``==``, so a payload whose ``schema`` is an unhashable JSON
+#: value is refused as corrupt rather than raising ``TypeError`` past the
+#: refusal. Tied to :data:`SCHEMA_VERSION`, so a later bump is read by the
+#: build that makes it.
+_READABLE_SCHEMAS = (1, SCHEMA_VERSION)
 
 _TEMP_SUFFIX = ".tmp"
 
@@ -239,6 +276,43 @@ class PendingCloseRecord(_Frozen):
     entry_bar_time: datetime
     generation: int
     quantity: Money
+
+
+class PositionRecord(_Frozen):
+    """One open position, as what WE REQUESTED for it. The project owner's R1 and R2.
+
+    The same seven fields :class:`PendingRecord` carries, under the same
+    inclusion test -- every one is something WE REQUESTED, never something the
+    venue reported. ``symbol``, ``entry_bar_time`` and ``generation`` are the
+    seeds of our client ids; ``quantity``, ``entry_limit``, ``stop_loss`` and
+    ``take_profit`` are the values we sent, and they are what reconciliation
+    compares against.
+
+    **WHAT STAYS OUT, and each exclusion is the rule rather than an omission.**
+    The entry's fill price and quote total, and the venue's numeric list id,
+    are venue-reported: the owner's R2 re-fetches the entry at boot. The
+    protection state and the reconciliation stamp are derived by reconciling.
+    The settlement hold is re-derived from the venue's fills. The wall-clock
+    creation time does not survive a restart meaningfully.
+
+    ``kind`` carries NO DEFAULT, as on :class:`PendingCloseRecord`: no file has
+    ever held a position record, so there is nothing to be lenient towards.
+    ``stop_loss`` and ``take_profit`` are required KEYS with nullable values,
+    as on :class:`PendingRecord`, so a truncated record raises rather than
+    reading as unprotected.
+
+    **NOTHING WRITES OR READS ONE YET.** It is the shape, landing before its
+    writers -- the order ``PendingClose`` and ``persist_ledger`` each took.
+    """
+
+    kind: Literal["position"]
+    symbol: str
+    entry_bar_time: datetime
+    generation: int
+    quantity: Money
+    entry_limit: Money
+    stop_loss: Money | None
+    take_profit: Money | None
 
 
 class LedgerRecord(_Frozen):
@@ -338,7 +412,21 @@ class PersistedState(_Frozen):
     #: additive -- a new optional key on one model and a new model reached only
     #: when that key says so -- so a file written before this commit still
     #: loads unchanged, which is exactly what a schema integer is for.
+    #:
+    #: **ANNOTATED AT M5l P78 (C28): THE SCHEMA IS NOW 2, and "THE SCHEMA STAYS
+    #: AT 1" and "tests the version by strict EQUALITY" are no longer true.**
+    #: The project owner's Q1(a) bumped it for :attr:`positions`, and
+    #: :func:`load` now accepts every version in :data:`_READABLE_SCHEMAS`,
+    #: whose refusal names them all rather than "{SCHEMA_VERSION} only". So
+    #: the store already on disk, at 1, still loads. **What survives:** the
+    #: measured reason itself -- a bump that refused the file on disk would stop
+    #: the boot -- which is exactly why the bump reads both versions.
     pending: tuple[PendingRecord | PendingCloseRecord, ...] = ()
+    #: One record per open position, requested values only (the owner's R1 and
+    #: R2). **A SEPARATE KEY, NOT A THIRD KIND IN ``pending``**: a pending
+    #: CLOSE and the position it closes legitimately share a symbol, which the
+    #: one-record-per-symbol rule on ``pending`` forbids. Nothing writes one yet.
+    positions: tuple[PositionRecord, ...] = ()
     ledger: LedgerRecord | None = None
     #: Completed UTC days, newest and oldest alike, keyed by the day they cover.
     #:
@@ -415,6 +503,49 @@ class PersistedState(_Frozen):
             )
         return self
 
+    @model_validator(mode="after")
+    def _reject_conflicting_positions(self) -> PersistedState:
+        """At most one position record per symbol, and never beside a placement.
+
+        **Two records for one symbol** would collapse on restore, as a
+        duplicated pending record would, and one open position would be
+        forgotten -- the orphan this record exists to close.
+
+        **A placement pending record beside a position record** asserts that
+        one symbol both has an open position and has an entry whose outcome was
+        not observed. The executor refuses a second entry on a symbol it
+        holds, so the pair cannot come from our own writer; a file carrying it
+        cannot say which record describes the venue. **A CLOSE beside a
+        position is legitimate** and is allowed: it is the position being
+        closed.
+
+        On the model, for the reason :meth:`_reject_duplicate_symbols` gives,
+        and it reaches :class:`StoreCorruptError` through :func:`load` the
+        same way.
+        """
+        seen: set[str] = set()
+        duplicated: set[str] = set()
+        for position in self.positions:
+            if position.symbol in seen:
+                duplicated.add(position.symbol)
+            seen.add(position.symbol)
+        if duplicated:
+            raise ValueError(
+                f"{len(self.positions)} position record(s) carry a duplicated symbol "
+                f"({', '.join(sorted(duplicated))}). A symbol has at most one open "
+                "position, so a duplicate would collapse on restore and forget one."
+            )
+        placed = {record.symbol for record in self.pending if record.kind == "placement"}
+        both = placed & seen
+        if both:
+            raise ValueError(
+                f"{', '.join(sorted(both))} carries both a position record and an "
+                "unresolved placement. One symbol cannot both hold an open position and "
+                "have an entry whose outcome was not observed, and nothing in the file "
+                "says which describes the venue."
+            )
+        return self
+
 
 def _dump_money(value: Decimal) -> str:
     """A ``Decimal`` crosses as its exact ``str``, never as a JSON number."""
@@ -476,6 +607,35 @@ def _load_pending(entry: dict[str, Any]) -> PendingRecord | PendingCloseRecord:
     return PendingRecord(**entry)
 
 
+def _dump_position(record: PositionRecord) -> dict[str, Any]:
+    """One position record, field by named field, money as exact strings."""
+    return {
+        "kind": record.kind,
+        "symbol": record.symbol,
+        "entry_bar_time": record.entry_bar_time.isoformat(),
+        "generation": record.generation,
+        "quantity": _dump_money(record.quantity),
+        "entry_limit": _dump_money(record.entry_limit),
+        "stop_loss": _dump_optional_money(record.stop_loss),
+        "take_profit": _dump_optional_money(record.take_profit),
+    }
+
+
+def _load_positions(version: object, entries: list[Any]) -> tuple[PositionRecord, ...]:
+    """The position records back from their payload.
+
+    **A VERSION-1 FILE CARRYING POSITIONS IS CORRUPT, NOT IGNORED.** No build
+    writes one: version 1 predates the key. Reading past it would drop the
+    records silently, which is the loss ``M5l-107`` names, so it is refused.
+    """
+    if version == 1 and entries:
+        raise ValueError(
+            f"a schema-1 file carries {len(entries)} position record(s); schema 1 "
+            "predates positions, so no build writes that shape"
+        )
+    return tuple(PositionRecord(**entry) for entry in entries)
+
+
 def _dump_ledger(ledger: LedgerRecord | None) -> dict[str, Any] | None:
     if ledger is None:
         return None
@@ -518,6 +678,7 @@ def _serialise(state: PersistedState) -> str:
     payload = {
         "schema": state.schema_version,
         "pending": [_dump_pending(record) for record in state.pending],
+        "positions": [_dump_position(record) for record in state.positions],
         "ledger": _dump_ledger(state.ledger),
         "daily_history": _dump_history(state.daily_history),
         "lifetime_realised": _dump_optional_money(state.lifetime_realised),
@@ -551,15 +712,20 @@ def load(path: Path = DEFAULT_STORE_PATH) -> PersistedState | None:
         raise StoreCorruptError(f"{path} holds {type(payload).__name__}, not an object")
 
     version = payload.get("schema")
-    if version != SCHEMA_VERSION:
+    if version not in _READABLE_SCHEMAS:
+        readable = ", ".join(str(known) for known in _READABLE_SCHEMAS)
         raise StoreCorruptError(
-            f"{path} declares schema {version!r}; this build reads {SCHEMA_VERSION} only"
+            f"{path} declares schema {version!r}; this build reads {readable} only"
         )
 
     try:
         return PersistedState(
             schema_version=SCHEMA_VERSION,
             pending=tuple(_load_pending(entry) for entry in payload.get("pending", [])),
+            # `.get` with a default, so a version-1 file -- which predates the
+            # key -- loads with no positions; `_load_positions` refuses one that
+            # carries some.
+            positions=_load_positions(version, payload.get("positions", [])),
             ledger=(None if payload.get("ledger") is None else LedgerRecord(**payload["ledger"])),
             # `.get` with a default on every new key: a file written before this
             # commit carries none of them, and taking the default is exactly how

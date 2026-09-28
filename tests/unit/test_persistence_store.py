@@ -633,7 +633,7 @@ class TestThePendingClose:
         assert loaded is not None
         assert loaded.pending == (_close_record(),)
 
-    def test_the_schema_stays_at_one_so_a_close_needs_no_bump(self, tmp_path: Path) -> None:
+    def test_the_schema_is_pinned_so_a_bump_is_deliberate(self, tmp_path: Path) -> None:
         """THE RULING, asserted rather than trusted.
 
         MUTATION: bump ``SCHEMA_VERSION`` to 2.
@@ -643,13 +643,23 @@ class TestThePendingClose:
         real ledger this project has -- and ``live_system`` refuses to boot on
         a corrupt store. Asserting the integer on a file that contains a close
         is what pins the growth as additive.
+
+        **ANNOTATED AT M5l P78 (C28): SUPERSEDED BY THE PROJECT OWNER'S Q1(a).**
+        The schema is now 2, bumped for ``positions`` (``M5l-107``), and this
+        test was ``test_the_schema_stays_at_one_so_a_close_needs_no_bump``
+        until then; its name would otherwise be false. ``load`` no longer tests
+        by strict equality: it reads every version in ``_READABLE_SCHEMAS``, so
+        the store on disk, at 1, still loads. **MUTATION: bump
+        ``SCHEMA_VERSION`` to 3.** What survives: asserting the integer, on the
+        written file and on the constant, so any further bump is a deliberate
+        edit here rather than a side effect.
         """
         path = tmp_path / "state.json"
 
         s.save(s.PersistedState(pending=(_close_record(),)), path)
 
-        assert json.loads(path.read_text(encoding="utf-8"))["schema"] == 1
-        assert s.SCHEMA_VERSION == 1
+        assert json.loads(path.read_text(encoding="utf-8"))["schema"] == 2
+        assert s.SCHEMA_VERSION == 2
 
     def test_a_file_written_before_the_tag_still_loads_as_a_placement(self, tmp_path: Path) -> None:
         """**THE COMPATIBILITY CLAIM, on a payload shaped like the live file.**
@@ -1027,3 +1037,148 @@ class TestAgreementWithTheDomainsDaySummary:
 
     def test_the_duplicated_cap_agrees_with_the_domains(self) -> None:
         assert CORE_MAX_DAILY_HISTORY == s.MAX_DAILY_HISTORY
+
+
+# --------------------------------------------------------------------------
+# The position record -- the owner's R1 and R2, at schema 2
+# --------------------------------------------------------------------------
+def _position_record(**overrides: object) -> s.PositionRecord:
+    """The position ``_record``'s placement opened, as we requested it."""
+    fields: dict[str, object] = {
+        "kind": "position",
+        "symbol": "ETHUSDT",
+        "entry_bar_time": BAR,
+        "generation": 0,
+        "quantity": D("0.72650000"),
+        "entry_limit": D("2508.41000000"),
+        "stop_loss": D("2458.25000000"),
+        "take_profit": D("2608.74000000"),
+    }
+    fields.update(overrides)
+    return s.PositionRecord(**fields)  # type: ignore[arg-type]
+
+
+class TestThePositionRecord:
+    """One record per open position, requested values only, at schema 2.
+
+    Nothing writes or reads one yet; this pins the shape, the round trip, the
+    version rules and the validator before any writer depends on them.
+    """
+
+    def test_a_position_record_round_trips_exactly(self, tmp_path: Path) -> None:
+        """The written entry, key by key, and then the loaded object.
+
+        MUTATION: drop ``take_profit`` from ``_dump_position``. The payload
+        assertion reads the written entry before anything loads it, so a
+        dropped key fails as an assertion rather than as the load's refusal.
+        """
+        path = tmp_path / "state.json"
+        state = s.PersistedState(positions=(_position_record(),))
+
+        s.save(state, path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+
+        assert payload["positions"] == [
+            {
+                "kind": "position",
+                "symbol": "ETHUSDT",
+                "entry_bar_time": BAR.isoformat(),
+                "generation": 0,
+                "quantity": "0.72650000",
+                "entry_limit": "2508.41000000",
+                "stop_loss": "2458.25000000",
+                "take_profit": "2608.74000000",
+            }
+        ]
+        assert s.load(path) == state
+
+    def test_a_version_one_file_loads_with_no_positions(self, tmp_path: Path) -> None:
+        """The live file's shape, at schema 1, loads with ``positions == ()``.
+
+        MUTATION: read ``payload["positions"]`` rather than ``.get``. A
+        version-1 file has no such key, so the read raises.
+        """
+        path = tmp_path / "state.json"
+        path.write_text(LIVE_STATE_JSON, encoding="utf-8")
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert loaded.positions == ()
+        assert loaded.ledger == s.LedgerRecord(
+            realised_pnl=D("2.2781952000"), pnl_date=date(2026, 9, 9), trades_count=0
+        )
+
+    def test_a_version_one_file_carrying_positions_is_corrupt(self, tmp_path: Path) -> None:
+        """Schema 1 predates positions, so such a file is refused, never read past."""
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(positions=(_position_record(),)), path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["schema"] = 1
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(s.StoreCorruptError, match="schema-1 file carries 1 position"):
+            s.load(path)
+
+    def test_a_version_this_build_cannot_read_is_refused(self, tmp_path: Path) -> None:
+        """A later build's file is refused rather than loaded and erased (``M5l-107``).
+
+        MUTATION: accept any version. MUTATION: bump ``SCHEMA_VERSION`` to 3,
+        which makes 3 readable.
+        """
+        path = tmp_path / "state.json"
+        path.write_text('{"schema": 3, "pending": [], "ledger": null}', encoding="utf-8")
+
+        with pytest.raises(s.StoreCorruptError, match="declares schema 3"):
+            s.load(path)
+
+    def test_two_position_records_for_one_symbol_are_refused(self) -> None:
+        """MUTATION: remove the duplicate branch of ``_reject_conflicting_positions``."""
+        with pytest.raises(ValidationError, match="position record"):
+            s.PersistedState(positions=(_position_record(), _position_record()))
+
+    def test_a_placement_beside_a_position_on_one_symbol_is_refused(self, tmp_path: Path) -> None:
+        """Refused on construction, and through ``load`` as corruption.
+
+        MUTATION: remove the placement branch of ``_reject_conflicting_positions``.
+        """
+        with pytest.raises(ValidationError, match="unresolved placement"):
+            s.PersistedState(pending=(_record(),), positions=(_position_record(),))
+
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(positions=(_position_record(),)), path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        s.save(s.PersistedState(pending=(_record(),)), tmp_path / "pending.json")
+        payload["pending"] = json.loads((tmp_path / "pending.json").read_text(encoding="utf-8"))[
+            "pending"
+        ]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(s.StoreCorruptError, match="unresolved placement"):
+            s.load(path)
+
+    def test_a_close_beside_a_position_on_one_symbol_is_allowed(self, tmp_path: Path) -> None:
+        """A pending CLOSE is the position being closed, so the pair is legitimate."""
+        path = tmp_path / "state.json"
+        state = s.PersistedState(pending=(_close_record(),), positions=(_position_record(),))
+
+        s.save(state, path)
+
+        assert s.load(path) == state
+
+    def test_the_record_carries_only_requested_fields(self) -> None:
+        """I2, pinned: the owner's R2 -- the record holds only requested values.
+
+        MUTATION: add ``entry_fill_price`` to ``PositionRecord``. Any field the
+        venue reports added here fails this, which is the point.
+        """
+        assert set(s.PositionRecord.model_fields) == {
+            "kind",
+            "symbol",
+            "entry_bar_time",
+            "generation",
+            "quantity",
+            "entry_limit",
+            "stop_loss",
+            "take_profit",
+        }
