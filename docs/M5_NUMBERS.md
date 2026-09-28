@@ -326,8 +326,8 @@ a warning when it means something.
 > describes would now be refused at load, not refuse entries at run time.
 >
 > **The floor bounds the churn-free healthy case only.** A position opening on
-> a freed slot sorts first while unstamped and can add one more deferral
-> (`M5l-088`).
+> a freed slot sorts first while unstamped, and churn can add deferrals
+> beyond `n - 1`; no bound is claimed for it (`M5l-088`, `M5l-092`).
 >
 > **What survives:** that the value must be raised by hand, since nothing
 > raises it for you, and that too tight is the worse direction.

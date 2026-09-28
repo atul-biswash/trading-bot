@@ -902,8 +902,9 @@ class AppConfig(_Model):
         cap can defer a healthy position on at most ``n - 1`` consecutive
         bars on a healthy feed while the same positions stay open
         (``M5l-084``). A position opening on a freed slot sorts first while
-        unstamped and can add one more deferral (``M5l-088``), so this floor
-        bounds the churn-free case. The margin absorbs delivery latency,
+        unstamped, and churn can add deferrals beyond ``n - 1``; no bound is
+        claimed for it (``M5l-088``, ``M5l-092``). So this floor bounds the
+        churn-free case. The margin absorbs delivery latency,
         which no config term bounds.
 
         **Only the HEALTHY case is bounded.** A failed call, or a neighbour
