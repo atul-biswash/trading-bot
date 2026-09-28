@@ -355,6 +355,46 @@ validator, and an edit there arms both items.
 > config also enables ETHUSDT on 5m. Its conclusion survives: the shortest
 > enabled timeframe is still 1m, so the default passes.
 
+> **ANNOTATED AT M5l (P71, C22): P-2 IS RESOLVED EXCEPT FOR ITS LOCKED TEXT
+> AND ITS DEFAULT.** Item by item, with the commit that resolved each:
+>
+> - **The validation this item plans:** built at `f20e839` (C20). Config
+>   load refuses a `max_position_staleness_s` below the healthy-feed floor,
+>   `(1.5 + n - 1) x T + 1.0 s + 5 s`, which is 156 s on the committed
+>   config. `90355df` (C20b) adds the precondition that floor rests on:
+>   `max_open_positions >= L + 1`, where `L` is the number of enabled
+>   protective legs (`M5l-087`, P-3o).
+> - **Item 1, the strict `>`:** pinned at `517348f` (C17). What the
+>   measured gaps mean was corrected by C19's annotation above
+>   (`M5l-067`). Whether to change it to `>=` goes with item 2.
+> - **Item 2, the locked decision: STILL OPEN.** The owner's re-ruled text
+>   was offered at P71 as C21 and was not added. It says that once a stamp
+>   passes the floor, the guard refuses every entry. That is not what the
+>   code does. The guard compares against the CONFIGURED bound
+>   (`risk.max_position_staleness_s`, 180 s committed), not against the
+>   floor (156 s). A stamp between the two is refused by nothing. The floor
+>   and the 180 s rationale were resolved at `f20e839`, as noted under
+>   item 2.
+> - **Item 3, float arithmetic and one-decimal output:** resolved at
+>   `25dbc61` (C15) and `5d6f115` (C16).
+> - **Item 4, `M5l-049`'s docstring:** resolved at `6e7c9f2` (C18).
+> - **Churn (`M5l-088`), measured against the guard (`M5l-089`).** The
+>   real pass, resolver and `RiskManager.evaluate` were driven over 8
+>   bars, at `n = 2` and `n = 3` with the call cap `M = 3`. A position
+>   opened on every freed slot. Churn pushed a healthy stamp past the floor
+>   in every run: 182 s at `n = 2`, and 242 s at `n = 3`, where it was
+>   deferred on three consecutive bars, so `k` reached `n`. **No entry was
+>   admitted after any stamp passed the bound**: `evaluate` refused as
+>   `position_stale`, or earlier as `committed_risk_unknown`. The probe
+>   models the reopened position with an expired FOK entry, so it never
+>   resolves, and `committed_risk_unknown` then refuses every later bar. So
+>   churn costs refusals, not admissions. Whether the floor should widen for
+>   churn stays a question about false refusals, not about safety.
+> - **The default: STILL OPEN.** It stays at 180 s, PLACEHOLDER. It passes
+>   the floor on the committed config.
+>
+> **What survives:** the locked-decision question, and the default's value.
+
 ### P-3. The silent and unhedged failure modes catalogued in M5k
 
 Each is its own carried item with its own condition, re-verified by content
@@ -537,6 +577,24 @@ can count a deferral. MEASURED (code, and both captures). It matters more
 since `M5l-081`: a healthy position can be deferred on consecutive bars once
 three positions are open and one has absent legs, and the only trace of that
 would be a staleness refusal.
+
+> **ADDED AT M5l (P71, C22): TWO MORE SHAPES THAT LEAVE THE SAME SILENCE.**
+>
+> - **Starvation (`M5l-085`, `M5l-086`).** A healthy neighbour went unread
+>   for 6 bars, its stamp age rising 120, 181, 242, 303, 364, 425 s. That
+>   happened in two cases: when the other position's point queries failed
+>   at `max_calls = 3`, and when `max_calls = 2` was below `L + 1`. The
+>   second case is now refused at config load (`90355df`, P-3o). The first
+>   is not.
+> - **Churn (`M5l-088`, `M5l-089`).** A position opening on a freed slot is
+>   unstamped, so it sorts first. With an unresolved list, it defers the
+>   healthy position again. MEASURED: at `n = 3`, a healthy stamp reached
+>   242 s after three consecutive deferrals.
+>
+> Neither shape logs a deferral. In the measured runs, the deferral left a
+> trace only once the stamp passed the bound, as a `position_stale`
+> refusal. The `committed_risk_unknown` refusals before that point name the
+> untrusted position, not the deferral.
 
 *Arming condition:* **whoever next edits the call cap in `reconcile_open_positions` in `execution/reconciliation.py`, or `_report` in `execution/reconciliation_driver.py`.**
 

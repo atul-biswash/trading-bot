@@ -654,8 +654,9 @@ async def test_a_late_discovered_unresolved_position_self_corrects_next_cycle() 
     """The one asymmetric case, and why it needs no lookahead. A first
     unresolved position discovered LAST sets the reservation after every call
     is spent, so the resolver may get nothing that cycle -- but the position is
-    left unstamped, sorts first next cycle, and is then discovered on call one
-    with its full share still unspent.
+    not stamped. Here it keeps its old stamp (it was stamped before), which the
+    pass did not refresh, so it is now the oldest, sorts first next cycle, and
+    is then discovered on call one with its full share still unspent.
     """
     healthy = _position("ETHUSDT", stamp=NOW - timedelta(minutes=30))
     broken = _position("BTCUSDT", stamp=NOW - timedelta(minutes=5), take_profit=TAKE)

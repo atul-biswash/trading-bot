@@ -579,14 +579,20 @@ async def reconcile_open_positions(
     rather than work forecast, which is what lets it exist without lookahead.
     One asymmetric case follows and self-corrects: a first unresolved position
     discovered *last* sets ``reserved`` after every call is spent, so the
-    resolver may get nothing that cycle -- but that position is left unstamped,
-    sorts first next cycle, and is then discovered on call one.
+    resolver may get nothing that cycle -- but that position is not stamped, so
+    next cycle it sorts ahead of everything this pass stamped and, unless a
+    never-stamped position sorts ahead of it, is discovered on call one.
 
     **A position whose assessment carries unresolved legs is NOT stamped.** It
     keeps ``protection`` -- the verdict is real and untrusted either way -- and
-    is left maximally stale, so it sorts first next cycle and the reservation
-    fires early enough to fund it. The stamp is the state; nothing here
-    remembers anything between passes. See
+    keeps the stamp it came in with. Never stamped, that is ``None``, which is
+    maximally stale. Stamped before, it is the old stamp, which this pass did
+    not refresh and which keeps ageing (``M5l-076``). Either way the position
+    is still due next cycle and sorts ahead of every position this pass
+    stamped, behind only a never-stamped one -- the case a position opening on
+    a freed slot creates (``M5l-088``) -- so the reservation fires early enough
+    to fund it. The stamp is the state; nothing here remembers anything
+    between passes. See
     :meth:`~trading_bot.core.models.Position.record_partial_reconciliation`.
 
     :raises ContractViolationError: an order came back with an identifier that
@@ -910,9 +916,11 @@ async def resolve_unresolved_legs(
         )
         # The completing half of a two-phase reconciliation, and it stamps
         # only when there is nothing left outstanding. A position with legs
-        # carried forward stays unstamped, stays maximally stale, and is
-        # visited first next cycle -- which is what funds the query it did not
-        # get this time.
+        # carried forward is not stamped: it keeps None if it was never
+        # stamped, or an old stamp that keeps ageing if it was (M5l-076). Either
+        # way it is visited ahead of every position this pass stamped next
+        # cycle, behind only a never-stamped one -- which is what funds the
+        # query it did not get this time.
         if not carried:
             position.record_reconciliation(protection=verdict, at=now)
         refined.append((position, outcome))
