@@ -143,8 +143,8 @@ from dataclasses import dataclass
 from datetime import timezone
 from typing import TYPE_CHECKING, assert_never
 
-from trading_bot.core.assessment import EntryIntent
-from trading_bot.core.enums import PositionSide, ProtectionState
+from trading_bot.core.assessment import EntryIntent, ExitIntent
+from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState, SignalAction
 from trading_bot.core.exceptions import (
     ConfigError,
     FeeFillsIncompleteError,
@@ -157,7 +157,7 @@ from trading_bot.core.interfaces import (
     MarketDataStream,
     SignalHandler,
 )
-from trading_bot.core.models import Position
+from trading_bot.core.models import Position, Signal
 from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio, held_exit, settle_exit
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
@@ -219,7 +219,6 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
         Money,
         Order,
         OrderList,
-        Signal,
     )
     from trading_bot.execution.bookability import TotalSource
 
@@ -256,6 +255,8 @@ _EVENT_POSITION_GONE = "boot_position_gone"
 _EVENT_POSITIONS_RESOLVED = "boot_positions_resolved"
 #: A protective fill made while the bot was down, booked at boot (C32b-1).
 _EVENT_EXIT_BOOKED = "boot_exit_booked"
+#: A restored position whose protection is gone and whose base is held (R3).
+_EVENT_POSITION_UNPROTECTED = "boot_position_unprotected"
 #: The boot site's `resolution` for a held exit. `hold_fields`' own text says a
 #: restart releases the hold, which is not true of a hold boot keeps on disk.
 _BOOT_HOLD_RESOLUTION = (
@@ -1442,7 +1443,8 @@ def _refuse_disabled_records(records: Sequence[store.PositionRecord], settings: 
 
 
 def _restored_position(
-    source: store.PositionRecord | PendingPlacement, decision: Restore | BookExit
+    source: store.PositionRecord | PendingPlacement,
+    decision: Restore | BookExit | RestoreAndClose,
 ) -> Position:
     """The ``Position`` a decision rebuilds: requested values, venue economics.
 
@@ -1512,6 +1514,86 @@ class _Hold:
     decision: BookExit
     leg: Order
     held: HeldExit
+
+
+@dataclass(frozen=True, slots=True)
+class _BootResolution:
+    """What the boot resolution leaves for the rest of the root.
+
+    ``pending`` is what the executor still holds: the restored closes (Q13).
+    ``state`` is what the boot saved, or ``None`` when nothing was written.
+    ``held`` is every record kept with no ``Position`` (Q5(b)), which every
+    later save must carry. ``closes`` names the symbols restored to be SOLD on
+    their first candle (R3).
+    """
+
+    pending: tuple[Pending, ...]
+    state: store.PersistedState | None
+    held: tuple[store.PositionRecord, ...]
+    closes: tuple[str, ...]
+
+
+class _BootCloser:
+    """R3's synthetic CLOSE: once per symbol, on that symbol's first candle.
+
+    A candle subscriber registered after the executor, so the reconciler and
+    the executor's own resolution run first on that bar. It hands the
+    executor a ``CLOSE`` and an approved exit, and the executor's own path does
+    the rest: read the legs, cancel the list (an ALL_DONE list answers
+    ``-2011``, which that path treats as normal), confirm, sell once, book
+    through ``close_position``. The credit is right there, unlike a boot
+    booking, because the sale comes after the boot's balance read.
+
+    **ONE ATTEMPT PER SYMBOL** (``M5l-137``). If the executor refuses -- a
+    budget exhausted, legs that cannot be read -- the position stays restored
+    and UNKNOWN, every entry stays refused, and the boot's CRITICAL has told
+    the operator; the strategy's own ``CLOSE`` path is still open. A candle
+    handler, so it never raises.
+    """
+
+    def __init__(
+        self,
+        *,
+        executor: OrderExecutor,
+        portfolio: Portfolio,
+        pairs: Mapping[str, PairContext],
+        symbols: Iterable[str],
+    ) -> None:
+        self._executor = executor
+        self._portfolio = portfolio
+        self._pairs = pairs
+        self._symbols = set(symbols)
+
+    async def __call__(self, candle: Candle) -> None:
+        if candle.symbol not in self._symbols:
+            return
+        self._symbols.discard(candle.symbol)
+        position = self._portfolio.positions.get(candle.symbol)
+        if position is None:
+            return
+        signal = Signal(
+            symbol=candle.symbol,
+            action=SignalAction.CLOSE,
+            timestamp=candle.close_time,
+            price=candle.close,
+            reason="R3: a restored position whose protection is gone is sold at boot",
+        )
+        assessment = RiskAssessment(
+            symbol=candle.symbol,
+            approved=True,
+            reason="R3: sell a restored position whose protection is gone",
+            stage=None,
+            intent=ExitIntent(
+                symbol=candle.symbol,
+                side=OrderSide.SELL,
+                quantity=position.quantity,
+                reference_price=candle.close,
+            ),
+        )
+        try:
+            await self._executor.dispatch(signal, assessment, candle)
+        except Exception as exc:  # a candle handler never raises
+            _log_collaborator_failure(_COLLABORATOR_EXECUTOR, signal, exc, self._pairs)
 
 
 async def _settle_boot_exit(
@@ -1613,7 +1695,7 @@ async def _resolve_restored(
     portfolio: Portfolio,
     deadline_s: float,
     unrecorded: set[str],
-) -> tuple[tuple[Pending, ...], store.PersistedState | None, tuple[store.PositionRecord, ...]]:
+) -> _BootResolution:
     """P-3k's boot resolution, S3 of the P77 specification under the owner's rulings.
 
     Resolves every position record and every pending placement against the
@@ -1632,7 +1714,11 @@ async def _resolve_restored(
     known before anything changes, and every refusal is collected into one
     ``ConfigError``, so a refused boot leaves the portfolio and the disk as
     they were and an operator resolves the list in one pass.
-    ``RestoreAndClose`` still refuses, until C32b-2.
+
+    **``RestoreAndClose`` RESTORES AND IS SOLD LATER** (R3, Q4(b), C32b-2):
+    restored UNKNOWN with no debit, one ``boot_position_unprotected``
+    CRITICAL, and its symbol returned in ``closes`` for :class:`_BootCloser`
+    to sell on that symbol's first candle.
 
     **BOOKINGS ARE LEDGER-ONLY AND IN FILL-TIME ORDER** (I7, I9). Each goes
     through ``Portfolio.book_restored_exit`` on its fill's UTC day (R4), never
@@ -1643,7 +1729,7 @@ async def _resolve_restored(
     """
     placements = tuple(record for record in pending if isinstance(record, PendingPlacement))
     if restored is None or (not restored.positions and not placements):
-        return pending, None, ()
+        return _BootResolution(pending=pending, state=None, held=(), closes=())
     # Records first, then pending placements: the order `classify` answers in.
     sources: tuple[store.PositionRecord | PendingPlacement, ...] = (*records, *placements)
 
@@ -1698,13 +1784,6 @@ async def _resolve_restored(
     for source, decision in zip(sources, decisions, strict=True):
         if isinstance(decision, RefuseBoot):
             refusals.append(decision.reason)
-        elif isinstance(decision, RestoreAndClose):
-            # INTERIM, until C32b-2: refused rather than dropped, so nothing it
-            # would sell is lost in between.
-            refusals.append(
-                f"{source.symbol}, order list {decision.order_list.list_client_order_id}: "
-                "RestoreAndClose is handled from C32b"
-            )
         elif isinstance(decision, BookExit):
             outcome = await _settle_boot_exit(
                 client,
@@ -1731,6 +1810,7 @@ async def _resolve_restored(
 
     # APPLY. Nothing below can refuse the boot.
     settled: set[int] = set()
+    closes: list[str] = []
     restored_count = dropped_count = gone_count = 0
     for source, decision in zip(sources, decisions, strict=True):
         kind = "pending placement" if isinstance(source, PendingPlacement) else "position"
@@ -1789,7 +1869,30 @@ async def _resolve_restored(
                         "list_client_order_id": decision.order_list.list_client_order_id,
                     },
                 )
-            case RefuseBoot() | RestoreAndClose() | BookExit():
+            case RestoreAndClose():
+                # R3, Q4(b): restored UNKNOWN with no debit, and SOLD on the
+                # symbol's first candle through the executor's own CLOSE path.
+                # Until that books, UNKNOWN keeps every entry refused.
+                portfolio.restore_position(_restored_position(source, decision))
+                settled.add(id(source))
+                restored_count += 1
+                closes.append(source.symbol)
+                _log.critical(
+                    "%s: restored a position whose protection is GONE -- both protective "
+                    "legs were cancelled unexecuted and its base is still held. It is SOLD "
+                    "on this symbol's first candle (R3). If you acted on this symbol by hand, "
+                    "release its record before restarting.",
+                    source.symbol,
+                    extra={
+                        "event": _EVENT_POSITION_UNPROTECTED,
+                        "symbol": source.symbol,
+                        "list_client_order_id": decision.order_list.list_client_order_id,
+                        "order_list_id": decision.order_list.order_list_id,
+                        "quantity": source.quantity,
+                        "base_free": decision.base_free,
+                    },
+                )
+            case RefuseBoot() | BookExit():
                 # Refusals raised above; bookings and holds are applied below,
                 # in their own order.
                 pass
@@ -1856,7 +1959,9 @@ async def _resolve_restored(
             "gone": gone_count,
         },
     )
-    return remaining, state, tuple(held_records)
+    return _BootResolution(
+        pending=remaining, state=state, held=tuple(held_records), closes=tuple(closes)
+    )
 
 
 def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
@@ -2036,7 +2141,7 @@ async def live_system(
         # save share one "once per process" set.
         unrecorded: set[str] = set()
         order_lists = await _read_order_lists(resolved_client)
-        restored_pending, boot_state, held_records = await _resolve_restored(
+        resolution = await _resolve_restored(
             resolved_client,
             restored=restored,
             records=records,
@@ -2048,6 +2153,9 @@ async def live_system(
             deadline_s=settings.config.risk.reconcile_deadline_s,
             unrecorded=unrecorded,
         )
+        restored_pending = resolution.pending
+        boot_state = resolution.state
+        held_records = resolution.held
         # Still before any socket, with the other four boot refusals.
         await _snapshot_unmanaged_holdings(
             resolved_client, balances=balances, pairs=pairs, portfolio=portfolio
@@ -2418,6 +2526,19 @@ async def live_system(
                 # the previous bar is settled out of THIS bar's fresh budget
                 # before anything new can be dispatched.
                 provider.on_candle(executor)
+                # Subscriber TWO, and only when the boot restored a position to
+                # sell (R3): after the reconciler and the executor's own
+                # resolution, and still before the engine's hook, so the sale is
+                # dispatched before anything new could be decided on that bar.
+                if resolution.closes:
+                    provider.on_candle(
+                        _BootCloser(
+                            executor=executor,
+                            portfolio=portfolio,
+                            pairs=pairs,
+                            symbols=resolution.closes,
+                        )
+                    )
                 _log.info(
                     "Composition root ready: %d pair(s), %s %s free",
                     len(pairs),

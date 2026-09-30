@@ -424,3 +424,10 @@ exactly this and read a contradiction.
 > sites are still terminal and still need an operator within a run, and site
 > 5's paragraph above -- *"Positions are not persisted either"* -- stays as
 > written through C32b by the owner's R-A ruling.
+>
+> **ANNOTATED AT M5l P82 (C32b-2): "which refuses the boot until C32b sells
+> it" IS NO LONGER TRUE -- C32b sells it now.** Such a position is restored
+> UNKNOWN with no debit, one `boot_position_unprotected` CRITICAL names it,
+> and the executor's own `CLOSE` path sells it once on that symbol's first
+> candle (R3, Q4(b)). **What survives:** it still does not become an
+> unmanaged holding.

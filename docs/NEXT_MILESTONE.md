@@ -654,6 +654,10 @@ becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
 > NO LONGER TRUE.** A filled exit is booked at boot, or held with its record
 > kept and no position; see the C32b-1 record below. The half about a
 > position whose protection is gone with its base held stands until C32b-2.
+>
+> **ANNOTATED AT M5l P82 (C32b-2): that half is no longer true either.** Such
+> a position is restored and sold on its symbol's first candle; see the
+> C32b-2 record below.
 
 **It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
 capture and base-asset netting. The owner's M5l ruling, quoted at the head of
@@ -776,6 +780,9 @@ would book or sell is dropped in between.
 > **ANNOTATED AT M5l P82 (C32b-1): `BookExit` NO LONGER REFUSES THE BOOT**;
 > it is booked or held. `RestoreAndClose`'s interim refusal stands until
 > C32b-2.
+>
+> **ANNOTATED AT M5l P82 (C32b-2): THE INTERIM IS OVER.** `RestoreAndClose`
+> no longer refuses the boot either; it restores and is sold.
 
 **THE OWNER'S R-A EXTENSION, P81.** The five R-A sentences listed under C30
 above stay as written through C32b, because P-3k's deployment restriction
@@ -833,6 +840,26 @@ bookability ladder the runtime booking sites use.
   changes neither the portfolio nor the disk; and its save reads the ledger,
   the history and the lifetime total live from the portfolio, which the
   bookings wrote.
+
+**ADDED AT M5l P82 (C32b-2), protection gone and base held (R3, Q4(b)).** A
+`RestoreAndClose` is restored UNKNOWN with no debit and named by one
+`boot_position_unprotected` CRITICAL, whose message carries M5l-125's operator
+rule: if you acted on this symbol by hand, release its record before
+restarting.
+
+- The sale is R3's synthetic `CLOSE`, dispatched by `_BootCloser`, a candle
+  subscriber registered after the executor and only when boot restored such a
+  position. On the symbol's first candle it hands the executor a `CLOSE` and
+  an approved exit, and the executor's own path, traced at P82's STEP 0, does
+  the rest: the legs read cancelled, the ALL_DONE list's cancel answers
+  `-2011`, which that path treats as normal, and exactly one MARKET sell goes
+  out and books through `close_position`.
+- Until it books, UNKNOWN keeps every entry refused. The reconciler's first
+  pass on that bar classifies the list `DIVERGED` and escalates once per pass
+  until the position is gone.
+- **One attempt per symbol** (`M5l-137`): if the executor refuses the sale,
+  the position stays restored and UNKNOWN, entries stay refused, and the
+  strategy's own `CLOSE` path is still open.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 

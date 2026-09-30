@@ -62,6 +62,7 @@ from trading_bot.core.exceptions import (
     ConfigError,
     ExchangeAPIError,
     ExchangeConnectionError,
+    OrderNotFoundError,
     StrategyNotFoundError,
     TradingBotError,
 )
@@ -91,6 +92,7 @@ from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.engine.modes import (
     IntentLogger,
     LiveSystem,
+    _BootCloser,
     _build_signal_handler,
     _pair_timeframes,
     _restore_pending,
@@ -4597,6 +4599,107 @@ class _ResolvingRootClient(FakeRootClient):
         return self._legs[order_id]
 
 
+def _cancelled_legs(symbol: str = SYMBOL) -> list[Order]:
+    """An ALL_DONE list whose entry filled and whose protection was cancelled unexecuted."""
+    return [
+        _leg(_W, OrderStatus.FILLED, _QTY, symbol=symbol),
+        _leg(_SL, OrderStatus.CANCELED, symbol=symbol),
+        _leg(_TP, OrderStatus.CANCELED, symbol=symbol),
+    ]
+
+
+#: The account still holds the position's base, free: R3's RestoreAndClose.
+_BASE_HELD = [
+    Balance(asset="USDT", free=D("5000"), locked=D("0")),
+    Balance(asset="BTC", free=_QTY, locked=D("0")),
+]
+#: The MARKET sell R3's CLOSE sends, and its one fill.
+_SELL_ID = "SELL-1"
+_SELL_TOTAL = D("1337.61000000")
+
+
+class _RestoreCloseClient(_ResolvingRootClient):
+    """Serves a restored RestoreAndClose position from boot through its sale.
+
+    Boot reads the legs by venue order id. The executor's CLOSE then reads the
+    protective legs by OUR client id (both cancelled, nothing executed),
+    cancels an ALL_DONE list (`-2011`, which it treats as normal), sends one
+    MARKET sell and settles its fill. ``calls`` counts every write.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            legs=_cancelled_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            balances=_BASE_HELD,
+            my_trades=[
+                Trade(
+                    trade_id="sell-t1",
+                    order_id=_SELL_ID,
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=_QTY,
+                    price=D("57905.19480519"),
+                    quote_quantity=_SELL_TOTAL,
+                    fee=Fee(amount=D("1.33761000"), asset="USDT"),
+                    filled_at=NOW,
+                )
+            ],
+        )
+        self.calls: list[str] = []
+        self._sell = Order(
+            order_id=_SELL_ID,
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.MARKET,
+            status=OrderStatus.FILLED,
+            quantity=_QTY,
+            filled_quantity=_QTY,
+            filled_quote_quantity=_SELL_TOTAL,
+        )
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        if order_id is not None:
+            return await super().get_order(
+                symbol, order_id=order_id, timeout_s=timeout_s, attempts=attempts
+            )
+        self.calls.append("get_order")
+        if (client_order_id or "").endswith("-CL"):
+            return self._sell
+        for leg in (_SL, _TP):
+            if client_order_id == client_order_id_for(symbol, leg):
+                return _leg(leg, OrderStatus.CANCELED, symbol=symbol)
+        raise OrderNotFoundError("Order does not exist.")
+
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        self.calls.append("cancel_order_list")
+        raise OrderNotFoundError("Unknown order list sent.")
+
+    async def create_order(self, request: OrderRequest) -> Order:
+        self.calls.append("create_order")
+        return self._sell
+
+
+def client_order_id_for(symbol: str, leg: OrderListLeg) -> str:
+    """Our client id for one leg of the list at ``_LIST_BAR``."""
+    return client_order_id(symbol, _LIST_BAR, leg)
+
+
 class TestTheBootResolvesRestoredRecords:
     """P-3k's boot resolution through the real root and the real store (C32a).
 
@@ -4859,31 +4962,67 @@ class TestTheBootResolvesRestoredRecords:
         assert after is not None
         assert after.positions == (_record(),)
 
-    async def test_cancelled_protection_with_the_base_held_refuses_in_the_interim(
-        self, tmp_path: Path
+    async def test_cancelled_protection_with_the_base_held_is_restored_and_says_so(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """RestoreAndClose until C32b. MUTATION: drop it."""
+        """R3, Q4(b). MUTATION: restore without the CRITICAL.
+
+        **CHANGED AT M5l P82 (C32b-2), under the owner's ruled-overturn
+        authority: P78's R3 and Q4(b) restore and sell such a position**, which
+        overturns C32a's interim refusal. The old test was
+        `test_cancelled_protection_with_the_base_held_refuses_in_the_interim`,
+        asserting ``"RestoreAndClose is handled from C32b" in
+        str(excinfo.value)`` under ``pytest.raises(ConfigError)``. Its subject
+        -- what boot does with protection gone and base held -- stands.
+
+        Restored UNKNOWN with no debit, and one CRITICAL carrying M5l-125's
+        operator rule.
+        """
         settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
         store.save(store.PersistedState(positions=(_record(),)))
-        legs = [
-            _leg(_W, OrderStatus.FILLED, _QTY),
-            _leg(_SL, OrderStatus.CANCELED),
-            _leg(_TP, OrderStatus.CANCELED),
-        ]
         client = _ResolvingRootClient(
-            legs=legs,
+            legs=_cancelled_legs(),
             order_lists=[_our_list(status="ALL_DONE")],
-            balances=[
-                Balance(asset="USDT", free=D("5000"), locked=D("0")),
-                Balance(asset="BTC", free=_QTY, locked=D("0")),
-            ],
+            balances=_BASE_HELD,
         )
 
-        with pytest.raises(ConfigError) as excinfo:
-            async with live_system(settings, client=client, stream=FakeStream()):
-                pass  # pragma: no cover - the boot must not reach here
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                position = system.portfolio.positions[SYMBOL]
+                assert position.protection is ProtectionState.UNKNOWN
+                assert system.portfolio.free_quote == D("5000")
 
-        assert "RestoreAndClose is handled from C32b" in str(excinfo.value)
+        lines = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "boot_position_unprotected"
+        ]
+        assert len(lines) == 1
+        assert lines[0].levelno == logging.CRITICAL
+        assert vars(lines[0]).get("base_free") == _QTY
+        assert "release its record before restarting" in lines[0].getMessage()
+
+    async def test_the_restored_position_is_sold_once_on_its_first_candle(
+        self, tmp_path: Path
+    ) -> None:
+        """R3's synthetic CLOSE, through the executor's own path. MUTATION: never
+        dispatch it.
+
+        The list is ALL_DONE, so the cancel answers `-2011`, which that path
+        treats as normal; the legs re-confirm cancelled, and exactly one MARKET
+        sell goes out and books.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _RestoreCloseClient()
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            closers = [h for h in system.provider._handlers if isinstance(h, _BootCloser)]  # type: ignore[attr-defined]
+            assert len(closers) == 1
+            await closers[0](candle())
+
+            assert client.calls.count("create_order") == 1
+            assert SYMBOL not in system.portfolio.positions
 
     async def test_a_read_failure_refuses_the_boot(self, tmp_path: Path) -> None:
         """Q6(a). MUTATION: drop the record whose leg could not be read."""
