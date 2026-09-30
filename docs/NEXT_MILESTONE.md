@@ -640,6 +640,15 @@ becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
 > survives, and it is the item:** nothing reads those records until C32, and
 > each boot's first save erases them, so a position still does not survive a
 > restart and every consequence above stands.
+>
+> **ANNOTATED AT M5l P81 (C32a): "nothing reads those records until C32" IS
+> NO LONGER TRUE.** From C32a the boot restores a record whose list is live,
+> and drops one that expired, never placed or is gone, where each boot's
+> first save used to erase it. A record beside a pending close is still
+> erased, by the owner's interim ruling. A filled exit, and a position whose
+> protection is gone with its base held, refuse the boot until C32b.
+> **What survives:** the gate on live trading, and this item, until C32b
+> books and sells and C33 corrects the P77 S6 texts.
 
 **It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
 capture and base-asset netting. The owner's M5l ruling, quoted at the head of
@@ -678,6 +687,9 @@ directed for this commit.
   commit from 131f1c9 up to C32b's: records are written from C30, and boot
   reads them only from C32, so each boot's first save erases them (today's
   behaviour, not a regression)."
+  > ANNOTATED AT M5l P81 (C32a): *"each boot's first save erases them"* is
+  > no longer true of a record not beside a pending close; the boot now
+  > restores or drops it. The restriction itself stands, through C32b.
 - **The accepted residual, verbatim:** "One kill during one ambiguous
   placement write loses that position's durability (M5l-110); accepted by the
   owner at P78 (Q2(b))." The ambiguous-placement path, `_persist_dropping`, is
@@ -730,6 +742,59 @@ pure: no I/O, no clock, no write. Nothing calls it yet; C32 does.
   all satisfy, so `execution/` still imports no store.
 - The gate's file counts move with it: `ruff format` to 135 files and `mypy`
   to 81 source files.
+
+**ADDED AT M5l P81 (C32a), boot wiring.** `live_system` in `engine/modes.py`
+now resolves the store's records at boot, under P77's S3 and the owner's
+rulings:
+
+- R5 (`refuse_disabled`) runs before the lock and before any venue call.
+- After `_seed_portfolio` and before both snapshots:
+  - one `get_all_order_lists`, which `_snapshot_live_order_lists` now reuses
+    instead of reading again;
+  - one `get_order` per leg orderId, bounded by `risk.reconcile_deadline_s`
+    at one attempt. A failed read refuses the boot (Q6(a)).
+- The decisions are then applied:
+  - `Restore` goes through `restore_position`, with no debit;
+  - `DropExpired`, `DropNotPlaced` and `Gone` drop the record, each with its
+    own line;
+  - every refusal is collected into one `ConfigError`.
+  - Then one save, and a summary line, `boot_positions_resolved`.
+- Both snapshots skip the symbols it restored (I5, `M5l-103`).
+- A boot that completes has settled every restored placement, so the executor
+  receives restored CLOSES only. Its first-candle placement path stays,
+  defensively, for placements made ambiguous during a run.
+
+**THE INTERIM REFUSALS, until C32b.** `BookExit` and `RestoreAndClose` refuse
+the boot with the reason "`<decision>` is handled from C32b", so nothing C32b
+would book or sell is dropped in between.
+
+**THE OWNER'S R-A EXTENSION, P81.** The five R-A sentences listed under C30
+above stay as written through C32b, because P-3k's deployment restriction
+means no deployable restart runs on these commits. C33 corrects every P77 S6
+text.
+
+**A POSITION RECORD BESIDE A PENDING CLOSE -- the owner's rulings, P81
+amendment 1.**
+
+- *Interim, C32a, verbatim:* "a position record whose symbol has a pending
+  CLOSE record is neither classified nor restored. It is left out of the
+  classifier's input, and boot's save does not carry it, which is today's
+  behaviour. Site B handles the close as today."
+- *Final design, for C32b, verbatim:* "For a close record beside a position
+  record, read the close's sell by the client id in the close record:"
+  - "FILLED: settle at boot. On success, book ledger-only (I7), satisfying
+    Q13. On FeeUnresolvable, keep a held record with no Position (Q5(b),
+    M5l-112). Remove the close record either way."
+  - "Absent, or terminal and unfilled, with the legs CANCELED and base >=
+    quantity: RestoreAndClose, dropping the close record, so exactly one sell
+    goes out."
+  - "List live: Restore; the close record's fate is decided in P82 after STEP
+    0 reads Site B."
+  - "Anything else: RefuseBoot."
+  - "The two restart tests' assertions change once, in C32b."
+- Why it was needed (`M5l-126`): the bot's own close cancels the protective
+  legs by design, so the classifier reads that list as `Gone` or
+  `RestoreAndClose`, and Q13 collides with Q5(b) on the same disk shape.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
@@ -862,6 +927,14 @@ hand, and nothing on disk records that it was ever held or deferred.
 > releases the hold and a deferred close is still released unbooked; and the
 > record carries no hold, so nothing on disk records that it was held.
 > REAFFIRMED at C30, which edits `_persist_pending`.
+>
+> **ANNOTATED AT M5l P81 (C32a): "nothing reads the record until C32" IS NO
+> LONGER TRUE, and "a restart still releases the hold" is true only of a
+> hold with a pending close.** A position held by the reconciler has no
+> close record: at boot its filled exit classifies `BookExit` and, until
+> C32b, REFUSES the boot rather than releasing the hold (`M5l-130`). A hold
+> or a deferred close beside a pending close record is left out by the
+> owner's interim ruling, so that restart still releases it unbooked.
 
 *Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
 
@@ -1088,6 +1161,12 @@ did not fire.
 **FIRED AT M5l P79 (C30) AND REAFFIRMED.** C30 adds `positions` to what both
 closures write, read live from `portfolio.open_positions`. It does not touch
 the pending slice: `_persist_ledger` still writes `pending=persisted.pending`.
+
+**FIRED AGAIN AT M5l P81 (C32a) AND REAFFIRMED.** Neither closure is
+edited, but what `_persist_ledger` writes changes: `persisted` is now seeded
+from the boot's own save when there was one, so after a boot that settled
+restored placements it does not write them back (`M5l-128`). The carry itself,
+`pending=persisted.pending`, is unchanged.
 
 *Arming condition:* **whoever next changes what `_persist_pending` or
 `_persist_ledger` writes in `engine/modes.py`.** A docstring correction is not
@@ -1553,6 +1632,27 @@ verbatim:**
 > `M5l-116` as a record of what P78b measured, and the last sentence -- the
 > standing docstring authority widens this one for `src/` docstrings and
 > comments and does not touch the documents' half.
+
+**WIDENED BY THE PROJECT OWNER AT M5l P81 (amendment 3), standing:**
+`docs/QB_ESCALATION.md` and `docs/QC_PROTECTIVE_ORDERS.md` join the
+annotation authority's file list, for this and every later commit. First used
+at C32a, which annotates QB site 2 and its summary row and QC §5b
+(`M5l-131`). `CLAUDE.md`'s locked-decision text stays excluded; C32a's one
+annotation there, on pre-existing base holdings, was authorised for that
+sentence alone, because the owner accepted P77 S6's text for it at P78.
+
+**The ruled-overturn authority, ruled by the project owner at M5l P81,
+verbatim:**
+
+> "An existing assertion may change only when it encodes behaviour that a
+> ruling named in the prompt explicitly overturns. The report lists each such
+> change with the old assertion quoted, the new one, and the ruling; the test
+> keeps its subject; and the mutation survey still kills through it. Any other
+> broken assertion halts, as before."
+
+First used at C32a, where the owner named Q3(a) as overturning the
+first-candle resolution of restored placements, and five tests in
+`tests/unit/test_modes.py` changed under it (`M5l-127`).
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 

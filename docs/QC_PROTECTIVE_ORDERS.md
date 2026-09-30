@@ -535,6 +535,17 @@ refusal would mislabel — reporting `UNMANAGED_HOLDING` where the truth is
 excludes bot-owned base with no arithmetic, and the set is then immutable for the
 process lifetime because the bot never sells an unmanaged holding.
 
+> **ANNOTATED AT M5l P81 (C32a), with P77 S6's text as the project owner
+> accepted it at P78:** *"Restored positions exist before the snapshot (I5) and
+> are excluded from it, so the exclusion now does the work the ordering did. A
+> holding with no record is still never adopted."* So *"that timing is the
+> correctness argument"* and *"At boot `positions` is empty by construction"* are
+> no longer true: from C32a the boot restores positions from the store first,
+> and the snapshot skips every symbol the portfolio already holds. **What
+> survives:** the snapshot is still taken once, at boot; the set is still
+> immutable for the process lifetime; and this section's decision -- count,
+> refuse entries, never adopt -- is unchanged.
+
 The honest consequence: **the refusal does not clear within a run.** It clears across
 a restart, once the operator has sold. It escalates as a boot `WARNING`, once —
 never `CRITICAL`, because it is an ordinary state of a shared account and escalating

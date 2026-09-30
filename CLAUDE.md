@@ -978,6 +978,16 @@ data.
   `Position` exists**, which is what stops `equity` double-counting bot-owned base.
   See `docs/QC_PROTECTIVE_ORDERS.md` §5b.
 
+  > **ANNOTATED AT M5l P81 (C32a), with P77 S6's text as the project owner
+  > accepted it at P78:** *"Restored positions exist before the snapshot (I5)
+  > and are excluded from it, so the exclusion now does the work the ordering
+  > did. A holding with no record is still never adopted."* From C32a
+  > `live_system` restores positions from the store before
+  > `_snapshot_unmanaged_holdings` runs, and that snapshot skips every symbol
+  > the portfolio already holds. **What survives:** the decision entire --
+  > count pre-existing holdings, refuse entries on their symbol, never
+  > construct a `Position` for one.
+
 **Execution**
 - **The signal handler may perform I/O; it may not perform *unbounded* I/O.** The
   old rule was "no I/O", it lived in one docstring in `engine/modes.py`, and it was

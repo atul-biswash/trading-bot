@@ -140,9 +140,10 @@ from __future__ import annotations
 import logging
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, assert_never
 
 from trading_bot.core.assessment import EntryIntent
+from trading_bot.core.enums import PositionSide, ProtectionState
 from trading_bot.core.exceptions import ConfigError, TradingBotError
 from trading_bot.core.interfaces import (
     ExchangeClient,
@@ -150,6 +151,7 @@ from trading_bot.core.interfaces import (
     MarketDataStream,
     SignalHandler,
 )
+from trading_bot.core.models import Position
 from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
@@ -159,10 +161,23 @@ from trading_bot.execution.executor import (
     Pending,
     PendingClose,
     PendingPlacement,
+    _venue_list_id,
 )
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
+)
+from trading_bot.execution.restoration import (
+    BookExit,
+    DropExpired,
+    DropNotPlaced,
+    Gone,
+    RefuseBoot,
+    Restore,
+    RestoreAndClose,
+    classify,
+    reads_needed,
+    refuse_disabled,
 )
 from trading_bot.persistence import store
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
@@ -175,7 +190,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Balance, Candle, Money, Position, Signal
+    from trading_bot.core.models import Balance, Candle, Money, Order, OrderList, Signal
 
 _log = get_logger(__name__)
 
@@ -200,6 +215,14 @@ _EVENT_COLLABORATOR_FAILED = "collaborator_failed"
 #: because it is a DURABILITY loss rather than a refusal: the position trades
 #: and exits normally, and only a restart would lose it.
 _EVENT_POSITION_UNRECORDED = "position_record_skipped"
+#: P-3k's boot resolution (C32a): one line per record it restores, drops or
+#: finds gone, then one summary. Their own names, because an operator looking
+#: for what a restart did with a position should not have to filter the other
+#: boot events to find it.
+_EVENT_POSITION_RESTORED = "boot_position_restored"
+_EVENT_POSITION_DROPPED = "boot_position_dropped"
+_EVENT_POSITION_GONE = "boot_position_gone"
+_EVENT_POSITIONS_RESOLVED = "boot_positions_resolved"
 
 #: Names used in ``collaborator`` on a ``collaborator_failed`` line.
 _COLLABORATOR_RISK = "risk_manager"
@@ -885,6 +908,12 @@ async def _snapshot_unmanaged_holdings(
     opened: ``equity`` would double-count it and the refusal would mislabel,
     reporting an unmanaged holding where the truth is ``ALREADY_IN_POSITION``.
 
+    **ANNOTATED AT M5l P81 (C32a): "before any ``Position`` exists" IS NO
+    LONGER TRUE.** P-3k's boot resolution runs first and may restore positions
+    from the store. The argument survives by an exclusion instead of by
+    timing: a symbol the portfolio already holds a position on is skipped
+    here, so its base is counted once, by the position (I5).
+
     ``total`` and ``free`` answer different questions and both are used.
     Equity asks what the account **owns**, so the recorded quantity is ``total``
     -- locked base is owned, and excluding it understates the denominator every
@@ -940,6 +969,11 @@ async def _snapshot_unmanaged_holdings(
                 balance.total,
                 quote,
             )
+            continue
+        if symbol in portfolio.positions:
+            # RESTORED AT BOOT (P-3k, I5). Its base belongs to the position, and
+            # counting it again here would double it into equity and block a
+            # symbol the bot is managing.
             continue
 
         price = (await client.get_ticker(symbol)).last
@@ -1014,13 +1048,36 @@ async def _snapshot_unmanaged_holdings(
 _TERMINAL_LIST_STATUSES = frozenset({"ALL_DONE", "REJECT"})
 
 
-async def _snapshot_live_order_lists(
-    client: ExchangeClient,
+async def _read_order_lists(client: ExchangeClient) -> list[OrderList] | TradingBotError:
+    """The boot's ONE ``get_all_order_lists``, or the error that stopped it.
+
+    Read once and handed to both of its consumers -- P-3k's resolution and
+    :func:`_snapshot_live_order_lists` -- so they cannot disagree about which
+    lists exist. A failure is returned rather than raised because the two
+    consumers answer it differently: the resolution refuses the boot (Q6(a)),
+    the snapshot blocks every symbol.
+    """
+    try:
+        return await client.get_all_order_lists()
+    except TradingBotError as exc:
+        return exc
+
+
+def _snapshot_live_order_lists(
+    lists: Sequence[OrderList] | TradingBotError,
     *,
     pairs: Mapping[str, PairContext],
     portfolio: Portfolio,
 ) -> None:
     """Block any enabled symbol carrying an order list of OURS that still works.
+
+    **FROM C32a IT READS NOTHING ITSELF.** ``lists`` is the boot's one
+    enumeration from :func:`_read_order_lists`, or the error it met. And a
+    live list whose id is a RESTORED position's own is not blocked: that
+    position is watched from here on, so the block's message -- *"Money is
+    resting there that this bot is NOT watching"* -- would be false for it
+    (``M5l-103``, I5). A live list of ours that no restored position owns is
+    still blocked, so orphan detection is kept.
 
     **The failure this exists to prevent, measured.** ``Position`` is
     in-process only, so a restart forgets it entirely and
@@ -1028,6 +1085,9 @@ async def _snapshot_live_order_lists(
     -- is structurally silent about it. Meanwhile the base is *locked* by the
     resting protective legs, so ``balance.free`` is zero, so
     :func:`_snapshot_unmanaged_holdings` reads it as dust and blocks nothing.
+    (ANNOTATED AT M5l P81, C32a: "a restart forgets it entirely" is no longer
+    true of a position whose record the boot restores; it stays true of a live
+    list of ours with no restored position, which is what this still blocks.)
     The bot would then enter again, on top of a live list it does not know
     about. Measured on this account: BTC ``free=0``, ``locked=0.02310000``,
     order list ``255471`` ``EXECUTING``, two legs resting.
@@ -1058,9 +1118,8 @@ async def _snapshot_live_order_lists(
     refusal: the ruling is to refuse a symbol, not the boot. Whether anything
     remains tradeable is a separate question, answered by the caller.
     """
-    try:
-        lists = await client.get_all_order_lists()
-    except TradingBotError as exc:
+    if isinstance(lists, TradingBotError):
+        exc = lists
         for symbol in pairs:
             portfolio.blocked_symbols[symbol] = (
                 "could not enumerate order lists at boot, so whether one of ours is still "
@@ -1107,6 +1166,10 @@ async def _snapshot_live_order_lists(
                 },
             )
             continue
+
+        held = portfolio.positions.get(symbol)
+        if held is not None and held.order_list_id == order_list.list_client_order_id:
+            continue  # the restored position's own list: watched, not orphaned (M5l-103)
 
         portfolio.blocked_symbols[symbol] = (
             f"an order list this bot placed is still working at the venue (venue list "
@@ -1235,6 +1298,9 @@ def _require_something_tradeable(
     own correctness argument -- see the field. Reading it costs nothing;
     writing it at runtime was considered and rejected, because ``equity`` sums
     it and ``NO_MARK_PRICE`` refuses portfolio-wide on anything it cannot price.
+    (ANNOTATED AT M5l P81, C32a: "taken once before any ``Position`` exists" is
+    no longer true -- boot restores positions first. The snapshot is still
+    taken once, at boot, and skips every restored symbol instead.)
 
     **A RESTORED PLACEMENT IS STILL NOT A CAUSE**, and that ruling survives
     this rewrite deliberately. A placement lock is SELF-HEALING --
@@ -1242,6 +1308,14 @@ def _require_something_tradeable(
     candle and releases it -- so refusing to boot over one would prevent the
     very tick that clears it: refuse, restart, refuse again, with the causing
     state permanently out of reach. Only a CLOSE reaches ``pending`` above.
+
+    **ANNOTATED AT M5l P81 (C32a): FOR A RESTORED PLACEMENT, "``OrderExecutor
+    .__call__`` resolves it against the venue on the first candle" IS NO
+    LONGER TRUE**, here and in the paragraph on the deadlock above. The
+    owner's Q3(a) resolves every restored placement at boot, before this
+    check runs, or refuses the boot. What survives: the first-candle path
+    still resolves a placement made ambiguous during a run, and excluding a
+    placement here would still deadlock if one ever arrived.
 
     **A SYMBOL WITH MORE THAN ONE CAUSE REPORTS THE FIRST OF
     blocked > pending > unmanaged**, and the order is by how immediately the
@@ -1281,6 +1355,270 @@ def _require_something_tradeable(
         "or move any untracked base holding, or enable a pair that is not listed, then "
         "restart."
     )
+
+
+def _records_to_resolve(
+    restored: store.PersistedState | None, pending: Sequence[Pending]
+) -> tuple[store.PositionRecord, ...]:
+    """The position records P-3k's boot resolves: all of them but those beside a close.
+
+    **A POSITION RECORD WHOSE SYMBOL HAS A PENDING CLOSE IS LEFT OUT**, by the
+    project owner's interim ruling at M5l P81 (C32a): it is neither classified
+    nor restored, and boot's save does not carry it, which is how every boot
+    before C32a treated it. Site B resolves the close on the first candle, as
+    it always has. The bot's own close cancels the protective legs by design,
+    so the classifier would read such a list as ``Gone`` or
+    ``RestoreAndClose`` -- the second a second sell beside the one the close
+    record tracks (``M5l-126``). C32b replaces this with the owner's final
+    design, recorded under P-3k.
+    """
+    if restored is None:
+        return ()
+    closing = {record.symbol for record in pending if record.kind == "close"}
+    return tuple(record for record in restored.positions if record.symbol not in closing)
+
+
+def _refuse_disabled_records(records: Sequence[store.PositionRecord], settings: Settings) -> None:
+    """The owner's R5: a position record on a pair that is not enabled refuses the boot.
+
+    Pure, and called before the lock and before any venue call. The enabled
+    symbols are read from config directly rather than through
+    :func:`_pair_timeframes`, whose own refusals belong where they already run.
+    """
+    enabled = {pair.symbol for pair in settings.config.trading.enabled_pairs}
+    refusals = refuse_disabled(records, enabled)
+    if not refusals:
+        return
+    detail = "\n".join(f"  {refusal.reason}" for refusal in refusals)
+    raise ConfigError(
+        "the store holds an open position on a pair that is not enabled, so this bot "
+        "could restore it but never trade, watch or close it. Refusing rather than "
+        f"leaving it unwatched:\n{detail}\n"
+        "Enable the pair in config.yaml, or resolve the position at the venue, then "
+        "restart. Nothing on disk was changed."
+    )
+
+
+def _restored_position(
+    source: store.PositionRecord | PendingPlacement, decision: Restore
+) -> Position:
+    """The ``Position`` a ``Restore`` decision rebuilds: requested values, venue economics.
+
+    The requested values come from the record (R2), and the fill price from
+    the working leg the classifier read. ``ProtectionState.UNKNOWN``, as the
+    executor builds every position: the reconciler reads the legs on the
+    first candle.
+    """
+    return Position(
+        symbol=source.symbol,
+        side=PositionSide.LONG,
+        quantity=source.quantity,
+        entry_price=source.entry_limit,
+        entry_fill_price=decision.entry_fill_price,
+        entry_bar_time=source.entry_bar_time,
+        protection=ProtectionState.UNKNOWN,
+        order_list_id=decision.order_list.list_client_order_id,
+        venue_order_list_id=_venue_list_id(decision.order_list),
+        stop_loss=source.stop_loss,
+        take_profit=source.take_profit,
+    )
+
+
+async def _resolve_restored(
+    client: ExchangeClient,
+    *,
+    restored: store.PersistedState | None,
+    records: tuple[store.PositionRecord, ...],
+    pending: tuple[Pending, ...],
+    order_lists: list[OrderList] | TradingBotError,
+    balances: Sequence[Balance],
+    pairs: Mapping[str, PairContext],
+    portfolio: Portfolio,
+    deadline_s: float,
+    unrecorded: set[str],
+) -> tuple[tuple[Pending, ...], store.PersistedState | None]:
+    """P-3k's boot resolution, S3 of the P77 specification under the owner's rulings.
+
+    Resolves every position record and every pending placement against the
+    venue, applies each decision, and saves once. Returns the pending records
+    the executor still holds -- the closes (Q13) -- and the state saved, or
+    ``None`` when there was nothing to resolve and nothing was written.
+
+    **ALL READS ARE GETs.** The one ``get_all_order_lists`` is the caller's.
+    Then one ``get_order`` per leg orderId (Q10(b)), each bounded by
+    ``risk.reconcile_deadline_s`` at one attempt. A read that fails refuses
+    the boot (Q6(a)), naming the record.
+
+    **EVERY REFUSAL IS COLLECTED**, and one ``ConfigError`` lists them all, so
+    an operator resolves them in one pass rather than one restart each.
+    ``BookExit`` and ``RestoreAndClose`` refuse too, until C32b: nothing is
+    dropped that a later commit would book or sell.
+
+    **NOTHING IS BOOKED HERE**, so the ledger, the history and the lifetime
+    total are carried from the store as read. C32b, which books, must read
+    them from the portfolio.
+    """
+    placements = tuple(record for record in pending if isinstance(record, PendingPlacement))
+    if restored is None or (not restored.positions and not placements):
+        return pending, None
+    # Records first, then pending placements: the order `classify` answers in.
+    sources: tuple[store.PositionRecord | PendingPlacement, ...] = (*records, *placements)
+
+    orders: list[Order] = []
+    lists: list[OrderList] = []
+    if sources:
+        if isinstance(order_lists, TradingBotError):
+            names = ", ".join(source.symbol for source in sources)
+            raise ConfigError(
+                f"the store holds records to resolve ({names}), and the order-list read "
+                f"that resolves them failed ({type(order_lists).__name__}: {order_lists}). "
+                "Refusing rather than guessing what rests at the venue. Nothing on disk "
+                "was changed; restart once the venue can be read."
+            )
+        plan = reads_needed(records, placements, order_lists)
+        owner = {
+            entry.order_id: (entry.symbol, order_list.list_client_order_id)
+            for order_list in order_lists
+            for entry in order_list.orders
+        }
+        failed: list[str] = []
+        for order_id in plan.order_ids:
+            symbol, list_id = owner[order_id]
+            try:
+                orders.append(
+                    await client.get_order(
+                        symbol, order_id=order_id, timeout_s=deadline_s, attempts=1
+                    )
+                )
+            except TradingBotError as exc:
+                failed.append(
+                    f"  {symbol}, order list {list_id}: order {order_id} could not be read "
+                    f"({type(exc).__name__}: {exc})"
+                )
+        if failed:
+            raise ConfigError(
+                "a leg of a restored record could not be read, so what happened to it is "
+                "unknown. Refusing rather than guessing:\n"
+                + "\n".join(failed)
+                + "\nNothing on disk was changed; restart once the venue can be read."
+            )
+        lists = order_lists
+
+    filters = {symbol: context.symbol_info for symbol, context in pairs.items()}
+    decisions = classify(records, placements, lists, orders, balances, filters)
+    refusals: list[str] = []
+    settled: set[int] = set()
+    restored_count = dropped_count = gone_count = 0
+    for source, decision in zip(sources, decisions, strict=True):
+        kind = "pending placement" if isinstance(source, PendingPlacement) else "position"
+        match decision:
+            case Restore():
+                portfolio.restore_position(_restored_position(source, decision))
+                settled.add(id(source))
+                restored_count += 1
+                _log.info(
+                    "%s: restored the open %s from the store, UNKNOWN until reconciled",
+                    source.symbol,
+                    kind,
+                    extra={
+                        "event": _EVENT_POSITION_RESTORED,
+                        "symbol": source.symbol,
+                        "source": kind,
+                        "list_client_order_id": decision.order_list.list_client_order_id,
+                        "order_list_id": decision.order_list.order_list_id,
+                        "entry_fill_price": decision.entry_fill_price,
+                        "entry_quote_total": decision.entry_quote_total,
+                    },
+                )
+            case DropExpired() | DropNotPlaced():
+                settled.add(id(source))
+                dropped_count += 1
+                reason = (
+                    "its entry expired with nothing executed"
+                    if isinstance(decision, DropExpired)
+                    else "no order list carries its id, so it never reached the venue"
+                )
+                _log.warning(
+                    "%s: dropped the restored %s: %s",
+                    source.symbol,
+                    kind,
+                    reason,
+                    extra={
+                        "event": _EVENT_POSITION_DROPPED,
+                        "symbol": source.symbol,
+                        "source": kind,
+                        "reason": reason,
+                    },
+                )
+            case Gone():
+                settled.add(id(source))
+                gone_count += 1
+                _log.critical(
+                    "%s: the restored %s is GONE -- both protective legs were cancelled "
+                    "unexecuted and the base is no longer held. Dropped UNBOOKED; who sold "
+                    "it is not searched for (R6). Enter the trade by hand.",
+                    source.symbol,
+                    kind,
+                    extra={
+                        "event": _EVENT_POSITION_GONE,
+                        "symbol": source.symbol,
+                        "source": kind,
+                        "list_client_order_id": decision.order_list.list_client_order_id,
+                    },
+                )
+            case RefuseBoot():
+                refusals.append(decision.reason)
+            case BookExit() | RestoreAndClose():
+                # INTERIM, until C32b: refused rather than dropped, so nothing
+                # C32b would book or sell is lost in between.
+                refusals.append(
+                    f"{source.symbol}, order list "
+                    f"{decision.order_list.list_client_order_id}: "
+                    f"{type(decision).__name__} is handled from C32b"
+                )
+            case _:
+                assert_never(decision)
+
+    if refusals:
+        detail = "\n".join(f"  {reason}" for reason in refusals)
+        raise ConfigError(
+            f"{len(refusals)} restored record(s) cannot be resolved at boot, so this bot "
+            f"refuses rather than guess what the venue holds:\n{detail}\n"
+            "Nothing on disk was changed. Resolve each at the venue, then restart."
+        )
+
+    remaining = tuple(record for record in pending if id(record) not in settled)
+    kept = {id(record) for record in remaining}
+    state = store.PersistedState(
+        # The store's own records, matched to the domain ones by position:
+        # `_restore_pending` maps `restored.pending` one for one, in order.
+        pending=tuple(
+            stored
+            for stored, record in zip(restored.pending, pending, strict=True)
+            if id(record) in kept
+        ),
+        positions=_position_records(portfolio.open_positions, reported=unrecorded),
+        ledger=restored.ledger,
+        daily_history=restored.daily_history,
+        lifetime_realised=restored.lifetime_realised,
+    )
+    store.save(state)
+    _log.info(
+        "Boot resolved %d restored record(s): %d restored, %d dropped, %d gone",
+        len(records) + len(placements),
+        restored_count,
+        dropped_count,
+        gone_count,
+        extra={
+            "event": _EVENT_POSITIONS_RESOLVED,
+            "records": len(records),
+            "pending_placements": len(placements),
+            "restored": restored_count,
+            "dropped": dropped_count,
+            "gone": gone_count,
+        },
+    )
+    return remaining, state
 
 
 @asynccontextmanager
@@ -1337,6 +1675,12 @@ async def live_system(
     # nothing: no client exists yet, no lock is held, and a raise would happen
     # earlier than it does today rather than later.
     restored_pending = _restore_pending(restored)
+    # STEP 0b: P-3k's R5, BEFORE THE LOCK AND BEFORE ANY VENUE CALL. A position
+    # record on a pair that is not enabled refuses the boot here, where it is
+    # pure and costs nothing. The records beside a pending close are left out,
+    # here and in the resolution below, by the owner's interim ruling (C32a).
+    records = _records_to_resolve(restored, restored_pending)
+    _refuse_disabled_records(records, settings)
 
     # Imported lazily, mirroring BufferedMarketDataProvider.create: keeps
     # python-binance and aiohttp off the import path when a fake client is
@@ -1389,6 +1733,25 @@ async def live_system(
             daily_history=_restore_history(restored),
             lifetime_realised=_restore_lifetime(restored),
         )
+        # P-3k's BOOT RESOLUTION (C32a): RESOLVE THE RECORDS, before both
+        # snapshots, so each can exclude what was restored. The order-list
+        # read is the boot's only one; the live-list snapshot reuses it.
+        # `unrecorded` is created here so the boot's save and every later
+        # save share one "once per process" set.
+        unrecorded: set[str] = set()
+        order_lists = await _read_order_lists(resolved_client)
+        restored_pending, boot_state = await _resolve_restored(
+            resolved_client,
+            restored=restored,
+            records=records,
+            pending=restored_pending,
+            order_lists=order_lists,
+            balances=balances,
+            pairs=pairs,
+            portfolio=portfolio,
+            deadline_s=settings.config.risk.reconcile_deadline_s,
+            unrecorded=unrecorded,
+        )
         # Still before any socket, with the other four boot refusals.
         await _snapshot_unmanaged_holdings(
             resolved_client, balances=balances, pairs=pairs, portfolio=portfolio
@@ -1396,7 +1759,7 @@ async def live_system(
         # Beside the holdings snapshot, and after it: the two blocking
         # mechanisms are established together, so an operator meets both
         # verdicts before anything opens a socket. Still ahead of step 5.
-        await _snapshot_live_order_lists(resolved_client, pairs=pairs, portfolio=portfolio)
+        _snapshot_live_order_lists(order_lists, pairs=pairs, portfolio=portfolio)
         # CLOSES ONLY, and a placement here would DEADLOCK THE BOT. A restored
         # placement is resolved against the venue by the executor on the first
         # candle and released; refusing to boot over one would prevent that very
@@ -1408,6 +1771,13 @@ async def live_system(
         # Filtered HERE rather than inside the check: which kind disqualifies a
         # symbol is this root's judgement, and the check's contract stays "these
         # symbols are not tradeable".
+        #
+        # ANNOTATED AT M5l P81 (C32a): "A restored placement is resolved against
+        # the venue by the executor on the first candle" IS NO LONGER TRUE of a
+        # boot that reaches here. The boot resolution above settles every
+        # restored placement or refuses the boot, so `restored_pending` holds
+        # closes alone by this line. What survives: excluding a placement would
+        # still deadlock, if one ever arrived here.
         _require_something_tradeable(
             pairs,
             portfolio,
@@ -1471,11 +1841,19 @@ async def live_system(
                 # read it LIVE from `portfolio.open_positions`, never from
                 # here. What survives: `persisted` still carries exactly one
                 # slice, `pending`, read by `_persist_ledger` alone.
-                persisted = restored if restored is not None else store.PersistedState()
-                # The symbols whose position already had its one CRITICAL for
-                # lacking a record; see `_position_records`. One root per
-                # process, so this is the "once per process" in that ruling.
-                unrecorded: set[str] = set()
+                #
+                # FROM C32a IT IS SEEDED FROM THE BOOT'S OWN SAVE WHEN THERE WAS
+                # ONE. That save settled the restored placements; seeding from
+                # the store as read would let `_persist_ledger`'s
+                # `pending=persisted.pending` write them back. `unrecorded`, the
+                # "once per process" set, is created before the boot resolution
+                # now, so that save shares it.
+                if boot_state is not None:
+                    persisted = boot_state
+                elif restored is not None:
+                    persisted = restored
+                else:
+                    persisted = store.PersistedState()
 
                 def _to_record(
                     record: Pending,
@@ -1694,6 +2072,16 @@ async def live_system(
                     # and would duplicate a path that is already written,
                     # already ordered before the engine's own hook, and already
                     # fail-closed on an UNRESOLVED verdict.
+                    #
+                    # CORRECTED AT M5l P81 (C32a, M5l-111): "NO BOOT-TIME
+                    # RESOLUTION is added here" IS NO LONGER TRUE. The owner's
+                    # Q3(a) resolves restored placements at boot, bounded per
+                    # GET by `reconcile_deadline_s` at one attempt, and a boot
+                    # that reaches this line has settled every one of them. So
+                    # `restored_pending` now holds only restored CLOSES, which
+                    # Site B resolves on the first candle (Q13). The
+                    # first-candle placement path stays, defensively: it still
+                    # serves a placement made ambiguous during this run.
                     restored_pending=restored_pending,
                 )
                 engine.on_signal(

@@ -142,6 +142,12 @@ def _venue_list_id(order_list: OrderList) -> int | None:
     writes ``params["orderListId"] = int(order_list_id)``. This is that same
     conversion, at the one place a ``Position`` acquires the value.
 
+    **ANNOTATED AT M5l P81 (C32a, ``M5l-129``): "the one place a
+    ``Position`` acquires the value" IS NO LONGER TRUE.** P-3k's boot
+    resolution in ``engine/modes.py`` restores a ``Position`` from a matched
+    list and calls this function too. What survives: this is still the one
+    CONVERSION, shared by both sites, so the two cannot disagree about it.
+
     **``None`` rather than a raise on a non-numeric id, and the error direction
     decides it.** Reaching here means a placement has ALREADY LANDED at the
     venue. Raising would abandon the ``Position`` for a list that exists,

@@ -64,6 +64,14 @@ For **site 2 it is a hole**: a partial fill on a protective leg is recorded nowh
 durable, so a restart forgets it and the bot resumes trading against a quantity it
 does not know. Stated as a known limitation of M5, not as a design.
 
+> **ANNOTATED AT M5l P81 (C32a): "a restart forgets it and the bot resumes
+> trading against a quantity it does not know" IS NO LONGER TRUE of a stored
+> position.** From C32a the boot reads every leg of each stored position's
+> order list, and a partly filled leg refuses the boot, by the project owner's
+> Q11. **What survives:** the partial fill is still recorded nowhere durable,
+> since the record holds requested values only; it is re-read from the venue at
+> boot, not remembered.
+
 For **site 5 it is subtler and worth spelling out.** Positions are not persisted
 either, so on restart `positions` is empty and site 5's condition *cannot fire* —
 there is no `Position` to lack a stop. What the next run sees instead is a base
@@ -397,3 +405,14 @@ exactly this and read a contradiction.
 | Self-clearing (4) | Reconciliation catching up; automatic |
 | Resolvable by observation (1) | A successful query on the reconciliation cadence |
 | Terminal (2, 3, 5) | Operator action. In M5 that means a restart, plus boot re-detection — **except site 2**, which a restart forgets, and **site 5**, which a restart converts into an unmanaged holding rather than resolving (§1) |
+
+> **ANNOTATED AT M5l P81 (C32a): the table's "site 2, which a restart forgets"
+> IS NO LONGER TRUE of a stored position.** From C32a a stored position with a
+> partly filled protective leg refuses the boot (Q11); see site 2's annotation
+> above. **The site 5 clause is no longer true of a stored position either:** a
+> position whose protective legs were cancelled with its base still held
+> classifies `RestoreAndClose`, which refuses the boot until C32b sells it (R3,
+> Q4(b)); it does not become an unmanaged holding. **What survives:** both
+> sites are still terminal and still need an operator within a run, and site
+> 5's paragraph above -- *"Positions are not persisted either"* -- stays as
+> written through C32b by the owner's R-A ruling.

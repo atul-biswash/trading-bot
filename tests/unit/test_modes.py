@@ -76,6 +76,7 @@ from trading_bot.core.models import (
     Fee,
     Order,
     OrderList,
+    OrderListEntry,
     OrderRequest,
     OtocoOrderListRequest,
     OtoOrderListRequest,
@@ -92,6 +93,7 @@ from trading_bot.engine.modes import (
     LiveSystem,
     _build_signal_handler,
     _pair_timeframes,
+    _restore_pending,
     _seed_portfolio,
     _to_position_record,
     live_system,
@@ -622,6 +624,9 @@ def _case_live_order_list() -> Case:
     case: nothing to price, nothing uncomputable, and `ALREADY_IN_POSITION`
     silent -- which is exactly the hazard. A restart forgets the `Position`, so
     the BUY would pyramid onto a live list without this guard.
+    (ANNOTATED AT M5l P81, C32a: a restart now restores a position whose record
+    the store holds; the guard serves a live list of ours with no restored
+    position.)
     """
     pairs = default_pairs()
     manager, _ = build_manager(pairs=pairs)
@@ -2473,37 +2478,36 @@ class TestTheStoreIsReadAtBoot:
         rot when an eighth is added -- it fails instead, which is the correct
         response to a field the mapping forgot.
 
-        **It also pins that NOTHING RESOLVES AT BOOT, and does so for free.**
-        ``resolve_placement`` reaches ``get_own_open_orders`` and ``get_order``,
-        which ``FakeRootClient`` raises ``NotImplementedError`` on. Boot-time
-        resolution would therefore not merely change a value here; it would
-        raise out of ``__aenter__``. The fixture is the assertion.
-
-        **ONE PAIR, RESTORED.** It briefly took two: R5 made every restored
-        pending record disqualify its symbol, so this single-pair boot refused
-        and a second pair was added to step around it. Narrowing that exclusion
-        to CLOSES gave the original shape back, because the record here is a
-        PLACEMENT and a placement no longer excludes -- which is the ruling
-        working, not a coincidence to be preserved by leaving the workaround in.
+        **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn
+        authority.** The owner's Q3(a) resolves a restored placement AT BOOT,
+        which overturns the first-candle resolution this test used to pin
+        through the root: *"It also pins that NOTHING RESOLVES AT BOOT"*. Its
+        subject -- the store-to-executor mapping, field for field, through a
+        real JSON round trip -- is now pinned where the mapping lives, on
+        ``_restore_pending`` over what ``store.load`` returns. The old
+        assertions read ``assert list(system.executor._pending) == [SYMBOL]``
+        and ``assert restored == _EXPECTED`` inside ``live_system``. MUTATION:
+        drop a field in ``_restore_pending``.
         """
-        settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
         # The isolation is asserted, not assumed: this is what proves the module
         # fixture redirected the read away from the repository's own `data/`.
         assert (tmp_path / "data" / "state.json").exists()
 
-        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
-            assert list(system.executor._pending) == [SYMBOL]
-            restored = system.executor._pending[SYMBOL]
-            assert restored == _EXPECTED
-            # Exactness, not equality: `Decimal("0.0231") == Decimal("0.02310000")`
-            # is True, so `==` alone would not catch a value that lost its scale
-            # on the way through JSON.
-            assert str(restored.quantity) == "0.02310000"
-            assert str(restored.entry_limit) == "60123.45000000"
-            assert str(restored.stop_loss) == "58000.00000000"
-            assert str(restored.take_profit) == "63000.00000000"
-            assert restored.entry_bar_time.tzinfo is not None
+        records = _restore_pending(store.load())
+
+        assert len(records) == 1
+        restored = records[0]
+        assert restored == _EXPECTED
+        # Exactness, not equality: `Decimal("0.0231") == Decimal("0.02310000")`
+        # is True, so `==` alone would not catch a value that lost its scale
+        # on the way through JSON.
+        assert str(restored.quantity) == "0.02310000"
+        assert str(restored.entry_limit) == "60123.45000000"
+        assert isinstance(restored, PendingPlacement)
+        assert str(restored.stop_loss) == "58000.00000000"
+        assert str(restored.take_profit) == "63000.00000000"
+        assert restored.entry_bar_time.tzinfo is not None
 
     async def test_a_corrupt_store_refuses_the_boot_before_any_venue_call(
         self, tmp_path: Path
@@ -2832,18 +2836,27 @@ class TestTheStoreIsReadAtBoot:
         **ONE PAIR, RESTORED**, for the reason
         ``test_a_restored_record_reaches_the_executor_field_for_field`` states:
         the record is a PLACEMENT, and the boot gate excludes closes only.
+
+        **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn
+        authority: Q3(a) resolves the placement at boot.** This fixture's venue
+        carries no order list, so the placement is dropped as never placed and
+        the next write does not carry it. Its subject stands -- what the
+        executor holds is what the next write writes -- asserted for the state
+        Q3(a) leaves. The old assertion read ``assert after.pending ==
+        (_STORED,)``. MUTATION: ``DropNotPlaced`` keeps its record.
         """
         settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.executor._pending == {}  # dropped at boot as never placed
             writer = system.executor._persist_pending
             assert writer is not None
             writer(tuple(system.executor._pending.values()))
 
         after = store.load()
         assert after is not None
-        assert after.pending == (_STORED,)
+        assert after.pending == ()
 
 
 class TestThePendingWriteCarriesTheLiveLedger:
@@ -3386,14 +3399,23 @@ class TestTheBootGateSeesPending:
 
         ONE pair, deliberately: two would boot under the mutation as well, and
         the test would pin nothing.
+
+        **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn
+        authority: Q3(a) resolves the placement at boot.** With no order list at
+        this fixture's venue it is dropped as never placed, so no placement
+        reaches the boot gate and the mutation above now ABSTAINS here -- it
+        has nothing left to exclude. The subject stands: the only pair holding a
+        restored placement still boots. The old assertion read ``assert
+        list(system.executor._pending) == [SYMBOL]``. MUTATION: ``DropNotPlaced``
+        keeps its record.
         """
         settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
-            # It booted -- and the record is still held, which is the point:
-            # the lock survives, and the first candle is what resolves it.
-            assert list(system.executor._pending) == [SYMBOL]
+            # It booted, and the placement was resolved at boot rather than
+            # held for the first candle.
+            assert system.executor._pending == {}
             assert system.portfolio.blocked_symbols == {}
 
     async def test_a_placement_and_a_close_exclude_only_the_close(self, tmp_path: Path) -> None:
@@ -3415,6 +3437,12 @@ class TestTheBootGateSeesPending:
         `..._pending_placement_still_boots` differ in outcome under it, because
         with one pair the exclusion count decides the boot. A mixed set cannot,
         which is exactly why both single-pair tests exist.
+
+        **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn
+        authority: Q3(a) resolves the placement at boot**, so only the close
+        reaches the executor; the placement is dropped as never placed. The old
+        assertion read ``assert set(system.executor._pending) == {SYMBOL,
+        "ETHUSDT"}``. MUTATION: ``DropNotPlaced`` keeps its record.
         """
         settings = write_settings(
             tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
@@ -3435,9 +3463,8 @@ class TestTheBootGateSeesPending:
         )
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
-            # Both locks are held; only the close's symbol is non-tradeable, and
-            # that distinction lives in the boot gate rather than in `_pending`.
-            assert set(system.executor._pending) == {SYMBOL, "ETHUSDT"}
+            # Only the close is held: the placement was resolved at boot.
+            assert set(system.executor._pending) == {"ETHUSDT"}
             assert system.portfolio.blocked_symbols == {}
 
 
@@ -3591,6 +3618,8 @@ class TestTheBootGateHasThreeCauses:
 
     **`unmanaged_holdings` IS READ AND NEVER WRITTEN**, here or anywhere in
     this commit: it stays the boot snapshot taken before any `Position` exists.
+    (ANNOTATED AT M5l P81, C32a: from C32a the boot restores positions before
+    that snapshot, which skips their symbols instead.)
     """
 
     async def test_only_a_blocked_symbol_refuses_and_names_the_list(self, tmp_path: Path) -> None:
@@ -3747,12 +3776,19 @@ class TestTheBootGateHasThreeCauses:
         the property most likely to be lost to a defensive edit while the gate
         is being extended, which is why it is asserted again here rather than
         left to the class that introduced it.
+
+        **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn
+        authority: Q3(a) resolves the placement at boot**, so it still boots
+        and the placement is dropped as never placed. The mutation above now
+        abstains here, for the reason the pending-gate test states. The old
+        assertion read ``assert list(system.executor._pending) == [SYMBOL]``.
+        MUTATION: ``DropNotPlaced`` keeps its record.
         """
         settings = write_settings(tmp_path)
         store.save(store.PersistedState(pending=(_STORED,)))
 
         async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
-            assert list(system.executor._pending) == [SYMBOL]
+            assert system.executor._pending == {}
             assert system.portfolio.blocked_symbols == {}
 
 
@@ -4409,3 +4445,415 @@ class TestPositionRecordsCrossTheRoot:
                 writer(())
 
         assert len(_unrecorded(caplog)) == 1
+
+
+# --------------------------------------------------------------------------
+# P-3k's boot resolution (C32a)
+# --------------------------------------------------------------------------
+_TWO_PAIRS = ((SYMBOL, TIMEFRAME, True), (_OTHER, TIMEFRAME, True))
+_QTY = D("0.02310000")
+_NONE_EXECUTED = D("0")
+_RESTORE_FILL = D("60100.12000000")
+_RESTORE_TOTAL = D("1388.3127720000")
+_W, _SL, _TP = OrderListLeg.WORKING, OrderListLeg.STOP_LOSS, OrderListLeg.TAKE_PROFIT
+_LEG_TYPES = {_W: OrderType.LIMIT, _SL: OrderType.STOP_LOSS, _TP: OrderType.TAKE_PROFIT}
+
+
+def _leg_id(symbol: str, leg: OrderListLeg) -> str:
+    """The venue's order id for one of our legs -- a readable stand-in."""
+    return f"{symbol}-{leg.value}"
+
+
+def _our_list(symbol: str = SYMBOL, status: str = "EXECUTING") -> OrderList:
+    """Our three-leg list for ``symbol`` at ``_LIST_BAR``, carrying our derived ids."""
+    return OrderList(
+        order_list_id="255471",
+        symbol=symbol,
+        list_client_order_id=list_client_order_id(symbol, _LIST_BAR),
+        list_status_type="ALL_DONE" if status == "ALL_DONE" else "EXEC_STARTED",
+        list_order_status=status,
+        orders=tuple(
+            OrderListEntry(
+                symbol=symbol,
+                order_id=_leg_id(symbol, leg),
+                client_order_id=client_order_id(symbol, _LIST_BAR, leg),
+            )
+            for leg in (_W, _SL, _TP)
+        ),
+    )
+
+
+def _leg(
+    leg: OrderListLeg,
+    status: OrderStatus,
+    filled: Decimal = _NONE_EXECUTED,
+    symbol: str = SYMBOL,
+) -> Order:
+    """One leg as a GET returns it; a filled working leg carries its economics."""
+    priced = leg is _W and filled > 0
+    return Order(
+        order_id=_leg_id(symbol, leg),
+        symbol=symbol,
+        side=OrderSide.BUY if leg is _W else OrderSide.SELL,
+        type=_LEG_TYPES[leg],
+        status=status,
+        quantity=_QTY,
+        filled_quantity=filled,
+        average_price=_RESTORE_FILL if priced else None,
+        filled_quote_quantity=_RESTORE_TOTAL if priced else None,
+        client_order_id=client_order_id(symbol, _LIST_BAR, leg),
+    )
+
+
+#: The legs of a live list whose entry filled: what ``Restore`` needs.
+_LIVE_LEGS = [
+    _leg(_W, OrderStatus.FILLED, _QTY),
+    _leg(_SL, OrderStatus.NEW),
+    _leg(_TP, OrderStatus.NEW),
+]
+
+
+def _record(symbol: str = SYMBOL) -> store.PositionRecord:
+    return store.PositionRecord(
+        kind="position",
+        symbol=symbol,
+        entry_bar_time=_LIST_BAR,
+        generation=0,
+        quantity=_QTY,
+        entry_limit=D("60123.45000000"),
+        stop_loss=D("58000.00000000"),
+        take_profit=D("63000.00000000"),
+    )
+
+
+class _ResolvingRootClient(FakeRootClient):
+    """Answers the boot's leg GETs by venue order id, and can fail one of them."""
+
+    def __init__(
+        self, *, legs: list[Order], fail_order_id: str | None = None, **kwargs: Any
+    ) -> None:
+        super().__init__(**kwargs)
+        self._legs = {order.order_id: order for order in legs}
+        self._fail_order_id = fail_order_id
+        #: `(order_id, timeout_s, attempts)` per GET, in order.
+        self.leg_reads: list[tuple[str | None, float | None, int | None]] = []
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        self.leg_reads.append((order_id, timeout_s, attempts))
+        self._journal.append(f"get_order:{order_id}")
+        if order_id is not None and order_id == self._fail_order_id:
+            raise ExchangeConnectionError("timed out")
+        assert order_id is not None
+        return self._legs[order_id]
+
+
+class TestTheBootResolvesRestoredRecords:
+    """P-3k's boot resolution through the real root and the real store (C32a).
+
+    TWO PAIRS throughout, so a symbol a mutation wrongly blocks or excludes does
+    not also refuse the whole boot: each test then fails on its own assertion
+    rather than on the gate's refusal.
+    """
+
+    async def test_a_disabled_pair_refuses_before_any_venue_call(self, tmp_path: Path) -> None:
+        """R5. MUTATION: call it after the lock and the client."""
+        settings = write_settings(tmp_path)  # BTCUSDT only
+        store.save(store.PersistedState(positions=(_record(_OTHER),)))
+        journal: list[str] = []
+        client = FakeRootClient(journal=journal)
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        assert _OTHER in str(excinfo.value)
+        assert list_client_order_id(_OTHER, _LIST_BAR) in str(excinfo.value)
+        assert journal == []
+
+    async def test_a_restored_position_is_not_debited(self, tmp_path: Path) -> None:
+        """I8. MUTATION: restore through `open_position`, which debits."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            position = system.portfolio.positions[SYMBOL]
+            assert position.protection is ProtectionState.UNKNOWN
+            assert position.entry_fill_price == _RESTORE_FILL
+            assert system.portfolio.free_quote == D("5000")
+
+    async def test_a_restored_symbol_is_not_blocked_by_its_own_live_list(
+        self, tmp_path: Path
+    ) -> None:
+        """M5l-103. MUTATION: remove that exclusion from the live-list snapshot."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert SYMBOL in system.portfolio.positions
+            assert system.portfolio.blocked_symbols == {}
+
+    async def test_a_restored_symbols_base_is_not_an_unmanaged_holding(
+        self, tmp_path: Path
+    ) -> None:
+        """I5. MUTATION: remove that exclusion from the holdings snapshot.
+
+        0.5 BTC at the fixture's ticker of 100 clears the 10 USDT minimum, so
+        without the exclusion the snapshot would record it rather than skip it
+        as dust.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_LIVE_LEGS,
+            order_lists=[_our_list()],
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=D("0.5"), locked=D("0")),
+            ],
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert SYMBOL in system.portfolio.positions
+            assert not system.portfolio.has_unmanaged_holding(SYMBOL)
+
+    async def test_every_refusal_is_listed(self, tmp_path: Path) -> None:
+        """MUTATION: raise on the first. Two records, and no list for either."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(), _record(_OTHER))))
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=FakeRootClient(), stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        message = str(excinfo.value)
+        assert "2 restored record(s)" in message
+        assert f"{SYMBOL}, order list" in message
+        assert f"{_OTHER}, order list" in message
+
+    async def test_a_filled_exit_refuses_in_the_interim(self, tmp_path: Path) -> None:
+        """BookExit until C32b. MUTATION: drop it."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        legs = [
+            _leg(_W, OrderStatus.FILLED, _QTY),
+            _leg(_SL, OrderStatus.FILLED, _QTY),
+            _leg(_TP, OrderStatus.EXPIRED),
+        ]
+        client = _ResolvingRootClient(legs=legs, order_lists=[_our_list(status="ALL_DONE")])
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        assert "BookExit is handled from C32b" in str(excinfo.value)
+
+    async def test_cancelled_protection_with_the_base_held_refuses_in_the_interim(
+        self, tmp_path: Path
+    ) -> None:
+        """RestoreAndClose until C32b. MUTATION: drop it."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        legs = [
+            _leg(_W, OrderStatus.FILLED, _QTY),
+            _leg(_SL, OrderStatus.CANCELED),
+            _leg(_TP, OrderStatus.CANCELED),
+        ]
+        client = _ResolvingRootClient(
+            legs=legs,
+            order_lists=[_our_list(status="ALL_DONE")],
+            balances=[
+                Balance(asset="USDT", free=D("5000"), locked=D("0")),
+                Balance(asset="BTC", free=_QTY, locked=D("0")),
+            ],
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        assert "RestoreAndClose is handled from C32b" in str(excinfo.value)
+
+    async def test_a_read_failure_refuses_the_boot(self, tmp_path: Path) -> None:
+        """Q6(a). MUTATION: drop the record whose leg could not be read."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_LIVE_LEGS, order_lists=[_our_list()], fail_order_id=_leg_id(SYMBOL, _SL)
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the boot must not reach here
+
+        message = str(excinfo.value)
+        assert "could not be read" in message
+        assert f"{SYMBOL}, order list {list_client_order_id(SYMBOL, _LIST_BAR)}" in message
+
+    async def test_one_save_after_resolution_carries_the_restored_position(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """MUTATION: omit the save. Counted from the boot, so nothing else writes."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+        saves: list[store.PersistedState] = []
+        real_save = store.save
+
+        def _counting_save(state: store.PersistedState, *args: object, **kwargs: object) -> None:
+            saves.append(state)
+            real_save(state, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr("trading_bot.persistence.store.save", _counting_save)
+        async with live_system(settings, client=client, stream=FakeStream()):
+            assert len(saves) == 1
+
+        assert saves[0].positions == (_record(),)
+        assert saves[0].pending == ()
+
+    async def test_the_order_list_read_happens_once_and_the_gets_are_bounded(
+        self, tmp_path: Path
+    ) -> None:
+        """MUTATION: read the order lists again for the snapshot."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        async with live_system(settings, client=client, stream=FakeStream()):
+            assert client.order_list_calls == 1
+            deadline = settings.config.risk.reconcile_deadline_s
+            assert [read[1:] for read in client.leg_reads] == [(deadline, 1)] * 3
+
+    async def test_a_pending_placement_on_a_live_list_is_restored_and_released(
+        self, tmp_path: Path
+    ) -> None:
+        """Q3(a): Restore, a Position, and no pending record left.
+
+        MUTATION: keep the pending record after its Restore. The boot's save
+        would then hold a placement beside a position for one symbol, which the
+        store refuses, so the boot is wrapped and its failure reported as this
+        test's own.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_STORED,)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        try:
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert SYMBOL in system.portfolio.positions
+                assert system.executor._pending == {}
+        except AssertionError:
+            raise
+        except Exception as exc:
+            pytest.fail(f"the boot failed: {type(exc).__name__}: {exc}")
+
+        after = store.load()
+        assert after is not None
+        assert after.pending == ()
+        assert [record.symbol for record in after.positions] == [SYMBOL]
+
+    async def test_a_position_beside_a_pending_close_is_left_out(self, tmp_path: Path) -> None:
+        """The owner's interim ruling (C32a): neither classified nor restored.
+
+        MUTATION: classify it anyway. This venue carries no list, so a
+        classified record would refuse the boot; the boot is wrapped and that
+        failure reported as this test's own.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        close = store.PendingCloseRecord(
+            kind="close", symbol=SYMBOL, entry_bar_time=_LIST_BAR, generation=0, quantity=_QTY
+        )
+        store.save(store.PersistedState(pending=(close,), positions=(_record(),)))
+
+        try:
+            async with live_system(
+                settings, client=FakeRootClient(), stream=FakeStream()
+            ) as system:
+                assert SYMBOL not in system.portfolio.positions
+                assert list(system.executor._pending) == [SYMBOL]
+        except AssertionError:
+            raise
+        except Exception as exc:
+            pytest.fail(f"the boot failed: {type(exc).__name__}: {exc}")
+
+        after = store.load()
+        assert after is not None
+        assert after.positions == ()
+        assert after.pending == (close,)
+
+    async def test_a_ledger_write_after_boot_does_not_resurrect_a_settled_placement(
+        self, tmp_path: Path
+    ) -> None:
+        """M5l-128. MUTATION: seed the carrier from the state as read."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_STORED,)))
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            assert system.executor._pending == {}  # dropped at boot as never placed
+            ledger_writer = system.reconciler._persist_ledger
+            assert ledger_writer is not None
+            ledger_writer(Ledger(realised_pnl=D("-1.5"), pnl_date=date(2026, 9, 29)))
+
+        after = store.load()
+        assert after is not None
+        assert after.pending == ()
+
+    @pytest.mark.parametrize(
+        ("legs", "event", "level"),
+        [
+            pytest.param(
+                [
+                    _leg(_W, OrderStatus.EXPIRED),
+                    _leg(_SL, OrderStatus.EXPIRED),
+                    _leg(_TP, OrderStatus.EXPIRED),
+                ],
+                "boot_position_dropped",
+                logging.WARNING,
+                id="expired",
+            ),
+            pytest.param(
+                [
+                    _leg(_W, OrderStatus.FILLED, _QTY),
+                    _leg(_SL, OrderStatus.CANCELED),
+                    _leg(_TP, OrderStatus.CANCELED),
+                ],
+                "boot_position_gone",
+                logging.CRITICAL,
+                id="gone",
+            ),
+        ],
+    )
+    async def test_a_dropped_record_leaves_the_store_with_its_line(
+        self,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+        legs: list[Order],
+        event: str,
+        level: int,
+    ) -> None:
+        """DropExpired at WARNING, Gone at CRITICAL; either way the record leaves."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=legs, order_lists=[_our_list(status="ALL_DONE")])
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert SYMBOL not in system.portfolio.positions
+
+        lines = [
+            r for r in caplog.records if r.name == _MODES_LOGGER and vars(r).get("event") == event
+        ]
+        assert len(lines) == 1
+        assert lines[0].levelno == level
+        after = store.load()
+        assert after is not None
+        assert after.positions == ()

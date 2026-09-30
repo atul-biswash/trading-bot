@@ -201,6 +201,13 @@ class RefusalStage(str, Enum):
     asserts the reverse, and its message would tell an operator the bot did not
     open something it did.
 
+    **ANNOTATED AT M5l P81 (C32a): "because ``Position`` is in-process only
+    and a restart forgets it" IS NO LONGER THE WHOLE CAUSE.** From C32a a
+    boot restores the position a live list of ours belongs to when the store
+    holds its record, and that list is then not blocked. What survives: a live
+    list of ours with no restored position -- no record, or a record left out
+    -- still has no ``Position``, and this stage is still what it refuses as.
+
     What the two share is the only thing that decides placement: both are facts
     about ONE symbol, discovered at boot, that leave every limit computable. So
     both are checked after the limits and neither belongs beside the guards
