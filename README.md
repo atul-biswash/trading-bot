@@ -346,7 +346,7 @@ src/trading_bot/
   risk/          manager · rules · position_sizing
   execution/     executor · placement · dispatch_budget · resolution
                  · reconciliation · reconciliation_driver · close_plan
-                 · bookability · booking_line · order_manager†
+                 · bookability · booking_line · restoration · order_manager†
   backtesting/   engine† · portfolio† · metrics†
   paper/         simulator†
   persistence/   store · database† · models†

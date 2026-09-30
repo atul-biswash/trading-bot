@@ -700,6 +700,37 @@ directed for this commit.
     `TestADeferredSettlementAcrossARestart.test_a_held_close_is_released_unbooked_after_a_restart`:
     *"positions are not persisted -- so the mark is gone"*.
 
+**ADDED AT M5l P80 (C31), the boot classifier.** `execution/restoration.py`,
+pure: no I/O, no clock, no write. Nothing calls it yet; C32 does.
+
+- `refuse_disabled` is R5, callable before any venue call. `reads_needed`
+  returns the venue order ids to GET (Q10(b)) and the refusals decidable
+  without a read. `classify` returns exactly one decision per position record,
+  then one per pending placement, in input order. Pending close records are
+  not classified (Q13).
+- The decisions: `Restore`, `BookExit`, `RestoreAndClose`, `Gone`,
+  `DropExpired`, `DropNotPlaced` and `RefuseBoot`. Only `RestoreAndClose`
+  implies a venue write, and it is the only one whose `writes_to_venue` is
+  true. The full table is the module's docstring.
+- Several matching lists refuse the boot even when exactly one is live,
+  where `resolve_placement` answers `PLACED_LIVE`: the P80 prompt rules
+  "several match" a refusal.
+- **Three choices the rulings did not make, for the owner to see:**
+  - Every leg of a matched list is read, not only the working leg that the
+    P77 specification's boot table (S3, in the report, not in the tree)
+    listed, because Q11 refuses a partial execution on any leg and a
+    live list's protective leg is seen only by reading it. A live record
+    costs one GET per leg (`M5l-123`).
+  - `Gone` reads the base's total, and `RestoreAndClose` its free balance
+    (`M5l-122`).
+  - `Restore`, `BookExit` and `RestoreAndClose` also carry the matched order
+    list and the entry economics, so C32 need not match or read again.
+- The records are typed by a protocol, `Requested`, which the store's
+  `PositionRecord` and `PendingRecord` and the executor's `PendingPlacement`
+  all satisfy, so `execution/` still imports no store.
+- The gate's file counts move with it: `ruff format` to 135 files and `mypy`
+  to 81 source files.
+
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
 #### P-3l. A market-data outage stops reconciliation (`M5l-055`)
