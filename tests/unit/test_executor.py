@@ -1297,9 +1297,56 @@ class TestTheEntryFillPrice:
         assert portfolio.free_quote == D("10000")  # and no money moved
         assert [r.status for r in _records(caplog, "entry_fill_absent")] == ["EXPIRED"]
         assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["entry_leg_expired"]
-        # The pending record is gone: it was popped before the query, which is
-        # already right for this outcome -- there is no list to resolve later.
+        # The pending record is gone: the expired branch pops it and rewrites
+        # the durable set before refusing (C30) -- there is no list to resolve
+        # later. Until C30 it was popped before the query, for every outcome.
         assert executor._pending == {}
+
+    async def test_no_save_between_placement_and_position_lacks_both_records(self) -> None:
+        """M5l-102, closed at C30: the placement record leaves in the position's save.
+
+        MUTATION: restore the removal before ``_open_position``.
+
+        The spy reads the portfolio AT EACH WRITE, which is what the root's
+        writer does: it serialises ``open_positions`` live. So each call's pair
+        says whether that save would hold the placement record, the position's
+        record, or neither. Under the old order the removal write held neither,
+        while the fill query was still in flight.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        seen: list[tuple[bool, bool]] = []
+
+        def spy(records: tuple[PendingPlacement, ...]) -> None:
+            seen.append(
+                (SYMBOL in {record.symbol for record in records}, SYMBOL in portfolio.positions)
+            )
+
+        executor, _, _ = build(portfolio=portfolio, persist=spy)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert SYMBOL in portfolio.positions
+        # Before the venue call: the placement record. After it: the position.
+        assert seen == [(True, False), (False, True)]
+
+    async def test_an_expired_fok_leaves_no_placement_record_on_disk(self) -> None:
+        """The expired refusal persists its removal. MUTATION: skip that persist.
+
+        Without it the last durable write is the one made before the venue call,
+        which still holds the placement record for a list that never rested.
+        No position exists, so the root's writer would carry no position record
+        either.
+        """
+        writer = RecordingWriter()
+        executor, _, portfolio = build(persist=writer)
+        executor._client.fill_price = None  # type: ignore[attr-defined]
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert SYMBOL not in portfolio.positions
+        assert len(writer.calls) == 2
+        assert writer.symbols(0) == [SYMBOL]
+        assert writer.calls[-1] == ()
 
     async def test_a_failed_query_is_not_an_expiry(self, caplog) -> None:  # type: ignore[no-untyped-def]
         """THE AMBIGUOUS CASE, and the two errors are opposite.

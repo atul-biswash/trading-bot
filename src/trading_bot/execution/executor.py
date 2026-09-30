@@ -1270,8 +1270,13 @@ class OrderExecutor:
             )
             return
 
-        self._pending.pop(signal.symbol, None)
-        self._persist_after_removal(signal.symbol)
+        # THE PENDING RECORD STAYS UNTIL THE POSITION EXISTS (M5l-102, C30).
+        # It used to be popped and the durable set rewritten HERE, before the
+        # fill query -- so that write held neither the placement record nor the
+        # position's, and a kill during the query left nothing on disk for a
+        # list that is live. It is now removed below, after `_open_position`,
+        # in the one save that also carries the new position's record.
+        #
         # THE SECOND AND LAST VENUE CALL OF AN ENTRY DISPATCH. The count is
         # pinned by a test on the fake client, because the coherence validator
         # contains no call count and cannot guard one -- and because this
@@ -1297,9 +1302,10 @@ class OrderExecutor:
         # NOTHING RESTS, SO THERE IS NOTHING TO UNWIND. MEASURED, and the
         # resolution path above already says it: "six probe lists with a FOK
         # working leg read ALL_DONE/ALL_DONE, every leg EXPIRED, `executedQty`
-        # 0." The pending record was popped and the durable set rewritten
-        # before the query, which is already correct for this outcome: there
-        # is no list to resolve on a later bar.
+        # 0." So the pending record is popped and the durable set rewritten
+        # here, before the refusal: there is no list to resolve on a later bar.
+        # (Until C30 that removal happened before the query, for every outcome;
+        # it now happens on each branch, after the outcome is known.)
         #
         # THE SAME REASONING ALREADY RAN ON THE OTHER PATH. `PLACED_TERMINAL`
         # refuses to construct for exactly this, in those words -- "Constructing
@@ -1315,6 +1321,8 @@ class OrderExecutor:
         # `unrealized_pnl` raises on an absent fill price, and the next boot
         # re-seeds `free_quote` from the venue.
         if fill.expired:
+            self._pending.pop(signal.symbol, None)
+            self._persist_after_removal(signal.symbol)
             self._refuse(signal, _REASON_ENTRY_EXPIRED, candle)
             return
         self._open_position(
@@ -1328,6 +1336,12 @@ class OrderExecutor:
             order_list_id=order_list.list_client_order_id,
             venue_order_list_id=_venue_list_id(order_list),
         )
+        # ONE SAVE SWAPS THE PLACEMENT RECORD FOR THE POSITION RECORD. The
+        # position is in the portfolio now, and the root's writer reads the
+        # open positions live, so this write drops the one and carries the
+        # other: no save between placement and position lacks both.
+        self._pending.pop(signal.symbol, None)
+        self._persist_after_removal(signal.symbol)
         _log.info(
             "Order list placed",
             extra={

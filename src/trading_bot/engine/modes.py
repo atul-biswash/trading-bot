@@ -171,11 +171,11 @@ from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import AsyncIterator, Collection, Mapping, Sequence
+    from collections.abc import AsyncIterator, Collection, Iterable, Mapping, Sequence
     from datetime import date
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Balance, Candle, Money, Signal
+    from trading_bot.core.models import Balance, Candle, Money, Position, Signal
 
 _log = get_logger(__name__)
 
@@ -196,6 +196,10 @@ _EVENT_BOOT_EXCLUDED = "boot_assets_excluded"
 _EVENT_RISK_REFUSED = "risk_refused"
 _EVENT_INTENT_DISPATCHED = "intent_dispatched"
 _EVENT_COLLABORATOR_FAILED = "collaborator_failed"
+#: An open position whose record the store cannot be given. Its own name
+#: because it is a DURABILITY loss rather than a refusal: the position trades
+#: and exits normally, and only a restart would lose it.
+_EVENT_POSITION_UNRECORDED = "position_record_skipped"
 
 #: Names used in ``collaborator`` on a ``collaborator_failed`` line.
 _COLLABORATOR_RISK = "risk_manager"
@@ -542,6 +546,95 @@ def _to_day_record(summary: DaySummary) -> store.DayRecord:
     which is what keeps this a rename of nothing.
     """
     return store.DayRecord(realised=summary.realised, trades_count=summary.trades_count)
+
+
+class _UnrecordablePositionError(ValueError):
+    """An open position whose list id cannot supply its record's ``generation``."""
+
+
+def _to_position_record(position: Position) -> store.PositionRecord:
+    """One open position into its store shape: what was REQUESTED, and nothing else.
+
+    The position-level sibling of ``_to_record`` in :func:`live_system`, and
+    here for the reason every mapping in this file is: ``core/`` may not import
+    ``persistence/``, and ``persistence/`` may not import ``exchange/``, whose
+    id parser this needs. The composition root is the one layer that knows all
+    three.
+
+    **``generation`` IS PARSED FROM OUR OWN LIST ID**, by the project owner's
+    Q9 at M5l P78: ``Position`` carries no generation, and the list id it does
+    carry was computed from one. ``entry_limit`` is ``entry_price``, which
+    ``OrderExecutor._open_position`` sets from the requested limit.
+
+    **Raises** :class:`_UnrecordablePositionError`, naming the defect, when the
+    list id is absent, is not one of ours, or names another symbol. The caller
+    decides what that costs; see :func:`_position_records`.
+    """
+    list_id = position.order_list_id
+    if list_id is None:
+        raise _UnrecordablePositionError("it carries no list client order id")
+    parts = parse_list_client_order_id(list_id)
+    if parts is None:
+        raise _UnrecordablePositionError(f"its list client order id {list_id!r} is not ours")
+    if parts.symbol != position.symbol:
+        raise _UnrecordablePositionError(
+            f"its list client order id {list_id!r} names {parts.symbol}, not {position.symbol}"
+        )
+    return store.PositionRecord(
+        kind="position",
+        symbol=position.symbol,
+        entry_bar_time=position.entry_bar_time,
+        generation=parts.generation,
+        quantity=position.quantity,
+        entry_limit=position.entry_price,
+        stop_loss=position.stop_loss,
+        take_profit=position.take_profit,
+    )
+
+
+def _position_records(
+    positions: Iterable[Position], *, reported: set[str]
+) -> tuple[store.PositionRecord, ...]:
+    """The records of every position given, SKIPPING one that cannot have a record.
+
+    **SKIP, NEVER FAIL THE SAVE** -- the project owner's ruling R-B at M5l P79
+    (``M5l-118``). ``Position.order_list_id`` is optional and is filled from
+    the venue's echo of our list id; a ``None`` has never been observed. A
+    failed save would be the costlier answer: every writer serialises every
+    open position, so one unrecordable position would refuse the ``CLOSE``'s
+    record write -- blocking its exit -- and every entry and ledger write with
+    it. Skipped, the position trades and exits normally and loses only its
+    durability, which is where every position stood before C30.
+
+    **ONE ``CRITICAL`` PER SYMBOL PER PROCESS.** ``reported`` is owned by the
+    caller, which is the composition root, and one root runs per process. Every
+    save serialises every open position, so logging per save would repeat the
+    same line on every write for the position's lifetime.
+
+    A held position is an open position and keeps its record (the owner's
+    Q5(b)): nothing here reads ``settlement_hold``.
+    """
+    records: list[store.PositionRecord] = []
+    for position in positions:
+        try:
+            records.append(_to_position_record(position))
+        except _UnrecordablePositionError as exc:
+            if position.symbol in reported:
+                continue
+            reported.add(position.symbol)
+            _log.critical(
+                "%s: this open position has NO durable record, because %s. It trades "
+                "and exits normally, and it will not survive a restart.",
+                position.symbol,
+                exc,
+                extra={
+                    "event": _EVENT_POSITION_UNRECORDED,
+                    "symbol": position.symbol,
+                    "defect": str(exc),
+                    "list_client_order_id": position.order_list_id,
+                },
+            )
+    return tuple(records)
 
 
 def _restore_history(state: store.PersistedState | None) -> dict[date, DaySummary]:
@@ -1371,7 +1464,18 @@ async def live_system(
                 # ONE slice -- `pending` -- read by `_persist_ledger` alone.
                 # That one read is the residual its own docstring names; it is
                 # UNRULED and deliberately untouched by C3.
+                #
+                # ANNOTATED AT M5l P79 (C30): "FOUR of the five" counted the
+                # five fields `PersistedState` had before C28 added a sixth,
+                # `positions`. From C30 both closures name `positions` too, and
+                # read it LIVE from `portfolio.open_positions`, never from
+                # here. What survives: `persisted` still carries exactly one
+                # slice, `pending`, read by `_persist_ledger` alone.
                 persisted = restored if restored is not None else store.PersistedState()
+                # The symbols whose position already had its one CRITICAL for
+                # lacking a record; see `_position_records`. One root per
+                # process, so this is the "once per process" in that ruling.
+                unrecorded: set[str] = set()
 
                 def _to_record(
                     record: Pending,
@@ -1459,6 +1563,15 @@ async def live_system(
                     added -- a separate completion writer would be a second
                     owner of one slice, which is the clobber this root holds the
                     whole state to prevent.
+
+                    **THE OPEN POSITIONS ARE READ LIVE TOO, from C30 (P-3k).**
+                    One record per open position, held ones included, taken
+                    from ``portfolio.open_positions`` at serialisation time for
+                    the reason the ledger is. So a position's record appears in
+                    the same save that removes its placement record, and leaves
+                    in the same save that removes its close record: every write
+                    site already writes after the portfolio changed, and none
+                    needs a second call.
                     """
                     nonlocal persisted
                     # EVERY FIELD BELOW IS READ LIVE FROM `portfolio`, NEVER
@@ -1470,6 +1583,7 @@ async def live_system(
                     # cached here.
                     persisted = store.PersistedState(
                         pending=tuple(_to_record(record) for record in records),
+                        positions=_position_records(portfolio.open_positions, reported=unrecorded),
                         ledger=(
                             None
                             if portfolio.ledger is None
@@ -1530,6 +1644,11 @@ async def live_system(
                     holds no ledger writer, and after this commit it does not
                     need one: its pending write carries the live ledger, so a
                     close's deletion and its accrual reach disk together.
+
+                    **THE OPEN POSITIONS ARE READ LIVE HERE TOO, from C30.**
+                    A reconciler booking removes the position from the
+                    portfolio before this runs, so its record leaves in the same
+                    save as its accrual, and every other position keeps its own.
                     """
                     nonlocal persisted
                     # `trades_count` comes from the ARGUMENT, beside the two
@@ -1544,6 +1663,7 @@ async def live_system(
                     # rule the pending closure states above.
                     persisted = store.PersistedState(
                         pending=persisted.pending,
+                        positions=_position_records(portfolio.open_positions, reported=unrecorded),
                         ledger=store.LedgerRecord(
                             realised_pnl=ledger.realised_pnl,
                             pnl_date=ledger.pnl_date,

@@ -634,6 +634,13 @@ list rests; a protective fill in that window is never booked, so the daily-loss
 halt undercounts; once the list completes or is cancelled, the base asset
 becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
 
+> **ANNOTATED AT M5l P79 (C30): *"Positions are memory-only"* IS NO LONGER
+> TRUE OF THE FILE.** From C30 both of the root's writers put one record per
+> open position into `data/state.json`, held positions included. **What
+> survives, and it is the item:** nothing reads those records until C32, and
+> each boot's first save erases them, so a position still does not survive a
+> restart and every consequence above stands.
+
 **It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
 capture and base-asset netting. The owner's M5l ruling, quoted at the head of
 this file, keeps *"The architectural live-trading block"* *"strictly active"*
@@ -663,6 +670,35 @@ unmanaged holding until the owner sold it with
 unbooked fill and the unmanaged holding are REASONED from `live_system`'s boot
 snapshots; the holding and its exclusion were MEASURED in that instance
 (`M5l-036`). No protective fill in such a window has been observed.
+
+**ADDED AT M5l P79 (C30), the writers.** Three records the project owner
+directed for this commit.
+
+- **Deployment, verbatim:** "No deployment or supervised run may use any
+  commit from 131f1c9 up to C32b's: records are written from C30, and boot
+  reads them only from C32, so each boot's first save erases them (today's
+  behaviour, not a regression)."
+- **The accepted residual, verbatim:** "One kill during one ambiguous
+  placement write loses that position's durability (M5l-110); accepted by the
+  owner at P78 (Q2(b))." The ambiguous-placement path, `_persist_dropping`, is
+  unchanged by C30.
+- **Sentences that read "persisted" as "survives a restart" -- the owner's
+  ruling R-A at P79.** Each stays as written for C30, because it stays true
+  until C32: each boot's first save erases the records. C32 and C33 correct
+  them under P77 S6. The owner named the first three; C30's own search found
+  the last two, which read the same way.
+  - `CLAUDE.md`, the R2 hold bullet among the locked decisions: *"positions
+    are not persisted, so a restart forgets the hold"*.
+  - `docs/QB_ESCALATION.md`, site 5: *"Positions are not persisted either, so
+    on restart `positions` is empty"*.
+  - `src/trading_bot/execution/booking_line.py`, the held exit's `CRITICAL`
+    string: *"A restart releases the hold, because the position is not
+    persisted"*.
+  - `CLAUDE.md`, the M5k paragraph under Current state: *"A restart releases
+    the hold, because positions are not persisted."*
+  - `tests/unit/test_modes.py`, the docstring of
+    `TestADeferredSettlementAcrossARestart.test_a_held_close_is_released_unbooked_after_a_restart`:
+    *"positions are not persisted -- so the mark is gone"*.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
@@ -787,6 +823,14 @@ F2's successor. A position is not persisted, so a restart releases a hold,
 and a close deferred before a restart is released unbooked after it
 (`M5k-065`). The trade is then in the ledger only if an operator entered it by
 hand, and nothing on disk records that it was ever held or deferred.
+
+> **ANNOTATED AT M5l P79 (C30): *"A position is not persisted"* IS NO LONGER
+> TRUE OF THE FILE.** From C30 a held position keeps its record in
+> `data/state.json` (the owner's Q5(b)). **What survives:** nothing reads the
+> record until C32 and each boot's first save erases it, so a restart still
+> releases the hold and a deferred close is still released unbooked; and the
+> record carries no hold, so nothing on disk records that it was held.
+> REAFFIRMED at C30, which edits `_persist_pending`.
 
 *Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
 
@@ -1009,6 +1053,10 @@ fact is already computed.
 
 Unchanged from M5h. M5j touched no persistence code at all, so this condition
 did not fire.
+
+**FIRED AT M5l P79 (C30) AND REAFFIRMED.** C30 adds `positions` to what both
+closures write, read live from `portfolio.open_positions`. It does not touch
+the pending slice: `_persist_ledger` still writes `pending=persisted.pending`.
 
 *Arming condition:* **whoever next changes what `_persist_pending` or
 `_persist_ledger` writes in `engine/modes.py`.** A docstring correction is not
@@ -1454,6 +1502,26 @@ it covers `README.md`, `docs/NEXT_MILESTONE.md`, `docs/M5_NUMBERS.md`,
 per-prompt extensions for named `src/` docstrings and `config.yaml` comment
 lines. The standing docstring authority above widens it for `src/` docstrings
 and comments; it does not touch the documents' half.
+
+**The annotation authority, recorded by the project owner at M5l P79 (C30),
+verbatim:**
+
+> "ANNOTATION AUTHORITY (owner's standing ruling, stated in prompts from M5l
+> P68, recorded at P79): every commit annotates, in place and with no
+> deletions, any text it makes false in README.md, docs/NEXT_MILESTONE.md,
+> docs/M5_NUMBERS.md, docs/RUN_LEDGER.md, and CLAUDE.md except its
+> locked-decision text; it greps for such text before committing and lists
+> each annotation. PRE-EXISTING FALSE TEXT (owner's standing ruling, P68): text
+> a commit did not make false is reported and declared, and does not halt."
+
+> **ANNOTATED AT M5l P79 (C30): *"The annotation authority it was to sit beside
+> is recorded nowhere in the tree"* IS NO LONGER TRUE.** The ruling is quoted
+> immediately above. One detail of the reported paragraph differs from it: the
+> owner dates the ruling to P68, where the paragraph cited it from *"P70 and
+> P71"*. **What survives:**
+> `M5l-116` as a record of what P78b measured, and the last sentence -- the
+> standing docstring authority widens this one for `src/` docstrings and
+> comments and does not touch the documents' half.
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 

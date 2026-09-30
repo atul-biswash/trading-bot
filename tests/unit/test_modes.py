@@ -93,6 +93,7 @@ from trading_bot.engine.modes import (
     _build_signal_handler,
     _pair_timeframes,
     _seed_portfolio,
+    _to_position_record,
     live_system,
 )
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
@@ -4103,3 +4104,308 @@ class TestADeferredSettlementAcrossARestart:
             assert system.portfolio.ledger is None
 
         assert store.load() is None
+
+
+#: A second symbol, for the tests below that need a position the save must
+#: KEEP beside the one it removes. Not a configured pair: the root's writers
+#: serialise every open position and consult no pair list, and the boot gate
+#: that will (the owner's R5) is C32's.
+_OTHER = "ETHUSDT"
+
+
+def _open_position(
+    symbol: str = SYMBOL,
+    *,
+    generation: int = 0,
+    list_id: str | None = None,
+    bar: datetime = _LIST_BAR,
+) -> Position:
+    """An open position as the executor builds one, with OUR list id by default.
+
+    Every requested money value keeps trailing zeros and the fill differs from
+    the limit, so a record that took ``entry_fill_price`` for ``entry_limit``,
+    or lost a scale through a float, cannot compare equal.
+    """
+    return Position(
+        symbol=symbol,
+        side=PositionSide.LONG,
+        quantity=D("0.02310000"),
+        entry_price=D("60123.45000000"),
+        entry_fill_price=D("60100.12000000"),
+        entry_bar_time=bar,
+        protection=ProtectionState.UNKNOWN,
+        order_list_id=(
+            list_client_order_id(symbol, bar, generation=generation) if list_id is None else list_id
+        ),
+        venue_order_list_id=255471,
+        stop_loss=D("58000.00000000"),
+        take_profit=D("63000.00000000"),
+    )
+
+
+def _position_record(
+    symbol: str = SYMBOL, *, generation: int = 0, bar: datetime = _LIST_BAR
+) -> store.PositionRecord:
+    """What ``_open_position``'s position must become on disk, written out.
+
+    Written out rather than mapped by a helper, for ``_EXPECTED``'s reason: a
+    helper here would be the mapping under test, compared against itself.
+    """
+    return store.PositionRecord(
+        kind="position",
+        symbol=symbol,
+        entry_bar_time=bar,
+        generation=generation,
+        quantity=D("0.02310000"),
+        entry_limit=D("60123.45000000"),
+        stop_loss=D("58000.00000000"),
+        take_profit=D("63000.00000000"),
+    )
+
+
+def _unrecorded(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """The skip's CRITICAL lines, by logger name and event, never by position."""
+    return [
+        r
+        for r in caplog.records
+        if r.name == _MODES_LOGGER and vars(r).get("event") == "position_record_skipped"
+    ]
+
+
+class TestPositionRecordsCrossTheRoot:
+    """P-3k's writers (C30): each save carries a record per open position, read live.
+
+    Both of the root's closures serialise ``portfolio.open_positions`` at the
+    moment they write, so a record arrives in the save that follows the
+    position's construction and leaves in the save that follows its removal.
+    Nothing here reads the records back: boot restores them only from C32.
+    """
+
+    async def test_a_closure_serialises_the_positions_open_when_it_writes(
+        self, tmp_path: Path
+    ) -> None:
+        """LIVE, not a snapshot. MUTATION: serialise a snapshot taken at closure creation.
+
+        The position opens AFTER the root is built, which is the only order a
+        snapshot cannot see. The record is compared whole, so a dropped or
+        swapped field fails here too.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = _open_position()
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer(())
+
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_position_record(),)
+        # Exactness, not equality: `Decimal("0.0231") == Decimal("0.02310000")`.
+        assert str(after.positions[0].quantity) == "0.02310000"
+        assert str(after.positions[0].entry_limit) == "60123.45000000"
+
+    async def test_a_reconciler_booking_removes_its_record_in_the_same_save(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ONE save carries the accrual, drops the booked record and keeps the other.
+
+        MUTATION: ``_persist_ledger`` omits ``positions``.
+
+        **THE SECOND POSITION IS WHAT MAKES THIS BITE.** With the booked
+        position alone, a writer that omitted positions would write none -- the
+        very absence this test expects -- and pass. The neighbour's stamp is
+        fresh, so the pass does not visit it and needs no venue answer for it.
+        """
+        settings = write_settings(tmp_path)
+        leg = Order(
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            type=OrderType.STOP_LOSS,
+            status=OrderStatus.FILLED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY,
+            filled_quote_quantity=_BOOK_TOTAL,
+            stop_price=D("79141.56"),
+            order_list_id="371839",
+            client_order_id=client_order_id(
+                SYMBOL, _BOOK_BAR, OrderListLeg.STOP_LOSS, generation=0
+            ),
+            created_at=NOW,
+        )
+        client = FakeRootClient(
+            own_open_orders=[leg],
+            my_trades=[
+                Trade(
+                    trade_id="1",
+                    order_id="777",
+                    symbol=SYMBOL,
+                    side=OrderSide.SELL,
+                    quantity=_BOOK_QTY,
+                    price=D("79141.56"),
+                    quote_quantity=_BOOK_TOTAL,
+                    fee=_BOOK_FEE,
+                    filled_at=NOW,
+                )
+            ],
+        )
+        saves: list[store.PersistedState] = []
+        real_save = store.save
+
+        def _counting_save(state: store.PersistedState, *args: object, **kwargs: object) -> None:
+            saves.append(state)
+            real_save(state, *args, **kwargs)  # type: ignore[arg-type]
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = Position(
+                symbol=SYMBOL,
+                side=PositionSide.LONG,
+                quantity=_BOOK_QTY,
+                entry_price=D("80700.00"),
+                entry_fill_price=_BOOK_ENTRY_FILL,
+                entry_bar_time=_BOOK_BAR,
+                protection=ProtectionState.UNKNOWN,
+                order_list_id=list_client_order_id(SYMBOL, _BOOK_BAR),
+                stop_loss=D("79141.56"),
+            )
+            neighbour = _open_position(_OTHER)
+            neighbour.last_reconciled_at = datetime.now(timezone.utc)
+            system.portfolio.positions[_OTHER] = neighbour
+            monkeypatch.setattr("trading_bot.persistence.store.save", _counting_save)
+            await system.reconciler(engine_candle())
+
+        assert len(saves) == 1
+        assert saves[0].ledger is not None  # the accrual is in this save...
+        assert saves[0].positions == (_position_record(_OTHER),)  # ...and so is the swap
+
+    async def test_an_executor_close_removes_its_record_in_its_removal_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The close's removal write drops its position's record and keeps the rest.
+
+        MUTATION: omit ``positions`` from that write -- ``_persist_pending``,
+        which every executor write goes through.
+
+        Driven as ``_sold_unbooked``'s caller ends: ``_drop_position_unbooked``
+        and then ``_release_close``. The neighbour is what makes an omitted
+        field visible, as in the reconciler's test above.
+        """
+        settings = write_settings(tmp_path)
+        saves: list[store.PersistedState] = []
+        real_save = store.save
+
+        def _counting_save(state: store.PersistedState, *args: object, **kwargs: object) -> None:
+            saves.append(state)
+            real_save(state, *args, **kwargs)  # type: ignore[arg-type]
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            system.portfolio.positions[SYMBOL] = _open_position()
+            system.portfolio.positions[_OTHER] = _open_position(_OTHER)
+            system.executor._pending[SYMBOL] = PendingClose(
+                symbol=SYMBOL, entry_bar_time=_LIST_BAR, generation=0, quantity=D("0.02310000")
+            )
+            monkeypatch.setattr("trading_bot.persistence.store.save", _counting_save)
+            system.executor._drop_position_unbooked(SYMBOL)
+            system.executor._release_close(SYMBOL)
+
+        assert len(saves) == 1
+        assert saves[0].pending == ()
+        assert saves[0].positions == (_position_record(_OTHER),)
+
+    async def test_a_held_position_keeps_its_record(self, tmp_path: Path) -> None:
+        """The owner's Q5(b). MUTATION: drop held positions from serialisation.
+
+        A hold writes nothing itself, so what keeps the record is every later
+        save still serialising the held position.
+        """
+        settings = write_settings(tmp_path)
+
+        async with live_system(settings, client=FakeRootClient(), stream=FakeStream()) as system:
+            position = _open_position()
+            position.hold_settlement()
+            system.portfolio.positions[SYMBOL] = position
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer(())
+
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_position_record(),)
+
+    def test_the_generation_round_trips_through_the_list_id(self) -> None:
+        """Q9: parsed from our list id. MUTATION: hard-code 0.
+
+        Generation 1, because 0 is what a hard-coded value would also produce.
+        """
+        record = _to_position_record(_open_position(generation=1))
+
+        assert record == _position_record(generation=1)
+
+    @pytest.mark.parametrize(
+        ("list_id", "defect"),
+        [
+            pytest.param("", "no list client order id", id="none"),
+            pytest.param("tb1-garbage", "is not ours", id="unparseable"),
+            pytest.param(
+                list_client_order_id(_OTHER, _LIST_BAR), "names ETHUSDT", id="other-symbol"
+            ),
+        ],
+    )
+    async def test_a_position_with_no_usable_list_id_is_skipped_and_the_save_succeeds(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, list_id: str, defect: str
+    ) -> None:
+        """The owner's R-B: skip that record, one CRITICAL, NEVER fail the save.
+
+        MUTATION: fail the save instead.
+
+        ``""`` stands for ``None`` here and is mapped back below, because the
+        helper reads ``None`` as "derive our id". The neighbour proves the save
+        wrote everything else; a failed save is reported as a failure of THIS
+        test's contract rather than as an escaping crash.
+        """
+        settings = write_settings(tmp_path)
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(
+                settings, client=FakeRootClient(), stream=FakeStream()
+            ) as system:
+                position = _open_position()
+                position.order_list_id = list_id or None
+                system.portfolio.positions[SYMBOL] = position
+                system.portfolio.positions[_OTHER] = _open_position(_OTHER)
+                writer = system.executor._persist_pending
+                assert writer is not None
+                try:
+                    writer(())
+                except Exception as exc:
+                    pytest.fail(f"the save failed: {type(exc).__name__}: {exc}")
+
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_position_record(_OTHER),)
+        lines = _unrecorded(caplog)
+        assert len(lines) == 1
+        assert lines[0].levelno == logging.CRITICAL
+        assert vars(lines[0]).get("symbol") == SYMBOL
+        assert defect in str(vars(lines[0]).get("defect"))
+
+    async def test_the_skip_is_reported_once_per_symbol_per_process(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Every save serialises every position. MUTATION: log on every save."""
+        settings = write_settings(tmp_path)
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(
+                settings, client=FakeRootClient(), stream=FakeStream()
+            ) as system:
+                position = _open_position()
+                position.order_list_id = None
+                system.portfolio.positions[SYMBOL] = position
+                writer = system.executor._persist_pending
+                assert writer is not None
+                writer(())
+                writer(())
+
+        assert len(_unrecorded(caplog)) == 1
