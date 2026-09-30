@@ -140,11 +140,17 @@ from __future__ import annotations
 import logging
 from contextlib import ExitStack, asynccontextmanager
 from dataclasses import dataclass
+from datetime import timezone
 from typing import TYPE_CHECKING, assert_never
 
 from trading_bot.core.assessment import EntryIntent
 from trading_bot.core.enums import PositionSide, ProtectionState
-from trading_bot.core.exceptions import ConfigError, TradingBotError
+from trading_bot.core.exceptions import (
+    ConfigError,
+    FeeFillsIncompleteError,
+    FeeUnresolvableError,
+    TradingBotError,
+)
 from trading_bot.core.interfaces import (
     ExchangeClient,
     MarketDataProvider,
@@ -152,9 +158,24 @@ from trading_bot.core.interfaces import (
     SignalHandler,
 )
 from trading_bot.core.models import Position
-from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio
+from trading_bot.core.portfolio import DaySummary, Ledger, Portfolio, held_exit, settle_exit
 from trading_bot.engine.live_engine import TradingEngine
 from trading_bot.exchange.ids import parse_list_client_order_id
+from trading_bot.execution.bookability import (
+    BookabilityOutcome,
+    classify_bookability,
+    require_bookable,
+)
+from trading_bot.execution.booking_line import (
+    DISAGREE_MESSAGE,
+    EVENT_QUOTE_TOTALS_DISAGREE,
+    EVENT_SETTLEMENT_HELD,
+    HOLD_MESSAGE,
+    disagreement_fields,
+    hold_fields,
+    quote_total_fields,
+    settlement_fields,
+)
 from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.executor import (
     OrderExecutor,
@@ -190,7 +211,17 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from datetime import date
 
     from trading_bot.config.settings import Settings
-    from trading_bot.core.models import Balance, Candle, Money, Order, OrderList, Signal
+    from trading_bot.core.models import (
+        Balance,
+        Candle,
+        ExitSettlement,
+        HeldExit,
+        Money,
+        Order,
+        OrderList,
+        Signal,
+    )
+    from trading_bot.execution.bookability import TotalSource
 
 _log = get_logger(__name__)
 
@@ -223,6 +254,17 @@ _EVENT_POSITION_RESTORED = "boot_position_restored"
 _EVENT_POSITION_DROPPED = "boot_position_dropped"
 _EVENT_POSITION_GONE = "boot_position_gone"
 _EVENT_POSITIONS_RESOLVED = "boot_positions_resolved"
+#: A protective fill made while the bot was down, booked at boot (C32b-1).
+_EVENT_EXIT_BOOKED = "boot_exit_booked"
+#: The boot site's `resolution` for a held exit. `hold_fields`' own text says a
+#: restart releases the hold, which is not true of a hold boot keeps on disk.
+_BOOT_HOLD_RESOLUTION = (
+    "THE EXIT FILLED WHILE THE BOT WAS DOWN and IT CANNOT BE BOOKED: the fees field "
+    "names what the venue charged. NOTHING WAS BOOKED. THE BASE IS ALREADY SOLD: DO NOT "
+    "SELL IT BY HAND. Its record is KEPT on disk with no position, and the symbol is "
+    "BLOCKED, so this boot and every later one hold it until an operator enters the "
+    "trade by hand and releases the record."
+)
 
 #: Names used in ``collaborator`` on a ``collaborator_failed`` line.
 _COLLABORATOR_RISK = "risk_manager"
@@ -1400,14 +1442,18 @@ def _refuse_disabled_records(records: Sequence[store.PositionRecord], settings: 
 
 
 def _restored_position(
-    source: store.PositionRecord | PendingPlacement, decision: Restore
+    source: store.PositionRecord | PendingPlacement, decision: Restore | BookExit
 ) -> Position:
-    """The ``Position`` a ``Restore`` decision rebuilds: requested values, venue economics.
+    """The ``Position`` a decision rebuilds: requested values, venue economics.
 
     The requested values come from the record (R2), and the fill price from
     the working leg the classifier read. ``ProtectionState.UNKNOWN``, as the
     executor builds every position: the reconciler reads the legs on the
     first candle.
+
+    **A ``BookExit`` builds one too, and it never enters the portfolio.** It
+    is the cost basis ``Portfolio.book_restored_exit`` prices the exit
+    against, and that method refuses a symbol the portfolio holds.
     """
     return Position(
         symbol=source.symbol,
@@ -1424,6 +1470,137 @@ def _restored_position(
     )
 
 
+def _as_held_record(source: store.PositionRecord | PendingPlacement) -> store.PositionRecord:
+    """The record a held exit keeps on disk. A pending placement becomes one.
+
+    The owner's Q5(b): a held exit keeps a RECORD and no ``Position``. A
+    placement whose list filled and then exited while the bot was down
+    (``M5l-104``) is held as the position record it would have become; the two
+    carry the same requested values under a different tag.
+    """
+    if isinstance(source, store.PositionRecord):
+        return source
+    return store.PositionRecord(
+        kind="position",
+        symbol=source.symbol,
+        entry_bar_time=source.entry_bar_time,
+        generation=source.generation,
+        quantity=source.quantity,
+        entry_limit=source.entry_limit,
+        stop_loss=source.stop_loss,
+        take_profit=source.take_profit,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _Booking:
+    """One exit that filled while the bot was down, settled and ready to book."""
+
+    source: store.PositionRecord | PendingPlacement
+    decision: BookExit
+    leg: Order
+    settlement: ExitSettlement
+    total: Money
+    total_source: TotalSource
+
+
+@dataclass(frozen=True, slots=True)
+class _Hold:
+    """One exit that filled while the bot was down and cannot be booked (R2, Q5(b))."""
+
+    source: store.PositionRecord | PendingPlacement
+    decision: BookExit
+    leg: Order
+    held: HeldExit
+
+
+async def _settle_boot_exit(
+    client: ExchangeClient,
+    source: store.PositionRecord | PendingPlacement,
+    decision: BookExit,
+    leg: Order,
+    *,
+    quote_asset: str,
+    deadline_s: float,
+) -> _Booking | _Hold | str:
+    """Settle one ``BookExit``: a booking, a hold, or the reason the boot refuses.
+
+    One ``get_my_trades`` for the filled leg's order, bounded like every boot
+    read, then ``settle_exit`` and the bookability ladder the three runtime
+    booking sites use. A terminal fee refusal is a HOLD (R2, Q5(b)). A fetch
+    that fails, fills that do not yet account for the execution, or an exit
+    with no cost basis refuse the boot: each is a record this boot cannot
+    resolve (Q6(a)), and each leaves it on disk for the next.
+    """
+    symbol, list_id = source.symbol, decision.order_list.list_client_order_id
+    prefix = f"{symbol}, order list {list_id}: the {decision.leg.value} leg filled while down"
+    try:
+        trades = await client.get_my_trades(
+            symbol, order_id=decision.order_id, timeout_s=deadline_s, attempts=1
+        )
+    except TradingBotError as exc:
+        return f"{prefix}, and its fills could not be read ({type(exc).__name__}: {exc})"
+    try:
+        settlement = settle_exit(
+            trades,
+            order_id=decision.order_id,
+            quote_asset=quote_asset,
+            executed_quantity=leg.filled_quantity,
+        )
+    except FeeFillsIncompleteError as exc:
+        return f"{prefix}, and its fills do not yet account for it ({exc})"
+    except FeeUnresolvableError as exc:
+        return _Hold(
+            source=source,
+            decision=decision,
+            leg=leg,
+            held=held_exit(trades, order_id=decision.order_id, error=exc),
+        )
+    basis = _restored_position(source, decision)
+    verdict = classify_bookability(
+        position=basis,
+        filled_quantity=leg.filled_quantity,
+        filled_quote_quantity=leg.filled_quote_quantity,
+    )
+    if verdict.outcome is BookabilityOutcome.NO_QUOTE_TOTAL:
+        verdict = classify_bookability(
+            position=basis,
+            filled_quantity=leg.filled_quantity,
+            filled_quote_quantity=leg.filled_quote_quantity,
+            fills_total=settlement.quote_quantity,
+        )
+    if verdict.outcome is not BookabilityOutcome.BOOKABLE:
+        return f"{prefix}, and it cannot be booked: {verdict.reason}"
+    total, total_source = require_bookable(verdict)
+    if total_source == "venue" and settlement.quote_quantity != total:
+        # THE RUNTIME SITES' WARNING, EXACTLY -- the owner's ruling on draft
+        # choice 3 (`M5l-135`). The venue's total is booked and both are named.
+        # No `candle_time`: boot has no candle.
+        _log.warning(
+            DISAGREE_MESSAGE,
+            symbol,
+            extra={
+                "event": EVENT_QUOTE_TOTALS_DISAGREE,
+                "symbol": symbol,
+                **disagreement_fields(
+                    order_id=settlement.order_id,
+                    venue_total=total,
+                    fills_total=settlement.quote_quantity,
+                    quote_asset=quote_asset,
+                    site="boot",
+                ),
+            },
+        )
+    return _Booking(
+        source=source,
+        decision=decision,
+        leg=leg,
+        settlement=settlement,
+        total=total,
+        total_source=total_source,
+    )
+
+
 async def _resolve_restored(
     client: ExchangeClient,
     *,
@@ -1436,31 +1613,37 @@ async def _resolve_restored(
     portfolio: Portfolio,
     deadline_s: float,
     unrecorded: set[str],
-) -> tuple[tuple[Pending, ...], store.PersistedState | None]:
+) -> tuple[tuple[Pending, ...], store.PersistedState | None, tuple[store.PositionRecord, ...]]:
     """P-3k's boot resolution, S3 of the P77 specification under the owner's rulings.
 
     Resolves every position record and every pending placement against the
     venue, applies each decision, and saves once. Returns the pending records
-    the executor still holds -- the closes (Q13) -- and the state saved, or
-    ``None`` when there was nothing to resolve and nothing was written.
+    the executor still holds -- the closes (Q13) -- the state saved, or
+    ``None`` when there was nothing to resolve and nothing was written, and
+    the HELD records: exits that filled while down and cannot be booked, kept
+    on disk with no ``Position`` (Q5(b)), which every later save must carry.
 
     **ALL READS ARE GETs.** The one ``get_all_order_lists`` is the caller's.
-    Then one ``get_order`` per leg orderId (Q10(b)), each bounded by
-    ``risk.reconcile_deadline_s`` at one attempt. A read that fails refuses
-    the boot (Q6(a)), naming the record.
+    Then one ``get_order`` per leg orderId (Q10(b)), and one ``get_my_trades``
+    per filled exit, each bounded by ``risk.reconcile_deadline_s`` at one
+    attempt. A read that fails refuses the boot (Q6(a)), naming the record.
 
-    **EVERY REFUSAL IS COLLECTED**, and one ``ConfigError`` lists them all, so
-    an operator resolves them in one pass rather than one restart each.
-    ``BookExit`` and ``RestoreAndClose`` refuse too, until C32b: nothing is
-    dropped that a later commit would book or sell.
+    **DECIDE, THEN REFUSE, THEN APPLY.** Every decision and every settlement is
+    known before anything changes, and every refusal is collected into one
+    ``ConfigError``, so a refused boot leaves the portfolio and the disk as
+    they were and an operator resolves the list in one pass.
+    ``RestoreAndClose`` still refuses, until C32b-2.
 
-    **NOTHING IS BOOKED HERE**, so the ledger, the history and the lifetime
-    total are carried from the store as read. C32b, which books, must read
-    them from the portfolio.
+    **BOOKINGS ARE LEDGER-ONLY AND IN FILL-TIME ORDER** (I7, I9). Each goes
+    through ``Portfolio.book_restored_exit`` on its fill's UTC day (R4), never
+    crediting ``free_quote``, which was seeded after the sale. Ascending fill
+    time is what lets a later day's booking roll an earlier one into the
+    history rather than absorb it. So the save reads the ledger, the history
+    and the lifetime total LIVE from the portfolio.
     """
     placements = tuple(record for record in pending if isinstance(record, PendingPlacement))
     if restored is None or (not restored.positions and not placements):
-        return pending, None
+        return pending, None, ()
     # Records first, then pending placements: the order `classify` answers in.
     sources: tuple[store.PositionRecord | PendingPlacement, ...] = (*records, *placements)
 
@@ -1506,7 +1689,47 @@ async def _resolve_restored(
 
     filters = {symbol: context.symbol_info for symbol, context in pairs.items()}
     decisions = classify(records, placements, lists, orders, balances, filters)
+    by_order_id = {order.order_id: order for order in orders}
+
+    # DECIDE: every settlement is read, and every refusal known, before any write.
     refusals: list[str] = []
+    bookings: list[_Booking] = []
+    holds: list[_Hold] = []
+    for source, decision in zip(sources, decisions, strict=True):
+        if isinstance(decision, RefuseBoot):
+            refusals.append(decision.reason)
+        elif isinstance(decision, RestoreAndClose):
+            # INTERIM, until C32b-2: refused rather than dropped, so nothing it
+            # would sell is lost in between.
+            refusals.append(
+                f"{source.symbol}, order list {decision.order_list.list_client_order_id}: "
+                "RestoreAndClose is handled from C32b"
+            )
+        elif isinstance(decision, BookExit):
+            outcome = await _settle_boot_exit(
+                client,
+                source,
+                decision,
+                by_order_id[decision.order_id],
+                quote_asset=portfolio.quote_asset,
+                deadline_s=deadline_s,
+            )
+            if isinstance(outcome, _Booking):
+                bookings.append(outcome)
+            elif isinstance(outcome, _Hold):
+                holds.append(outcome)
+            else:
+                refusals.append(outcome)
+
+    if refusals:
+        detail = "\n".join(f"  {reason}" for reason in refusals)
+        raise ConfigError(
+            f"{len(refusals)} restored record(s) cannot be resolved at boot, so this bot "
+            f"refuses rather than guess what the venue holds:\n{detail}\n"
+            "Nothing on disk was changed. Resolve each at the venue, then restart."
+        )
+
+    # APPLY. Nothing below can refuse the boot.
     settled: set[int] = set()
     restored_count = dropped_count = gone_count = 0
     for source, decision in zip(sources, decisions, strict=True):
@@ -1566,26 +1789,23 @@ async def _resolve_restored(
                         "list_client_order_id": decision.order_list.list_client_order_id,
                     },
                 )
-            case RefuseBoot():
-                refusals.append(decision.reason)
-            case BookExit() | RestoreAndClose():
-                # INTERIM, until C32b: refused rather than dropped, so nothing
-                # C32b would book or sell is lost in between.
-                refusals.append(
-                    f"{source.symbol}, order list "
-                    f"{decision.order_list.list_client_order_id}: "
-                    f"{type(decision).__name__} is handled from C32b"
-                )
+            case RefuseBoot() | RestoreAndClose() | BookExit():
+                # Refusals raised above; bookings and holds are applied below,
+                # in their own order.
+                pass
             case _:
                 assert_never(decision)
 
-    if refusals:
-        detail = "\n".join(f"  {reason}" for reason in refusals)
-        raise ConfigError(
-            f"{len(refusals)} restored record(s) cannot be resolved at boot, so this bot "
-            f"refuses rather than guess what the venue holds:\n{detail}\n"
-            "Nothing on disk was changed. Resolve each at the venue, then restart."
-        )
+    # I9: ASCENDING FILL TIME, so a later day's booking rolls an earlier one
+    # into the history rather than absorbing it.
+    for booking in sorted(bookings, key=lambda item: item.settlement.filled_at):
+        _book_boot_exit(booking, portfolio)
+        settled.add(id(booking.source))
+    held_records: list[store.PositionRecord] = []
+    for hold in holds:
+        held_records.append(_as_held_record(hold.source))
+        settled.add(id(hold.source))
+        _block_held_exit(hold, portfolio)
 
     remaining = tuple(record for record in pending if id(record) not in settled)
     kept = {id(record) for record in remaining}
@@ -1597,16 +1817,32 @@ async def _resolve_restored(
             for stored, record in zip(restored.pending, pending, strict=True)
             if id(record) in kept
         ),
-        positions=_position_records(portfolio.open_positions, reported=unrecorded),
-        ledger=restored.ledger,
-        daily_history=restored.daily_history,
-        lifetime_realised=restored.lifetime_realised,
+        positions=(
+            *held_records,
+            *_position_records(portfolio.open_positions, reported=unrecorded),
+        ),
+        # LIVE from the portfolio: the bookings above wrote the ledger.
+        ledger=(
+            None
+            if portfolio.ledger is None
+            else store.LedgerRecord(
+                realised_pnl=portfolio.ledger.realised_pnl,
+                pnl_date=portfolio.ledger.pnl_date,
+                trades_count=portfolio.ledger.trades_count,
+            )
+        ),
+        daily_history={
+            day: _to_day_record(summary) for day, summary in portfolio.daily_history.items()
+        },
+        lifetime_realised=portfolio.lifetime_realised,
     )
     store.save(state)
     _log.info(
-        "Boot resolved %d restored record(s): %d restored, %d dropped, %d gone",
+        "Boot resolved %d restored record(s): %d restored, %d booked, %d held, %d dropped, %d gone",
         len(records) + len(placements),
         restored_count,
+        len(bookings),
+        len(holds),
         dropped_count,
         gone_count,
         extra={
@@ -1614,11 +1850,71 @@ async def _resolve_restored(
             "records": len(records),
             "pending_placements": len(placements),
             "restored": restored_count,
+            "booked": len(bookings),
+            "held": len(holds),
             "dropped": dropped_count,
             "gone": gone_count,
         },
     )
-    return remaining, state
+    return remaining, state, tuple(held_records)
+
+
+def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
+    """Book one exit that filled while down: ledger only, on its fill's UTC day.
+
+    ``Portfolio.book_restored_exit`` credits nothing (I7): ``free_quote`` was
+    seeded from the one balance read, taken after the sale.
+    """
+    settlement = booking.settlement
+    realised = portfolio.book_restored_exit(
+        _restored_position(booking.source, booking.decision),
+        exit_quote_total=booking.total,
+        fee=settlement.fee,
+        filled_at=settlement.filled_at,
+    )
+    _log.warning(
+        "%s: an exit that filled while the bot was down was BOOKED at boot, ledger only",
+        booking.source.symbol,
+        extra={
+            "event": _EVENT_EXIT_BOOKED,
+            "symbol": booking.source.symbol,
+            "list_client_order_id": booking.decision.order_list.list_client_order_id,
+            "leg": booking.decision.leg.value,
+            **quote_total_fields(booking.total, booking.total_source),
+            **settlement_fields(settlement, order_created_at=booking.leg.created_at),
+            "realised": realised,
+            "booked_day": settlement.filled_at.astimezone(timezone.utc).date().isoformat(),
+        },
+    )
+
+
+def _block_held_exit(hold: _Hold, portfolio: Portfolio) -> None:
+    """Q5(b): no ``Position``, the symbol blocked, one CRITICAL. The record is kept."""
+    symbol = hold.source.symbol
+    list_id = hold.decision.order_list.list_client_order_id
+    portfolio.blocked_symbols[symbol] = (
+        f"an exit of this bot's position (order list {list_id}) FILLED while the bot was "
+        "down and cannot be booked. Its record is held on disk with no position; entries "
+        "here are refused until an operator enters the trade by hand and releases it"
+    )
+    fields = hold_fields(
+        hold.held,
+        quote_asset=portfolio.quote_asset,
+        quantity=hold.leg.filled_quantity,
+        quote_total=hold.leg.filled_quote_quantity,
+    )
+    fields["resolution"] = _BOOT_HOLD_RESOLUTION
+    _log.critical(
+        HOLD_MESSAGE,
+        symbol,
+        extra={
+            "event": EVENT_SETTLEMENT_HELD,
+            "site": "boot",
+            "symbol": symbol,
+            "list_client_order_id": list_id,
+            **fields,
+        },
+    )
 
 
 @asynccontextmanager
@@ -1740,7 +2036,7 @@ async def live_system(
         # save share one "once per process" set.
         unrecorded: set[str] = set()
         order_lists = await _read_order_lists(resolved_client)
-        restored_pending, boot_state = await _resolve_restored(
+        restored_pending, boot_state, held_records = await _resolve_restored(
             resolved_client,
             restored=restored,
             records=records,
@@ -1961,7 +2257,12 @@ async def live_system(
                     # cached here.
                     persisted = store.PersistedState(
                         pending=tuple(_to_record(record) for record in records),
-                        positions=_position_records(portfolio.open_positions, reported=unrecorded),
+                        # The records boot HELD (Q5(b)) have no Position, so
+                        # nothing live can carry them: they ride every save.
+                        positions=(
+                            *held_records,
+                            *_position_records(portfolio.open_positions, reported=unrecorded),
+                        ),
                         ledger=(
                             None
                             if portfolio.ledger is None
@@ -2041,7 +2342,10 @@ async def live_system(
                     # rule the pending closure states above.
                     persisted = store.PersistedState(
                         pending=persisted.pending,
-                        positions=_position_records(portfolio.open_positions, reported=unrecorded),
+                        positions=(
+                            *held_records,
+                            *_position_records(portfolio.open_positions, reported=unrecorded),
+                        ),
                         ledger=store.LedgerRecord(
                             realised_pnl=ledger.realised_pnl,
                             pnl_date=ledger.pnl_date,

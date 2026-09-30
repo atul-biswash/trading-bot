@@ -110,6 +110,14 @@ Three categories, not two. The distinction is **what can clear it**.
 > | `exit_settlement_held` (`reconciliation_driver.py`'s `_settle`, and `executor.py`'s `_hold_close` at the sell and at the resolution) | An exit FILLED and its settlement shows a fee in an asset this ledger cannot subtract, or a fill that is not a sell (R2) | **Terminal**. Emitted once; the position is HELD and no longer reconciled (ruling A), and a `CLOSE` for it is refused (ruling B). A restart releases the hold by forgetting it, which is §1's amnesia rather than a resolution |
 > | `close_record_resolved`, outcome `settlement_timeout` (`executor.py`, the close-resolution line) | A close whose sell filled and whose settlement could not be read within `_SETTLEMENT_RETRY_BARS` of the symbol's own candles | **Terminal**, as the promotion of a condition that was **resolvable by observation** until then: each deferral is a `WARNING` (`close_settlement_deferred`) and a later successful read books it. This is the shape site 4's paragraph below prescribes -- a distinct marker first, promotion after N -- built with a count the executor holds in memory |
 >
+> **ANNOTATED AT M5l P82 (C32b-1): the `exit_settlement_held` row's "A
+> restart releases the hold by forgetting it" IS NO LONGER TRUE of a hold the
+> reconciler made.** At boot the exit is re-settled from the venue's fills and
+> re-held: its record is kept with no position, the symbol blocked, and one
+> `exit_settlement_held` CRITICAL carries `site=boot` (Q5(b)). A hold beside a
+> pending close is still released by a restart until C32b-3. **What survives:**
+> the row's category -- terminal, operator only.
+>
 > **Two changes to emitters that already existed, for completeness.**
 > `close_sold_unpriced`'s `CRITICAL` is gone with `_sold_unpriced`, by the
 > project owner's Decision 2. And `close_sold_unbooked` now also takes an

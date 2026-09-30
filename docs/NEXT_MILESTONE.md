@@ -649,6 +649,11 @@ becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
 > protection is gone with its base held, refuse the boot until C32b.
 > **What survives:** the gate on live trading, and this item, until C32b
 > books and sells and C33 corrects the P77 S6 texts.
+>
+> **ANNOTATED AT M5l P82 (C32b-1): "A filled exit ... refuse[s] the boot" IS
+> NO LONGER TRUE.** A filled exit is booked at boot, or held with its record
+> kept and no position; see the C32b-1 record below. The half about a
+> position whose protection is gone with its base held stands until C32b-2.
 
 **It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
 capture and base-asset netting. The owner's M5l ruling, quoted at the head of
@@ -768,6 +773,10 @@ rulings:
 the boot with the reason "`<decision>` is handled from C32b", so nothing C32b
 would book or sell is dropped in between.
 
+> **ANNOTATED AT M5l P82 (C32b-1): `BookExit` NO LONGER REFUSES THE BOOT**;
+> it is booked or held. `RestoreAndClose`'s interim refusal stands until
+> C32b-2.
+
 **THE OWNER'S R-A EXTENSION, P81.** The five R-A sentences listed under C30
 above stay as written through C32b, because P-3k's deployment restriction
 means no deployable restart runs on these commits. C33 corrects every P77 S6
@@ -795,6 +804,35 @@ amendment 1.**
 - Why it was needed (`M5l-126`): the bot's own close cancels the protective
   legs by design, so the classifier reads that list as `Gone` or
   `RestoreAndClose`, and Q13 collides with Q5(b) on the same disk shape.
+
+**ADDED AT M5l P82 (C32b-1), a filled exit at boot.** A `BookExit` is
+settled at boot: one `get_my_trades` for the filled leg's order, bounded by
+`risk.reconcile_deadline_s` at one attempt, then `settle_exit` and the
+bookability ladder the runtime booking sites use.
+
+- **Booked** through `Portfolio.book_restored_exit`: ledger only (I7), on the
+  fill's UTC day (R4), in ascending fill time across records (I9), with one
+  `boot_exit_booked` line. The record leaves the store.
+- **Held** when the fee is one this ledger cannot subtract, or a fill is not
+  a sell (R2): the record is KEPT, no `Position` is created (Q5(b),
+  `M5l-112`), the symbol is BLOCKED, and one `exit_settlement_held` CRITICAL
+  carries `site=boot`. Every later save carries the held record, beside the
+  live positions, until an operator releases it -- the tool is C34's.
+- **Refused**, with the record left on disk, when the fills cannot be read,
+  do not yet account for the execution, or the exit has no cost basis: each
+  is a record this boot cannot resolve (Q6(a); the owner accepted this as
+  draft choice 1, `M5l-133`).
+- A pending placement whose list filled and then exited while down, and whose
+  exit is HELD, is kept as the position record it would have become (draft
+  choice 2, accepted, `M5l-134`).
+- When the venue's quote total and the sum of the fills disagree, the boot
+  booking emits `exit_quote_totals_disagree`, `site=boot`, exactly as the
+  runtime sites do, and books the venue's total (draft choice 3, overruled
+  by the owner, `M5l-135`).
+- Boot now DECIDES every record, then REFUSES, then APPLIES, so a refused boot
+  changes neither the portfolio nor the disk; and its save reads the ledger,
+  the history and the lifetime total live from the portfolio, which the
+  bookings wrote.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
@@ -935,6 +973,11 @@ hand, and nothing on disk records that it was ever held or deferred.
 > C32b, REFUSES the boot rather than releasing the hold (`M5l-130`). A hold
 > or a deferred close beside a pending close record is left out by the
 > owner's interim ruling, so that restart still releases it unbooked.
+>
+> **ANNOTATED AT M5l P82 (C32b-1): the reconciler-held case no longer
+> refuses the boot.** Its filled exit re-holds at boot: the record is kept
+> with no position and the symbol blocked (Q5(b)), so the hold now SURVIVES
+> the restart rather than refusing it or being released.
 
 *Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
 
@@ -1653,6 +1696,14 @@ verbatim:**
 First used at C32a, where the owner named Q3(a) as overturning the
 first-candle resolution of restored placements, and five tests in
 `tests/unit/test_modes.py` changed under it (`M5l-127`).
+
+**The S6 standing rule, ruled by the project owner at M5l P82, verbatim:**
+
+> "Any CLAUDE.md locked-decision sentence listed in P77 S6, accepted at P78 as
+> adjusted for Q5(b), may be annotated with its accepted text in the commit
+> that makes it false. No other locked text is authorised."
+
+First used at C32b-1, on the R2 hold bullet's quoted ruling (`M5l-132`).
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 

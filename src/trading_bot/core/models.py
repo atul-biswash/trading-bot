@@ -820,6 +820,9 @@ class Position(BaseModel):
     #: ``False`` is true of every position at birth: an exit cannot precede its
     #: position. Set once, by :meth:`hold_settlement`, and never cleared; the
     #: mark is in memory only, so a restart releases it.
+    #: (ANNOTATED AT M5l P82, C32b-1: the MARK is still released, but the hold
+    #: is not. A restart re-settles the exit from the venue's fills at boot and
+    #: keeps a held record with no position, the symbol blocked -- Q5(b).)
     #:
     #: Read by ``reconcile_open_positions`` (ruling A: a held position is not
     #: reconciled) and by ``OrderExecutor`` (Site B's skip, and ruling B's

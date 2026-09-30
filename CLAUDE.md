@@ -1593,6 +1593,19 @@ data.
   restart forgets the hold, and the trade is in the ledger only if an operator
   entered it.
 
+  > **ANNOTATED AT M5l P82 (C32b-1), under the project owner's S6 standing
+  > rule, with P77 S6's hold text as adjusted for Q5(b): the ruling's *"a
+  > restart releases the hold and converges on the unbooked drop"* IS NO
+  > LONGER TRUE of a hold the reconciler made.** A restart re-derives the hold
+  > at boot from the venue's immutable fills and keeps a held record, with the
+  > symbol blocked and no `Position`; it does not release it. **What
+  > survives:** the rest of R2 -- one fetch, one `CRITICAL`, then HOLD; the
+  > mark on `Position`, in memory; the stateless driver. A hold beside a
+  > pending close record is still released by a restart until C32b-3. The
+  > sentence after the quote, *"positions are not persisted, so a restart
+  > forgets the hold"*, stays as written through C32b by the owner's R-A
+  > ruling.
+
   **"R2" NAMES TWO DIFFERENT RULINGS IN THIS FILE (`P45-F14`), and this bullet
   is M5k's.** The M5h paragraph under Current state cites an earlier R2, from
   the close-resolution work (C5c): *"R2's grounds were that the cost basis is
@@ -3960,6 +3973,16 @@ four raise `ConfigError` inside `engine/modes.py`, while the unprimeable symbol
 **propagates** out of `client.get_symbol_info` and is documented only on
 `_prime_pairs`. Counting the `raise ConfigError` sites therefore finds four and
 misses the one that is not a refusal this file writes.
+
+> **ANNOTATED AT M5l P82 (C32b-1, `M5l-136`): "Five conditions refuse the
+> boot" IS NO LONGER THE COUNT, and C32a left it standing.** Later milestones
+> added the corrupt-store refusal and V2's every-pair-excluded refusal, and
+> C32a added P-3k's: a stored position record on a pair not enabled (R5), a
+> failed order-list or leg read while records await resolution (Q6(a)), and
+> every record the boot classifier refuses. **What survives:** each still
+> refuses before any socket exists, and the paragraph above's point -- that
+> counting `raise ConfigError` sites misses a refusal that propagates -- is
+> unchanged.
 
 **Nothing placed an order at M4a's close.** `IntentLogger` was the terminal
 collaborator and it

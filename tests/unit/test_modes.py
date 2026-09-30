@@ -4488,8 +4488,12 @@ def _leg(
     status: OrderStatus,
     filled: Decimal = _NONE_EXECUTED,
     symbol: str = SYMBOL,
+    quote: Decimal | None = None,
 ) -> Order:
-    """One leg as a GET returns it; a filled working leg carries its economics."""
+    """One leg as a GET returns it; a filled working leg carries its economics.
+
+    ``quote`` is a filled PROTECTIVE leg's venue quote total, for an exit.
+    """
     priced = leg is _W and filled > 0
     return Order(
         order_id=_leg_id(symbol, leg),
@@ -4500,9 +4504,47 @@ def _leg(
         quantity=_QTY,
         filled_quantity=filled,
         average_price=_RESTORE_FILL if priced else None,
-        filled_quote_quantity=_RESTORE_TOTAL if priced else None,
+        filled_quote_quantity=_RESTORE_TOTAL if priced else quote,
         client_order_id=client_order_id(symbol, _LIST_BAR, leg),
     )
+
+
+#: A stop that filled while the bot was down: its venue total and its fee.
+#: Realised = 1340.40000000 - 60100.12 x 0.02310000 - 1.34040000 = -49.253172.
+_EXIT_TOTAL = D("1340.40000000")
+_EXIT_FEE = D("1.34040000")
+_EXIT_REALISED = D("-49.253172")
+_EXIT_AT = datetime(2026, 9, 20, 11, 0, tzinfo=timezone.utc)
+
+
+def _exit_trade(
+    symbol: str = SYMBOL,
+    *,
+    at: datetime = _EXIT_AT,
+    fee_asset: str = "USDT",
+    quote: Decimal = _EXIT_TOTAL,
+) -> Trade:
+    """The one fill of a stop leg that filled while the bot was down."""
+    return Trade(
+        trade_id=f"{symbol}-t1",
+        order_id=_leg_id(symbol, _SL),
+        symbol=symbol,
+        side=OrderSide.SELL,
+        quantity=_QTY,
+        price=D("58025.97402597"),
+        quote_quantity=quote,
+        fee=Fee(amount=_EXIT_FEE, asset=fee_asset),
+        filled_at=at,
+    )
+
+
+def _stopped_legs(symbol: str = SYMBOL) -> list[Order]:
+    """An ALL_DONE list whose stop filled in full while down, and its target expired."""
+    return [
+        _leg(_W, OrderStatus.FILLED, _QTY, symbol=symbol),
+        _leg(_SL, OrderStatus.FILLED, _QTY, symbol=symbol, quote=_EXIT_TOTAL),
+        _leg(_TP, OrderStatus.EXPIRED, symbol=symbol),
+    ]
 
 
 #: The legs of a live list whose entry filled: what ``Restore`` needs.
@@ -4640,22 +4682,182 @@ class TestTheBootResolvesRestoredRecords:
         assert f"{SYMBOL}, order list" in message
         assert f"{_OTHER}, order list" in message
 
-    async def test_a_filled_exit_refuses_in_the_interim(self, tmp_path: Path) -> None:
-        """BookExit until C32b. MUTATION: drop it."""
+    async def test_a_filled_exit_is_booked_at_boot_ledger_only(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """I7. MUTATION: the booking credits `free_quote`.
+
+        **CHANGED AT M5l P82 (C32b-1), under the owner's ruled-overturn
+        authority: P78's R4 and P77 S3 book a filled exit at boot**, which
+        overturns C32a's interim refusal. The old test was
+        `test_a_filled_exit_refuses_in_the_interim`, asserting
+        ``"BookExit is handled from C32b" in str(excinfo.value)`` under
+        ``pytest.raises(ConfigError)``. Its subject -- what boot does with an
+        exit that filled while down -- stands.
+
+        The balance was read after the sale, so ``free_quote`` already holds the
+        proceeds; the booking is the ledger's alone.
+        """
         settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
         store.save(store.PersistedState(positions=(_record(),)))
-        legs = [
-            _leg(_W, OrderStatus.FILLED, _QTY),
-            _leg(_SL, OrderStatus.FILLED, _QTY),
-            _leg(_TP, OrderStatus.EXPIRED),
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade()],
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert system.portfolio.free_quote == D("5000")
+                assert SYMBOL not in system.portfolio.positions
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.realised_pnl == _EXIT_REALISED
+
+        lines = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "boot_exit_booked"
         ]
-        client = _ResolvingRootClient(legs=legs, order_lists=[_our_list(status="ALL_DONE")])
+        assert len(lines) == 1
+        assert vars(lines[0]).get("leg") == "SL"
+        assert vars(lines[0]).get("quote_total_source") == "venue"
+        after = store.load()
+        assert after is not None
+        assert after.positions == ()
 
-        with pytest.raises(ConfigError) as excinfo:
-            async with live_system(settings, client=client, stream=FakeStream()):
-                pass  # pragma: no cover - the boot must not reach here
+    async def test_disagreeing_totals_warn_once_and_book_the_venues(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Draft choice 3, overruled (`M5l-135`). MUTATION: omit the warning.
 
-        assert "BookExit is handled from C32b" in str(excinfo.value)
+        The fills sum to one cent less than the venue's total: one
+        `exit_quote_totals_disagree` line, `site=boot`, naming both, and the
+        venue's figure is the one booked.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade(quote=D("1340.39000000"))],
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.realised_pnl == _EXIT_REALISED  # the venue's total
+
+        lines = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "exit_quote_totals_disagree"
+        ]
+        assert len(lines) == 1
+        assert vars(lines[0]).get("site") == "boot"
+        assert vars(lines[0]).get("venue_quote_total") == _EXIT_TOTAL
+        assert vars(lines[0]).get("fills_quote_total") == D("1340.39000000")
+
+    async def test_a_filled_exit_is_booked_on_its_fill_day(self, tmp_path: Path) -> None:
+        """R4. MUTATION: the booking takes `utc_now()` for its day.
+
+        The fill is on 2026-09-20; any clock this suite runs under is later.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade()],
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            ledger = system.portfolio.ledger
+            assert ledger is not None
+            assert ledger.pnl_date == date(2026, 9, 20)
+
+    async def test_bookings_are_applied_in_ascending_fill_time(self, tmp_path: Path) -> None:
+        """I9. MUTATION: apply the bookings in reverse.
+
+        The store lists the LATER fill first. Booked earliest first, the second
+        booking's day is later and rolls the first into the history; booked
+        the other way, the earlier fill lands in the later day's ledger and the
+        history never sees it.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(), _record(_OTHER))))
+        client = _ResolvingRootClient(
+            legs=[*_stopped_legs(), *_stopped_legs(_OTHER)],
+            order_lists=[_our_list(status="ALL_DONE"), _our_list(_OTHER, status="ALL_DONE")],
+            my_trades=[
+                _exit_trade(at=datetime(2026, 9, 21, 10, 0, tzinfo=timezone.utc)),
+                _exit_trade(_OTHER, at=datetime(2026, 9, 20, 10, 0, tzinfo=timezone.utc)),
+            ],
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            ledger = system.portfolio.ledger
+            assert ledger is not None
+            assert ledger.pnl_date == date(2026, 9, 21)
+            assert ledger.realised_pnl == _EXIT_REALISED
+            assert system.portfolio.daily_history == {
+                date(2026, 9, 20): DaySummary(realised=_EXIT_REALISED, trades_count=1)
+            }
+
+    async def test_a_held_exit_keeps_its_record_with_no_position(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Q5(b), M5l-112. MUTATION: restore the held record as a Position.
+
+        The fee is in BNB, which this ledger cannot subtract (R2): the exit is
+        HELD. No Position -- its base is sold and its proceeds are in the
+        seeded balance -- the symbol blocked, one CRITICAL, the record kept.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade(fee_asset="BNB")],
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert SYMBOL not in system.portfolio.positions
+                assert system.portfolio.is_blocked(SYMBOL)
+                assert system.portfolio.ledger is None
+
+        lines = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "exit_settlement_held"
+        ]
+        assert len(lines) == 1
+        assert lines[0].levelno == logging.CRITICAL
+        assert vars(lines[0]).get("site") == "boot"
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_record(),)
+
+    async def test_a_held_record_rides_every_later_save(self, tmp_path: Path) -> None:
+        """The kept-records carrier. MUTATION: a root save drops the held record."""
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade(fee_asset="BNB")],
+        )
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            writer = system.executor._persist_pending
+            assert writer is not None
+            writer(())
+
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_record(),)
 
     async def test_cancelled_protection_with_the_base_held_refuses_in_the_interim(
         self, tmp_path: Path
