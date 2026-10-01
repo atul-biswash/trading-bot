@@ -959,6 +959,24 @@ C32b-1 left false is `M5l-144`.
 C32b's last commit**, C32b-4. **The supervised run still waits for C34**,
 M5l-125's release tool: a held record has no way out until it exists.
 
+**ADDED AT M5l P82 (C32b-4), `M5l-120`'s test, and it changes no `src/`.**
+`M5l-120` said that after C30 a raise from `_open_position` following a
+successful placement leaves the pending record in memory and on disk, and that
+*"No test exercises the raise"*. One does now:
+`test_a_raise_after_a_placed_list_keeps_the_pending_record_and_refuses_the_symbol`
+in `tests/unit/test_executor.py` makes `_open_position` raise after the list is
+placed and its fill read, and asserts that the raise escapes `dispatch`, the
+record is still in `_pending`, no removal write reached disk, no position
+exists, and a second entry for the symbol is refused as `placement_pending`
+without a second list. Its mutation, the pre-C30 order, also fails
+`test_no_save_between_placement_and_position_lacks_both_records` and
+`test_a_delete_failure_logs_and_continues_without_raising` (`M5l-149`).
+
+That the raise escapes is a fact the test measures and the module docstring's
+*"It must never raise"* does not cover: `_open_position` has no `try` of its
+own, and what contains the raise is `TradingEngine._emit`'s isolation
+(`M5l-150`). Nothing changes here; it is recorded.
+
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
 #### P-3l. A market-data outage stops reconciliation (`M5l-055`)

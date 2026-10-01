@@ -653,6 +653,48 @@ class TestOptionFourResolution:
 
         assert executor._pending == {}
 
+    async def test_a_raise_after_a_placed_list_keeps_the_pending_record_and_refuses_the_symbol(
+        self, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M5l-120: what a raise from ``_open_position`` leaves behind.
+
+        The list is placed and its fill read, then recording the position
+        raises. Since C30 the placement record leaves ``_pending`` and the
+        durable set only AFTER the position exists, so the raise leaves it in
+        both: memory still holds it, no removal write ever happened (so disk
+        still holds the placement record the pre-placement write put there),
+        and the symbol stays refused by dispatch's pending guard. Before C30
+        the record was already popped and persisted away, leaving a live list
+        with no record at all. MUTATION: pop the record, and rewrite the durable
+        set, before ``_open_position``.
+
+        THE RAISE ESCAPES ``dispatch``: it sits outside the placement ``try``,
+        and the composition root's handler isolation is what contains it.
+        """
+        writer = RecordingWriter()
+        executor, client, portfolio = build(persist=writer)
+
+        def _raise(self: OrderExecutor, **_kwargs: object) -> None:
+            raise RuntimeError("the portfolio refused the position")
+
+        monkeypatch.setattr(OrderExecutor, "_open_position", _raise)
+
+        with pytest.raises(RuntimeError):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert len(client.otoco) == 1  # the list was placed
+        assert SYMBOL not in portfolio.positions
+        assert list(executor._pending) == [SYMBOL]
+        assert len(writer.calls) == 1  # no removal write
+        assert writer.symbols() == [SYMBOL]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert len(client.otoco) == 1  # and no second list followed it
+        refusals = _records(caplog, "dispatch_refused")
+        assert [vars(r).get("reason") for r in refusals] == ["placement_pending"]
+
     async def test_a_second_dispatch_is_refused_while_one_is_pending(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
