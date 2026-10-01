@@ -266,7 +266,15 @@ _BOOT_HOLD_RESOLUTION = (
     "names what the venue charged. NOTHING WAS BOOKED. THE BASE IS ALREADY SOLD: DO NOT "
     "SELL IT BY HAND. Its record is KEPT on disk with no position, and the symbol is "
     "BLOCKED, so this boot and every later one hold it until an operator enters the "
-    "trade by hand and releases the record."
+    "trade by hand and releases the record: python scripts/release_position.py "
+    "--symbol <SYMBOL>"
+)
+
+#: The release tool (C34), named by every message that leaves a record on disk.
+#: A test pins that these agree with the script's own ``COMMAND``.
+_RELEASE_COMMAND = "python scripts/release_position.py --symbol <SYMBOL>"
+_RELEASE_HINT = (
+    f"To release a record once it is resolved at the venue (stop the bot first): {_RELEASE_COMMAND}"
 )
 
 #: Names used in ``collaborator`` on a ``collaborator_failed`` line.
@@ -1428,7 +1436,7 @@ def _refuse_disabled_records(records: Sequence[store.PositionRecord], settings: 
         "could restore it but never trade, watch or close it. Refusing rather than "
         f"leaving it unwatched:\n{detail}\n"
         "Enable the pair in config.yaml, or resolve the position at the venue, then "
-        "restart. Nothing on disk was changed."
+        f"restart. Nothing on disk was changed. {_RELEASE_HINT}"
     )
 
 
@@ -1763,7 +1771,7 @@ async def _resolve_restored(
                 f"the store holds records to resolve ({names}), and the order-list read "
                 f"that resolves them failed ({type(order_lists).__name__}: {order_lists}). "
                 "Refusing rather than guessing what rests at the venue. Nothing on disk "
-                "was changed; restart once the venue can be read."
+                f"was changed; restart once the venue can be read. {_RELEASE_HINT}"
             )
         plan = reads_needed(records, placements, order_lists, beside)
         owner = {
@@ -1803,7 +1811,8 @@ async def _resolve_restored(
                 "a leg of a restored record could not be read, so what happened to it is "
                 "unknown. Refusing rather than guessing:\n"
                 + "\n".join(failed)
-                + "\nNothing on disk was changed; restart once the venue can be read."
+                + "\nNothing on disk was changed; restart once the venue can be read. "
+                + _RELEASE_HINT
             )
         lists = order_lists
 
@@ -1843,7 +1852,8 @@ async def _resolve_restored(
         raise ConfigError(
             f"{len(refusals)} restored record(s) cannot be resolved at boot, so this bot "
             f"refuses rather than guess what the venue holds:\n{detail}\n"
-            "Nothing on disk was changed. Resolve each at the venue, then restart."
+            "Nothing on disk was changed. Resolve each at the venue, then restart. "
+            f"{_RELEASE_HINT}"
         )
 
     # APPLY. Nothing below can refuse the boot.
@@ -1923,7 +1933,7 @@ async def _resolve_restored(
                     "%s: restored a position whose protection is GONE -- both protective "
                     "legs were cancelled unexecuted and its base is still held. It is SOLD "
                     "on this symbol's first candle (R3). If you acted on this symbol by hand, "
-                    "release its record before restarting.",
+                    "release its record before restarting: " + _RELEASE_COMMAND + ".",
                     source.symbol,
                     extra={
                         "event": _EVENT_POSITION_UNPROTECTED,
@@ -2055,7 +2065,8 @@ def _block_held_exit(hold: _Hold, portfolio: Portfolio) -> None:
     portfolio.blocked_symbols[symbol] = (
         f"an exit of this bot's position (order list {list_id}) FILLED while the bot was "
         "down and cannot be booked. Its record is held on disk with no position; entries "
-        "here are refused until an operator enters the trade by hand and releases it"
+        "here are refused until an operator enters the trade by hand and releases it: "
+        + _RELEASE_COMMAND
     )
     fields = hold_fields(
         hold.held,

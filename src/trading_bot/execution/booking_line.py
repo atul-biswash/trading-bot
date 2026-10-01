@@ -159,7 +159,8 @@ def hold_fields(
             "BASE IS ALREADY SOLD: DO NOT SELL IT BY HAND. The position is HELD in memory "
             "with untrusted protection and is no longer reconciled, so ENTRIES ARE REFUSED "
             "PORTFOLIO-WIDE until an operator acts -- as committed risk unknown at first, "
-            "then as a stale position once it ages. Enter this trade by hand, then restart. "
+            "then as a stale position once it ages. Resolve it at the venue, then release the "
+            "record: python scripts/release_position.py --symbol <SYMBOL>. "
             "A restart keeps the hold: boot re-derives it from the venue's fills and keeps the "
             "record, with the symbol blocked."
         ),

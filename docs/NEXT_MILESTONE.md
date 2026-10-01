@@ -955,9 +955,17 @@ blocked."* Its neighbouring sentence, *"Enter this trade by hand, then
 restart"*, is left as written and is reported (`M5l-143`), and the text
 C32b-1 left false is `M5l-144`.
 
+> **ANNOTATED AT M5l P83 (C34): "left as written and is reported (`M5l-143`)"
+> IS NO LONGER TRUE.** The sentence was replaced by the release command in
+> C34, and `M5l-143` is resolved there.
+
 **The interim refusals are removed and the no-deployment window closes at
 C32b's last commit**, C32b-4. **The supervised run still waits for C34**,
 M5l-125's release tool: a held record has no way out until it exists.
+
+> **ANNOTATED AT M5l P83 (C34): THE TOOL NOW EXISTS**, so a held record has a
+> way out and "has no way out until it exists" is no longer true. The
+> supervised run's other precondition is the documents commit, C33.
 
 **ADDED AT M5l P82 (C32b-4), `M5l-120`'s test, and it changes no `src/`.**
 `M5l-120` said that after C30 a raise from `_open_position` following a
@@ -976,6 +984,40 @@ That the raise escapes is a fact the test measures and the module docstring's
 *"It must never raise"* does not cover: `_open_position` has no `try` of its
 own, and what contains the raise is `TradingEngine._emit`'s isolation
 (`M5l-150`). Nothing changes here; it is recorded.
+
+**ADDED AT M5l P83 (C34), the release tool (M5l-125).**
+`scripts/release_position.py --symbol SYMBOL [--store PATH] [--preview]`, run
+from a deployment clone's root with the bot stopped. It is the only way out of
+a record the boot refuses or holds, short of editing `data/state.json` by hand.
+
+- **It refuses while the bot runs**: it takes the bot's own non-blocking
+  instance lock, holds it for the whole run and releases it on exit.
+- **It loads through `store.load`**, so the schema check applies, finds every
+  record for the symbol -- the position, a pending placement, a pending close
+  -- and prints each in full with the list id our seeds derive. None found, a
+  corrupt store or a missing one exits 1 and writes nothing.
+- **`--preview` is GET-only**: it reads the order lists, the legs, the close's
+  sell, the balances and the symbol's filters, and prints what the boot would
+  decide with `reads_needed` and `classify`. A failed read prints `preview
+  unavailable` and the run goes on. It never calls the venue otherwise.
+- **The operator types the symbol exactly**; anything else aborts, nothing
+  written. Only that symbol's records are removed, through `store.save`, and
+  one line goes to `logs/release.log` with the store's SHA-256 before and after.
+- **The messages name it.** The held-exit message's *"Enter this trade by hand,
+  then restart"*, which told an operator to do what keeps the hold, now reads
+  *"Resolve it at the venue, then release the record: python
+  scripts/release_position.py --symbol <SYMBOL>"*: **`M5l-143` is resolved**,
+  and the `<SYMBOL>` is a literal placeholder (`M5l-153`). So do the boot's
+  four record-related refusals, R3's `CRITICAL`, the held exit's `CRITICAL` and
+  the symbol's block reason.
+
+**The tool's limits, stated.** Its lock is keyed on the working directory's
+`logs/.bot.lock`, so it excludes the bot of the clone it is run FROM and no
+other (`M5l-155`): release a clone's store from that clone. And `--preview` is
+what separates releasing a resolved position from discarding a live one; the
+tool does not require it (`M5l-156`).
+
+*Arming condition:* **whoever next edits `store.save` or `PersistedState` in `persistence/store.py`, or the instance lock's path handling in `utils/instance_lock.py`, which `scripts/release_position.py` reuses.**
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 

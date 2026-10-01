@@ -4278,6 +4278,8 @@ class TestADeferredSettlementAcrossARestart:
 #: serialise every open position and consult no pair list, and the boot gate
 #: that will (the owner's R5) is C32's.
 _OTHER = "ETHUSDT"
+#: The release tool's command, as every boot message that leaves a record names it.
+_RELEASE = "python scripts/release_position.py --symbol <SYMBOL>"
 
 
 def _open_position(
@@ -4938,6 +4940,7 @@ class TestTheBootResolvesRestoredRecords:
 
         assert _OTHER in str(excinfo.value)
         assert list_client_order_id(_OTHER, _LIST_BAR) in str(excinfo.value)
+        assert _RELEASE in str(excinfo.value)  # C34: the message names the release tool
         assert journal == []
 
     async def test_a_restored_position_is_not_debited(self, tmp_path: Path) -> None:
@@ -5001,6 +5004,7 @@ class TestTheBootResolvesRestoredRecords:
         assert "2 restored record(s)" in message
         assert f"{SYMBOL}, order list" in message
         assert f"{_OTHER}, order list" in message
+        assert _RELEASE in message  # C34
 
     async def test_a_filled_exit_is_booked_at_boot_ledger_only(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
@@ -5147,6 +5151,7 @@ class TestTheBootResolvesRestoredRecords:
                 assert SYMBOL not in system.portfolio.positions
                 assert system.portfolio.is_blocked(SYMBOL)
                 assert system.portfolio.ledger is None
+                blocked = system.portfolio.blocked_symbols[SYMBOL]
 
         lines = [
             r
@@ -5156,6 +5161,8 @@ class TestTheBootResolvesRestoredRecords:
         assert len(lines) == 1
         assert lines[0].levelno == logging.CRITICAL
         assert vars(lines[0]).get("site") == "boot"
+        assert _RELEASE in str(vars(lines[0]).get("resolution"))  # C34
+        assert _RELEASE in blocked
         after = store.load()
         assert after is not None
         assert after.positions == (_record(),)
@@ -5218,6 +5225,7 @@ class TestTheBootResolvesRestoredRecords:
         assert lines[0].levelno == logging.CRITICAL
         assert vars(lines[0]).get("base_free") == _QTY
         assert "release its record before restarting" in lines[0].getMessage()
+        assert _RELEASE in lines[0].getMessage()  # C34: and it names the tool
 
     async def test_the_restored_position_is_sold_once_on_its_first_candle(
         self, tmp_path: Path
@@ -5256,6 +5264,7 @@ class TestTheBootResolvesRestoredRecords:
         message = str(excinfo.value)
         assert "could not be read" in message
         assert f"{SYMBOL}, order list {list_client_order_id(SYMBOL, _LIST_BAR)}" in message
+        assert _RELEASE in message  # C34
 
     async def test_one_save_after_resolution_carries_the_restored_position(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
