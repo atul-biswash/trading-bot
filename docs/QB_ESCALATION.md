@@ -56,6 +56,15 @@ deferred. So a restart clears every halt.
 > **What survives:** *"a restart clears every halt"*, and the amnesia argument
 > for sites 2 and 5 below -- both rest on positions not being persisted, which
 > is still true. What expired is only the claim that nothing is.
+>
+> **ANNOTATED AT M5l P83 (C33): "both rest on positions not being persisted,
+> which is still true" IS NO LONGER TRUE, and neither is "positions and holds
+> are still in-memory".** Since C30 every open position keeps a record, held
+> positions included, and a boot resolves each against the venue (P-3k).
+> **What survives:** *"a restart clears every halt"*, since no halt flag
+> exists; and the amnesia argument, which now covers only what is still
+> unpersisted: the P-3b count, the hold mark (re-derived at boot from the
+> venue's fills) and Site B's bar count.
 
 For sites 3 and 4 that is acceptable, because **boot reconciliation re-detects the
 condition** — the divergence is still there, the stale stamp is still stale.
@@ -85,6 +94,18 @@ That does not weaken site 5's argument; it sharpens what "terminal" means.
 "resolves" it by forgetting, which is amnesia rather than resolution — and the
 unmanaged-holding state it lands in is the honest description of what is actually
 known afterwards.
+
+> **ANNOTATED AT M5l P83 (C33): THE PARAGRAPHS ABOVE, *"Positions are not
+> persisted either, so on restart `positions` is empty and site 5's condition
+> *cannot fire*"*, AND *"A restart 'resolves' it by forgetting"*, ARE NO LONGER
+> TRUE OF A STORED POSITION, which the owner's R-A ruling held as written
+> through C32b.** Under R3 a persisted position whose protective legs were
+> cancelled and whose base is still held is restored UNKNOWN and sold at boot,
+> with one `boot_position_unprotected` CRITICAL; one whose base is gone is
+> dropped unbooked at CRITICAL (`Gone`). Neither becomes an unmanaged holding,
+> and `positions` is not empty after a restart. **What survives:** a holding
+> with NO record is still counted toward equity and never adopted, and site 5's
+> within-run routes are unchanged.
 
 ## 2. The five binding sites
 

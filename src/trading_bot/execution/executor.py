@@ -15,6 +15,14 @@ that catch, log without structured fields, and continue -- forever, once per
 bar, with no counter quarantining anything. So every phase carries its own
 ``try`` and its own name in the log line, exactly as
 ``ReconciliationDriver`` and the signal handler do.
+
+(ANNOTATED AT M5l P83, C33: *"every phase carries its own ``try``"* is not true
+of one phase. A raise from ``_open_position`` after a placed list escapes
+``dispatch``, MEASURED by
+``test_a_raise_after_a_placed_list_keeps_the_pending_record_and_refuses_the_symbol``
+(``M5l-150``), and what contains it is ``TradingEngine._emit``'s isolation, not
+this class. What survives: the contract for every phase that has a ``try``, and
+the pending record the raise leaves behind, which the next bar resolves.)
 """
 
 from __future__ import annotations

@@ -53,6 +53,14 @@ only venue it will connect to.
 > and P-3k. Every commission recorded so far is zero, on Testnet
 > (`M5l-054`). **What survives:** the refusal at every entry point, and
 > Testnet as the only venue.
+>
+> **ANNOTATED AT M5l P83 (C33): THE RESTART GAP IS IMPLEMENTED, AND ITS GATE
+> STAYS CLOSED.** P-3k is built in C28 to C34: every open position keeps a
+> record in `data/state.json`, a boot resolves each against the venue, and
+> `scripts/release_position.py` releases one. *"a restart leaves an open
+> position no process owns"* is no longer true of the code. The gate stays
+> closed until a supervised Testnet run's arms A1, A2 and A4 are recorded in
+> `docs/RUN_LEDGER.md`. **What survives:** the other two gates, unchanged.
 
 | Area | State |
 |---|---|

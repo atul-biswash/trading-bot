@@ -2478,10 +2478,15 @@ class TestTheStoreIsReadAtBoot:
         # Boot performs NO write: the store is untouched until a placement.
         assert not (tmp_path / "data" / "state.json").exists()
 
-    async def test_a_restored_record_reaches_the_executor_field_for_field(
+    async def test_a_stored_pending_record_maps_to_the_executors_type_field_for_field(
         self, tmp_path: Path
     ) -> None:
         """The whole point: a record survives the process that could not resolve it.
+
+        **RENAMED AT M5l P83 (C33), from
+        ``test_a_restored_record_reaches_the_executor_field_for_field``**: since
+        C32a the record no longer reaches the executor through the root, and
+        the test's subject is the mapping alone, on ``_restore_pending``.
 
         Equality on a frozen dataclass compares ALL SEVEN fields, so this cannot
         rot when an eighth is added -- it fails instead, which is the correct
@@ -2833,17 +2838,23 @@ class TestTheStoreIsReadAtBoot:
         assert after.ledger.realised_pnl == D("-38.2378038200")
         assert SYMBOL not in system.portfolio.positions
 
-    async def test_a_restored_record_is_rewritten_not_dropped_by_the_next_write(
+    async def test_the_next_write_carries_exactly_what_the_executor_holds_after_boot(
         self, tmp_path: Path
     ) -> None:
         """A restored record is in ``_pending``, so it is in what the writer writes.
+
+        **RENAMED AT M5l P83 (C33), from
+        ``test_a_restored_record_is_rewritten_not_dropped_by_the_next_write``**:
+        since C32a this fixture's placement is dropped at boot, so nothing is
+        "rewritten", and the subject is that the next write carries what the
+        executor holds.
 
         Catches a restore that seeds a SEPARATE collection: the executor would
         resolve the record correctly and then erase it from disk on the next
         write, reintroducing the crash window the restore exists to close.
 
         **ONE PAIR, RESTORED**, for the reason
-        ``test_a_restored_record_reaches_the_executor_field_for_field`` states:
+        ``test_a_stored_pending_record_maps_to_the_executors_type_field_for_field`` states:
         the record is a PLACEMENT, and the boot gate excludes closes only.
 
         **CHANGED AT M5l P81 (C32a), under the owner's ruled-overturn

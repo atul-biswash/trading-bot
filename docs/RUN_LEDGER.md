@@ -1814,3 +1814,86 @@ entry fees, which were zero.
 A census of one frozen capture and a read of the venue, each figure beside
 its instrument. No rule. The objectives' results are observations, and what
 they mean for the milestone is reserved.
+
+## 24. P-3k's supervised run: the template (NOT YET RUN)
+
+**This section is a TEMPLATE, written at M5l P83 (C33), and holds no
+observation.** Every `<...>` below is filled when the run happens, from the
+run's own log and the venue's own answers, never from memory. The live-trading
+gate that P-3k carries stays closed until the arms **A1, A2 and A4** are
+recorded here (`docs/NEXT_MILESTONE.md`, P-3k). The arms and their expected
+lines are P77 S7's, corrected to the events the tree emits (see the notes
+after the table).
+
+### The start record
+
+Recorded before any evidence is read, from the run's `boot_provenance` line.
+
+| Field | Value |
+|---|---|
+| UTC instant | `<...>` |
+| pid | `<...>` (the venv interpreter's, `M5l-040`) |
+| code_commit | `<...>` |
+| config_sha256 | `<...>` |
+| clone | `<...>` |
+| log | `<clone>\logs\trading_bot.log` |
+| store at start | `<SHA-256 of data/state.json>` and its `"schema"` |
+
+The run follows `CLAUDE.md`'s deployment procedure in full, including the C33
+additions: the store copied from the ACTIVE deployment clone, and the schema
+comparison made before the first boot.
+
+### Before each restart, read only
+
+The leg states of the list under test, the relevant `myTrades` fills, and the
+SHA-256 of `data/state.json`. Kill with `taskkill /F /PID <interpreter pid>`.
+
+### The arms
+
+| Arm | Action | Expected lines after the restart |
+|---|---|---|
+| A1 | Hard kill with a live list | `boot_provenance`; `boot_position_restored` for the symbol; no `boot_symbol_blocked` for it; then, at the first candle, `reconciliation_pass` with `states="active=1"` |
+| A2 | Hard kill, and the stop fills while down | `boot_exit_booked` with `leg=SL`, `quote_total_source=venue`, `fee_asset=USDT`, `filled_at=<t>` and `booked_day=<the fill's UTC day>`; no `boot_position_restored` for it; `boot_positions_resolved` with `booked=1` |
+| A3 | As A2 with the take-profit, only if the market provides it | `boot_exit_booked` with `leg=TP` |
+| A4 | Hard kill, then cancel the list with `scripts/cancel_testnet_order_list.py` | `boot_position_unprotected` at `CRITICAL`, naming `scripts/release_position.py`; then, on that symbol's first candle, the executor's close path: `close_planned`, the answer to the list's cancel, one MARKET sell, and `close_booked` |
+| A5 | Hard kill, cancel the list, and sell the base with `scripts/clear_testnet_holdings.py` | `boot_position_gone` at `CRITICAL`, and no order sent |
+| A6 | Restart onto a config with the pair disabled | Exit 1, with a refusal naming the pair and our list id and the release command. The config must be committed and pushed to pass the provenance check, so this arm needs its own deployment commit |
+| A7 | Ctrl+C with a live list | As A1 |
+
+**Two corrections to P77 S7's expected lines** (`M5l-158`). It listed
+`list_order_status=EXECUTING` on `boot_position_restored` and `site=boot` on
+`close_booked`; neither field exists on those emitters, so the lines above omit
+them, and the live state of the list is read from the venue instead. The
+`site=boot` field does exist on `exit_settlement_held`, which a boot hold emits.
+
+### A4 also records the venue's answer to cancelling an ALL_DONE list (`M5l-141`)
+
+R3's sale rests on that cancel answering `OrderNotFoundError`, and no capture
+holds the answer. Record it VERBATIM from the log: either the
+`close_cancel_already_terminal` line, or the `close_cancel_failed` line's
+`error_type` and `error`.
+
+| Field | Value |
+|---|---|
+| line | `<verbatim>` |
+| `error_type` / `error`, if it failed | `<verbatim>` |
+| the venue's code and message | `<verbatim>` |
+| consequence | `<the sale went out, or nothing was sold and the position stayed UNKNOWN>` |
+
+### Per arm, record
+
+| Field | A1 | A2 | A4 |
+|---|---|---|---|
+| kill instant and pid | `<...>` | `<...>` | `<...>` |
+| our list id and the venue's | `<...>` | `<...>` | `<...>` |
+| leg states read, before the restart | `<...>` | `<...>` | `<...>` |
+| the fills read | `<...>` | `<...>` | `<...>` |
+| the boot lines, verbatim | `<...>` | `<...>` | `<...>` |
+| the store's SHA-256 and realised figures, before and after | `<...>` | `<...>` | `<...>` |
+| the day each booking was attributed to | `<...>` | `<...>` | `<...>` |
+
+### What the run decides
+
+A1, A2 and A4 recorded, each beside its instrument, is the condition the P-3k
+gate names. It is the project owner's to judge whether they are met. A3, A5, A6
+and A7 are recorded when they are run and gate nothing.

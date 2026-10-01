@@ -81,6 +81,11 @@ above, the fill price among them. **Nothing writes or reads a
 :class:`PositionRecord` yet**: the writers and the boot step are later
 commits, and this sentence goes false when the first of them lands.
 
+(ANNOTATED AT M5l P83, C33: it went false at C30, whose two writers put one
+record per open position into every save, and at C32a, whose boot reads and
+resolves each one. What survives: the inclusion test, and that no fill price
+is stored.)
+
 **THE LEDGER IS ABSENT, NOT ZERO, UNTIL A FIRST ACCRUAL, and the distinction
 is load-bearing.** Absent means *nothing has ever been booked*; ``0`` would
 mean *accruals netted to zero*. Those are different facts and a reader acting
@@ -303,6 +308,11 @@ class PositionRecord(_Frozen):
 
     **NOTHING WRITES OR READS ONE YET.** It is the shape, landing before its
     writers -- the order ``PendingClose`` and ``persist_ledger`` each took.
+
+    (ANNOTATED AT M5l P83, C33: FALSE since C30, whose writers build one per open
+    position, and C32a, whose boot reads and resolves each. ``scripts/
+    release_position.py`` removes one. What survives: the shape, and its
+    inclusion test.)
     """
 
     kind: Literal["position"]
@@ -426,6 +436,7 @@ class PersistedState(_Frozen):
     #: R2). **A SEPARATE KEY, NOT A THIRD KIND IN ``pending``**: a pending
     #: CLOSE and the position it closes legitimately share a symbol, which the
     #: one-record-per-symbol rule on ``pending`` forbids. Nothing writes one yet.
+    #: (ANNOTATED AT M5l P83, C33: both of the root's writers write them, from C30.)
     positions: tuple[PositionRecord, ...] = ()
     ledger: LedgerRecord | None = None
     #: Completed UTC days, newest and oldest alike, keyed by the day they cover.

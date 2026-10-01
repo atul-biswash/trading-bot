@@ -1618,6 +1618,21 @@ data.
   > forgets the hold"*, stays as written through C32b by the owner's R-A
   > ruling.
 
+  > **ANNOTATED AT M5l P83 (C33), under the project owner's S6 standing rule,
+  > with P77 S6's hold text as adjusted for Q5(b): THE SENTENCE THE R-A RULING
+  > HELD THROUGH C32b, *"The restart semantics are amnesia, not resolution**:
+  > positions are not persisted, so a restart forgets the hold, and the trade
+  > is in the ledger only if an operator entered it"*, IS NO LONGER TRUE.**
+  > *"From R1, positions are persisted. The hold is not recorded; it is
+  > re-derived at boot from the venue's immutable fills, so a restart re-holds
+  > rather than forgets"*, and keeps a held record with the symbol blocked and
+  > no `Position` until an operator releases it with `scripts/release_position.py`
+  > (C34). The trade is in the ledger only if the hold's fee could be settled
+  > at boot or an operator entered it. **What survives:** the mark on
+  > `Position` is in memory only, and a hold beside a close record is
+  > re-derived the same way. The previous annotation's *"is still released by a
+  > restart until C32b-3"* is past, as C32b-3 records.
+
   **"R2" NAMES TWO DIFFERENT RULINGS IN THIS FILE (`P45-F14`), and this bullet
   is M5k's.** The M5h paragraph under Current state cites an earlier R2, from
   the close-resolution work (C5c): *"R2's grounds were that the cost basis is
@@ -2115,6 +2130,38 @@ data.
   > section 21 records. **What survives:** steps 4 to 8 above, added at P61
   > from P59's measurements. The evidence run is the first to follow all of
   > them.
+
+  > **ANNOTATED AT M5l P83 (C33): THREE ADDITIONS TO THE DEPLOYMENT
+  > PROCEDURE, and step 5 above is corrected by the first.**
+  >
+  > 1. **Step 5's source is the ACTIVE deployment clone's store, not the
+  >    retired development copy.** *"Copy `data/state.json` from the
+  >    development tree into the clone's `data/`"* is replaced by: copy it from
+  >    the clone the bot last ran from, `F:\trading bot\deploy\06089d5e01cb\data\state.json`
+  >    while that is the active one, show the two SHA-256-equal and record the
+  >    digest. The development copy is retired, per the project owner. What
+  >    survives of step 5: the digest, and retiring the source so no second
+  >    store for the account remains beside it.
+  > 2. **A schema step, before the new clone's first boot (`M5l-107`).** The new
+  >    clone's `SCHEMA_VERSION` in `persistence/store.py` must be greater than
+  >    or equal to the copied file's `"schema"`. Compare them: the file's from
+  >    `python -c "import json; print(json.load(open('data/state.json'))['schema'])"`,
+  >    the build's from `python -c "from trading_bot.persistence.store import
+  >    SCHEMA_VERSION; print(SCHEMA_VERSION)"`, both with the clone's own
+  >    interpreter. A build older than the `positions` key reads a file that
+  >    carries it WITHOUT error and erases every record at its first whole-file
+  >    save, which is the loss the schema bump exists to prevent.
+  > 3. **The release tool's operator rule (`M5l-125`).** When a boot refuses
+  >    over a record, or the bot holds a position, resolve it at the venue
+  >    first. Then stop the bot and run `python scripts/release_position.py
+  >    --symbol SYMBOL --preview` from that clone's root, read the records and
+  >    the preview, and type the symbol to release. **If you acted on a symbol
+  >    by hand, release its record BEFORE restarting**: a boot that finds a
+  >    record for a position you have already closed refuses, or sells base you
+  >    no longer mean to sell. Never edit `data/state.json` by hand -- a file
+  >    that no longer parses refuses every boot -- and never release while the
+  >    bot runs, which the tool refuses. The tool's lock covers the clone it is
+  >    run from and no other (`M5l-155`).
 
 ---
 

@@ -628,6 +628,12 @@ REASONED.
 
 #### P-3k. A restart orphans an ordinary open position (`M5l-045`, `M5l-044`)
 
+**IMPLEMENTED (C28-C34). The live-trading gate stays closed until the
+supervised run's arms A1, A2 and A4 are recorded in RUN_LEDGER.** The
+template for that run is `docs/RUN_LEDGER.md` section 24. What follows is the
+item as it stood before the implementation and the annotations that track it;
+the commits are recorded beneath it.
+
 Positions are memory-only, so a clean shutdown or a power cut leaves an open
 position no later process owns. After a restart the symbol is blocked while its
 list rests; a protective fill in that window is never booked, so the daily-loss
@@ -795,6 +801,17 @@ would book or sell is dropped in between.
 above stay as written through C32b, because P-3k's deployment restriction
 means no deployable restart runs on these commits. C33 corrects every P77 S6
 text.
+
+> **DISCHARGED AT M5l P83 (C33), the five R-A sentences one by one.**
+> 1. `CLAUDE.md`, the R2 hold bullet's *"positions are not persisted, so a
+>    restart forgets the hold"*: annotated at C33 under the S6 rule.
+> 2. `docs/QB_ESCALATION.md`, site 5's *"Positions are not persisted either"*:
+>    annotated at C33.
+> 3. `booking_line.py`'s hold `CRITICAL`: the message was replaced, at C32b-1 and
+>    C32b-3, and at C34 names the release tool.
+> 4. `CLAUDE.md`, the M5k paragraph: annotated at C32b-3.
+> 5. `test_modes.py`'s docstring *"positions are not persisted -- so the mark is
+>    gone"*: gone with the rewrite of that test at C32b-3.
 
 **A POSITION RECORD BESIDE A PENDING CLOSE -- the owner's rulings, P81
 amendment 1.**
@@ -1019,6 +1036,24 @@ tool does not require it (`M5l-156`).
 
 *Arming condition:* **whoever next edits `store.save` or `PersistedState` in `persistence/store.py`, or the instance lock's path handling in `utils/instance_lock.py`, which `scripts/release_position.py` reuses.**
 
+**ADDED AT M5l P83 (C33), the documents.** No behaviour changes. Every P77 S6
+row is now annotated or corrected, listed in C33's commit message by content,
+before and after; the two C32a test names that described the old behaviour are
+renamed (the pytest count does not move); `dispatch`'s *"must never raise"* is
+annotated in the executor's module docstring (`M5l-150`); `CLAUDE.md`'s
+deployment procedure gains the active-clone store source, the schema step
+(`M5l-107`) and the release tool's operator rule (`M5l-125`); and
+`docs/RUN_LEDGER.md` section 24 is the supervised run's template, arms A1 to A7
+with the expected lines. **P-3k is IMPLEMENTED (C28-C34)**, and its gate is
+open only to A1, A2 and A4 recorded in section 24.
+
+**C33's S6 rows that remain by design.** Two S6 sentences are NOT changed, each
+for a stated reason. `modes.py`'s block message *"the position it belongs to
+was lost when the previous process ended"* is a code string, outside C33's
+fence, and is still true of a live list with no record (`M5l-159`). And
+`executor.py`'s *"Only a restart forgets"* comment under U2's Reading A is
+still true: the unconfirmed placement's durable record is dropped on purpose.
+
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
 #### P-3l. A market-data outage stops reconciliation (`M5l-055`)
@@ -1172,6 +1207,14 @@ hand, and nothing on disk records that it was ever held or deferred.
 > removed either way, so such a restart neither releases nor drops it unbooked.
 > **What survives:** the item, and a close with no position record beside it,
 > which is still released on its first candle.
+>
+> **ANNOTATED AT M5l P83 (C33): THE ITEM'S HEADLINE IS ANSWERED.** *"A
+> held-then-released trade leaves no record across a restart"*: a held exit
+> now keeps its record across a restart (Q5(b)) and is released only by an
+> operator with `scripts/release_position.py`, whose line in `logs/release.log`
+> is the record that it was. **What survives:** nothing on disk records WHY a
+> position was held, since the record carries requested values only; the hold
+> is re-derived from the venue's fills at each boot.
 
 *Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
 

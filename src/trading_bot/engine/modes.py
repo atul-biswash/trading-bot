@@ -849,6 +849,11 @@ def _seed_portfolio(
     exist. It is therefore the only thing a restart genuinely forgets, and the
     only reason the store holds it.
 
+    (ANNOTATED AT M5l P83, C33: the store also holds one record per open
+    position now, requested values only, which boot resolves against the venue
+    before anything reads it (P-3k). What survives: the ledger is still the one
+    FIGURE the venue cannot re-supply, and the records carry no figure at all.)
+
     Defaulting to ``None`` keeps every caller that predates the restore
     unchanged, and ``None`` is what ``Portfolio.ledger`` defaults to anyway --
     absent, meaning nothing has ever been booked.
