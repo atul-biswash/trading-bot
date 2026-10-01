@@ -20,7 +20,7 @@ from trading_bot.core.enums import OrderSide, OrderStatus, OrderType
 from trading_bot.core.models import Balance, Order, OrderList, OrderListEntry, SymbolInfo
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
 from trading_bot.execution import resolution, restoration
-from trading_bot.execution.executor import PendingPlacement
+from trading_bot.execution.executor import PendingClose, PendingPlacement
 from trading_bot.execution.restoration import (
     DECISION_TYPES,
     BookExit,
@@ -32,6 +32,7 @@ from trading_bot.execution.restoration import (
     Restore,
     RestoreAndClose,
     classify,
+    close_sell_id,
     reads_needed,
     refuse_disabled,
 )
@@ -512,6 +513,125 @@ class TestExactlyOneDecision:
             assert decisions[0].record is subject
             shapes += 1
         assert shapes == 864
+
+
+SELL_ID = "SELL-1"
+SELL_TOTAL = D("1337.61000000")
+
+
+def close(quantity: Decimal = QTY) -> PendingClose:
+    """A pending close of the record's position: its seeds are the position's."""
+    return PendingClose(symbol=SYMBOL, entry_bar_time=BAR, generation=0, quantity=quantity)
+
+
+def sell(status: OrderStatus, filled: Decimal = ZERO) -> Order:
+    """The close's MARKET sell as a GET by its client id returns it."""
+    return Order(
+        order_id=SELL_ID,
+        symbol=SYMBOL,
+        side=OrderSide.SELL,
+        type=OrderType.MARKET,
+        status=status,
+        quantity=QTY,
+        filled_quantity=filled,
+        filled_quote_quantity=SELL_TOTAL if filled == QTY else None,
+        client_order_id=close_sell_id(close()),
+    )
+
+
+def beside(
+    orders: list[Order],
+    the_sell: Order | None,
+    *,
+    lists: list[OrderList] | None = None,
+    balances: list[Balance] | None = None,
+    the_close: PendingClose | None = None,
+    read: bool = True,
+) -> Decision:
+    """Classify the record beside a pending close whose sell was read as ``the_sell``."""
+    pending_close = the_close or close()
+    return one(
+        classify(
+            [record()],
+            [],
+            [order_list()] if lists is None else lists,
+            orders,
+            balances or [],
+            FILTERS,
+            closes=[pending_close],
+            sells={close_sell_id(pending_close): the_sell} if read else {},
+        )
+    )
+
+
+class TestACloseBeside:
+    """P81 amendment 1's final design (C32b-3): the close's sell decides."""
+
+    def test_legs_cancelled_and_the_sell_filled_books_the_sell(self) -> None:
+        """The bot's own close filled while down: a ``BookExit`` of the sell, no leg."""
+        decision = beside([_FILLED_W, *_CANCELLED], sell(OrderStatus.FILLED, QTY))
+
+        assert isinstance(decision, BookExit)
+        assert decision.leg is None
+        assert decision.order_id == SELL_ID
+        assert decision.entry_fill_price == FILL
+        assert decision.entry_quote_total == QUOTE
+
+    def test_legs_cancelled_and_no_sell_restores_and_closes(self) -> None:
+        decision = beside([_FILLED_W, *_CANCELLED], None, balances=base(QTY))
+
+        assert isinstance(decision, RestoreAndClose)
+        assert decision.base_free == QTY
+
+    def test_legs_cancelled_and_a_sell_that_sold_nothing_restores_and_closes(self) -> None:
+        decision = beside([_FILLED_W, *_CANCELLED], sell(OrderStatus.EXPIRED), balances=base(QTY))
+
+        assert isinstance(decision, RestoreAndClose)
+
+    def test_a_close_that_died_before_its_cancel_restores(self) -> None:
+        """The list still live and no sell: ``Restore``; the close record is Site B's."""
+        decision = beside(
+            [_FILLED_W, leg(SL, OrderStatus.NEW), leg(TP, OrderStatus.NEW)],
+            None,
+            lists=[order_list(status="EXECUTING")],
+        )
+
+        assert isinstance(decision, Restore)
+        assert decision.entry_fill_price == FILL
+
+    def test_legs_cancelled_no_sell_and_the_base_gone_refuses_rather_than_gone(self) -> None:
+        """Without the close this is ``Gone``; beside one, it is not a named shape."""
+        decision = beside([_FILLED_W, *_CANCELLED], None, balances=base(ZERO))
+
+        assert isinstance(decision, RefuseBoot)
+        assert "no longer held" in decision.reason
+
+    def test_every_other_shape_refuses(self) -> None:
+        """A live list with a sell, a partly filled sell, a sell not read, a close
+        that does not match its record, and a stop that filled beside a close."""
+        live = [order_list(status="EXECUTING")]
+        resting = [_FILLED_W, leg(SL, OrderStatus.NEW), leg(TP, OrderStatus.NEW)]
+        stopped = [_FILLED_W, leg(SL, OrderStatus.FILLED, QTY), leg(TP, OrderStatus.EXPIRED)]
+        cases = [
+            beside(resting, sell(OrderStatus.FILLED, QTY), lists=live, balances=base(QTY)),
+            beside([_FILLED_W, *_CANCELLED], sell(OrderStatus.EXPIRED, PART), balances=base(QTY)),
+            beside([_FILLED_W, *_CANCELLED], None, balances=base(QTY), read=False),
+            beside([_FILLED_W, *_CANCELLED], None, balances=base(QTY), the_close=close(PART)),
+            beside(stopped, None, balances=base(QTY)),
+        ]
+
+        reasons = [decision.reason for decision in cases if isinstance(decision, RefuseBoot)]
+        assert len(reasons) == 5
+        assert "was not read" in reasons[2]
+        assert "does not match" in reasons[3]
+
+    def test_the_sell_is_read_only_for_a_close_beside_a_record(self) -> None:
+        """One ``(symbol, client id)`` per close beside a record; a lone close is Site B's."""
+        lone = PendingClose(symbol=OTHER, entry_bar_time=BAR, generation=0, quantity=QTY)
+
+        plan = reads_needed([record()], [], [order_list()], [close(), lone])
+
+        assert plan.sell_reads == ((SYMBOL, close_sell_id(close())),)
 
 
 class TestTheWriteFlag:

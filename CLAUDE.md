@@ -1570,6 +1570,18 @@ data.
   feed resumes or the process restarts."* The number is PLACEHOLDER in
   `docs/M5_NUMBERS.md` §7.
 
+  > **ANNOTATED AT M5l P82 (C32b-3), under the project owner's S6 standing
+  > rule, with the text the owner substituted at P82 for P77 S6's row: the
+  > bullet's *"after a restart there is no `Position`, so a restored close is
+  > released on its first candle"* IS NO LONGER TRUE of a close beside a
+  > position record.** *"After a restart the boot reads the close's sell beside
+  > the position's record. A filled sell is booked ledger-only at boot, or held
+  > (Q5(b)), and the close record is removed, so no restored close enters the
+  > count. The count is still in memory only and resets at a restart. A close
+  > with no position record beside it is still released on its first
+  > candle."* **What survives:** N = 5, Variant L, the stalled-feed limit, and
+  > the count's being in memory only.
+
 - **AN EXIT THE LEDGER CANNOT BOOK IS HELD -- FETCHED ONCE, ONE `CRITICAL`, AND
   NEVER RETRIED -- by the project owner's ruling R2 at M5k.** The ruling,
   verbatim from the commit whose subject begins `feat(execution): hold an exit
@@ -4395,6 +4407,16 @@ position is still in memory, because R2's grounds were that the cost basis is
 **unreconstructable** after a restart, and that is an engineering limit rather
 than a policy of forfeiting valid accounting. The restart case is unchanged.
 
+> **ANNOTATED AT M5l P82 (C32b-3): "The restart case is unchanged" IS NO
+> LONGER TRUE WHERE THE POSITION'S RECORD IS ON DISK, and the engineering
+> limit it rests on is lifted there.** The store carries the requested
+> economics (P-3k's records) and boot re-fetches the entry fill by GET, so the
+> cost basis IS reconstructable. Boot reads a close's sell beside the record
+> and books a filled one ledger-only, or holds it (Q5(b)), removing the close
+> record; a sell that never sold is sold again by R3. **What survives:** a
+> close with no position record beside it still finds no `Position` and drops
+> unbooked on its first candle, and R2's reasoning stands for that case.
+
 **Nothing had RUN at M5h's close, and nothing has run since.** Every path built
 there was exercised by fabricated fixtures only, and three venue facts stood
 unobserved after ~25 trades and 33 closes: no take-profit had ever filled,
@@ -4590,6 +4612,14 @@ visiting the held position (ruling A), a `CLOSE` for it is refused (ruling B),
 and entries stay refused, first as `COMMITTED_RISK_UNKNOWN` and then as
 `POSITION_STALE`. A restart releases the hold, because positions are not
 persisted.
+
+> **ANNOTATED AT M5l P82 (C32b-3): "A restart releases the hold" IS NO LONGER
+> TRUE.** A restart re-derives the hold at boot from the venue's immutable
+> fills and keeps a held record, with the symbol blocked and no `Position`; it
+> does not release it (Q5(b)). This holds for a hold the reconciler made and,
+> from C32b-3, for one beside a close record. **What survives:** *"positions
+> are not persisted"* is true of the `Position` and untrue of the record, and
+> the hold's `CRITICAL` is emitted once per boot at `site=boot`.
 
 *A missing quote total is supplied from the order's own fills.* The
 bookability ladder is `A > P > C > Q` (Decision 1), so a partial or

@@ -160,8 +160,8 @@ def hold_fields(
             "with untrusted protection and is no longer reconciled, so ENTRIES ARE REFUSED "
             "PORTFOLIO-WIDE until an operator acts -- as committed risk unknown at first, "
             "then as a stale position once it ages. Enter this trade by hand, then restart. "
-            "A restart releases the hold, because the position is not persisted: after it the "
-            "trade is in the ledger only if it was entered by hand."
+            "A restart keeps the hold: boot re-derives it from the venue's fills and keeps the "
+            "record, with the symbol blocked."
         ),
     }
     if quote_total is not None:

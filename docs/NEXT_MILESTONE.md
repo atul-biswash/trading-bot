@@ -658,6 +658,13 @@ becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
 > **ANNOTATED AT M5l P82 (C32b-2): that half is no longer true either.** Such
 > a position is restored and sold on its symbol's first candle; see the
 > C32b-2 record below.
+>
+> **ANNOTATED AT M5l P82 (C32b-3): "A record beside a pending close is still
+> erased, by the owner's interim ruling" IS NO LONGER TRUE.** The interim
+> exclusion is removed: such a record is classified with its close and
+> restored, booked, held or sold by the final design below, and no boot save
+> erases it. **What survives:** the gate on live trading, and this item, until
+> C33 corrects the P77 S6 texts.
 
 **It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
 capture and base-asset netting. The owner's M5l ruling, quoted at the head of
@@ -812,6 +819,15 @@ amendment 1.**
   legs by design, so the classifier reads that list as `Gone` or
   `RestoreAndClose`, and Q13 collides with Q5(b) on the same disk shape.
 
+> **ANNOTATED AT M5l P82 (C32b-3): THE INTERIM IS OVER AND THE FINAL DESIGN
+> IS BUILT.** The "Interim, C32a" bullet no longer describes the tree: no
+> record is left out of the classifier's input and the boot's save carries
+> what the decisions leave. The *"List live"* row is settled by P82's STEP
+> 0(b): the position is restored and the close record is KEPT, and Site B, on
+> the first candle, finds no sell, keeps the position UNKNOWN and releases the
+> record, selling and booking nothing. *"The two restart tests' assertions
+> change once, in C32b"* is discharged: both changed at C32b-3.
+
 **ADDED AT M5l P82 (C32b-1), a filled exit at boot.** A `BookExit` is
 settled at boot: one `get_my_trades` for the filled leg's order, bounded by
 `risk.reconcile_deadline_s` at one attempt, then `settle_exit` and the
@@ -910,6 +926,38 @@ measured message as the `-2011` row is.
 rather than `OrderError`.
 
 *Arming condition:* **whoever next adds a row to `_API_RULES` in `exchange/models.py`.**
+
+**ADDED AT M5l P82 (C32b-3), a close beside a position record (P81
+amendment 1's final design).** The interim exclusion is removed. A position
+record whose symbol has a pending close is classified with it: the close's sell
+is read by the client id the close record derives (`close_sell_id`), one GET
+bounded like every boot read, and `OrderNotFoundError` is the answer "absent".
+The decision, per the owner:
+
+- **Legs cancelled and the sell FILLED**: `BookExit` of the sell, with no leg.
+  It is settled and booked ledger-only, or held (Q5(b)), exactly as a leg's
+  exit is, and the close record is removed either way. The booking line carries
+  `close_client_order_id` where a leg's carries `leg`.
+- **Legs cancelled and the sell absent, or terminal with nothing executed,
+  with the base free at least the quantity**: `RestoreAndClose`, and the close
+  record is removed, so `_BootCloser`'s sell is the only one.
+- **List live and no sell**: `Restore`, and the close record is KEPT for Site B
+  (P82's STEP 0(b)).
+- **Anything else** refuses the boot, including a close that does not match
+  its record, a sell that was not read, a sell read that fails with any error
+  but `OrderNotFoundError`, and legs cancelled with the base gone.
+
+Two P82 amendment 2 rulings land with it. This row of P77 S6 is superseded,
+recorded under the standing authorities. And `hold_fields`' resolution text no
+longer says a restart releases the hold: *"A restart keeps the hold: boot
+re-derives it from the venue's fills and keeps the record, with the symbol
+blocked."* Its neighbouring sentence, *"Enter this trade by hand, then
+restart"*, is left as written and is reported (`M5l-143`), and the text
+C32b-1 left false is `M5l-144`.
+
+**The interim refusals are removed and the no-deployment window closes at
+C32b's last commit**, C32b-4. **The supervised run still waits for C34**,
+M5l-125's release tool: a held record has no way out until it exists.
 
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
@@ -1055,6 +1103,15 @@ hand, and nothing on disk records that it was ever held or deferred.
 > refuses the boot.** Its filled exit re-holds at boot: the record is kept
 > with no position and the symbol blocked (Q5(b)), so the hold now SURVIVES
 > the restart rather than refusing it or being released.
+>
+> **ANNOTATED AT M5l P82 (C32b-3): "A hold or a deferred close beside a
+> pending close record is left out by the owner's interim ruling, so that
+> restart still releases it unbooked" IS NO LONGER TRUE.** Boot reads the
+> close's sell beside the position's record. A filled sell is booked
+> ledger-only, or held with its record kept (Q5(b)), and the close record is
+> removed either way, so such a restart neither releases nor drops it unbooked.
+> **What survives:** the item, and a close with no position record beside it,
+> which is still released on its first candle.
 
 *Arming condition:* **whoever next edits `PendingCloseRecord` in `persistence/store.py` or `_persist_pending` in `engine/modes.py`.**
 
@@ -1781,6 +1838,19 @@ first-candle resolution of restored placements, and five tests in
 > that makes it false. No other locked text is authorised."
 
 First used at C32b-1, on the R2 hold bullet's quoted ruling (`M5l-132`).
+
+**THIS ROW OF P77 S6 IS SUPERSEDED BY THE OWNER AT P82.** The five-bar
+retention bullet's S6 text, *"After a restart the `Position` is restored, so
+Site B resolves a restored close and books it if its settlement reads. The
+count still resets (R2)."*, does not describe the final design: Site B does
+not book a restored close, because boot books or holds a close whose sell
+filled and removes its record. The owner's amendment 2 substituted, and C32b-3
+annotated `CLAUDE.md` with, this text: *"After a restart the boot reads the
+close's sell beside the position's record. A filled sell is booked ledger-only
+at boot, or held (Q5(b)), and the close record is removed, so no restored
+close enters the count. The count is still in memory only and resets at a
+restart. A close with no position record beside it is still released on its
+first candle."* The other S6 rows are unchanged.
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 

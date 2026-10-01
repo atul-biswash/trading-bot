@@ -59,8 +59,34 @@ any leg partly executed               ``RefuseBoot`` (Q11)
 no match means it never placed. A terminal list whose working leg FILLED is
 therefore a ``BookExit`` or its siblings, never a drop -- which is
 ``M5l-104``: ``resolve_placement`` answers ``PLACED_TERMINAL`` for it without
-reading the working leg. Pending CLOSE records are not classified here; Site B
-resolves them on the first candle (the owner's Q13).
+reading the working leg.
+
+**A RECORD BESIDE A PENDING CLOSE TAKES A TABLE OF ITS OWN** (P81 amendment
+1's final design, C32b-3). The bot's own close cancels the protective legs by
+design, so the table above would read such a list as ``Gone`` or
+``RestoreAndClose``, the second a sell beside the one the close record tracks
+(``M5l-126``). So the close's sell is read too, by the client id the close
+record derives (:func:`close_sell_id`), and it decides:
+
+====================================  ========================================
+list and legs, and the close's sell   decision
+====================================  ========================================
+ALL_DONE; working FILLED; protective  sell FILLED: ``BookExit`` of the sell,
+all CANCELED, 0 executed              ``leg`` ``None``; sell absent, or
+                                      terminal with 0 executed: base free at
+                                      least the quantity: ``RestoreAndClose``,
+                                      else ``RefuseBoot``
+live; working FILLED; protective      sell absent: ``Restore``
+legs NEW or PENDING_NEW, 0 executed
+the sell was not read, or the close   ``RefuseBoot``
+does not match the record
+anything else                         ``RefuseBoot``
+====================================  ========================================
+
+What becomes of the close record is the caller's: it goes with a ``BookExit``
+or a ``RestoreAndClose``, and it stays beside a ``Restore`` for Site B. A
+pending close with NO record beside it is not classified here; Site B resolves
+it on the first candle (the owner's Q13).
 
 **TWO BASE FIGURES, AND THE DIFFERENCE IS DELIBERATE (``M5l-122``).** ``Gone``
 reads the base's TOTAL, so base locked by some other order is never mistaken
@@ -80,7 +106,12 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, ClassVar, Protocol
 
 from trading_bot.core.enums import OrderStatus
-from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
+from trading_bot.exchange.ids import (
+    OrderListLeg,
+    client_order_id,
+    close_client_order_id,
+    list_client_order_id,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -98,9 +129,11 @@ __all__ = [
     "ReadPlan",
     "RefuseBoot",
     "Requested",
+    "RequestedClose",
     "Restore",
     "RestoreAndClose",
     "classify",
+    "close_sell_id",
     "reads_needed",
     "refuse_disabled",
 ]
@@ -143,6 +176,32 @@ class Requested(Protocol):
     def take_profit(self) -> Decimal | None: ...
 
 
+class RequestedClose(Protocol):
+    """What a pending close REQUESTED: the sell's id seeds and its quantity.
+
+    The executor's ``PendingClose`` and the store's ``PendingCloseRecord`` both
+    satisfy it. ``entry_bar_time`` is the POSITION'S entry bar, so it must
+    equal the record's.
+    """
+
+    @property
+    def symbol(self) -> str: ...
+
+    @property
+    def entry_bar_time(self) -> datetime: ...
+
+    @property
+    def generation(self) -> int: ...
+
+    @property
+    def quantity(self) -> Decimal: ...
+
+
+def close_sell_id(close: RequestedClose) -> str:
+    """The client id of the close's MARKET sell, derived from the close's seeds."""
+    return close_client_order_id(close.symbol, close.entry_bar_time, generation=close.generation)
+
+
 @dataclass(frozen=True, slots=True)
 class Restore:
     """A live list whose working leg FILLED: restore the position, UNKNOWN, no debit.
@@ -167,12 +226,16 @@ class BookExit:
     ``leg`` and ``order_id`` name the filled leg, whose fills settle the exit.
     The entry economics are carried as :class:`Restore` carries them, because
     booking the exit needs the cost basis and the classifier already read it.
+
+    **``leg`` IS ``None`` FOR THE BOT'S OWN CLOSE SELL** (C32b-3): a record
+    beside a pending close whose sell FILLED while the bot was down. That exit
+    is no leg of the list; ``order_id`` is the sell's.
     """
 
     writes_to_venue: ClassVar[bool] = False
     record: Requested
     order_list: OrderList
-    leg: OrderListLeg
+    leg: OrderListLeg | None
     order_id: str
     entry_fill_price: Decimal | None
     entry_quote_total: Decimal | None
@@ -249,10 +312,15 @@ DECISION_TYPES: tuple[type[Decision], ...] = (
 
 @dataclass(frozen=True, slots=True)
 class ReadPlan:
-    """The venue order ids to GET, and the refusals already decided."""
+    """The venue order ids to GET, the refusals already decided, and the close sells.
+
+    ``sell_reads`` is one ``(symbol, client id)`` per pending close beside a
+    record, to GET by that client id.
+    """
 
     order_ids: tuple[str, ...]
     refusals: tuple[RefuseBoot, ...]
+    sell_reads: tuple[tuple[str, str], ...] = ()
 
 
 def refuse_disabled(
@@ -273,13 +341,15 @@ def reads_needed(
     records: Sequence[Requested],
     pending_placements: Sequence[Requested],
     order_lists: Sequence[OrderList],
+    closes: Sequence[RequestedClose] = (),
 ) -> ReadPlan:
     """The orders :func:`classify` needs, and the refusals it will make without them.
 
     One GET per leg of each list that exactly one record or pending placement
     matches, by the leg's venue ``orderId`` (Q10(b)), each id once, in input
     order. A pending placement that matches nothing needs no read and is not a
-    refusal.
+    refusal. And one GET per pending close beside a record, by the sell's
+    client id (C32b-3); a close with no record beside it is Site B's.
     """
     order_ids: list[str] = []
     refusals: list[RefuseBoot] = []
@@ -289,7 +359,14 @@ def reads_needed(
             refusals.append(found)
         elif isinstance(found, _Matched):
             order_ids.extend(i for i in found.leg_order_ids.values() if i not in order_ids)
-    return ReadPlan(order_ids=tuple(order_ids), refusals=tuple(refusals))
+    symbols = {record.symbol for record in records}
+    return ReadPlan(
+        order_ids=tuple(order_ids),
+        refusals=tuple(refusals),
+        sell_reads=tuple(
+            (close.symbol, close_sell_id(close)) for close in closes if close.symbol in symbols
+        ),
+    )
 
 
 def classify(
@@ -299,6 +376,9 @@ def classify(
     orders: Iterable[Order],
     balances: Iterable[Balance],
     filters: Mapping[str, SymbolInfo],
+    *,
+    closes: Sequence[RequestedClose] = (),
+    sells: Mapping[str, Order | None] | None = None,
 ) -> tuple[Decision, ...]:
     """Exactly one decision per record, then one per pending placement, in input order.
 
@@ -306,11 +386,28 @@ def classify(
     ``order_id``. ``balances`` is the boot's one ``get_balances`` read; an asset
     it does not list holds zero. ``filters`` maps a symbol to its
     ``SymbolInfo``, whose ``step_size`` is the ``LOT_SIZE`` step.
+
+    ``closes`` are the pending closes, and a record whose symbol has one takes
+    the close-beside table. ``sells`` maps each such close's sell client id to
+    the order read by it, or to ``None`` when the venue has no such order; an
+    id that is not a key was not read, and refuses.
     """
     by_id = {order.order_id: order for order in orders}
     held = {balance.asset: balance for balance in balances}
+    beside = {close.symbol: close for close in closes}
+    read_sells: Mapping[str, Order | None] = {} if sells is None else sells
     decisions: list[Decision] = [
-        _decide(record, order_lists, by_id, held, filters, pending=False) for record in records
+        _decide(
+            record,
+            order_lists,
+            by_id,
+            held,
+            filters,
+            pending=False,
+            close=beside.get(record.symbol),
+            sells=read_sells,
+        )
+        for record in records
     ]
     for pending in pending_placements:
         decisions.append(_decide(pending, order_lists, by_id, held, filters, pending=True))
@@ -405,6 +502,8 @@ def _decide(
     filters: Mapping[str, SymbolInfo],
     *,
     pending: bool,
+    close: RequestedClose | None = None,
+    sells: Mapping[str, Order | None] | None = None,
 ) -> Decision:
     found = _match(record, order_lists, pending=pending)
     if not isinstance(found, _Matched):
@@ -423,6 +522,8 @@ def _decide(
 
     if any(order.quantity != quantity for order in legs.values()):
         return _refuse(record, f"a leg's quantity is not {quantity}; {shape}")
+    if close is not None:
+        return _beside_close(record, close, order_list, legs, sells or {}, balances, filters, shape)
 
     status = order_list.list_order_status or ""
     if status in _LIVE_STATUSES:
@@ -501,3 +602,76 @@ def _unprotected(
         f"{info.base_asset} total {total}, free {free}: held, but below the quantity "
         f"{record.quantity}; {shape}",
     )
+
+
+def _beside_close(
+    record: Requested,
+    close: RequestedClose,
+    order_list: OrderList,
+    legs: Mapping[OrderListLeg, Order],
+    sells: Mapping[str, Order | None],
+    balances: Mapping[str, Balance],
+    filters: Mapping[str, SymbolInfo],
+    shape: str,
+) -> Decision:
+    """A record beside a pending close: the close's sell decides (C32b-3).
+
+    Only three shapes are named, and each is one the close sequence itself can
+    leave: the legs cancelled and the sell filled, the legs cancelled and no
+    sell, or the process gone before the cancel. Everything else refuses.
+    """
+    sell_id = close_sell_id(close)
+    if close.entry_bar_time != record.entry_bar_time or close.quantity != record.quantity:
+        return _refuse(
+            record,
+            f"its pending close (sell {sell_id}, quantity {close.quantity}) does not match "
+            f"it; {shape}",
+        )
+    if sell_id not in sells:
+        return _refuse(record, f"its pending close's sell {sell_id} was not read; {shape}")
+    sell = sells[sell_id]
+    sold = (
+        "absent" if sell is None else f"{sell.status.value} {sell.filled_quantity}/{sell.quantity}"
+    )
+    shape = f"{shape}; close sell {sell_id} {sold}"
+    working = legs[OrderListLeg.WORKING]
+    protective = [legs[leg] for leg in _PROTECTIVE if leg in legs]
+    quantity = record.quantity
+    status = order_list.list_order_status or ""
+
+    cancelled = (
+        status == _DONE_STATUS
+        and _filled(working, quantity)
+        and bool(protective)
+        and all(order.status is OrderStatus.CANCELED and _unexecuted(order) for order in protective)
+    )
+    if cancelled and sell is not None and _filled(sell, quantity):
+        return BookExit(
+            record=record,
+            order_list=order_list,
+            leg=None,
+            order_id=sell.order_id,
+            entry_fill_price=working.average_price,
+            entry_quote_total=working.filled_quote_quantity,
+        )
+    if cancelled and (sell is None or (sell.status.is_closed and _unexecuted(sell))):
+        decision = _unprotected(record, order_list, working, balances, filters, shape)
+        if isinstance(decision, RestoreAndClose | RefuseBoot):
+            return decision
+        return _refuse(
+            record,
+            f"its pending close sold nothing and its base is no longer held; {shape}",
+        )
+    if (
+        status in _LIVE_STATUSES
+        and sell is None
+        and _filled(working, quantity)
+        and all(order.status in _RESTING and _unexecuted(order) for order in protective)
+    ):
+        return Restore(
+            record=record,
+            order_list=order_list,
+            entry_fill_price=working.average_price,
+            entry_quote_total=working.filled_quote_quantity,
+        )
+    return _refuse(record, f"beside its pending close, no decision covers this shape; {shape}")

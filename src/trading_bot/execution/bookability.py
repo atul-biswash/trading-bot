@@ -26,7 +26,10 @@ differently and the numbers were never the same fact twice.
 * **A** -- ``POSITION_ABSENT``. No position is held, so there is no cost basis
   in memory at all. After a restart there is no ``Position`` and
   ``PendingCloseRecord`` carries none, so the figure is UNRECONSTRUCTABLE
-  rather than merely unknown.
+  rather than merely unknown. (ANNOTATED AT M5l P82, C32b-3: not after a
+  restart whose store holds the position's record beside the close. Boot
+  books that close's filled sell from the record, or restores the position.
+  What survives: a close with no record beside it.)
 * **Q** -- ``NO_QUOTE_TOTAL``. The venue reported a fill and gave no
   ``cummulativeQuoteQty`` for it -- or gave a negative one, which the venue
   documents as unavailable and the adapter's ``to_order`` reads as absent --

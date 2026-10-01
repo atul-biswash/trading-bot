@@ -2797,6 +2797,14 @@ class OrderExecutor:
         one process the position is present. "No position found" is not a
         failure and must never be logged as one.
 
+        (ANNOTATED AT M5l P82, C32b-3: "After a restart there is no `Position`
+        at all -- boot reconstructs none" is no longer true of a close whose
+        position's record is on disk. Boot restores that position when its
+        list is still live and leaves the close here, and books or holds a
+        close whose sell filled, removing the record, so none reaches here.
+        What survives: a close with no record beside it still finds no
+        position, and that is still not an error.)
+
         **THE ACTION IS NO LONGER INVARIANT ON THE CONFIRMED-FILL BRANCH, AND
         THAT IS A DELIBERATE REVERSAL. Ruling 5.** This docstring used to say
         the query decides nothing, and for R1 (no sell) and the retain branch it
@@ -2831,6 +2839,12 @@ class OrderExecutor:
         is computable and the venue's own quote total is the input -- or, from
         3b-2b, the sum of the order's own fills when the venue gave none. The
         restart case is unchanged and still drops unbooked.
+
+        (ANNOTATED AT M5l P82, C32b-3: "The restart case is unchanged and
+        still drops unbooked" is no longer true of a close whose position's
+        record is on disk: boot books its filled sell ledger-only, or holds
+        it, from the record's requested values and the entry leg's fill. What
+        survives: a close with no record beside it still drops unbooked here.)
         """
         symbol = record.symbol
         # THE CONSERVATIVE DEFAULT, and it is load-bearing rather than tidy.
@@ -3071,6 +3085,11 @@ class OrderExecutor:
 
         Absent is ORDINARY here, not an error: after a restart there is no
         `Position` to retain, and the boot snapshots cover that case instead.
+
+        (ANNOTATED AT M5l P82, C32b-3: after a restart a position IS here when
+        boot restored it beside its close, the list still live and no sell
+        sent, and this keeps it. What survives: a close with no record beside
+        it still finds none, and that is still ordinary.)
         """
         position = self._portfolio.positions.get(symbol)
         if position is not None:
@@ -3212,6 +3231,9 @@ class OrderExecutor:
         `entry_price`. That is an engineering limit, not a policy of forfeiting
         valid accounting, and it simply does not hold when the position is in
         memory. Where it still holds -- the restart case -- nothing changed.
+        (ANNOTATED AT M5l P82, C32b-3: the restart case with the position's
+        record on disk no longer holds it. Boot books that close's filled sell
+        itself, ledger-only; this path still books nothing after a restart.)
 
         **NO THIRD DELETION PATH.** This deletes through
         `Portfolio.close_position`, which is the SAME path `_book_close` uses

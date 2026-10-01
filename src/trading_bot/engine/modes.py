@@ -149,6 +149,7 @@ from trading_bot.core.exceptions import (
     ConfigError,
     FeeFillsIncompleteError,
     FeeUnresolvableError,
+    OrderNotFoundError,
     TradingBotError,
 )
 from trading_bot.core.interfaces import (
@@ -197,6 +198,7 @@ from trading_bot.execution.restoration import (
     Restore,
     RestoreAndClose,
     classify,
+    close_sell_id,
     reads_needed,
     refuse_disabled,
 )
@@ -257,8 +259,8 @@ _EVENT_POSITIONS_RESOLVED = "boot_positions_resolved"
 _EVENT_EXIT_BOOKED = "boot_exit_booked"
 #: A restored position whose protection is gone and whose base is held (R3).
 _EVENT_POSITION_UNPROTECTED = "boot_position_unprotected"
-#: The boot site's `resolution` for a held exit. `hold_fields`' own text says a
-#: restart releases the hold, which is not true of a hold boot keeps on disk.
+#: The boot site's `resolution` for a held exit. It names the record kept on
+#: disk, where `hold_fields`' own text names the position held in memory.
 _BOOT_HOLD_RESOLUTION = (
     "THE EXIT FILLED WHILE THE BOT WAS DOWN and IT CANNOT BE BOOKED: the fees field "
     "names what the venue charged. NOTHING WAS BOOKED. THE BASE IS ALREADY SOLD: DO NOT "
@@ -1282,6 +1284,15 @@ def _require_something_tradeable(
     earlier: on a config whose every pair is excluded the boot refuses BEFORE
     that first candle, so the healing path is never reached there.
 
+    (ANNOTATED AT M5l P82, C32b-3: "with no ``Position`` after a restart ...
+    the record is dropped unbooked" is no longer true of a close whose
+    position's record is on disk. Boot books or holds a close whose sell
+    filled and removes its record, removes the record of one it sells again,
+    and keeps only the record beside a position it restored on a live list,
+    which ``_resolve_close`` releases on the first candle, keeping the
+    position. What survives: a close with no record beside it is dropped
+    unbooked as described, and the lock still heals one candle after boot.)
+
     **A RESTORED *PLACEMENT* IS NOT IN ``pending``, AND EXCLUDING ONE WOULD
     DEADLOCK THE BOT.** The two locks look alike and behave oppositely. A
     placement lock is SELF-HEALING: ``OrderExecutor.__call__`` resolves it
@@ -1400,27 +1411,6 @@ def _require_something_tradeable(
     )
 
 
-def _records_to_resolve(
-    restored: store.PersistedState | None, pending: Sequence[Pending]
-) -> tuple[store.PositionRecord, ...]:
-    """The position records P-3k's boot resolves: all of them but those beside a close.
-
-    **A POSITION RECORD WHOSE SYMBOL HAS A PENDING CLOSE IS LEFT OUT**, by the
-    project owner's interim ruling at M5l P81 (C32a): it is neither classified
-    nor restored, and boot's save does not carry it, which is how every boot
-    before C32a treated it. Site B resolves the close on the first candle, as
-    it always has. The bot's own close cancels the protective legs by design,
-    so the classifier would read such a list as ``Gone`` or
-    ``RestoreAndClose`` -- the second a second sell beside the one the close
-    record tracks (``M5l-126``). C32b replaces this with the owner's final
-    design, recorded under P-3k.
-    """
-    if restored is None:
-        return ()
-    closing = {record.symbol for record in pending if record.kind == "close"}
-    return tuple(record for record in restored.positions if record.symbol not in closing)
-
-
 def _refuse_disabled_records(records: Sequence[store.PositionRecord], settings: Settings) -> None:
     """The owner's R5: a position record on a pair that is not enabled refuses the boot.
 
@@ -1504,6 +1494,9 @@ class _Booking:
     settlement: ExitSettlement
     total: Money
     total_source: TotalSource
+    #: The close sell's client id, when the exit is the bot's own close sell
+    #: rather than a leg (C32b-3); ``None`` for a leg.
+    sell_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1604,8 +1597,12 @@ async def _settle_boot_exit(
     *,
     quote_asset: str,
     deadline_s: float,
+    sell_id: str | None = None,
 ) -> _Booking | _Hold | str:
     """Settle one ``BookExit``: a booking, a hold, or the reason the boot refuses.
+
+    ``sell_id`` is the close sell's client id when the exit is the bot's own
+    close sell (C32b-3), carried onto the booking line.
 
     One ``get_my_trades`` for the filled leg's order, bounded like every boot
     read, then ``settle_exit`` and the bookability ladder the three runtime
@@ -1615,7 +1612,8 @@ async def _settle_boot_exit(
     resolve (Q6(a)), and each leaves it on disk for the next.
     """
     symbol, list_id = source.symbol, decision.order_list.list_client_order_id
-    prefix = f"{symbol}, order list {list_id}: the {decision.leg.value} leg filled while down"
+    filled = "its close sell" if decision.leg is None else f"the {decision.leg.value} leg"
+    prefix = f"{symbol}, order list {list_id}: {filled} filled while down"
     try:
         trades = await client.get_my_trades(
             symbol, order_id=decision.order_id, timeout_s=deadline_s, attempts=1
@@ -1680,6 +1678,7 @@ async def _settle_boot_exit(
         settlement=settlement,
         total=total,
         total_source=total_source,
+        sell_id=sell_id,
     )
 
 
@@ -1706,9 +1705,21 @@ async def _resolve_restored(
     on disk with no ``Position`` (Q5(b)), which every later save must carry.
 
     **ALL READS ARE GETs.** The one ``get_all_order_lists`` is the caller's.
-    Then one ``get_order`` per leg orderId (Q10(b)), and one ``get_my_trades``
-    per filled exit, each bounded by ``risk.reconcile_deadline_s`` at one
-    attempt. A read that fails refuses the boot (Q6(a)), naming the record.
+    Then one ``get_order`` per leg orderId (Q10(b)), one per pending close
+    beside a record by its sell's client id (C32b-3), and one
+    ``get_my_trades`` per filled exit, each bounded by
+    ``risk.reconcile_deadline_s`` at one attempt. A read that fails refuses
+    the boot (Q6(a)), naming the record; a sell the venue answers
+    ``OrderNotFoundError`` for is absent, which is an answer.
+
+    **A CLOSE BESIDE A RECORD GOES WITH ITS EXIT** (P81 amendment 1's final
+    design, C32b-3). Its sell FILLED: the exit is booked ledger-only or held,
+    and the close record is removed either way. Its sell absent or unfilled
+    with the legs cancelled: ``RestoreAndClose``, and the close record is
+    removed, so :class:`_BootCloser`'s sell is the only one. The list still
+    live: ``Restore``, and the close record is KEPT for Site B, which finds no
+    sell, keeps the position UNKNOWN and releases the record, selling nothing
+    and booking nothing (P82's STEP 0(b)).
 
     **DECIDE, THEN REFUSE, THEN APPLY.** Every decision and every settlement is
     known before anything changes, and every refusal is collected into one
@@ -1732,6 +1743,16 @@ async def _resolve_restored(
         return _BootResolution(pending=pending, state=None, held=(), closes=())
     # Records first, then pending placements: the order `classify` answers in.
     sources: tuple[store.PositionRecord | PendingPlacement, ...] = (*records, *placements)
+    # The pending closes BESIDE a record, which the classifier reads with it
+    # (C32b-3). A close with no record beside it is Site B's (Q13).
+    record_symbols = {record.symbol for record in records}
+    beside = tuple(
+        record
+        for record in pending
+        if isinstance(record, PendingClose) and record.symbol in record_symbols
+    )
+    closing = {close.symbol: close for close in beside}
+    sells: dict[str, Order | None] = {}
 
     orders: list[Order] = []
     lists: list[OrderList] = []
@@ -1744,7 +1765,7 @@ async def _resolve_restored(
                 "Refusing rather than guessing what rests at the venue. Nothing on disk "
                 "was changed; restart once the venue can be read."
             )
-        plan = reads_needed(records, placements, order_lists)
+        plan = reads_needed(records, placements, order_lists, beside)
         owner = {
             entry.order_id: (entry.symbol, order_list.list_client_order_id)
             for order_list in order_lists
@@ -1764,6 +1785,19 @@ async def _resolve_restored(
                     f"  {symbol}, order list {list_id}: order {order_id} could not be read "
                     f"({type(exc).__name__}: {exc})"
                 )
+        for symbol, sell_id in plan.sell_reads:
+            try:
+                sells[sell_id] = await client.get_order(
+                    symbol, client_order_id=sell_id, timeout_s=deadline_s, attempts=1
+                )
+            except OrderNotFoundError:
+                # AN ANSWER, NOT A FAILURE: the venue has no such sell.
+                sells[sell_id] = None
+            except TradingBotError as exc:
+                failed.append(
+                    f"  {symbol}: its pending close's sell {sell_id} could not be read "
+                    f"({type(exc).__name__}: {exc})"
+                )
         if failed:
             raise ConfigError(
                 "a leg of a restored record could not be read, so what happened to it is "
@@ -1774,8 +1808,11 @@ async def _resolve_restored(
         lists = order_lists
 
     filters = {symbol: context.symbol_info for symbol, context in pairs.items()}
-    decisions = classify(records, placements, lists, orders, balances, filters)
+    decisions = classify(
+        records, placements, lists, orders, balances, filters, closes=beside, sells=sells
+    )
     by_order_id = {order.order_id: order for order in orders}
+    by_order_id.update({sell.order_id: sell for sell in sells.values() if sell is not None})
 
     # DECIDE: every settlement is read, and every refusal known, before any write.
     refusals: list[str] = []
@@ -1792,6 +1829,7 @@ async def _resolve_restored(
                 by_order_id[decision.order_id],
                 quote_asset=portfolio.quote_asset,
                 deadline_s=deadline_s,
+                sell_id=(close_sell_id(closing[source.symbol]) if decision.leg is None else None),
             )
             if isinstance(outcome, _Booking):
                 bookings.append(outcome)
@@ -1877,6 +1915,10 @@ async def _resolve_restored(
                 settled.add(id(source))
                 restored_count += 1
                 closes.append(source.symbol)
+                if (close := closing.get(source.symbol)) is not None:
+                    # Beside a close whose sell never sold: the record goes, so
+                    # `_BootCloser`'s sell is the only one (C32b-3).
+                    settled.add(id(close))
                 _log.critical(
                     "%s: restored a position whose protection is GONE -- both protective "
                     "legs were cancelled unexecuted and its base is still held. It is SOLD "
@@ -1909,6 +1951,12 @@ async def _resolve_restored(
         held_records.append(_as_held_record(hold.source))
         settled.add(id(hold.source))
         _block_held_exit(hold, portfolio)
+    # A close whose sell FILLED goes with its exit, booked or held (C32b-3):
+    # the exit is resolved here, so Site B has nothing left to resolve.
+    exits: list[_Booking | _Hold] = [*bookings, *holds]
+    for exited in exits:
+        if (close := closing.get(exited.source.symbol)) is not None:
+            settled.add(id(close))
 
     remaining = tuple(record for record in pending if id(record) not in settled)
     kept = {id(record) for record in remaining}
@@ -1971,6 +2019,13 @@ def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
     seeded from the one balance read, taken after the sale.
     """
     settlement = booking.settlement
+    # The bot's own close sell is no leg of the list (C32b-3): `leg` is absent
+    # rather than null, and the sell is named by its client id instead.
+    exit_field = (
+        {"close_client_order_id": booking.sell_id}
+        if booking.decision.leg is None
+        else {"leg": booking.decision.leg.value}
+    )
     realised = portfolio.book_restored_exit(
         _restored_position(booking.source, booking.decision),
         exit_quote_total=booking.total,
@@ -1984,7 +2039,7 @@ def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
             "event": _EVENT_EXIT_BOOKED,
             "symbol": booking.source.symbol,
             "list_client_order_id": booking.decision.order_list.list_client_order_id,
-            "leg": booking.decision.leg.value,
+            **exit_field,
             **quote_total_fields(booking.total, booking.total_source),
             **settlement_fields(settlement, order_created_at=booking.leg.created_at),
             "realised": realised,
@@ -2078,9 +2133,10 @@ async def live_system(
     restored_pending = _restore_pending(restored)
     # STEP 0b: P-3k's R5, BEFORE THE LOCK AND BEFORE ANY VENUE CALL. A position
     # record on a pair that is not enabled refuses the boot here, where it is
-    # pure and costs nothing. The records beside a pending close are left out,
-    # here and in the resolution below, by the owner's interim ruling (C32a).
-    records = _records_to_resolve(restored, restored_pending)
+    # pure and costs nothing. Every record, including one beside a pending
+    # close: C32b-3 replaced C32a's interim exclusion with the owner's final
+    # design, which the resolution below applies.
+    records = () if restored is None else restored.positions
     _refuse_disabled_records(records, settings)
 
     # Imported lazily, mirroring BufferedMarketDataProvider.create: keeps

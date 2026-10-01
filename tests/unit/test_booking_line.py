@@ -268,10 +268,14 @@ def test_the_hold_line_names_order_asset_amount_and_what_a_restart_does() -> Non
         "DO NOT SELL IT BY HAND",
         "PORTFOLIO-WIDE",
         "Enter this trade by hand, then restart",
-        "A restart releases the hold, because the position is not persisted",
+        "A restart keeps the hold: boot re-derives it from the venue's fills and keeps the "
+        "record, with the symbol blocked.",
         "subtracts only USDT",
     ):
         assert phrase in resolution, phrase
+    # CHANGED AT M5l P82 (C32b-3), under the owner's amendment 2: the old text
+    # said a restart RELEASES the hold, which boot no longer does (Q5(b)).
+    assert "releases the hold" not in resolution
 
     with_total = hold_fields(
         HELD, quote_asset="USDT", quantity=D("0.02314000"), quote_total=D("1772.00890360")

@@ -26,6 +26,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from binance.exceptions import BinanceAPIException
 
 from tests.unit.test_live_engine import FakeMarketDataProvider, ScriptedStrategy
 from tests.unit.test_live_engine import candle as engine_candle
@@ -100,7 +101,13 @@ from trading_bot.engine.modes import (
     _to_position_record,
     live_system,
 )
-from trading_bot.exchange.ids import OrderListLeg, client_order_id, list_client_order_id
+from trading_bot.exchange.ids import (
+    OrderListLeg,
+    client_order_id,
+    close_client_order_id,
+    list_client_order_id,
+)
+from trading_bot.exchange.models import translate_binance_error
 from trading_bot.execution.executor import PendingClose, PendingPlacement
 from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
@@ -3861,6 +3868,81 @@ class _ClosingRootClient(FakeRootClient):
         return list(self._settlement)
 
 
+class _RestartedCloseClient(FakeRootClient):
+    """The venue a restart meets after `_ClosingRootClient`'s close (C32b-3).
+
+    The position's list at ``_BOOK_BAR`` is ALL_DONE: the entry filled and the
+    close cancelled both protective legs unexecuted. The close's sell answers
+    by its client id as ``sell``; its fills are ``settlement``. Every round
+    trip is recorded in ``calls``.
+    """
+
+    def __init__(self, *, sell: Order, settlement: list[Trade]) -> None:
+        super().__init__(
+            order_lists=[
+                OrderList(
+                    order_list_id="255471",
+                    symbol=SYMBOL,
+                    list_client_order_id=list_client_order_id(SYMBOL, _BOOK_BAR),
+                    list_status_type="ALL_DONE",
+                    list_order_status="ALL_DONE",
+                    orders=tuple(
+                        OrderListEntry(
+                            symbol=SYMBOL,
+                            order_id=f"B-{leg.value}",
+                            client_order_id=client_order_id(SYMBOL, _BOOK_BAR, leg),
+                        )
+                        for leg in (
+                            OrderListLeg.WORKING,
+                            OrderListLeg.STOP_LOSS,
+                            OrderListLeg.TAKE_PROFIT,
+                        )
+                    ),
+                )
+            ],
+            my_trades=settlement,
+        )
+        self._sell = sell
+        self.calls: list[str] = []
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        self.calls.append("get_order")
+        if order_id is None:
+            assert (client_order_id or "").endswith("-CL")
+            return self._sell
+        working = order_id == f"B-{OrderListLeg.WORKING.value}"
+        return Order(
+            order_id=order_id,
+            symbol=symbol,
+            side=OrderSide.BUY if working else OrderSide.SELL,
+            type=OrderType.LIMIT if working else OrderType.STOP_LOSS,
+            status=OrderStatus.FILLED if working else OrderStatus.CANCELED,
+            quantity=_BOOK_QTY,
+            filled_quantity=_BOOK_QTY if working else D("0"),
+            average_price=_BOOK_ENTRY_FILL if working else None,
+        )
+
+    async def get_my_trades(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        limit: int | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> list[Trade]:
+        self.calls.append("get_my_trades")
+        return await super().get_my_trades(symbol, order_id=order_id)
+
+
 class TestADeferredSettlementAcrossARestart:
     """F2 in `docs/NEXT_MILESTONE.md`, driven end to end rather than seeded.
 
@@ -3868,26 +3950,32 @@ class TestADeferredSettlementAcrossARestart:
     `TestTheBootGateSeesPending` gives.
     """
 
-    async def test_a_close_deferred_before_a_restart_is_released_unbooked_after_it(
+    async def test_a_close_deferred_before_a_restart_is_booked_at_boot(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """DEFER, PERSIST, RESTART, RESOLVE -- through two real roots and the real store.
+        """DEFER, PERSIST, RESTART, BOOK -- through two real roots and the real store.
 
         Root 1 holds a position and closes it through the executor's own
         `dispatch`: the sell FILLS and its settlement read fails in transport,
         so Site A DEFERS -- the record the root's writer put on disk before the
-        cancel stays there. Root 2 boots fresh from that store, as a restart
-        does, holding no `Position`, and its first candle resolves the record.
+        cancel stays there, beside the position's own record. Root 2 boots
+        fresh from that store, as a restart does. Its boot reads the list (the
+        legs cancelled by the close) and the close's sell by its client id
+        (FILLED), settles it, and books it ledger-only; the close record goes.
 
-        **THE OUTCOME, PREDICTED BEFORE THIS TEST WAS WRITTEN:** released
-        unbooked at CRITICAL as `filled_and_released` -- the fill classifies
-        `POSITION_ABSENT`, so nothing is settled, nothing is booked, the
-        tracker stays empty and the record leaves the store. The tracker is in
-        memory by ruling and the store carries no deferral count, so a restart
-        cannot re-enter the retention and cannot book.
+        **CHANGED AT M5l P82 (C32b-3), under the owner's ruled-overturn
+        authority: Q13 and P81 amendment 1's final design book such a close at
+        boot.** The old test was
+        `test_a_close_deferred_before_a_restart_is_released_unbooked_after_it`,
+        asserting that root 2 booted holding the record
+        (``list(system.executor._pending) == [SYMBOL]``), that its first candle
+        released it with ``second.calls == ["get_order"]``, one CRITICAL
+        ``close_record_resolved`` with outcome ``filled_and_released``, and
+        ``after.ledger is None``. Its subject -- a close deferred before a
+        restart -- stands. MUTATION: keep the close record beside a filled sell.
 
-        TWO pairs, because a restored close on the only pair is refused at boot
-        before the first candle, and this test is about the candle.
+        TWO pairs, as before, so a symbol the boot handles wrongly does not
+        also refuse the whole boot.
         """
         settings = write_settings(
             tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
@@ -3942,50 +4030,84 @@ class TestADeferredSettlementAcrossARestart:
         between = store.load()
         assert between is not None
         assert [(r.kind, r.symbol) for r in between.pending] == [("close", SYMBOL)]
+        assert [r.symbol for r in between.positions] == [SYMBOL]
 
-        # ROOT 2: a fresh boot from that store -- no Position, no tracker.
-        second = _ClosingRootClient(sell=sold, settlement=[])
-        with caplog.at_level(logging.DEBUG, logger="trading_bot.execution.executor"):
+        # ROOT 2: a fresh boot from that store. The sell's fill now reads.
+        usdt_fill = Trade(
+            trade_id="1",
+            order_id="777",
+            symbol=SYMBOL,
+            side=OrderSide.SELL,
+            quantity=_BOOK_QTY,
+            price=D("79141.56"),
+            quote_quantity=_BOOK_TOTAL,
+            fee=_BOOK_FEE,
+            filled_at=NOW,
+        )
+        second = _RestartedCloseClient(sell=sold, settlement=[usdt_fill])
+        with caplog.at_level(logging.DEBUG):
             async with live_system(settings, client=second, stream=FakeStream()) as system:
-                assert list(system.executor._pending) == [SYMBOL]
-                assert system.executor._settlement_deferrals == {}
+                assert system.executor._pending == {}
                 assert SYMBOL not in system.portfolio.positions
+                assert system.portfolio.free_quote == D("5000")
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.realised_pnl == _BOOK_EXACT - _BOOK_FEE.amount
+                assert ledger.trades_count == 1
 
                 await system.executor(candle())
 
                 assert system.executor._pending == {}
-                assert system.executor._settlement_deferrals == {}
-                assert system.portfolio.ledger is None
+                assert system.portfolio.ledger is not None
+                assert system.portfolio.ledger.trades_count == 1
 
-        assert second.calls == ["get_order"]  # the close re-read, and no settlement
+        assert second.calls.count("get_my_trades") == 1
+        booked = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "boot_exit_booked"
+        ]
+        assert len(booked) == 1
+        assert "leg" not in vars(booked[0])
+        assert vars(booked[0]).get("close_client_order_id", "").endswith("-CL")
         resolved = [
             r
             for r in caplog.records
             if r.name == "trading_bot.execution.executor"
-            and getattr(r, "event", None) == "close_record_resolved"
+            and vars(r).get("event") == "close_record_resolved"
         ]
-        assert len(resolved) == 1
-        assert resolved[0].levelno == logging.CRITICAL
-        assert resolved[0].outcome == "filled_and_released"  # type: ignore[attr-defined]
+        assert resolved == []
 
         after = store.load()
         assert after is not None
         assert after.pending == ()
-        assert after.ledger is None
+        assert after.positions == ()
+        assert after.ledger is not None
+        assert after.ledger.trades_count == 1
 
-    async def test_a_held_close_is_released_unbooked_after_a_restart(
+    async def test_a_held_close_keeps_a_held_record_with_no_position_after_a_restart(
         self, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """R2's RESTART: HOLD, PERSIST, RESTART, RELEASE -- the hold does not survive.
+        """R2's RESTART: HOLD, PERSIST, RESTART, HOLD AGAIN -- re-derived at boot.
 
         Root 1 closes through `dispatch`; the sell FILLS and its fee is BTC,
         so Site A HOLDS: the position is marked and KEPT, the record stays in
-        memory and on disk. Root 2 boots from that store holding no `Position`
-        -- positions are not persisted -- so the mark is gone, `__call__` does
-        not skip the record, and its first candle resolves it as
-        `POSITION_ABSENT`: released unbooked at CRITICAL, `filled_and_released`.
-        FABRICATED BTC fee. MUTATION: defer at Site A instead of holding, or
-        release the record at the hold.
+        memory and on disk beside the position's own record. Root 2 boots from
+        that store, reads the sell FILLED by its client id, and settles it: the
+        BTC fee is terminal, so the exit is HELD -- the position's record kept
+        with no `Position`, the symbol blocked, one CRITICAL -- and the close
+        record goes. FABRICATED BTC fee.
+
+        **CHANGED AT M5l P82 (C32b-3), under the owner's ruled-overturn
+        authority: Q5(b) and P81 amendment 1's final design keep a held record
+        with no Position.** The old test was
+        `test_a_held_close_is_released_unbooked_after_a_restart`, asserting that
+        root 2 booted holding the close record, that its first candle released
+        it with ``second.calls == ["get_order"]`` and one CRITICAL
+        ``close_record_resolved`` with outcome ``filled_and_released``, and that
+        ``after.pending == ()``. Its subject -- a held close across a restart --
+        stands. MUTATION: defer at Site A instead of holding, release the
+        record at the hold, or keep the close record beside a filled sell.
         """
         settings = write_settings(
             tmp_path, pairs=((SYMBOL, TIMEFRAME, True), ("ETHUSDT", TIMEFRAME, True))
@@ -4052,32 +4174,39 @@ class TestADeferredSettlementAcrossARestart:
         between = store.load()
         assert between is not None
         assert [(r.kind, r.symbol) for r in between.pending] == [("close", SYMBOL)]
+        assert [r.symbol for r in between.positions] == [SYMBOL]
 
-        # ROOT 2: a fresh boot from that store -- no Position, so no mark.
-        second = _ClosingRootClient(sell=sold, settlement=[])
-        with caplog.at_level(logging.DEBUG, logger="trading_bot.execution.executor"):
+        # ROOT 2: a fresh boot from that store; the same BTC fee holds again.
+        second = _RestartedCloseClient(sell=sold, settlement=[btc_fill])
+        with caplog.at_level(logging.DEBUG):
             async with live_system(settings, client=second, stream=FakeStream()) as system:
-                assert list(system.executor._pending) == [SYMBOL]
+                assert system.executor._pending == {}
                 assert SYMBOL not in system.portfolio.positions
+                assert SYMBOL in system.portfolio.blocked_symbols
 
                 await system.executor(candle())
 
                 assert system.executor._pending == {}
                 assert system.portfolio.ledger is None
 
-        assert second.calls == ["get_order"]  # the close re-read, and no settlement
+        assert second.calls.count("get_my_trades") == 1
+        held = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "exit_settlement_held"
+        ]
+        assert [(r.levelno, vars(r).get("site")) for r in held] == [(logging.CRITICAL, "boot")]
         resolved = [
             r
             for r in caplog.records
             if r.name == "trading_bot.execution.executor"
-            and getattr(r, "event", None) == "close_record_resolved"
+            and vars(r).get("event") == "close_record_resolved"
         ]
-        assert [(r.levelno, vars(r).get("outcome")) for r in resolved] == [
-            (logging.CRITICAL, "filled_and_released")
-        ]
+        assert resolved == []
         after = store.load()
         assert after is not None
         assert after.pending == ()
+        assert after.positions == between.positions
         assert after.ledger is None
 
     async def test_a_reconciler_hold_leaves_nothing_on_disk(self, tmp_path: Path) -> None:
@@ -4695,6 +4824,94 @@ class _RestoreCloseClient(_ResolvingRootClient):
         return self._sell
 
 
+def _venue_error(*, code: int, message: str) -> BinanceAPIException:
+    """A ``BinanceAPIException`` as the library raises it, without its constructor."""
+    exc = BinanceAPIException.__new__(BinanceAPIException)
+    exc.code = code
+    exc.status_code = 400
+    exc.message = message
+    return exc
+
+
+class _BesideCloseClient(_RestoreCloseClient):
+    """`_RestoreCloseClient` with a pending close beside the position (C32b-3).
+
+    A GET by the close's client id answers ``before`` -- ``None`` is the
+    venue's ``OrderNotFoundError`` -- until this client's own ``create_order``
+    runs, and the sell it sent after that. ``before_error`` instead raises the
+    given venue payload THROUGH THE REAL MAPPER, as ``BinanceClient._call``
+    does, so a test can use the payload the venue really sends. ``calls``
+    counts every MARKET sell.
+    """
+
+    def __init__(
+        self,
+        *,
+        before: Order | None,
+        before_error: BinanceAPIException | None = None,
+        legs: list[Order] | None = None,
+        order_lists: list[OrderList] | None = None,
+        balances: list[Balance] | None = None,
+    ) -> None:
+        super().__init__()
+        self._before = before
+        self._before_error = before_error
+        self._sent = False
+        if legs is not None:
+            self._legs = {order.order_id: order for order in legs}
+        if order_lists is not None:
+            self._order_lists = order_lists
+        if balances is not None:
+            self._balances = balances
+
+    async def get_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str | None = None,
+        client_order_id: str | None = None,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> Order:
+        if order_id is None and (client_order_id or "").endswith("-CL") and not self._sent:
+            self.calls.append("get_order")
+            if self._before_error is not None:
+                raise translate_binance_error(self._before_error)
+            if self._before is None:
+                raise OrderNotFoundError("Order does not exist.")
+            return self._before
+        return await super().get_order(
+            symbol,
+            order_id=order_id,
+            client_order_id=client_order_id,
+            timeout_s=timeout_s,
+            attempts=attempts,
+        )
+
+    async def create_order(self, request: OrderRequest) -> Order:
+        self._sent = True
+        return await super().create_order(request)
+
+
+#: The close's MARKET sell, FILLED while the bot was down, and what booking it
+#: realises: 1337.61000000 - 60100.12 x 0.02310000 - 1.33761000 = -52.040382.
+_SOLD_WHILE_DOWN = Order(
+    order_id=_SELL_ID,
+    symbol=SYMBOL,
+    side=OrderSide.SELL,
+    type=OrderType.MARKET,
+    status=OrderStatus.FILLED,
+    quantity=_QTY,
+    filled_quantity=_QTY,
+    filled_quote_quantity=_SELL_TOTAL,
+)
+_SELL_REALISED = D("-52.040382")
+#: The pending close of `_record()`'s position: its seeds are the position's.
+_CLOSE_BESIDE = store.PendingCloseRecord(
+    kind="close", symbol=SYMBOL, entry_bar_time=_LIST_BAR, generation=0, quantity=_QTY
+)
+
+
 def client_order_id_for(symbol: str, leg: OrderListLeg) -> str:
     """Our client id for one leg of the list at ``_LIST_BAR``."""
     return client_order_id(symbol, _LIST_BAR, leg)
@@ -5102,25 +5319,167 @@ class TestTheBootResolvesRestoredRecords:
         assert after.pending == ()
         assert [record.symbol for record in after.positions] == [SYMBOL]
 
-    async def test_a_position_beside_a_pending_close_is_left_out(self, tmp_path: Path) -> None:
-        """The owner's interim ruling (C32a): neither classified nor restored.
+    async def test_a_position_beside_a_pending_close_is_classified_not_left_out(
+        self, tmp_path: Path
+    ) -> None:
+        """P81 amendment 1's final design (C32b-3): classified with its close.
 
-        MUTATION: classify it anyway. This venue carries no list, so a
-        classified record would refuse the boot; the boot is wrapped and that
-        failure reported as this test's own.
+        **CHANGED AT M5l P82 (C32b-3), under the owner's ruled-overturn
+        authority: P81 amendment 1's final design classifies the record beside
+        a close, and P82 removes the interim exclusion.** The old test was
+        `test_a_position_beside_a_pending_close_is_left_out`, asserting under a
+        boot that must not fail that ``SYMBOL not in
+        system.portfolio.positions``, ``list(system.executor._pending) ==
+        [SYMBOL]``, ``after.positions == ()`` and ``after.pending ==
+        (close,)``. Its subject -- a position record beside a pending close at
+        boot -- stands. This venue carries no list for it, so the record is
+        classified and refuses the boot (Q6(a)), and nothing on disk changes.
+        MUTATION: restore the interim exclusion.
         """
         settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
-        close = store.PendingCloseRecord(
-            kind="close", symbol=SYMBOL, entry_bar_time=_LIST_BAR, generation=0, quantity=_QTY
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(
+                settings,
+                client=_BesideCloseClient(before=None, order_lists=[]),
+                stream=FakeStream(),
+            ):
+                pass
+
+        assert "no order list on the account carries this id" in str(excinfo.value)
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_record(),)
+        assert after.pending == (_CLOSE_BESIDE,)
+
+    async def test_a_close_whose_sell_filled_while_down_is_booked_once(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """FILLED beside a close: booked ledger-only, the close record removed.
+
+        MUTATION: keep the close record. Site B would then hold a record for
+        an exit the boot already booked.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+        client = _BesideCloseClient(
+            before=_SOLD_WHILE_DOWN,
+            balances=[Balance(asset="USDT", free=D("5000"), locked=D("0"))],
         )
-        store.save(store.PersistedState(pending=(close,), positions=(_record(),)))
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert system.executor._pending == {}
+                assert SYMBOL not in system.portfolio.positions
+                assert system.portfolio.free_quote == D("5000")
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.realised_pnl == _SELL_REALISED
+                assert ledger.trades_count == 1
+
+                await system.executor(candle())
+
+                assert system.portfolio.ledger is not None
+                assert system.portfolio.ledger.trades_count == 1
+
+        assert client.calls.count("create_order") == 0
+        booked = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "boot_exit_booked"
+        ]
+        assert len(booked) == 1
+        assert "leg" not in vars(booked[0])
+        assert vars(booked[0]).get("close_client_order_id") == close_client_order_id(
+            SYMBOL, _LIST_BAR
+        )
+        after = store.load()
+        assert after is not None
+        assert after.pending == ()
+        assert after.positions == ()
+
+    async def test_a_close_whose_sell_never_sold_is_sold_once(self, tmp_path: Path) -> None:
+        """Absent beside a close, the legs cancelled and the base held:
+        ``RestoreAndClose``, the close record dropped, and ONE MARKET sell.
+
+        MUTATION: keep the close record.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+        client = _BesideCloseClient(before=None)
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.executor._pending == {}
+            assert system.portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+            on_disk = store.load()
+            assert on_disk is not None
+            assert on_disk.pending == ()
+
+            closers = [h for h in system.provider._handlers if isinstance(h, _BootCloser)]  # type: ignore[attr-defined]
+            assert len(closers) == 1
+            await system.executor(candle())
+            await closers[0](candle())
+
+            assert client.calls.count("create_order") == 1
+            assert SYMBOL not in system.portfolio.positions
+
+    async def test_a_close_that_died_before_its_cancel_is_restored_and_left_to_site_b(
+        self, tmp_path: Path
+    ) -> None:
+        """The list still live and no sell: ``Restore``, the close record KEPT.
+
+        On the first candle Site B finds no sell, keeps the position UNKNOWN
+        and releases the record, selling and booking nothing (P82's STEP 0(b)).
+        MUTATION: drop the close record beside a ``Restore``.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+        client = _BesideCloseClient(before=None, legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert list(system.executor._pending) == [SYMBOL]
+            assert SYMBOL in system.portfolio.positions
+            on_disk = store.load()
+            assert on_disk is not None
+            assert on_disk.pending == (_CLOSE_BESIDE,)
+
+            await system.executor(candle())
+
+            assert system.executor._pending == {}
+            assert system.portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+            assert system.portfolio.ledger is None
+
+        assert client.calls.count("create_order") == 0
+
+    async def test_the_measured_absent_sell_payload_reads_as_absent_through_the_real_mapper(
+        self, tmp_path: Path
+    ) -> None:
+        """The sell read's "absent" comes from the venue's payload, not a fake.
+
+        MEASURED on Testnet, 2026-10-01 (`M5l-138`): a GET order by a
+        fabricated `-CL` client id answers code -2013, "Order does not exist."
+        Here that payload goes through ``translate_binance_error``, as
+        ``BinanceClient._call`` sends it, so a mapper that does not classify
+        it fails this test and not only the mapper's own. MUTATION: remove
+        the `-2013` row, or catch less than ``OrderNotFoundError`` at the
+        sell read.
+
+        The boot is wrapped, and its failure reported as this test's own.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+        client = _BesideCloseClient(
+            before=None,
+            before_error=_venue_error(code=-2013, message="Order does not exist."),
+        )
 
         try:
-            async with live_system(
-                settings, client=FakeRootClient(), stream=FakeStream()
-            ) as system:
-                assert SYMBOL not in system.portfolio.positions
-                assert list(system.executor._pending) == [SYMBOL]
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                assert system.portfolio.positions[SYMBOL].protection is ProtectionState.UNKNOWN
+                assert system.executor._pending == {}
+                closers = [h for h in system.provider._handlers if isinstance(h, _BootCloser)]  # type: ignore[attr-defined]
+                assert len(closers) == 1
         except AssertionError:
             raise
         except Exception as exc:
@@ -5128,8 +5487,38 @@ class TestTheBootResolvesRestoredRecords:
 
         after = store.load()
         assert after is not None
-        assert after.positions == ()
-        assert after.pending == (close,)
+        assert after.pending == ()
+
+    async def test_a_sell_read_failing_with_another_api_error_refuses_the_boot(
+        self, tmp_path: Path
+    ) -> None:
+        """Only "no such order" is an answer; any other venue error is a failure.
+
+        A -1021 (timestamp outside the receive window) is a generic
+        ``ExchangeAPIError``, which says nothing about whether the sell exists.
+        Reading it as absent would restore the position and SELL it beside a
+        sell that may have filled. MUTATION: the sell read catches
+        ``ExchangeAPIError`` rather than ``OrderNotFoundError``.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(pending=(_CLOSE_BESIDE,), positions=(_record(),)))
+        client = _BesideCloseClient(
+            before=None,
+            before_error=_venue_error(
+                code=-1021, message="Timestamp for this request is outside of the recvWindow."
+            ),
+        )
+
+        with pytest.raises(ConfigError) as excinfo:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass
+
+        assert "its pending close's sell" in str(excinfo.value)
+        assert "could not be read" in str(excinfo.value)
+        after = store.load()
+        assert after is not None
+        assert after.positions == (_record(),)
+        assert after.pending == (_CLOSE_BESIDE,)
 
     async def test_a_ledger_write_after_boot_does_not_resurrect_a_settled_placement(
         self, tmp_path: Path

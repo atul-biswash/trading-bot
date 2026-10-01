@@ -949,6 +949,17 @@ minutes on a 15m one, and unbounded on a symbol whose feed has stopped.
 classifies `POSITION_ABSENT`, fetches no settlement, and is released on the
 first candle; the count is not persisted and does not need to be.
 
+> **ANNOTATED AT M5l P82 (C32b-3): "After a restart there is no `Position`" IS
+> NO LONGER TRUE OF A CLOSE WHOSE POSITION'S RECORD IS ON DISK.** Boot reads
+> that close's sell: a filled sell is booked ledger-only at boot, or held
+> (Q5(b)), and the close record is removed, so no restored close of that kind
+> enters the count. A sell that never sold, with the protection cancelled and
+> the base held, is sold again by R3 and its record removed. A close beside a
+> position restored on a live list keeps its record, which Site B releases on
+> the first candle. **What survives:** the count is in memory only and resets
+> at a restart, and a close with no position record beside it is still
+> released unbooked on its first candle.
+
 **Measurement.** How long the venue takes to return a filled order's fills from
 `myTrades` after the fill. Nothing in this repository has measured it: the only
 `myTrades` captures were read long after their fills.

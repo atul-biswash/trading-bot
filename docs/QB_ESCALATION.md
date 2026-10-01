@@ -118,6 +118,15 @@ Three categories, not two. The distinction is **what can clear it**.
 > pending close is still released by a restart until C32b-3. **What survives:**
 > the row's category -- terminal, operator only.
 >
+> **ANNOTATED AT M5l P82 (C32b-3): THE CLAUSE "A hold beside a pending close
+> is still released by a restart until C32b-3" IS NOW PAST.** From C32b-3 boot
+> reads the close's sell by the client id the close record derives. A sell that
+> FILLED is settled at boot and booked ledger-only, or held in the same way as
+> any other exit (Q5(b)), and the close record is removed either way. So a
+> hold beside a close is re-derived at boot and keeps its record, as the
+> reconciler's does. **What survives:** the row's category, and a close with no
+> position record beside it, which is still released on its first candle.
+>
 > **Two changes to emitters that already existed, for completeness.**
 > `close_sold_unpriced`'s `CRITICAL` is gone with `_sold_unpriced`, by the
 > project owner's Decision 2. And `close_sold_unbooked` now also takes an

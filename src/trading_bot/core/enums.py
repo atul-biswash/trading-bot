@@ -207,6 +207,9 @@ class RefusalStage(str, Enum):
     holds its record, and that list is then not blocked. What survives: a live
     list of ours with no restored position -- no record, or a record left out
     -- still has no ``Position``, and this stage is still what it refuses as.
+    (ANNOTATED AT M5l P82, C32b-3: no record is left out any more. A record
+    beside a pending close is classified with its close, so "a record left
+    out" names a case that no longer occurs; "no record" stands.)
 
     What the two share is the only thing that decides placement: both are facts
     about ONE symbol, discovered at boot, that leave every limit computable. So
