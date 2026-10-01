@@ -99,6 +99,7 @@ _REASON_QUOTE_TOTAL_UNAVAILABLE = (
 # a generic ExchangeAPIError that carries the original code.
 _RATE_LIMIT_CODE = -1003
 _UNKNOWN_ORDER_CODE = -2011
+_ORDER_DOES_NOT_EXIST_CODE = -2013
 _FILTER_FAILURE_CODE = -1013
 _MALFORMED_REQUEST_CODE = -1100
 # The contract group: our request is structurally wrong for the endpoint.
@@ -990,6 +991,15 @@ _DUPLICATE_ORDER_RE = re.compile(r"^Duplicate order sent\.$", re.IGNORECASE)
 #: auto-cancelled both pending legs and the follow-up cancels each returned it).
 _UNKNOWN_ORDER_RE = re.compile(r"^Unknown order sent\.$", re.IGNORECASE)
 
+#: Matched against the message of a ``-2013``, the answer to a GET of an order
+#: the venue has no record of. Anchored on the complete measured message, as
+#: the ``-2011`` pattern above is. MEASURED, Testnet, 2026-10-01 (M5l P82): a
+#: ``GET /api/v3/order`` by a fabricated client id in our ``-CL`` format for
+#: BTCUSDT answered ``-2013`` "Order does not exist." and, before this row, was
+#: translated to a bare ``ExchangeAPIError`` -- so ``get_order``'s documented
+#: ``OrderNotFoundError`` was never raised by the real venue.
+_ORDER_DOES_NOT_EXIST_RE = re.compile(r"^Order does not exist\.$", re.IGNORECASE)
+
 #: The first message with a VARIABLE TAIL, so the first row that captures
 #: rather than anchoring on the whole string. Measured shape:
 #: "Filter failure: NOTIONAL" (MEASURED, Testnet, on a stop leg below
@@ -1070,6 +1080,7 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_OVERLOADED_ORDER_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
     _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
     _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_RE, OrderNotFoundError),
+    _ApiRule(_ORDER_DOES_NOT_EXIST_CODE, _ORDER_DOES_NOT_EXIST_RE, OrderNotFoundError),
     _ApiRule(_FILTER_FAILURE_CODE, _FILTER_FAILURE_RE, FilterRejectedError, _filter_rejected),
     _ApiRule(
         _MALFORMED_REQUEST_CODE, _MALFORMED_PARAM_RE, MalformedRequestError, _malformed_request

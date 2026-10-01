@@ -321,6 +321,13 @@ class OrderNotFoundError(OrderError):
     OTO teardown: cancelling the working leg **auto-cancelled both pending
     legs**, and the follow-up cancels for those two each returned this.
 
+    (ANNOTATED AT M5l P82, C32b-3a: ``-2011`` is the answer to a CANCEL. The
+    answer to a point QUERY of an order the venue has no record of is
+    ``-2013 'Order does not exist.'``, MEASURED on Testnet on 2026-10-01, and
+    from this commit it classifies here too. Until it did, ``get_order``
+    raised a bare ``ExchangeAPIError`` for it, and a catcher of this class
+    never saw a venue-absent order. What survives: everything below.)
+
     **Benign is a property of the CALL SITE, not of this class, which is why it
     subclasses ``OrderError`` rather than sitting outside the order hierarchy.**
     On a cancel path it is the expected result of a list that already collapsed

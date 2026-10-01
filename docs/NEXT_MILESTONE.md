@@ -861,6 +861,56 @@ restarting.
   the position stays restored and UNKNOWN, entries stay refused, and the
   strategy's own `CLOSE` path is still open.
 
+**ADDED AT M5l P82 (C32b-3a), `-2013` maps to `OrderNotFoundError`
+(`M5l-138`).** C32b-3's draft read the close's sell by its client id and took
+`OrderNotFoundError` for "the sell is absent". The owner's P82 amendment 2
+measured that read on Testnet before the commit: a GET order by a fabricated
+client id in our `-CL` format answered `-2013 "Order does not exist."`, and
+`translate_binance_error` returned a bare `ExchangeAPIError`, because
+`_API_RULES` keyed `OrderNotFoundError` on `-2011 "Unknown order sent."` alone.
+The owner's amendment 3 ruled the fix: one row, `-2013`, anchored on the whole
+measured message as the `-2011` row is.
+
+- **Tests**: the measured payload maps to `OrderNotFoundError`, exact type and
+  ancestry and code kept; two near-miss messages, one with a tail and one with
+  a head, do not, so loosening either anchor is caught; the unmatched `-2013`
+  logs once at ERROR and the measured one does not.
+- **STEP 0(b), what each catcher did on a venue-absent order and does now**
+  (`M5l-139`, REASONED from the code; the type itself is MEASURED):
+  - `reconciliation.py` `resolve_unresolved_legs`, the only site that
+    branches on the type. Before: `-2013` escaped as `ExchangeAPIError`, so the
+    driver's `leg_resolution` phase failed for EVERY position in that pass.
+    Now: that one leg is `DIVERGED` ("the venue has no such order"), and the
+    pass goes on. Nothing is booked, sold, cancelled or dropped; the position
+    keeps untrusted protection, and `_escalate_unbookable_divergence` logs one
+    `CRITICAL` per pass.
+  - `executor.py` `_entry_fill_price`, `_requery_sell_total`,
+    `_read_close_outcome`, `_confirm_protective_legs`, and this tree's boot
+    reads: each catches broadly and does not branch on the type, so the
+    behaviour is unchanged. `_confirm_protective_legs` records
+    `type(exc).__name__` in a log field only.
+  - `executor.py` `_cancel_protection`'s `except OrderNotFoundError` and the
+    `ExchangeError` catches around `get_my_trades`
+    (`_settle` in the executor and the driver) are not reached by `get_order`.
+- **Captures**: `-2013` and "Order does not exist" occur on 0 lines in all 14
+  logs checked (`M5l-140`), so the resolver's `-2013` branch has never run in
+  production. None of the 12 `reconciliation_phase_failed` lines in the M5k
+  close capture is explained by it: all 12 are `ExchangeConnectionError` in
+  phase `reconciliation_pass`.
+- **Not measured, and it bounds C32b-2** (`M5l-141`): R3's sale rests on
+  `cancel_order_list` of an ALL_DONE list answering `OrderNotFoundError`. No
+  capture holds that answer (`docs/RUN_LEDGER.md` reads
+  `close_cancel_already_terminal` NOT OBSERVED), and its message is not known to
+  be `-2011 "Unknown order sent."`. If it differs, the cancel fails at
+  `CRITICAL`, the record is released and nothing is sold: the safe direction,
+  and the position stays restored and UNKNOWN.
+
+`M5l-138`'s row is the first `_API_RULES` row keyed on a code that is not in
+`_ORDER_REJECT_CODES`, so a near-miss falls through to `ExchangeAPIError`
+rather than `OrderError`.
+
+*Arming condition:* **whoever next adds a row to `_API_RULES` in `exchange/models.py`.**
+
 *Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
 
 #### P-3l. A market-data outage stops reconciliation (`M5l-055`)

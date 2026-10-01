@@ -875,6 +875,7 @@ def test_the_rule_table_declares_its_order() -> None:
         (-2010, InsufficientBalanceError),
         (-2010, DuplicateOrderError),
         (-2011, OrderNotFoundError),
+        (-2013, OrderNotFoundError),
         (-1013, FilterRejectedError),
         (-1100, MalformedRequestError),
         (-1106, ContractViolationError),
@@ -963,6 +964,7 @@ def test_1111_is_unclassified_and_its_code_survives() -> None:
         (-2010, "Account has insufficient balance for requested action.", InsufficientBalanceError),
         (-2010, "Duplicate order sent.", DuplicateOrderError),
         (-2011, "Unknown order sent.", OrderNotFoundError),
+        (-2013, "Order does not exist.", OrderNotFoundError),
         (-1013, "Filter failure: NOTIONAL", FilterRejectedError),
         (-1100, "Illegal characters found in parameter 'symbol'; x", MalformedRequestError),
         (-1106, "whatever the venue said", ContractViolationError),
@@ -1463,6 +1465,72 @@ def test_an_unmatched_2011_message_logs_loudly(caplog: pytest.LogCaptureFixture)
 def test_the_measured_2011_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
     """Quiet on the happy path: a guard that fired every call would train a skim."""
     exc = _api_error(code=-2011, status=400, message="Unknown order sent.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
+
+
+# --------------------------------------------------------------------------
+# Error translation -- -2013, the point query's answer for an order the venue
+# has no record of
+#
+# MEASURED on Testnet, 2026-10-01 (M5l P82): a GET order by a fabricated client
+# id in our -CL format for BTCUSDT answered code -2013, message "Order does not
+# exist.", and was translated to a bare ExchangeAPIError, so `get_order`'s
+# documented OrderNotFoundError was never raised by the real venue.
+# --------------------------------------------------------------------------
+def test_the_measured_order_does_not_exist_message_maps_to_order_not_found() -> None:
+    """The measured payload, not a fake raising the domain type directly.
+
+    Exact type AND ancestry, per the arc-wide ruling, and the code is kept.
+    MUTATION: remove the ``-2013`` row.
+    """
+    exc = _api_error(code=-2013, status=400, message="Order does not exist.")
+    result = m.translate_binance_error(exc)
+    assert type(result) is OrderNotFoundError
+    assert isinstance(result, OrderError)
+    assert result.code == -2013
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Order does not exist. Retry later.",
+        "Error: Order does not exist.",
+    ],
+)
+def test_a_reworded_order_does_not_exist_message_does_not_map_to_order_not_found(
+    message: str,
+) -> None:
+    """The near-miss (M5c-AA): anchored on the whole measured string.
+
+    One case adds a tail and one a head, so loosening EITHER anchor is caught.
+    A ``-2013`` is not in the order-reject set, so the fallthrough is the
+    generic ``ExchangeAPIError`` carrying its code. MUTATION: loosen the
+    anchors.
+    """
+    exc = _api_error(code=-2013, status=400, message=message)
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, OrderNotFoundError)
+    assert type(result) is ExchangeAPIError
+    assert result.code == -2013
+
+
+def test_an_unmatched_2013_message_logs_loudly(caplog: pytest.LogCaptureFixture) -> None:
+    """The guard covers every keyed code, and that is asserted per family."""
+    exc = _api_error(code=-2013, status=400, message="Some other -2013 condition.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    records = [r for r in caplog.records if r.name == m.__name__]
+    assert len(records) == 1
+    assert "-2013" in records[0].getMessage()
+
+
+def test_the_measured_2013_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
+    """Quiet on the happy path: a guard that fired every call would train a skim."""
+    exc = _api_error(code=-2013, status=400, message="Order does not exist.")
     with caplog.at_level("ERROR", logger=m.__name__):
         m.translate_binance_error(exc)
 
