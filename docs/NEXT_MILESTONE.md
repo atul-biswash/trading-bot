@@ -634,6 +634,23 @@ template for that run is `docs/RUN_LEDGER.md` section 24. What follows is the
 item as it stood before the implementation and the annotations that track it;
 the commits are recorded beneath it.
 
+> **P-3k IS CLOSED, BY THE OWNER'S RULING AT M5l P87 (C38) -- THE FIRST
+> SENTENCE'S GATE, *"stays closed until the supervised run's arms A1, A2 and
+> A4 are recorded"*, IS DISCHARGED.** The ruling, verbatim: *"The P-3k gate is
+> satisfied: A1 (hard kill, restore), A2 (protective fill while down, booked at
+> boot) and A4 (protection cancelled while down, R3 sells once) passed on the
+> supervised Testnet run of 2026-10-01/02, A1 and A2 at d1074c6 and A4 at
+> 5e22bc6. A2's Ctrl+C stop does not change the path it tests. P-3k no longer
+> blocks live trading. The fee-capture and base-asset-netting gates remain, so
+> live trading stays blocked."* The arms are recorded in `docs/RUN_LEDGER.md`
+> section 25 (`M5l-168`, `M5l-169`). **What survives:** the item's history and
+> every annotation beneath it, the *"Live trading additionally stays blocked
+> until an open position survives a restart"* ruling at P76 as the record of
+> what the gate was, and **live trading itself, which stays blocked by N6's two
+> remaining preconditions** -- the non-zero fee capture and base-asset
+> netting. Closing P-3k lifts one of three gates and none of the code block:
+> `refuse_live_trading` is unchanged.
+
 Positions are memory-only, so a clean shutdown or a power cut leaves an open
 position no later process owns. After a restart the symbol is blocked while its
 list rests; a protective fill in that window is never booked, so the daily-loss
@@ -1074,6 +1091,15 @@ per the procedure -- and recorded in section 25. **A1's and A2's evidence from
 `d1074c6` stands**, because neither path cancels an order list: A1 restores
 records and reconciles, A2 books an exit the venue already filled, and the
 answer C35 changed is the answer to a list cancel, made only by the close path.
+
+> **SUPERSEDED AT M5l P87 (C38): *"THE GATE STAYS CLOSED. It opens only when
+> A4 is re-run on the commit carrying C35"* HAS HAPPENED, AND *"A2's line is
+> already in the log ... whether it counts is the owner's judgement"* IS
+> RULED.** A4 was re-run at `5e22bc6` and passed (`M5l-168`), and the owner
+> ruled A2 a pass and the gate satisfied (`M5l-169`, `M5l-166` resolved). See
+> P-3k's head. **What survives:** the reasoning that A1's and A2's `d1074c6`
+> evidence stands because neither path cancels a list.
+
 The operator's release and manual ETHUSDT sale of that run cost
 `-6.91308000` USDT outside the ledger (`M5l-164`, section 25).
 
@@ -1295,6 +1321,14 @@ the lift waits on.
 **A third gate stands beside the two, added by the owner at P61:** the restart
 gap, P-3k -- an open position that a restart leaves unowned. It carries its own
 arming condition there, and the condition below does not watch it.
+
+> **ANNOTATED AT M5l P87 (C38): THE THIRD GATE IS CLOSED, AND TWO STAND.** The
+> owner ruled P-3k satisfied at P87 (quoted verbatim at P-3k above): *"P-3k no
+> longer blocks live trading. The fee-capture and base-asset-netting gates
+> remain, so live trading stays blocked."* **N6's two preconditions, listed
+> above, are exactly what remains, and neither exists.** A protective
+> stop-loss order type review, marked at P87 (`M5l-170`), is not a gate by the
+> owner's ruling; it is marked for QC before live trading.
 
 *Arming condition:* **whoever next edits `calculate_position_size` in `risk/position_sizing.py` or `build_placement` in `execution/placement.py`.**
 

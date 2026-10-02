@@ -2098,3 +2098,208 @@ carrying C35. A1's and A2's evidence from `d1074c6` stands, because neither
 path cancels an order list: A1 restores records and reconciles, and A2 books an
 exit the venue already filled, and the answer C35 changed is the answer to a
 list cancel, made only by the close path.
+
+> **ANNOTATED AT M5l P87 (C38): THE PARAGRAPH ABOVE IS SUPERSEDED, AND SO IS
+> THIS SECTION'S HEADING.** *"Nothing"* and *"the gate stays closed"* were
+> true when written. A4 has since been re-run on the commit carrying C35 and
+> passed, and the owner has ruled on the gate: see *"A4 re-run at 5e22bc6"*
+> and *"The owner's ruling"* below. The heading's *"A2 in the log"* is
+> resolved there too (`M5l-166`). **What survives:** every figure recorded
+> above, and the reasoning that A1's and A2's `d1074c6` evidence stands
+> because neither path cancels a list.
+
+### A4 re-run at 5e22bc6 -- PASS (`M5l-168`)
+
+**Recorded at M5l P87 (C38), from the new deployment clone's own files only,
+read while no Python process ran** (`F:\trading bot\deploy\5e22bc6a33ed`, at
+`5e22bc6a33ed2d1500a9ed52a12ed5232459b8c0`, built at P86): `logs\trading_bot.log`,
+193 lines, SHA-256
+`85e1c64391089b1f425ae0efe3954aa705a271d2369ac4bab85ad425871c71bb`, last line
+`2026-10-02T12:05:10Z`; and `F:\trading bot\deploy\arm_notes.txt`. Every figure
+below is a claim about those bytes. The clone's store was not read.
+
+**The launch.** `boot_provenance verdict=accepted` for pid 11844 at
+`2026-10-02T07:28:32Z`, `install_kind=vcs`,
+`code_commit=5e22bc6a33ed2d1500a9ed52a12ed5232459b8c0`, `code_intact=true`
+over 69 files, `commits_agree=true`, `config_sha256=f9e0d737...82a0`,
+`config_tracked=true`; `Starting in TESTNET mode`; and
+`Composition root ready: 2 pair(s), 90167.24816300 USDT free`, the figure P86's
+pre-flight read. Before it, pids 21660 and 6324 are P86's two dry boots of
+`strategies` (`07:19:20Z`, `07:19:28Z`), `boot_provenance` lines only.
+
+**The position under test.** BTCUSDT, `order_list_id=413202`,
+`list_client_order_id=tb1-BTCUSDT-1790939579999-0-L`, quantity 0.02083000,
+placed `2026-10-02T11:13:03Z`. Pid 11844 had already made three BTCUSDT round
+trips that session, each closed by the strategy: lists 410982
+(`realised=4.6440308000`), 412180 (`-1.7751860000`) and 412886
+(`-3.6098390000`).
+
+**The kill.** Pid 11844's last line is `2026-10-02T11:54:04Z`, a
+`reconciliation_pass ... states="active=1"`, with no `engine_stopped`; pid
+12472's first line is `12:01:05Z`. So the process was hard-killed in that
+interval, bracketed from presence on both sides. The cancel of list 413202 is
+not in the log either, because `scripts/cancel_testnet_order_list.py` writes
+none; the relaunch's own lines show both legs `CANCELED`.
+
+**The relaunch and the sale, verbatim**, pid 12472 (`Seeded` and
+`Market-data provider` lines omitted; nothing else between these lines was):
+
+    2026-10-02T12:01:05Z | INFO | pid=12472 | __main__ | Startup provenance accepted event=boot_provenance verdict=accepted refusal_reasons=none unknown_reasons=none install_kind=vcs code_commit=5e22bc6a33ed2d1500a9ed52a12ed5232459b8c0 code_intact=true code_files_checked=69 ... checkout_dirty=false dirty_count=0 dirty_paths=none commits_agree=true ... config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0 config_tracked=true python_version=3.12.10 package_version=0.1.0
+    2026-10-02T12:01:05Z | INFO | pid=12472 | __main__ | Starting in TESTNET mode
+    2026-10-02T12:01:10Z | CRITICAL | pid=12472 | trading_bot.engine.modes | BTCUSDT: restored a position whose protection is GONE -- both protective legs were cancelled unexecuted and its base is still held. It is SOLD on this symbol's first candle (R3). If you acted on this symbol by hand, release its record before restarting: python scripts/release_position.py --symbol <SYMBOL>. event=boot_position_unprotected symbol=BTCUSDT list_client_order_id=tb1-BTCUSDT-1790939579999-0-L order_list_id=413202 quantity=0.02083000 base_free=0.02083000
+    2026-10-02T12:01:10Z | INFO | pid=12472 | trading_bot.engine.modes | Boot resolved 1 restored record(s): 1 restored, 0 booked, 0 held, 0 dropped, 0 gone event=boot_positions_resolved records=1 pending_placements=0 restored=1 booked=0 held=0 dropped=0 gone=0
+    2026-10-02T12:01:10Z | WARNING | pid=12472 | trading_bot.engine.modes | 499 asset(s) are EXCLUDED FROM EQUITY -- no enabled USDT pair prices them, so equity is UNDERSTATED by their combined value, which cannot be computed here. Set logging.level to DEBUG for the per-asset list. event=boot_assets_excluded excluded_count=499 quote_asset=USDT
+    2026-10-02T12:01:10Z | INFO | pid=12472 | trading_bot.engine.modes | Composition root ready: 2 pair(s), 88365.38039520 USDT free
+    2026-10-02T12:01:11Z | INFO | pid=12472 | trading_bot.engine.live_engine | Trading engine started: BTCUSDT/1m, ETHUSDT/5m
+    2026-10-02T12:02:00Z | INFO | pid=12472 | trading_bot.execution.reconciliation_driver | Reconciled 1 position(s) event=reconciliation_pass positions=1 calls=1 queries=2 states="diverged=1"
+    2026-10-02T12:02:00Z | WARNING | pid=12472 | trading_bot.execution.reconciliation_driver | 1 position(s) carry protection this bot does not trust event=reconciliation_untrusted count=1 symbols=BTCUSDT detail="BTCUSDT leg SL was requested and does not rest: the point query reports CANCELED; BTCUSDT leg TP was requested and does not rest: the point query reports CANCELED"
+    2026-10-02T12:02:00Z | CRITICAL | pid=12472 | trading_bot.execution.reconciliation_driver | BTCUSDT has no protection resting and no fill to book; the ledger and the account may have parted event=exit_unbookable symbol=BTCUSDT state=diverged quantity=0.02083000 venue_order_list_id=413202 reason="BTCUSDT leg SL was requested and does not rest: the point query reports CANCELED; BTCUSDT leg TP was requested and does not rest: the point query reports CANCELED" resolution="OPERATOR ONLY: no leg reported a fill, so there is nothing to price and nothing is booked. The position is retained and stays untrusted, so entries are refused portfolio-wide until it is reconciled by hand."
+    2026-10-02T12:02:01Z | INFO | pid=12472 | trading_bot.execution.executor | Close planned for BTCUSDT: sell event=close_planned symbol=BTCUSDT decision=sell detail="no protective leg executed across 2 leg(s); the position is still open and the sell may be dispatched" reads=2 elapsed_s=0.830626 refused_as=close_sell_reserved candle_time=2026-10-02T12:01:59.999000+00:00 list_client_order_id=tb1-BTCUSDT-1790939579999-0-L sl_status=CANCELED sl_executed=0E-8 tp_status=CANCELED tp_executed=0E-8
+    2026-10-02T12:02:01Z | WARNING | pid=12472 | trading_bot.execution.executor | Cancelling protection to close BTCUSDT; the position is unprotected from here event=close_window_open symbol=BTCUSDT venue_order_list_id=413202 quantity=0.02083000 candle_time=2026-10-02T12:01:59.999000+00:00
+    2026-10-02T12:02:02Z | INFO | pid=12472 | trading_bot.execution.executor | Order list for BTCUSDT was already terminal at cancel event=close_cancel_already_terminal symbol=BTCUSDT venue_order_list_id=413202 candle_time=2026-10-02T12:01:59.999000+00:00
+    2026-10-02T12:02:03Z | INFO | pid=12472 | trading_bot.execution.executor | Closed BTCUSDT event=close_booked symbol=BTCUSDT quote_total=1798.54552000 quote_total_source=venue realised=-2.5812536000 order_id=8756208 quantity=0.02083000 fee=0E-8 fee_asset=USDT fills=1 filled_at=2026-10-02T12:02:03.122000+00:00 order_created_at=2026-10-02T12:02:03.122000+00:00 candle_time=2026-10-02T12:01:59.999000+00:00
+    2026-10-02T12:03:00Z | INFO | pid=12472 | trading_bot.engine.live_engine | Signal CLOSE BTCUSDT (death cross: SMA(20)=86467.766 crossed below SMA(50)=86471.894) from sma_crossover
+
+**The `nothing_to_close` refusal, verbatim**, follows it:
+
+    2026-10-02T12:03:00Z | INFO | pid=12472 | trading_bot.engine.modes | Risk refused BTCUSDT at nothing_to_close event=risk_refused symbol=BTCUSDT timeframe=1m action=CLOSE signal_ts=2026-10-02T12:02:59.999000+00:00 stage=nothing_to_close reason="nothing to close: no open position in BTCUSDT"
+
+then `2026-10-02T12:05:08Z | INFO | pid=12472 | __main__ | Received SIGINT;
+shutting down gracefully` and `12:05:10Z ... Trading engine stopped
+event=engine_stopped clean_shutdown=True`.
+
+**Against the sheet's expected lines** (`F:\trading bot\deploy\arm_tools\A4_sheet.md`
+section 9): every one is present, in the order listed. **The absences are
+counted over the same 193 lines:** `Unclassified message` 0,
+`close_cancel_failed` 0, `dispatch_refused` 0, `boot_symbol_blocked` 0;
+`close_cancel_already_terminal` 1, `exit_unbookable` 1, `CRITICAL` 2 (the
+boot's and the exit's).
+
+**The booking reconciles twice.** The realised figure is the exit's quote total
+less the entry's:
+
+    1798.54552000 - 1801.12677360 = -2.58125360
+
+and the entry's `1801.12677360` is the owner's figure; the log alone gives it
+back as `1798.54552000 + 2.5812536000`, so it is a consequence of the booking
+line, not an independent read. The balance is independent. Pid 11844's
+root read `90167.24816300` free at `07:28:35Z`; adding its three closed round
+trips and subtracting this position's entry cost gives
+
+    90167.24816300 + 4.6440308 - 1.775186 - 3.609839 - 1801.1267736 = 88365.3803952
+
+which is pid 12472's `88365.38039520` at `12:01:10Z`, to the digit.
+
+**What this measures, and the venue fact that matters.** On the real venue a
+restored position whose list was cancelled while the bot was down was sold
+once, by R3, on the first candle after the relaunch, and booked. The cancel
+the close path made on that list was answered by the mapped `-2011 'Unknown
+order list sent.'` and read as the benign `OrderNotFoundError`: the line
+`close_cancel_already_terminal`, not `close_cancel_failed`. This is C35
+(`244aa6b`) confirmed against the venue, and it closes the loop `M5l-141` and
+`M5l-161` opened.
+
+### The owner's ruling, and A2 (`M5l-169`)
+
+The owner's ruling at M5l P87, recorded verbatim:
+
+> *"The P-3k gate is satisfied: A1 (hard kill, restore), A2 (protective fill
+> while down, booked at boot) and A4 (protection cancelled while down, R3 sells
+> once) passed on the supervised Testnet run of 2026-10-01/02, A1 and A2 at
+> d1074c6 and A4 at 5e22bc6. A2's Ctrl+C stop does not change the path it
+> tests. P-3k no longer blocks live trading. The fee-capture and base-asset-
+> netting gates remain, so live trading stays blocked."*
+
+**So A2 is PASS by the owner's ruling, and `M5l-166` is resolved**: the
+`boot_exit_booked leg=SL` line recorded above stands as A2's evidence, the
+stop before it having been SIGINT and not a hard kill. This ledger records
+the ruling; it does not judge it.
+
+### The deviations from the written procedure, and what the run left behind
+
+- **The `arm_notes.txt` appends came late** (`M5l-167`'s shape, again,
+  `M5l-174`). The file now holds ten lines, the two new ones being
+  `boot_provenance` lines for pid 11844 (`07:28:32Z`) and pid 12472
+  (`12:01:05Z`); the file's modification time, `12:01:17.9Z`, is 12 seconds
+  after the relaunch. **None of the sheet's pre-launch lines is in it**, so no
+  store SHA-256 was recorded before either launch, and the owner reports that
+  one append landed before a relaunch and recorded the previous launch. The
+  file cannot show which, because its earlier modification times are
+  overwritten; the owner's account is recorded as the owner's.
+- **P86 installed with the old build's frozen dependencies as constraints**
+  (`M5l-172`). `pip install -c <constraints> "binance-trading-bot @
+  git+file:///...@5e22bc6..."`, the constraints being `pip freeze` of the
+  retired clone less its own project line, 38 lines. This is not in
+  `CLAUDE.md`'s written procedure, which installs without constraints and so
+  lets the transitive dependencies float. MEASURED: the new venv's `pip freeze`
+  differs from the old one's in one line, the project's own commit. The
+  written procedure is unchanged by this entry.
+- **P86's H4 outcome** (`M5l-171`). P86 reported *"no Python process at the
+  start"* while the old clone's pid 3608 logged `Received SIGINT` at
+  `2026-10-02T07:14:06Z`. **That is timing, not a defective check.** P86's H4
+  command was issued at `2026-10-02T07:15:32Z`, from the session transcript's
+  own timestamp, 86 seconds after the stop (`engine_stopped` at `07:14:08Z`),
+  and the next command's `date -u` read `07:15:48Z`. And the check was tested
+  directly at P87: a scratch script run by a venv interpreter under a path
+  containing a space, with the venv built from the same Store interpreter as
+  the clones, was found by `Get-CimInstance Win32_Process` filtered on
+  `Name -match 'python'` and by `Get-Process -Name python*, py*`, which listed
+  **two** processes -- the venv's `python.exe`, parent 22632, and its child
+  `python3.12.exe` -- and by a filter on the command line. So the check sees a
+  bot of this tree; it saw none because none was running.
+- **The old clone's extra round trip before its stop.** Pid 3608, after
+  booking A2's stop at boot, opened BTCUSDT list 410028 (`06:57:03Z`) and
+  closed it (`07:00:03Z`, `realised=-0.991718400`), and stopped at
+  `07:14:06Z` by SIGINT. So the store P86 copied (`3B6EE9A3...5B40D`) held
+  ledger day 2026-10-02 at `-108.8296010000`, not the `-107.8378826000` the
+  P86 prompt expected. The new clone's store was loaded at P86 and read the
+  former.
+- **The old clone's directory** is now `d1074c646cf6.retired-20261002T072802Z`,
+  by the owner. P86 could not rename it: a Windows Terminal window opened with
+  `-d` on it held the directory open, and a directory a shell is inside cannot
+  be renamed (`M5l-173`). Its `.venv` had already been renamed to
+  `.venv.disabled`. At P87 the only directory under `F:\trading bot\deploy`
+  holding `.venv\Scripts\python.exe` is `5e22bc6a33ed`.
+
+### The tools' SHA-256, as read at P87
+
+| File | SHA-256 |
+|---|---|
+| `F:\trading bot\deploy\arm_tools\read_state.py` | `fd0548d4f57dabb1a2e5c855b29ae6c3e09cd69edaaf0284be4dd459b854bcd5` |
+| `F:\trading bot\deploy\arm_tools\preflight.py` | `b35992dc30ab461a51613a92f3387f7cb80baef41a4044ac10b30211cbdcad64` |
+| `F:\trading bot\deploy\arm_tools\A4_sheet.md` | `a587a43efdb1512ccdaab4e18d9b3e187c1c20f4e7ba413bd9c61dd7ae7fde4e` |
+| `F:\trading bot\deploy\arm_notes.txt` (10 lines) | `e31a74e657151b0465bcf1bae7665ef8ad48ba1bae7733ad6136f6170eb2e5d7` |
+
+`read_state.py` is the helper P84 wrote and P86 left unchanged.
+
+### The stop-loss fill that A2 booked (`M5l-170`)
+
+A2's booking line records a stop that filled far from its trigger. BTCUSDT list
+402643's stop was requested at `83214.72` (`order_placed` `stop_loss=83214.72`,
+pid 21844, `20:06:04Z`). It filled at `2026-10-02T05:25:58.122Z` in two fills,
+at `79800.00` and `79749.94` by the owner's account of the venue's fills, which
+are not in the log. The log's own figures are consistent with them:
+`quantity=0.02126000` and `quote_total=1695.60837380` give an average of
+79755.803, between the two, and the two prices fit a split of 0.00249 and
+0.01877 of the 0.02126.
+
+    stop 83214.72 against 79800.00      4.10% below the trigger
+    stop 83214.72 against 79749.94      4.16% below the trigger
+    stop 83214.72 against the average   4.16% below the trigger
+
+So the fill is **about 4.2% beyond the stop**. The loss booked is
+`-107.8378826000`; at the stop itself it would have been about `-36.1`
+(`0.02126 x (84912.97 - 83214.72)`, from the entry limit, which is the order's
+price and not its fill). **`STOP_LOSS` guarantees the exit and not the
+price**: it triggers a market order, which takes what the book gives.
+`CLAUDE.md` already says it of booking at the requested stop price -- *"a
+stop-market fills at whatever the book gives"* -- and this is that statement on
+a real fill, the largest loss recorded in this section. **It is marked for a QC
+review of the protective order type before live trading.** No type is chosen
+here.
+
+### What this section decides (P87)
+
+**Nothing beyond what the owner's ruling above states.** A1, A2 and A4 are
+recorded, each beside its instrument; the owner has ruled the P-3k gate
+satisfied; the fee-capture and base-asset-netting gates remain.

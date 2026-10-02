@@ -2163,6 +2163,26 @@ data.
   >    bot runs, which the tool refuses. The tool's lock covers the clone it is
   >    run from and no other (`M5l-155`).
 
+  > **ANNOTATED AT M5l P87 (C38): RETIRING A CLONE DISABLES ITS VENV, AND ONE
+  > RUNNABLE CLONE PER ACCOUNT IS VERIFIED, NOT ASSUMED.** Step 6's *"Only one
+  > deployment clone runs at a time on one account"* was held by whoever read
+  > it. From P86 it is checked. **Retiring a clone** means renaming its
+  > directory to `<clone>.retired-<UTC compact>` and renaming its `.venv` to
+  > `.venv.disabled`, so that no retired clone holds `.venv\Scripts\python.exe`.
+  > **The check (P86's H8):** after the new build exists, list the directories
+  > under `F:\trading bot\deploy` and confirm that none except the new build
+  > holds `.venv\Scripts\python.exe`; `Test-Path` on that path per directory is
+  > the instrument. And **before a clone is retired, no shell may be inside
+  > it**: at P86 a Windows Terminal window opened with `-d` on the old clone
+  > held its directory open and the rename failed (`M5l-173`); only the `.venv`
+  > rename, inside it, succeeded. **The "no bot is running" check** is
+  > `Get-CimInstance Win32_Process` filtered on `Name -match 'python'`, and it
+  > was tested at P87 against a venv interpreter under a path containing a
+  > space: it finds both the venv's `python.exe` and its child `python3.12.exe`
+  > (`M5l-171`). Run it immediately before reading a clone's files, not once at
+  > the start of a session. **What survives:** steps 1 to 9 and the C33
+  > additions above, unchanged.
+
 ---
 
 ## Quality gates — hard zero
