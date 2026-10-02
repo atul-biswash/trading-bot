@@ -2221,6 +2221,7 @@ async def live_system(
     # injected, and off it entirely for anything that only imports this module's
     # types.
     from trading_bot.data.market_data import BufferedMarketDataProvider
+    from trading_bot.data.watchdog import FeedWatchdog
     from trading_bot.exchange.binance_client import BinanceClient
 
     # THE OUTERMOST SCOPE, and BEFORE the client. A refused instance must never
@@ -2329,7 +2330,13 @@ async def live_system(
             settings, client=resolved_client, stream=stream
         )
         try:
-            engine = await TradingEngine.create(settings, provider=provider)
+            # P-3l: the feed watchdog reports a silent pair, a lagging loop and a
+            # slow handler chain. It is fed by the provider's chain observer and
+            # owned by the engine, which arms it after seeding and stops it with
+            # itself; nothing here reads what it logs.
+            watchdog = FeedWatchdog()
+            provider.observe_chain(watchdog.on_chain)
+            engine = await TradingEngine.create(settings, provider=provider, watchdog=watchdog)
             try:
                 risk = RiskManager(
                     config=settings.config.risk,

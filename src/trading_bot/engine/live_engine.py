@@ -51,6 +51,7 @@ from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from trading_bot.config.settings import Settings
+    from trading_bot.data.watchdog import FeedWatchdog
 
 _log = get_logger(__name__)
 
@@ -77,13 +78,17 @@ class TradingEngine:
         *,
         max_strategy_errors: int = _DEFAULT_MAX_STRATEGY_ERRORS,
         history_limit: int | None = None,
+        watchdog: FeedWatchdog | None = None,
     ) -> None:
         """Build an engine over an injected provider and per-pair strategies.
 
         ``strategies`` maps ``(symbol, timeframe)`` to the strategy that trades
         it; symbols are normalised to upper case to match the provider.
         ``history_limit``, when given, is only used to warn at startup that the
-        seeded history is too short for a strategy's warmup.
+        seeded history is too short for a strategy's warmup. ``watchdog``, when
+        given, is armed and started with the engine and stopped with it (P-3l):
+        the engine owns its lifecycle so it is torn down with the engine, and the
+        wiring that feeds it lives in the composition root.
         """
         if max_strategy_errors < 0:
             raise ValueError("max_strategy_errors must be >= 0")
@@ -95,6 +100,7 @@ class TradingEngine:
         }
         self._max_strategy_errors = max_strategy_errors
         self._history_limit = history_limit
+        self._watchdog = watchdog
 
         self._signal_handlers: list[SignalHandler] = []
         self._error_counts: dict[_Key, int] = {}
@@ -112,6 +118,7 @@ class TradingEngine:
         settings: Settings,
         *,
         provider: MarketDataProvider | None = None,
+        watchdog: FeedWatchdog | None = None,
     ) -> TradingEngine:
         """Build an engine and its market-data provider from :class:`Settings`.
 
@@ -146,6 +153,7 @@ class TradingEngine:
             strategies,
             max_strategy_errors=settings.config.engine.max_strategy_errors,
             history_limit=settings.config.data.history_limit,
+            watchdog=watchdog,
         )
 
     # -- registration -------------------------------------------------------
@@ -156,6 +164,11 @@ class TradingEngine:
         This is where risk management and execution attach in later phases.
         """
         self._signal_handlers.append(handler)
+
+    @property
+    def watchdog(self) -> FeedWatchdog | None:
+        """The feed watchdog this engine arms, starts and stops, if one was given."""
+        return self._watchdog
 
     @property
     def pairs(self) -> list[_Key]:
@@ -177,6 +190,11 @@ class TradingEngine:
         self._warn_on_insufficient_history()
         self._provider.on_candle(self._on_candle)
         await self._provider.start()
+        if self._watchdog is not None:
+            # Armed AFTER the provider's seeding, so boot time is not counted as
+            # silence, and started last so a boot that fails leaves no task behind.
+            self._watchdog.arm(self._strategies)
+            await self._watchdog.start()
         self._started = True
         _log.info(
             "Trading engine started: %s",
@@ -236,6 +254,8 @@ class TradingEngine:
         requested = self._stop_requested.is_set()
         self._started = False
         self._stop_requested.set()
+        if self._watchdog is not None:
+            await self._watchdog.stop()
         await self._provider.stop()
         _log.info(
             "Trading engine stopped",

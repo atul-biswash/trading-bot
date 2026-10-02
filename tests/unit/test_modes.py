@@ -18,6 +18,7 @@ proven to reach those branches.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
@@ -2157,6 +2158,38 @@ class TestBootAssembly:
             assert isinstance(system.intent_logger, IntentLogger)
             assert system.pairs.keys() == {SYMBOL}
             assert system.pairs[SYMBOL].timeframe == TIMEFRAME
+
+    async def test_the_root_wires_the_watchdog_to_the_provider_and_the_engine(
+        self, tmp_path: Path
+    ) -> None:
+        """P-3l: the engine owns a watchdog, arms it with the pairs, and a bar through
+        the provider reaches it -- so the chain observer is connected, not merely built.
+
+        The task starts with the engine and is gone when the root's teardown has run.
+        """
+        settings = write_settings(tmp_path)
+        stream = FakeStream()
+
+        async with live_system(settings, client=FakeRootClient(), stream=stream) as system:
+            watchdog = system.engine.watchdog
+            assert watchdog is not None
+            assert not watchdog.running
+            await system.engine.start()
+            assert watchdog.running
+            assert watchdog.watched == [(SYMBOL, TIMEFRAME)]
+            armed_at = watchdog.last_arrival(SYMBOL, TIMEFRAME)
+            assert armed_at is not None
+
+            # The monotonic clock ticks in ~15 ms steps on Windows, so a bar
+            # delivered at once would read as the same instant it was armed at.
+            await asyncio.sleep(0.05)
+            await stream.handlers[(SYMBOL, TIMEFRAME)](candle("100"))
+
+            arrived_at = watchdog.last_arrival(SYMBOL, TIMEFRAME)
+            assert arrived_at is not None
+            assert arrived_at > armed_at
+
+        assert not watchdog.running
 
     async def test_the_container_is_frozen(self, tmp_path: Path) -> None:
         settings = write_settings(tmp_path)

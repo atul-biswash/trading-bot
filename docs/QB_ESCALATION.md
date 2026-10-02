@@ -157,6 +157,20 @@ Three categories, not two. The distinction is **what can clear it**.
 > condition's category is decided by what can clear it. None of the three
 > additions is one of the five sites. Whether any should be numbered into this
 > table is a decision this annotation does not take.
+>
+> **ANNOTATED AT M5l P91 (C45): A FOURTH EMITTER NO ROW NAMES.** The feed
+> watchdog (`data/watchdog.py`, P-3l) logs `feed_silent_critical` at `CRITICAL`
+> when a pair has accepted no closed bar for five of its timeframes. It is
+> **Self-clearing**, by this document's rule that the category is what can
+> clear it: the next accepted bar ends the episode and logs `feed_resumed` at
+> `INFO` with the gap. It is built in the shape the Self-clearing paragraph
+> below prescribes, a distinct marker first (`feed_silent` at `WARNING`, 1.5
+> timeframes) and the `CRITICAL` after, once per episode. It is the log line
+> alone, with no halt flag, by the owner's ratification of that shape (`M5k-006`)
+> and the P91 ruling that reporting without repair is accepted for the outage.
+> It is not one of the five sites. **What survives:** the five sites and their
+> categories; the count of `_log.critical(` sites in the M5k annotation above is
+> a dated measurement and is left as it was.
 
 **Self-clearing (4).** The refusal frees the budget the reconciler needs, so the
 condition resolves on its own. Escalate at a *distinct* marker and promote to

@@ -269,6 +269,7 @@ def build_provider(
     buffer_size: int = 1000,
     owns_client: bool = False,
     journal: list[str] | None = None,
+    clock: Any = None,
 ) -> tuple[BufferedMarketDataProvider, FakeExchangeClient, FakeMarketDataStream]:
     """Assemble a provider over fakes. ``journal`` records the call order."""
     client = FakeExchangeClient(history, journal)
@@ -279,6 +280,7 @@ def build_provider(
         history_limit=history_limit,
         buffer_size=buffer_size,
         owns_client=owns_client,
+        **({} if clock is None else {"clock": clock}),
     )
     for symbol, timeframe in pairs:
         provider.track(symbol, timeframe)
@@ -966,3 +968,50 @@ def test_the_untracked_pair_still_raises_for_bars_since_gap() -> None:
     provider, _, _ = build_provider()
     with pytest.raises(DataError):
         provider.bars_since_gap("ETHUSDT", "1m")
+
+
+# --------------------------------------------------------------------------
+# P-3l: the chain observer the watchdog is fed by
+# --------------------------------------------------------------------------
+async def test_the_chain_observer_is_called_once_per_accepted_bar_with_the_chain_times() -> None:
+    """Started when the bar is accepted, finished when every subscriber has returned.
+
+    A stale bar is dropped before any subscriber runs, so it is not observed.
+    """
+    ticks = iter([10.0, 12.5, 70.0, 70.4])
+    provider, _, stream = build_provider(
+        {("BTCUSDT", "1m"): [rest_candle(0)]}, clock=lambda: next(ticks)
+    )
+    seen: list[tuple[int, float, float]] = []
+    provider.observe_chain(
+        lambda candle, start, end: seen.append((candle.timeframe == "1m", start, end))
+    )  # type: ignore[arg-type]
+    await provider.start()
+
+    await stream.emit("BTCUSDT", "1m", ws_candle(1))
+    await stream.emit("BTCUSDT", "1m", ws_candle(0))  # stale: dropped
+    await stream.emit("BTCUSDT", "1m", ws_candle(2))
+
+    assert seen == [(True, 10.0, 12.5), (True, 70.0, 70.4)]
+
+
+async def test_a_failing_chain_observer_does_not_stop_the_feed(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An observer reports and never decides: its failure is logged and the bar stands."""
+    provider, _, stream = build_provider({("BTCUSDT", "1m"): [rest_candle(0)]})
+
+    def boom(*_args: object) -> None:
+        raise RuntimeError("observer exploded")
+
+    later: list[int] = []
+    provider.observe_chain(boom)
+    provider.observe_chain(lambda *_args: later.append(1))
+    await provider.start()
+
+    with caplog.at_level(logging.ERROR, logger=_PROVIDER_LOGGER):
+        await stream.emit("BTCUSDT", "1m", ws_candle(1))
+
+    assert provider.candle_count("BTCUSDT", "1m") == 2
+    assert later == [1]
+    assert any("Chain observer failed" in r.getMessage() for r in caplog.records)

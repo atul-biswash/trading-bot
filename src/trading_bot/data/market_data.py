@@ -57,8 +57,9 @@ methods directly.
 
 from __future__ import annotations
 
+import time
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Final
@@ -175,6 +176,7 @@ class BufferedMarketDataProvider(MarketDataProvider):
         history_limit: int = _DEFAULT_HISTORY_LIMIT,
         buffer_size: int = _DEFAULT_BUFFER_SIZE,
         owns_client: bool = False,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         """Build a provider over injected ports.
 
@@ -202,6 +204,11 @@ class BufferedMarketDataProvider(MarketDataProvider):
         # accepted append. See get_dataframe() for why this is worth caching.
         self._frames: dict[_Key, pd.DataFrame] = {}
         self._handlers: list[CandleHandler] = []
+        # Observers of each accepted bar's handler chain, and the monotonic clock
+        # that times it. Injected so the watchdog's thresholds are tested without
+        # real time. An observer reports and never decides.
+        self._clock = clock
+        self._chain_observers: list[Callable[[Candle, float, float], None]] = []
         self._started = False
         # **A SECOND FLAG, and `_started` deliberately cannot serve.** Teardown
         # releases resources this object holds from CONSTRUCTION -- the stream's
@@ -288,6 +295,17 @@ class BufferedMarketDataProvider(MarketDataProvider):
         other (see :meth:`_notify`).
         """
         self._handlers.append(handler)
+
+    def observe_chain(self, observer: Callable[[Candle, float, float], None]) -> None:
+        """Register ``observer(candle, started_at, finished_at)``, called once per accepted bar.
+
+        ``started_at`` is the instant the bar was accepted and its handler chain
+        began, ``finished_at`` the instant every subscriber returned, both read
+        from the provider's monotonic clock. Called AFTER the chain, and isolated
+        like the chain itself: an observer that raises is logged and cannot stop
+        the feed. This is the watchdog's one input from the data path.
+        """
+        self._chain_observers.append(observer)
 
     @property
     def tracked_pairs(self) -> list[_Key]:
@@ -532,7 +550,14 @@ class BufferedMarketDataProvider(MarketDataProvider):
                     candle.open_time,
                 )
                 return
+            started_at = self._clock()
             await self._notify(candle)
+            finished_at = self._clock()
+            for observer in self._chain_observers:
+                try:
+                    observer(candle, started_at, finished_at)
+                except Exception:
+                    _log.exception("Chain observer failed for %s/%s; continuing", key[0], key[1])
 
         return handler
 

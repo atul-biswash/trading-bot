@@ -1236,6 +1236,33 @@ What the outage also cost, measured at P65 and recorded in
 > `_check_dispatch_budget_fits_the_bar`, annotating C16's refusal text, and are
 > REAFFIRMED: no term, budget or refusal in the block moved. The conditions
 > naming the reconciliation trigger and `_run` are not fired by C44.
+>
+> **ANNOTATED AT M5l P91 (C45): THE HEARTBEAT, THE LAG MONITOR AND THE SLOW-CHAIN
+> LINE ARE BUILT, AND *"no line reported it"* IS NO LONGER TRUE OF THE TREE.**
+> `FeedWatchdog` (`data/watchdog.py`) is armed, started and stopped by the
+> engine and fed by the provider's chain observer, which `live_system` wires.
+> **Per pair:** `feed_silent` at `WARNING` after 1.5 timeframes with no accepted
+> bar, `feed_silent_critical` at `CRITICAL` after 5, once per episode, and
+> `feed_resumed` at `INFO` with the gap when a bar ends it. **Event-loop lag:**
+> `event_loop_lagging` at `WARNING` when a one-second tick wakes more than 5 s
+> late, with `event_loop_recovered`. **Slow chain:** `handler_chain_slow` at
+> `WARNING` when one candle's subscribers take more than half the bar, with
+> `handler_chain_recovered`. It reports and nothing else: no halt, no
+> reconnect, no refusal. **Its purpose in `M5l-198`:** the lag and slow-chain
+> lines are the measurement of the 229 s stall that the capture could not
+> supply, so the next occurrence names what held the consumer. A loop blocked
+> outright cannot run the watchdog and is reported when it resumes. **What
+> survives:** reconciliation still stops with the candles; the line says so at
+> `CRITICAL` and does not restart it.
+>
+> **ARMING AUDIT AT C45.** P-3l's *"…`provider.on_candle` in `live_system` in
+> `engine/modes.py` -- or the market-data reconnect path, `_run` in
+> `exchange/websocket_client.py`"* names `live_system`, which C45 edits to wire
+> the observer and the watchdog; it is REAFFIRMED, because what triggers a
+> reconciliation pass is unchanged (the driver is still registered by
+> `provider.on_candle`) and `_run` is untouched until C46. The P-3k boot-
+> reconciliation condition names `live_system` only as where the snapshots run
+> and is not fired.
 
 #### P-3m. A call-cap deferral logs nothing (`M5l-075`)
 
