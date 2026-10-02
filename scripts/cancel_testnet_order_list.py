@@ -24,6 +24,13 @@ which unlocks the base. Free base is no longer dust, so
 
 This script performs the first step only. It prints the next one and stops.
 
+(ANNOTATED AT M5l P85, C36: **THE FORCED SEQUENCE ABOVE HAS BEEN STALE SINCE
+C32b-2.** Since P-3k a position the bot recorded is restored at the next boot
+and sold on its first candle by R3, so "sell, then boot" is the sequence only for
+a holding with NO record. The printed warning says so from C36. What survives:
+cancelling alone still frees the base, and this script still performs the first
+step only.)
+
 **TESTNET ONLY, and by construction rather than by flag.** Three layers, the
 same three ``clear_testnet_holdings.py`` carries and for the same reasons:
 
@@ -422,8 +429,11 @@ def _print_consequence(symbol: str, exposure: Exposure) -> None:
         print(
             f"    WARNING: the working leg has executed {format_decimal(exposure.executed)} "
             f"{base}. Cancelling removes the resting protection, leaving that {base} "
-            "UNPROTECTED and FREE -- which is no longer dust, so it will block this symbol "
-            "under UNMANAGED_HOLDING at the next boot. Sell it before booting the bot."
+            "UNPROTECTED and FREE. The next boot restores the position from its record "
+            "and sells it on its first candle (R3), unless its record is released first "
+            "with scripts/release_position.py. A holding with no record is not restored: "
+            "it blocks this symbol under UNMANAGED_HOLDING, and is sold with "
+            "clear_testnet_holdings.py."
         )
         return
     print(

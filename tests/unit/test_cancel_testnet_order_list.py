@@ -423,6 +423,25 @@ class TestCancelOne:
         assert "0.02310000" in out
         assert "UNMANAGED_HOLDING" in out
 
+    async def test_a_filled_working_leg_names_the_restore_and_the_release_tool(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Catches the pre-P-3k remedy returning: *"Sell it before booting the bot"*.
+
+        That text was stale from C32b-2: a recorded position is restored at the
+        next boot and sold on its first candle (R3), and an operator who sold it
+        by hand first is the one who must release its record. It is asserted by
+        what it says -- R3, the release tool -- and by the old instruction being
+        absent, and each is checked against the whole output.
+        """
+        client = _FakeClient(legs=_legs(working_status="FILLED", working_executed="0.02310000"))
+        await canceller._cancel_one(client, _VENUE_LIST_ID, execute=False)
+        out = capsys.readouterr().out
+        assert "restores the position" in out
+        assert "first candle (R3)" in out
+        assert "scripts/release_position.py" in out
+        assert "Sell it before booting" not in out
+
     async def test_an_unfilled_working_leg_says_nothing_is_left_behind(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
