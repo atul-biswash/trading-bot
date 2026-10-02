@@ -644,6 +644,39 @@ in `src/` tracks request weight. MEASURED.
 
 *Arming condition:* **whoever next edits `ReconciliationBudget` in `execution/reconciliation_driver.py`.**
 
+> **PARTLY RESOLVED AT M5l P89 (C43): THE CALL COUNT IS NOW REPORTED, THE
+> REQUEST WEIGHT IS NOT, AND THE ARMING CONDITION FIRED AND IS DISCHARGED FOR
+> THE COUNT.** *"A phase may make up to `max_calls` plus one call per bookable
+> exit"* stays true: settlement is still outside `max_calls`, and nothing
+> changed its budget. What changed is that it is said. A phase that made a
+> settlement fetch logs `reconciliation_phase_calls` at `INFO` with
+> `pass_calls`, `point_queries`, `settlements` and `max_calls`, so the overrun
+> is their sum against the cap. `point_queries` is derived from the legs the
+> resolver left unresolved (the pass line's `queries` field is the remainder, not
+> work, `M5g-085`) and is absent when the resolver failed. This is ACCOUNTING
+> and LOGGING; no budget semantics moved, so H6 did not fire for the count.
+>
+> **WHAT STAYS OPEN: *"nothing in `src/` tracks request weight"* is still
+> true, and it is not closable by logging.** The port returns no response
+> headers, so a call is counted and never weighed, and a per-endpoint weight
+> table would be the venue's documentation and not a measurement. Counting
+> weight needs the port to carry what the venue reports, which is new
+> semantics and the owner's. Nothing here weighs a call.
+>
+> **ARMING AUDIT AT C43, by content.** C43 edits `ReconciliationDriver.__call__`,
+> `_book_exits` and the `ReconciliationBudget.max_calls` comment. Fired and
+> REAFFIRMED, each unaffected because the edit is a counter and a log: P-3a's
+> *"the Q branch of `_book_exits`"* (the counter is incremented there, and the
+> branch's logic is unchanged); the A5 evidence-gap item's *"`_book_exits` or
+> `_refine`"*; `M5i-065`'s *"the orphan guard or its caller in `_book_exits`"*
+> (the guard is untouched); and the trigger item's
+> *"`ReconciliationDriver.__call__`"* (what triggers a pass is unchanged).
+> Not fired: P-3b's, which names `_settle`, not edited. Reported, not made
+> false by C43: the A5 item's *"`exit_unbookable` occurs zero times: the
+> escalation has never run"* is false of the 2026-10-01/02 supervised run, which
+> logged it on passes of both of A4's runs, the failed one and the one that
+> passed (`docs/RUN_LEDGER.md` section 25).
+
 #### P-3j. No end-to-end test drives a hold to stale (`M5k-090`'s limit)
 
 The staleness rows call `hold_settlement()` on a hand-built position. Nothing

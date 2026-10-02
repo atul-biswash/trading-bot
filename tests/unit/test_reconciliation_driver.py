@@ -1415,6 +1415,152 @@ async def test_a_position_that_is_not_the_portfolios_own_refuses_loudly(
 
 
 # --------------------------------------------------------------------------
+# P-3i: the calls one phase spent, including settlement outside `max_calls`
+# --------------------------------------------------------------------------
+def _phase_calls_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """The accounting line, selected by logger name and event and never by position."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == "trading_bot.execution.reconciliation_driver"
+        and vars(record).get("event") == "reconciliation_phase_calls"
+    ]
+
+
+def _booking_and_a_resolving_position() -> tuple[Portfolio, _StubClient]:
+    """BTC: a filled stop in the book, so it BOOKS (one settlement fetch). ETH: its
+    stop absent from the book, so the pass reserves one leg and the resolver
+    makes one point query. Pass 2 + point query 1 + settlement 1 = 4 calls."""
+    eth_sl = client_order_id("ETHUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")], "ETHUSDT": []},
+        orders={eth_sl: _order("ETHUSDT", OrderListLeg.STOP_LOSS)},
+        trades={"777": [_trade()]},
+    )
+    return _portfolio(_booking_position(), _position("ETHUSDT")), client
+
+
+async def test_a_phase_that_settles_reports_its_calls_beyond_the_cap(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The overrun P-3i names, made visible: with a cap of 3, one phase made 2
+    enumerations, 1 point query and 1 settlement fetch -- 4 calls.
+
+    MUTATION: do not count the settlement at the branch this booking takes --
+    `settlements` is 0, no line is emitted, and this fails.
+    """
+    portfolio, client = _booking_and_a_resolving_position()
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert client.settled == ["777"]
+    lines = _phase_calls_lines(caplog)
+    assert len(lines) == 1
+    fields = vars(lines[0])
+    assert fields.get("pass_calls") == 2
+    assert fields.get("point_queries") == 1
+    assert fields.get("settlements") == 1
+    assert fields.get("max_calls") == BUDGET.max_calls == 3
+
+
+async def test_the_point_queries_are_the_ones_made_not_the_headroom(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A cap of 4 leaves a REMAINDER of 2 point queries, and one was made.
+
+    The pass line's `queries` field carries the remainder (`M5g-085`), so a line
+    that copied it would read 2 here. It reads 1, derived from the legs the
+    resolver actually left behind.
+
+    MUTATION: `point_queries = remainder` -- 2, and this fails.
+    """
+    portfolio, client = _booking_and_a_resolving_position()
+    budget = ReconciliationBudget(
+        dedup_interval=timedelta(minutes=1), max_calls=4, timeout_s=3.0, attempts=1
+    )
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, budget=budget, persist_ledger=_RecordingWriter())(
+            _candle()
+        )
+
+    lines = _phase_calls_lines(caplog)
+    assert len(lines) == 1
+    assert vars(lines[0]).get("point_queries") == 1
+    summaries = [r for r in caplog.records if vars(r).get("event") == "reconciliation_pass"]
+    assert len(summaries) == 1
+    assert vars(summaries[0]).get("queries") == 2
+
+
+async def test_an_unpriced_exit_that_settles_is_counted_too(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The venue gave no quote total, so the one settlement fetch ALSO supplies it
+    (3b-2b): a second branch of `_book_exits` reaches `_settle`, and it is
+    counted like the first.
+
+    MUTATION: do not count at this branch -- `settlements` is 0, no line is
+    emitted, and this fails. Without this test that mutation killed nothing.
+    """
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=None)]},
+        trades={"777": [_trade()]},
+    )
+
+    with caplog.at_level(logging.INFO):
+        await _driver(_portfolio(_booking_position()), client, persist_ledger=_RecordingWriter())(
+            _candle()
+        )
+
+    assert client.settled == ["777"]
+    lines = _phase_calls_lines(caplog)
+    assert len(lines) == 1
+    assert vars(lines[0]).get("settlements") == 1
+    assert vars(lines[0]).get("pass_calls") == 1
+    assert vars(lines[0]).get("point_queries") == 0
+
+
+async def test_a_failed_resolver_leaves_the_point_query_count_absent(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The resolver raises (ETH's leg was never configured on the stub), so how
+    many queries it made is unknown. The key is ABSENT, never `null` and never a
+    guess; the booking still happened, so the line is still emitted."""
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")], "ETHUSDT": []}, trades={"777": [_trade()]}
+    )
+    portfolio = _portfolio(_booking_position(), _position("ETHUSDT"))
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    lines = _phase_calls_lines(caplog)
+    assert len(lines) == 1
+    assert "point_queries" not in vars(lines[0])
+    assert vars(lines[0]).get("settlements") == 1
+    assert vars(lines[0]).get("pass_calls") == 2
+
+
+async def test_a_phase_with_no_settlement_logs_no_calls_line(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The line is for the overrun and fires only when settlement made a call; a
+    quiet pass with a resting leg must not emit one every bar.
+
+    ABSTAINS under the mutation that leaves a settlement uncounted, by design;
+    it holds the other direction. MUTATION: emit whenever the phase booked or
+    not -- this fails.
+    """
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+
+    with caplog.at_level(logging.INFO):
+        await _driver(_portfolio(_position("BTCUSDT")), client)(_candle())
+
+    assert _phase_calls_lines(caplog) == []
+
+
+# --------------------------------------------------------------------------
 # Settlement: one fetch per bookable exit, net of the fee, and what a failure does
 # --------------------------------------------------------------------------
 _ZERO_USDT = Fee(amount=Decimal("0.00000000"), asset="USDT")

@@ -120,6 +120,9 @@ _EVENT_EXIT_UNBOOKABLE = "exit_unbookable"
 #: A bookable exit whose settlement could not be read or used this pass. The
 #: position is KEPT and the next pass retries; WARNING, like a refusal.
 _EVENT_SETTLEMENT_DEFERRED = "exit_settlement_deferred"
+#: P-3i: the calls one phase spent, said once when settlement made any, because
+#: a settlement fetch runs outside ``max_calls`` and nothing else reports it.
+_EVENT_PHASE_CALLS = "reconciliation_phase_calls"
 
 #: What each refusal MEANS HERE, appended to the fact `classify_bookability`
 #: states. `M5i-068`: the fact is shared and the consequence is not. The
@@ -145,6 +148,12 @@ _BOOK_REFUSAL_CONSEQUENCE: Final[dict[BookabilityOutcome, str]] = {
 _PHASE_PASS = "reconciliation_pass"
 _PHASE_RESOLUTION = "leg_resolution"
 _PHASE_BOOKING = "exit_booking"
+
+
+def _unresolved_legs(results: Sequence[tuple[Position, ProtectionAssessment]]) -> int:
+    """How many protective legs the assessments still carry as unresolved."""
+    return sum(len(assessment.unresolved) for _position, assessment in results)
+
 
 #: A clock, injected. Shaped exactly like ``risk.manager.Clock`` and
 #: deliberately NOT imported from there: ``execution/`` taking a dependency on
@@ -194,6 +203,13 @@ class ReconciliationBudget:
     #: the coherence validator's third term reserves its time instead. So "the
     #: whole phase" above is the pass, the point queries AND settlement, and
     #: this field bounds only the first two.
+    #:
+    #: (ANNOTATED AT M5l P89, C43, P-3i: settlement is still outside this count,
+    #: but it is no longer unreported. A phase that made a settlement fetch logs
+    #: ``reconciliation_phase_calls`` with ``pass_calls``, ``point_queries``,
+    #: ``settlements`` and this field, so the overrun is the sum against it.
+    #: What survives: nothing bounds the count of settlements but the coherence
+    #: check's time term, and request weight is not tracked.)
     max_calls: int
     #: Bound on ONE call, in seconds.
     timeout_s: float
@@ -351,6 +367,7 @@ class ReconciliationDriver:
         # Sound only because the pass makes exactly one call per returned
         # assessment, which its own tests pin.
         remainder = self._budget.max_calls - len(assessments)
+        point_queries: int | None
         try:
             reported: Sequence[
                 tuple[Position, ProtectionAssessment]
@@ -362,9 +379,17 @@ class ReconciliationDriver:
                 timeout_s=self._budget.timeout_s,
                 attempts=self._budget.attempts,
             )
+            # Every leg the resolver queried leaves `unresolved`, and every leg
+            # it did not reach is carried back, so the difference IS the number
+            # of point queries made. Derived rather than counted, because the
+            # resolver returns assessments and not a tally, and a figure read
+            # off the budget (`remainder`) is headroom, not work (`M5g-085`).
+            point_queries = _unresolved_legs(assessments) - _unresolved_legs(reported)
         except Exception as exc:  # the driver must never raise; see the docstring
             self._log_phase_failure(_PHASE_RESOLUTION, candle, exc)
             reported = assessments
+            # Unknown: the resolver may have made some queries before it raised.
+            point_queries = None
 
         self._report(reported, queries=remainder)
 
@@ -383,9 +408,16 @@ class ReconciliationDriver:
         # saw a filled stop genuinely did see untrusted protection; the warning
         # is true, and the booking line that follows says what was done about it.
         try:
-            await self._book_exits(reported, now=now)
+            settlements = await self._book_exits(reported, now=now)
         except Exception as exc:  # the driver must never raise; see the docstring
             self._log_phase_failure(_PHASE_BOOKING, candle, exc)
+        else:
+            if settlements:
+                self._log_phase_calls(
+                    pass_calls=len(assessments),
+                    point_queries=point_queries,
+                    settlements=settlements,
+                )
 
     def _report(
         self,
@@ -449,13 +481,50 @@ class ReconciliationDriver:
             },
         )
 
+    def _log_phase_calls(
+        self, *, pass_calls: int, point_queries: int | None, settlements: int
+    ) -> None:
+        """One line for a phase that made settlement calls, which ``max_calls`` does not count.
+
+        **P-3i (``M5k-060``).** ``max_calls`` bounds the enumeration and the point
+        queries, and a settlement fetch runs outside it, so one phase may make up
+        to ``max_calls`` plus one call per bookable exit. The coherence check's
+        third term reserves the TIME for that; this makes the COUNT visible: the
+        three figures are the three phases, and their sum against ``max_calls`` is
+        the overrun. Emitted only when settlement made a call, because a phase
+        with none cannot exceed the cap and this fires per bar otherwise.
+
+        ``point_queries`` is ABSENT, not null, when the resolver failed and the
+        count is unknown. **Request weight is NOT tracked here**: the port returns
+        no response headers, so a call is counted and never weighed, and that half
+        of P-3i stays open.
+        """
+        fields: dict[str, object] = {
+            "event": _EVENT_PHASE_CALLS,
+            "pass_calls": pass_calls,
+            "settlements": settlements,
+            "max_calls": self._budget.max_calls,
+        }
+        if point_queries is not None:
+            fields["point_queries"] = point_queries
+        _log.info(
+            "Reconciliation phase made %d settlement call(s) outside its call cap",
+            settlements,
+            extra=fields,
+        )
+
     async def _book_exits(
         self,
         results: Sequence[tuple[Position, ProtectionAssessment]],
         *,
         now: datetime,
-    ) -> None:
+    ) -> int:
         """Book every COMPLETE protective fill this pass saw, then save once.
+
+        **Returns the number of settlement fetches it MADE** -- the
+        ``get_my_trades`` calls, one per ``_settle`` -- so the caller can say how
+        many calls the phase spent outside ``max_calls`` (P-3i). It returns
+        nothing if it raises, and the caller logs the phase failure instead.
 
         **THE DRIVER BOOKS, AND NEITHER CLASSIFIER DOES.** ``classify_protection``
         and ``_refine`` are pure functions over what the venue reported: they
@@ -562,6 +631,7 @@ class ReconciliationDriver:
         the orphan guard's ``raise`` used to prevent.
         """
         booked = 0
+        settlements = 0
         try:
             for position, assessment in results:
                 fill = assessment.exit_fill
@@ -602,6 +672,7 @@ class ReconciliationDriver:
                     # this is the ONE call a missing total may spend -- the same
                     # settlement fetch a priced exit makes. `_settle` reports its
                     # own failure (deferred, incomplete or HELD) and returns None.
+                    settlements += 1
                     settlement = await self._settle(position.symbol, fill)
                     if settlement is None:
                         continue
@@ -629,6 +700,7 @@ class ReconciliationDriver:
                     )
                     continue
                 else:
+                    settlements += 1
                     settlement = await self._settle(position.symbol, fill)
                     if settlement is None:
                         continue
@@ -659,6 +731,7 @@ class ReconciliationDriver:
                 )
         finally:
             self._persist_booked(booked)
+        return settlements
 
     async def _settle(self, symbol: str, fill: ExitFill) -> ExitSettlement | None:
         """The exit's fills, settled -- or ``None``, having said why. Never raises those.
