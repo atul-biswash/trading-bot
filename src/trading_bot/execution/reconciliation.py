@@ -33,6 +33,7 @@ do about a verdict, only what the verdict is.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -52,6 +53,8 @@ from trading_bot.exchange.ids import (
     parse_client_order_id,
 )
 
+_log = logging.getLogger(__name__)
+
 __all__ = [
     "ExitFill",
     "ProtectionAssessment",
@@ -60,6 +63,10 @@ __all__ = [
     "reconcile_open_positions",
     "resolve_unresolved_legs",
 ]
+
+#: P-3m's deferral line: one per due position the per-pass call cap left unread.
+_EVENT_DEFERRED = "reconciliation_deferred"
+_DEFERRED_REASON_CALL_CAP = "call_cap"
 
 #: The generation every position is reconciled at, because there is nowhere to
 #: read one from: ``Position`` carries no generation field and nothing in
@@ -502,6 +509,14 @@ async def reconcile_open_positions(
     refusal is owed one. Nothing is logged here -- the driver decides what is
     worth saying.
 
+    (ANNOTATED AT M5l P89, C42, P-3m: *"Nothing is logged here"* is no longer
+    true of ONE line. A due position the call cap leaves unread is logged at
+    ``INFO`` as ``reconciliation_deferred``, with ``symbol``, ``reason`` =
+    ``call_cap``, ``calls_used`` and ``max_calls``, one line per deferred
+    position, because the driver sees only what is returned and a deferred
+    position is not in it. What survives: every verdict, and what to say
+    about it, is still the driver's.)
+
     ``now`` is WALL CLOCK. Candle time cannot be used: staleness must count
     every bar that never arrived because the feed dropped, and a bar that never
     arrived contributes no timestamp, so a candle clock freezes exactly during
@@ -631,7 +646,7 @@ async def reconcile_open_positions(
 
     results: list[tuple[Position, ProtectionAssessment]] = []
     reserved = 0
-    for position in due:
+    for index, position in enumerate(due):
         # ONE condition, not two branches. With `reserved` at zero this IS the
         # plain cap; with `reserved` at L it IS the reservation. The earlier
         # form was a disjunction because the reserved quantity was fixed at
@@ -643,6 +658,22 @@ async def reconcile_open_positions(
         # `len(results) <= max_calls - reserved`, so the remainder the caller
         # derives is at least `reserved`. Total stays at or under `max_calls`.
         if len(results) + reserved >= max_calls:
+            # P-3m: every due position the cap leaves unread is SAID, one line
+            # each, so a deferral no longer looks like a pass over fewer
+            # positions. Logged here, where the cap is, because the driver sees
+            # only what was returned and a deferred position is not in it.
+            for deferred in due[index:]:
+                _log.info(
+                    "Reconciliation of %s deferred: the call cap is spent",
+                    deferred.symbol,
+                    extra={
+                        "event": _EVENT_DEFERRED,
+                        "symbol": deferred.symbol,
+                        "reason": _DEFERRED_REASON_CALL_CAP,
+                        "calls_used": len(results),
+                        "max_calls": max_calls,
+                    },
+                )
             break
         orders = await client.get_own_open_orders(
             position.symbol, timeout_s=timeout_s, attempts=attempts

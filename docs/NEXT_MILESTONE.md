@@ -492,7 +492,10 @@ validator, and an edit there arms both items.
 > - P-3l, where a feed gap is still unreported.
 >
 > (ANNOTATED AT M5l P89, C41: P-3o's bullet is no longer true; its item is
-> RESOLVED, the cap being `max(max_open_positions, L + 1)`.)
+> RESOLVED, the cap being `max(max_open_positions, L + 1)`. And C42: P-3m's
+> bullet, *"where a deferral still logs nothing"*, is no longer true of the
+> log; a deferral is logged as `reconciliation_deferred`, and the starvation
+> and churn shapes it names stay open.)
 >
 > Each keeps its own item and arming condition.
 
@@ -1207,6 +1210,25 @@ would be a staleness refusal.
 > untrusted position, not the deferral.
 
 *Arming condition:* **whoever next edits the call cap in `reconcile_open_positions` in `execution/reconciliation.py`, or `_report` in `execution/reconciliation_driver.py`.**
+
+> **PARTLY RESOLVED AT M5l P89 (C42): *"A call-cap deferral logs nothing"* IS NO
+> LONGER TRUE, AND THE ARMING CONDITION ABOVE FIRED AND IS DISCHARGED FOR THE
+> LOG.** At the break in `reconcile_open_positions`, every due position the
+> cap leaves unread is logged at `INFO` as `reconciliation_deferred`, one line
+> each, with `symbol`, `reason=call_cap`, `calls_used` and `max_calls`. So a
+> pass that read one of two due positions no longer reads like a pass with one
+> position, and a capture can count deferrals. Pinned by
+> `test_a_call_cap_deferral_is_logged_with_the_calls_used`, three positions
+> with the middle one diverged, whose third is the one logged.
+>
+> **WHAT STAYS OPEN, logged rather than fixed:** the **starvation** shape
+> (`M5l-085`, `M5l-086`) and the **churn** shape (`M5l-088`, `M5l-089`) from
+> the P71 addition above. Both now leave this line, and the deferral is no
+> longer visible only as a `position_stale` refusal; neither is prevented. The
+> first of the starvation cases, a neighbour's failing point queries at
+> `max_calls = 3`, is not closed by the cap's decoupling at C41 either. **What
+> survives:** the item, for those two shapes, and the arming condition for
+> `_report`.
 
 #### P-3n. Is the confirm-step question ruled? (`M5l-077`) -- FOR THE OWNER
 

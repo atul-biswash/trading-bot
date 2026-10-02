@@ -12,6 +12,7 @@ No network and no clock: the client is a stub recording what it was asked, and
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
@@ -502,6 +503,84 @@ async def test_the_pass_stops_at_max_calls() -> None:
 
     assert client.asked == ["BTCUSDT", "ETHUSDT"]
     assert len(results) == 2
+
+
+def _deferral_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """The deferral lines, selected by LOGGER NAME and event and never by position."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == "trading_bot.execution.reconciliation"
+        and vars(record).get("event") == "reconciliation_deferred"
+    ]
+
+
+async def test_a_call_cap_deferral_is_logged_with_the_calls_used(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """P-3m: three due positions, the middle one diverged, so the cap stops the pass
+    before the third and the third is SAID to be deferred.
+
+    Oldest first the order is ETH (read, call 1), BTC (diverged with two legs,
+    read, call 2, which reserves 2) and SOL; `2 + 2 >= 3` breaks before SOL.
+    Before this line, `positions=2` read exactly like a pass with two
+    positions, and the only trace of a deferral was a later staleness refusal
+    (`M5l-075`).
+
+    MUTATION: remove the log -- no line, and this fails on the count.
+    """
+    older = NOW - timedelta(minutes=30)
+    positions = [
+        _position("ETHUSDT", stamp=older),
+        _position("BTCUSDT", stamp=older + timedelta(minutes=1), take_profit=TAKE),
+        _position("SOLUSDT", stamp=older + timedelta(minutes=2)),
+    ]
+    books = _resting("ETHUSDT", "SOLUSDT")
+    books["BTCUSDT"] = []
+
+    with caplog.at_level(logging.INFO, logger="trading_bot.execution.reconciliation"):
+        results = await reconcile_open_positions(
+            portfolio=_portfolio(*positions),
+            client=_StubClient(books),
+            now=NOW,
+            dedup_interval=DEDUP,
+            max_calls=3,
+            timeout_s=None,
+            attempts=None,
+        )
+
+    assert [position.symbol for position, _a in results] == ["ETHUSDT", "BTCUSDT"]
+    lines = _deferral_lines(caplog)
+    assert len(lines) == 1
+    fields = vars(lines[0])
+    assert fields.get("symbol") == "SOLUSDT"
+    assert fields.get("reason") == "call_cap"
+    assert fields.get("calls_used") == 2
+    assert fields.get("max_calls") == 3
+
+
+async def test_a_pass_that_reads_every_due_position_logs_no_deferral(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The line is a deferral and nothing else: three positions, a cap of three,
+    nothing unresolved, every one read. ABSTAINS under the mutation that removes
+    the log, by design -- it holds the other direction, a line logged on a pass
+    that deferred nothing."""
+    positions = [_position(symbol, stamp=None) for symbol in ("BTCUSDT", "ETHUSDT", "SOLUSDT")]
+
+    with caplog.at_level(logging.INFO, logger="trading_bot.execution.reconciliation"):
+        results = await reconcile_open_positions(
+            portfolio=_portfolio(*positions),
+            client=_StubClient(_resting("BTCUSDT", "ETHUSDT", "SOLUSDT")),
+            now=NOW,
+            dedup_interval=DEDUP,
+            max_calls=3,
+            timeout_s=None,
+            attempts=None,
+        )
+
+    assert len(results) == 3
+    assert _deferral_lines(caplog) == []
 
 
 async def test_the_pass_reserves_its_last_call_once_a_leg_is_unresolved() -> None:
