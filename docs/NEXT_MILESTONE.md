@@ -1076,6 +1076,12 @@ deployment procedure gains the active-clone store source, the schema step
 with the expected lines. **P-3k is IMPLEMENTED (C28-C34)**, and its gate is
 open only to A1, A2 and A4 recorded in section 24.
 
+> **ANNOTATED AT M5l P88 (C39): *"its gate is open only to A1, A2 and A4
+> recorded in section 24"* IS NO LONGER TRUE, AND WAS SUPERSEDED AT P87.** The
+> arms are recorded in section 25, not 24, which stays the template (`M5l-175`,
+> resolved here), and the gate is closed by the owner's ruling, quoted verbatim
+> at P-3k's head. **What survives:** section 24 as the arms' expected lines.
+
 **ADDED AT M5l P85 (C35-C37), the supervised run's first results.** The
 run started at `d1074c6` and is recorded in `docs/RUN_LEDGER.md` section 25.
 **A1 passed** (`M5l-165`: both records restored, `free_quote` reconciled to the
@@ -1475,6 +1481,19 @@ this tree holds is `0.00000000`, including the six fills of M5l's evidence
 run, so no Testnet run can meet it as worded.
 
 *Arming condition:* **whoever next edits `refuse_live_trading` in `config/settings.py`, or rules on N6's first precondition.**
+
+### U10. OWNER ITEM: QC review of the protective order type before live trading -- added at M5l (P88)
+
+QC review of the protective order type before live trading: `STOP_LOSS`
+guarantees the exit, not the price; measured 4.2% beyond the stop on Testnet
+(P87's finding, `M5l-170`, `docs/RUN_LEDGER.md` section 25): a stop at
+83214.72 filled at 79800.00 and 79749.94. Q-C section 3 fixed the leg types
+(`STOP_LOSS`, `TAKE_PROFIT`, a `LIMIT`+`FOK` working leg); whether a
+`STOP_LOSS_LIMIT` or another type bounds the price, and what it costs in
+exits that do not fill, is the review's question and is not decided here. Not a
+gate by the owner's P87 ruling: marked for review before live trading.
+
+*Arming condition:* **whoever next edits `build_placement` in `execution/placement.py`, which fixes the protective leg types, or rules on N6's preconditions.**
 
 ### U8. The harness: refuse, or report? — `M5i-096`
 
@@ -2018,6 +2037,16 @@ at boot, or held (Q5(b)), and the close record is removed, so no restored
 close enters the count. The count is still in memory only and resets at a
 restart. A close with no position record beside it is still released on its
 first candle."* The other S6 rows are unchanged.
+
+**A PROMPT'S FILE LIST DOES NOT NARROW THE STANDING AUTHORITY, ruled by the
+project owner at M5l P88 and recorded in C39, verbatim:**
+
+> "A prompt's list of files to write never narrows the standing authority."
+
+It was needed at P87, whose prompt named three files to write while the
+annotation authority covers README.md as well: the README text P87's ruling
+made false was reported (`M5l-175`) rather than annotated, and C39 annotates
+it.
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 

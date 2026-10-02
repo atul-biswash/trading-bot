@@ -61,6 +61,21 @@ only venue it will connect to.
 > position no process owns"* is no longer true of the code. The gate stays
 > closed until a supervised Testnet run's arms A1, A2 and A4 are recorded in
 > `docs/RUN_LEDGER.md`. **What survives:** the other two gates, unchanged.
+>
+> **ANNOTATED AT M5l P88 (C39): THE RESTART GAP'S GATE IS CLOSED, BY THE
+> OWNER'S RULING AT P87.** Two clauses above are no longer true: *"ITS GATE
+> STAYS CLOSED"* and *"The gate stays closed until a supervised Testnet run's
+> arms A1, A2 and A4 are recorded"*. The ruling, verbatim: *"The P-3k gate is
+> satisfied: A1 (hard kill, restore), A2 (protective fill while down, booked at
+> boot) and A4 (protection cancelled while down, R3 sells once) passed on the
+> supervised Testnet run of 2026-10-01/02, A1 and A2 at d1074c6 and A4 at
+> 5e22bc6. A2's Ctrl+C stop does not change the path it tests. P-3k no longer
+> blocks live trading. The fee-capture and base-asset-netting gates remain, so
+> live trading stays blocked."* The arms are recorded in `docs/RUN_LEDGER.md`
+> section 25. **What survives:** the P65 annotation's *"LIVE TRADING WAITS ON THREE
+> GATES, NOT ONE"* is now two gates, the fee capture and the base-asset
+> netting; the refusal at every entry point is unchanged, and Testnet is still
+> the only venue.
 
 | Area | State |
 |---|---|
