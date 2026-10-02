@@ -173,6 +173,13 @@ class ReconciliationBudget:
     reconciliation and every call is bounded by ``reconcile_deadline_s``, so the
     reservation admits exactly ``max_open_positions`` calls. The pass and the
     point queries share that, met with equality and never exceeded.
+
+    (ANNOTATED AT M5l P89, C41, P-3o: the count is ``RiskConfig.
+    reconcile_call_cap``, ``max(max_open_positions, L + 1)``, and the coherence
+    validator reserves ``reconcile_deadline_s`` for exactly that many calls.
+    Where this paragraph says ``max_open_positions``, read the cap; they are the
+    same number whenever ``max_open_positions >= L + 1``. What survives: the
+    count is the guarantee, and the pass and the point queries share it.)
     """
 
     #: How stale a position's stamp must be before it is re-read. The shortest
@@ -212,9 +219,17 @@ class ReconciliationBudget:
         (``M5l-039``, maximum 0.467 s), which says nothing about a second
         attempt's share on another day.
         Safe: **the retry is not removed, it moves to the CADENCE.** A transient
-        connection failure leaves the position unstamped, so it sorts first and
-        is re-read on the next bar. The retry still exists; it is one bar long
-        instead of 3.5 s of backoff.
+        connection failure leaves the position's stamp where it was, so it stays
+        due and is re-read on the next bar. The retry still exists; it is one
+        bar long instead of 3.5 s of backoff.
+
+        (CORRECTED AT M5l P89, C41, ``M5l-090``: this sentence read *"leaves the
+        position unstamped, so it sorts first"*, which is true only of a
+        position that has never been stamped. A failed read leaves the stamp it
+        came in with, and that stamp keeps ageing, so the position remains due
+        and sorts ahead of every position the pass did stamp -- but behind a
+        never-stamped one, which a position opening on a freed slot is
+        (``M5l-088``).)
 
         **THAT COVERS THE PASS AND NOT THE RESOLVER.** An unstamped position is
         re-read next bar, so a failed enumeration costs one cycle. A failed
@@ -231,6 +246,8 @@ class ReconciliationBudget:
         claim above. Budgeting point queries *additionally* to
         ``max_open_positions x reconcile_deadline_s`` would break the only
         guarantee the coherence validator computes, and break it silently.
+        (Read ``reconcile_call_cap`` for ``max_open_positions`` there, from
+        M5l P89, C41, P-3o.)
 
         :raises ValueError: ``timeframes`` is empty. That is a programming
             error rather than a config one -- ``_pair_timeframes`` refuses an
@@ -246,7 +263,7 @@ class ReconciliationBudget:
         shortest_ms = min(timeframe_to_ms(timeframe) for timeframe in timeframes.values())
         return cls(
             dedup_interval=timedelta(milliseconds=shortest_ms),
-            max_calls=config.risk.limits.max_open_positions,
+            max_calls=config.risk.reconcile_call_cap,
             timeout_s=config.risk.reconcile_deadline_s,
             attempts=1,
         )

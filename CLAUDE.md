@@ -1321,9 +1321,10 @@ data.
   > candle's close to that read, plus one T for each consecutive call-cap
   > deferral of that position (M5l-066); after a feed gap the first candle can
   > find the stamp as old as the gap (M5l-095). Without position churn, and
-  > because configuration load refuses max_open_positions below L + 1, a
-  > healthy feed allows at most n - 1 consecutive deferrals, n being
-  > min(max_open_positions, enabled pairs) (M5l-084); the config-load floor on
+  > because the per-pass call cap is max(max_open_positions, L + 1), so it is
+  > at least L + 1 by construction, a healthy feed allows at most n - 1
+  > consecutive deferrals, n being min(max_open_positions, enabled pairs)
+  > (M5l-084); the config-load floor on
   > max_position_staleness_s is sized from that bound so the guard does not
   > fire on a healthy, churn-free system. Churn, a position opening on a freed
   > slot and sorting first while unstamped, can add deferrals beyond n - 1
@@ -1356,6 +1357,16 @@ data.
   > A silently dead stream still leaves the bot believing it is current. The
   > next bullet's *"The shortest timeframe is a floor, not a bound"* is
   > consistent with this ruling and unchanged.
+  >
+  > **AMENDED BY THE PROJECT OWNER AT M5l P89 (C41), one clause, in place.**
+  > The owner's locked-text ruling replaced *"Because configuration load
+  > refuses max_open_positions below L + 1,"* with *"Because the per-pass call
+  > cap is max(max_open_positions, L + 1), so it is at least L + 1 by
+  > construction,"*; the clause is lower-cased above where it continues a
+  > sentence. Everything else in the ruling stands. The replaced clause is
+  > recorded here because it was the ruling's text: it was true until C41
+  > removed the refusal, and C41 made the cap `max(N, L + 1)` instead
+  > (`docs/NEXT_MILESTONE.md` P-3o).
 - **There is no static staleness guarantee — only what `last_reconciled_at`
   reports.** The shortest timeframe is a floor, not a bound: add the query's own
   latency, add every bar the budget skipped, add every bar that never arrived

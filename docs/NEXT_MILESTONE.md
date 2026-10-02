@@ -491,6 +491,9 @@ validator, and an edit there arms both items.
 > - P-3o, where the call cap is still the position limit;
 > - P-3l, where a feed gap is still unreported.
 >
+> (ANNOTATED AT M5l P89, C41: P-3o's bullet is no longer true; its item is
+> RESOLVED, the cap being `max(max_open_positions, L + 1)`.)
+>
 > Each keeps its own item and arming condition.
 
 ### P-3. The silent and unhedged failure modes catalogued in M5k
@@ -1248,6 +1251,49 @@ every configuration; decoupling restores single-position operation.
 > that protects its positions needs a cap of at least `L + 1`.
 
 *Arming condition:* **whoever next changes how `ReconciliationBudget.from_config` in `execution/reconciliation_driver.py` sets `max_calls`.**
+
+> **RESOLVED AT M5l P89 (C41): THE CALL CAP IS NO LONGER THE POSITION LIMIT,
+> AND THE ARMING CONDITION ABOVE IS DISCHARGED.** *"The pass cap max_calls
+> equals max_open_positions"* and *"C20b therefore refuses max_open_positions
+> = 1 in every configuration"* are no longer true. By the owner's P76 sketch
+> (a), `RiskConfig.reconcile_call_cap` is `max(max_open_positions, L + 1)`,
+> `ReconciliationBudget.from_config` sets `max_calls` from it, the coherence
+> validator's reconcile term counts it (`reconcile_call_cap x T_recon`), and
+> C20b's refusal, `AppConfig._check_the_call_cap_can_complete_a_position`, is
+> removed. **Rendered through `AppConfig`:** the committed shape is unchanged
+> (`2 x 9.0 + 3 x 2.3 + 2 x 2.3 = 29.5 s`, ceiling `D = 9.25`), and two 1m
+> pairs with `max_open_positions = 1` and a take-profit load with a cap of 3,
+> `2D + 3 x 2.3 + 1 x 2.3`, so `D = 10.4` is exactly 30.0 s and 10.41 is
+> refused. The settlement term is unchanged, `min(N_max, P_sim) x T_recon`,
+> because it counts positions that can exit on one bar and not calls. **The
+> staleness floor's `k <= n - 1` is unaffected (`M5l-084`, re-derived at P89).**
+> The derivation used only that the pass reads oldest-stamp-first, stops when
+> `len(results) + reserved >= max_calls`, and reserves the first unresolved
+> position's `L` legs, so that with `max_calls >= L + 1` every pass completes
+> and stamps at least one position ahead of a deferred one, and only `n - 1`
+> can sit ahead of it. It never used `max_calls <= max_open_positions`: it was
+> probed at `max_calls = 3` for `n` = 2, 3 and 4, with the cap BELOW `n`. The
+> new cap is at least `L + 1` by construction and at least `max_open_positions`
+> `>= n`, so the premise holds and a larger cap only widens each pass's read
+> prefix. **What survives:** the arithmetic
+> that completing an `L`-leg position costs `1 + L` calls, the livelock
+> argument, and `n = min(max_open_positions, enabled pairs)`, since `n` counts
+> positions and not calls. And the **starvation shape** (`M5l-085`: a
+> neighbour's failing point queries) stays open, logged rather than fixed by
+> P-3m.
+>
+> **ARMING AUDIT AT C41.** Fired and REAFFIRMED: P-2's *"whoever next edits
+> `config/models.py`'s coherence block"* and U7's identical condition, both
+> because C41 edits that block's reconcile term; P-2's design question (the
+> default, the floor) is untouched, and U7's `_CLOSE_SEQUENCE_CALLS` is not
+> deleted, the confirm-step question still being unruled. P-3i's
+> *"`ReconciliationBudget`"* condition fires on `from_config` and the class
+> docstring and is REAFFIRMED for C43. P-3m's *"the call cap in
+> `reconcile_open_positions`"* condition is touched by a docstring annotation
+> only and is REAFFIRMED for C42. P-2's annotation above, *"`90355df` (C20b)
+> adds the precondition"*, and the commit list's *"`90355df` (C20b): the
+> `L + 1` call-cap precondition"*, record what C20b did and stay as written;
+> the precondition now holds by construction.
 
 ---
 

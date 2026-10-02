@@ -328,6 +328,16 @@ class RiskConfig(_Model):
     #: Config load refuses that relation's breach, in
     #: :meth:`AppConfig._check_the_call_cap_can_complete_a_position`.
     #:
+    #: (ANNOTATED AT M5l P89, C41, P-3o: **that refusal is GONE, and the relation
+    #: holds by construction instead.** The per-pass call cap is no longer
+    #: ``max_open_positions`` but ``RiskConfig.reconcile_call_cap``, ``max(N,
+    #: L + 1)``, so it is at least ``L + 1`` in every configuration and
+    #: ``max_open_positions = 1`` loads with a take-profit. Where the comment
+    #: above says ``max_open_positions >= 1 + L``, read the call cap. What
+    #: survives: the ``n - 1`` bound and the reason it needs ``L + 1`` calls;
+    #: ``n`` is still ``min(max_open_positions, enabled pairs)``, because it
+    #: counts open positions and not calls.)
+    #:
     #: The old rationale, *"two consecutive budget skips are normal"*, named no
     #: mechanism in this code and did not hold under strict dedup (``M5l-072``).
     #:
@@ -400,6 +410,36 @@ class RiskConfig(_Model):
     #: sets 2.3 s, kept by the project owner on that data. One session says
     #: nothing about another day's tail.
     reconcile_deadline_s: float = Field(3.0, gt=0)
+
+    @property
+    def protective_legs(self) -> int:
+        """``L``: the protective legs a position carries, one per enabled level.
+
+        A stop-loss is one resting leg and a take-profit another. The trailing
+        stop is client-side and rests nowhere, so it is not counted.
+        """
+        return int(self.stop_loss.enabled) + int(self.take_profit.enabled)
+
+    @property
+    def reconcile_call_cap(self) -> int:
+        """The most calls one reconciliation phase may spend: ``max(N, L + 1)``.
+
+        ``N`` is ``limits.max_open_positions`` and ``L`` is
+        :attr:`protective_legs`. Completing one position whose ``L`` legs have
+        all left the book costs one enumeration and ``L`` point queries, so a
+        cap below ``L + 1`` never completes it (``M5l-086``, ``M5l-087``) -- and
+        a cap that was simply ``N`` made ``N = 1`` unconfigurable with a
+        take-profit. Taking the larger decouples the two: ``N`` bounds how many
+        positions are open, and this bounds the calls spent on reading them
+        (P-3o, the owner's P76 sketch (a)).
+
+        **The one definition both consumers read.** ``ReconciliationBudget``
+        sets ``max_calls`` from it, and the coherence check reserves
+        ``reconcile_deadline_s`` for exactly that many calls, so the two cannot
+        drift. At ``N >= L + 1`` it IS ``N``, so every configuration that loaded
+        before it existed has the cap it had.
+        """
+        return max(self.limits.max_open_positions, self.protective_legs + 1)
 
     @model_validator(mode="after")
     def _check_protective_coverage(self) -> RiskConfig:
@@ -755,6 +795,13 @@ class AppConfig(_Model):
         pairs whose bars coincide produce two back-to-back invocations, each
         with a full budget.
 
+        (ANNOTATED AT M5l P89, C41, P-3o: the reconciliation term is
+        ``reconcile_call_cap x T_recon``, where the cap is ``max(N_max, L + 1)``,
+        and not ``N_max x T_recon`` as written above. The two are equal whenever
+        ``N_max >= L + 1``, which is every configuration that loaded before.
+        The settlement term below is unchanged: it counts positions that can
+        exit on one bar, ``min(N_max, P_sim)``, and not calls.)
+
         **THE THIRD TERM IS SETTLEMENT, added by the project owner's ruling at
         M5k.** Booking an exit fetches that order's fills once, bounded by
         ``reconcile_deadline_s`` at one attempt, and neither of the first two
@@ -801,7 +848,8 @@ class AppConfig(_Model):
         dispatch_s = _exact_seconds(self.risk.dispatch_deadline_s)
         reconcile_s = _exact_seconds(self.risk.reconcile_deadline_s)
         dispatch = p_sim * dispatch_s
-        reconcile = n_max * reconcile_s
+        calls = self.risk.reconcile_call_cap
+        reconcile = calls * reconcile_s
         settlement = exiting * reconcile_s
         budget = _exact_seconds(_PIPELINE_HEADROOM) * t_min_s
 
@@ -815,7 +863,9 @@ class AppConfig(_Model):
         raise ValueError(
             f"risk.dispatch_deadline_s = {dispatch_s} x {p_sim} pair(s) that can close "
             f"simultaneously = {dispatch}s, plus risk.reconcile_deadline_s = {reconcile_s} x "
-            f"limits.max_open_positions = {n_max} = {reconcile}s, plus settlement at "
+            f"{calls} reconciliation calls per pass = max(limits.max_open_positions = "
+            f"{n_max}, {self.risk.protective_legs} protective leg(s) + 1) = {reconcile}s, "
+            f"plus settlement at "
             f"risk.reconcile_deadline_s = {reconcile_s} x {exiting} position(s) that can exit on "
             f"one bar = {settlement}s, is {total}s. That exceeds "
             f"{_PIPELINE_HEADROOM:.0%} of the shortest enabled timeframe "
@@ -831,58 +881,6 @@ class AppConfig(_Model):
             "Lower risk.dispatch_deadline_s, lower risk.reconcile_deadline_s, lower\n"
             "risk.limits.max_open_positions, enable fewer pairs, or configure a longer\n"
             "shortest timeframe in config.yaml."
-        )
-
-    @model_validator(mode="after")
-    def _check_the_call_cap_can_complete_a_position(self) -> AppConfig:
-        """Refuse a position cap too small for reconciliation to complete a position.
-
-        ``max_open_positions >= L + 1``, where ``L`` counts the protective legs
-        the config enables: one for a stop-loss, one for a take-profit.
-
-        **Why the cap is the reconciler's call budget.**
-        ``ReconciliationBudget.from_config`` sets ``max_calls`` to
-        ``max_open_positions``. A position whose ``L`` legs have all gone from
-        the book -- a take-profit that FILLED and a stop the venue EXPIRED, an
-        ordinary exit -- costs one enumeration and ``L`` point queries to
-        complete. With fewer than ``L + 1`` calls, the pass spends one and the
-        resolver never gets all ``L``.
-        - Its exit fill never reaches booking, so the daily-loss limit never
-          counts it.
-        - Its stamp never refreshes.
-        - A neighbour sorted behind it goes unread for as long as it stays
-          (``M5l-086``, ``M5l-087``).
-
-        MEASURED: with one call, neither a stop-only nor a stop-and-target
-        position ever completed across six bars. With two, a stop-only one
-        completed every bar.
-
-        **This refuses the configuration; it does not fix the coupling.**
-        Decoupling the call cap from the position limit is its own work
-        (P-3o). After the coherence check and before the staleness floor,
-        because the floor's derivation assumes this holds.
-        """
-        legs = int(self.risk.stop_loss.enabled) + int(self.risk.take_profit.enabled)
-        minimum = legs + 1
-        cap = self.risk.limits.max_open_positions
-        if cap >= minimum:
-            return self
-
-        raise ValueError(
-            f"risk.limits.max_open_positions = {cap} is below {minimum}, the calls one "
-            f"reconciliation pass needs to complete a position: 1 enumeration plus {legs} "
-            f"point quer{'y' if legs == 1 else 'ies'}, one per enabled protective leg "
-            f"(stop_loss.enabled = {self.risk.stop_loss.enabled}, take_profit.enabled = "
-            f"{self.risk.take_profit.enabled}).\n"
-            "\n"
-            "The reconciler's per-pass call budget IS max_open_positions. Below that\n"
-            "minimum, a position whose protective legs have all left the book -- a\n"
-            "take-profit that filled, its stop expired -- is never completed: its exit\n"
-            "is never booked, so the daily-loss limit never counts it, and a neighbour\n"
-            "sorted behind it is never read.\n"
-            "\n"
-            f"Set risk.limits.max_open_positions to at least {minimum}, or disable a "
-            "protective leg."
         )
 
     @model_validator(mode="after")
@@ -913,9 +911,14 @@ class AppConfig(_Model):
         ``max_open_positions < 1 + L`` (``M5l-086``) would break the
         ``n - 1`` bound too, and the sibling check before this one refuses it.
 
+        (ANNOTATED AT M5l P89, C41, P-3o: that sibling is gone and the case it
+        refused cannot arise. The call cap is ``max(N, L + 1)``, so it is at
+        least ``L + 1`` by construction.)
+
         After its two siblings: an incoherent budget is refused first, with
         its own message. Vacuous with no enabled pairs, for the coherence
-        check's reason.
+        check's reason. (Of those two siblings one remains, the coherence check,
+        after the C41 removal.)
         """
         enabled = self.trading.enabled_pairs
         if not enabled:

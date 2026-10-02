@@ -536,6 +536,11 @@ class TestDispatchBudgetCoherence:
         Protection is disabled so a cap of 1 stays legal: with a stop and a
         take-profit enabled, the call-cap check (added after this test)
         requires a cap of at least 3.
+
+        (ANNOTATED AT M5l P89, C41: that check is gone, and protection stays
+        disabled here for a different reason. With a take-profit the
+        reconciliation term is the call cap, 3 calls, not the position limit's
+        1, so the arithmetic above would read 33.0 and the case would refuse.)
         """
         config = _app_config(
             pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "1m"), ("SOLUSDT", "1m")],
@@ -770,6 +775,10 @@ class TestStalenessBoundCoversAHealthyFeed:
 
         Protection is disabled so a cap of 1 stays legal under the call-cap
         check, which requires 3 with a stop and a take-profit enabled.
+
+        (ANNOTATED AT M5l P89, C41: that check is gone, so protection is no
+        longer needed to make a limit of 1 load. It stays disabled so the
+        reconciliation term is still one call, as this case was written.)
         """
         with pytest.raises(ValidationError) as excinfo:
             _app_config(
@@ -796,41 +805,51 @@ class TestStalenessBoundCoversAHealthyFeed:
         )
 
 
-class TestTheCallCapCanCompleteAPosition:
-    """`max_open_positions >= L + 1`, `L` the enabled protective legs.
+class TestTheReconcileCallCap:
+    """The per-pass call cap is `max(max_open_positions, L + 1)`, `L` the enabled legs.
 
-    The reconciler's per-pass call budget IS `max_open_positions`, and a
-    position whose legs have all left the book needs one enumeration plus `L`
-    point queries to complete (`M5l-086`, `M5l-087`). No pairs are enabled in
-    the refusal cases, so the coherence and staleness checks are vacuous and
-    only this one can refuse.
+    A position whose legs have all left the book needs one enumeration plus `L`
+    point queries to complete (`M5l-086`, `M5l-087`). C20b refused a position
+    limit below `L + 1`; P-3o, ruled at P76 as sketch (a) and lifted at P89,
+    decouples the two, so the limit no longer bounds the calls. These tests
+    were `TestTheCallCapCanCompleteAPosition`, and the two that asserted the
+    refusal now assert the acceptance. No pairs are enabled in the cases that
+    read only the cap, so the coherence and staleness checks are vacuous.
     """
 
     def test_the_committed_shape_is_accepted(self) -> None:
-        """Stop and take-profit (L = 2) with the default cap of 3."""
+        """Stop and take-profit (L = 2) with the default limit of 3."""
         config = _app_config(
             pairs=[("BTCUSDT", "1m"), ("ETHUSDT", "5m")],
             risk=RiskConfig(reconcile_deadline_s=2.3),
         )
         assert config.risk.limits.max_open_positions == 3
+        assert config.risk.reconcile_call_cap == 3
 
-    def test_two_legs_with_a_cap_of_two_are_refused(self) -> None:
-        """L = 2 needs 3 calls. MUTATION: fix L at 1 -- the minimum becomes 2
-        and this cap passes."""
-        with pytest.raises(ValidationError) as excinfo:
-            _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=2)))
-        message = str(excinfo.value)
-        assert "risk.limits.max_open_positions = 2 is below 3" in message
-        assert "daily-loss limit never counts it" in message
-        assert "at least 3" in message
+    def test_two_legs_with_a_limit_of_two_are_accepted_with_a_cap_of_three(self) -> None:
+        """L = 2 needs 3 calls; the limit of 2 no longer refuses.
 
-    def test_two_legs_with_a_cap_of_one_are_refused(self) -> None:
-        """L = 2 with a single call: the pass spends it enumerating."""
-        with pytest.raises(ValidationError, match="max_open_positions = 1 is below 3"):
-            _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=1)))
+        THIS TEST WAS `test_two_legs_with_a_cap_of_two_are_refused` AND ASSERTED
+        THE OPPOSITE, under C20b. Overturned by P-3o's sketch (a).
 
-    def test_a_stop_only_config_with_a_cap_of_two_is_accepted(self) -> None:
-        """L = 1 (stop only) needs 2 calls, so a cap of 2 passes."""
+        MUTATION: `max(N, L + 1)` -> `N` -- the cap reads 2 and this fails.
+        """
+        config = _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=2)))
+        assert config.risk.limits.max_open_positions == 2
+        assert config.risk.reconcile_call_cap == 3
+
+    def test_two_legs_with_a_limit_of_one_are_accepted_with_a_cap_of_three(self) -> None:
+        """L = 2 with a single position: the cap is 3, the pass is not starved.
+
+        THIS TEST WAS `test_two_legs_with_a_cap_of_one_are_refused` AND ASSERTED
+        THE OPPOSITE, under C20b. Overturned by P-3o's sketch (a).
+        """
+        config = _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=1)))
+        assert config.risk.limits.max_open_positions == 1
+        assert config.risk.reconcile_call_cap == 3
+
+    def test_a_stop_only_config_with_a_limit_of_two_has_a_cap_of_two(self) -> None:
+        """L = 1 (stop only) needs 2 calls, and the limit already gives them."""
         config = _app_config(
             risk=RiskConfig(
                 take_profit=TakeProfitConfig(enabled=False),
@@ -838,11 +857,77 @@ class TestTheCallCapCanCompleteAPosition:
             )
         )
         assert config.risk.limits.max_open_positions == 2
+        assert config.risk.reconcile_call_cap == 2
 
-    def test_a_cap_of_exactly_l_plus_one_is_accepted(self) -> None:
-        """L = 2, cap 3: the boundary. MUTATION: `>=` -> `>` refuses it."""
+    def test_a_limit_of_exactly_l_plus_one_is_the_cap(self) -> None:
+        """L = 2, limit 3: the boundary, where the two terms of the `max` agree."""
         config = _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=3)))
-        assert config.risk.limits.max_open_positions == 3
+        assert config.risk.reconcile_call_cap == 3
+
+    def test_a_limit_above_l_plus_one_is_the_cap(self) -> None:
+        """L = 2, limit 5: the cap is the limit, so nothing that loaded before moved.
+
+        MUTATION: `max(N, L + 1)` -> `L + 1` -- the cap reads 3 and this fails.
+        """
+        config = _app_config(risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=5)))
+        assert config.risk.reconcile_call_cap == 5
+
+    def test_with_no_protective_leg_the_cap_is_the_limit(self) -> None:
+        """L = 0: `L + 1` is 1, below any limit, so the limit is the cap -- and a
+        single-position config with no protection keeps its cap of one."""
+        config = _app_config(
+            risk=RiskConfig(
+                limits=RiskLimitsConfig(max_open_positions=1),
+                stop_loss=StopLossConfig(enabled=False),
+                take_profit=TakeProfitConfig(enabled=False),
+            )
+        )
+        assert config.risk.protective_legs == 0
+        assert config.risk.reconcile_call_cap == 1
+
+    def test_the_committed_budget_is_unchanged(self) -> None:
+        """The committed shape's reconciliation term is 3 calls, as before.
+
+        Two pairs (1m and 5m), limit 3, `L = 2`, `D = 9.0`, `T_recon = 2.3`:
+        `2 x 9.0 + 3 x 2.3 + 2 x 2.3 = 29.5`, so `D = 9.25` is the ceiling,
+        exactly 30.0, and 9.26 is refused. Nothing here moves under the cap,
+        which is the point: the cap equals the limit wherever the limit already
+        covered `L + 1`.
+        """
+        shape = {"pairs": [("BTCUSDT", "1m"), ("ETHUSDT", "5m")]}
+        _app_config(**shape, risk=RiskConfig(dispatch_deadline_s=9.25, reconcile_deadline_s=2.3))
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                **shape, risk=RiskConfig(dispatch_deadline_s=9.26, reconcile_deadline_s=2.3)
+            )
+        assert "is 30.02s" in str(excinfo.value)
+
+    def test_a_single_position_budget_counts_the_call_cap_not_the_limit(self) -> None:
+        """Two 1m pairs, limit 1, `L = 2`, `T_recon = 2.3`: the budget is rendered.
+
+        `2 x D + 3 x 2.3 + min(1, 2) x 2.3 = 2D + 9.2`, so `D = 10.4` is exactly
+        30.0 and passes, and `D = 10.41` is 30.02 and is refused, the message
+        naming 3 reconciliation calls and not the limit's 1. Under the old
+        reading of the term, `1 x 2.3`, the total is `2D + 4.6` and 10.41 passes.
+
+        MUTATION: the validator counts `max_open_positions` -- 10.41 is 25.42,
+        accepted, and this fails (an unmet `pytest.raises`, so `Failed`).
+        """
+        shape = {"pairs": [("BTCUSDT", "1m"), ("ETHUSDT", "1m")]}
+        limits = RiskLimitsConfig(max_open_positions=1)
+        _app_config(
+            **shape,
+            risk=RiskConfig(limits=limits, dispatch_deadline_s=10.4, reconcile_deadline_s=2.3),
+        )
+        with pytest.raises(ValidationError) as excinfo:
+            _app_config(
+                **shape,
+                risk=RiskConfig(limits=limits, dispatch_deadline_s=10.41, reconcile_deadline_s=2.3),
+            )
+        message = str(excinfo.value)
+        assert "3 reconciliation calls per pass" in message
+        assert "max(limits.max_open_positions = 1, 2 protective leg(s) + 1)" in message
+        assert "is 30.02s" in message
 
 
 # --------------------------------------------------------------------------

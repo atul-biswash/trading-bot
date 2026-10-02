@@ -990,6 +990,23 @@ P_sim x D  +  N_max x T_recon  <=  alpha x T_min
 > `config.yaml` the check reads 21.0 s against 30.0 s; two 1-minute-led pairs
 > at `T_recon = 3.0` read 33.0 s and are refused.
 
+> **ANNOTATED AT M5l P89 (C41, P-3o): THE RECONCILIATION TERM COUNTS THE CALL
+> CAP, `max(N_max, L + 1)`, NOT `N_max`.** Three sentences in this document
+> say otherwise, each true when written and listed here by content. The
+> formula above and its M5k restatement, *"`N_max x T_recon`"*; the M5e
+> annotation's *"`max_open_positions >= L + 1` where `L` is the count of enabled
+> protective levels. The coherence constraint below cannot catch a violation"*;
+> and the `M5l-046` paragraph's *"`max_calls = max_open_positions` calls ...
+> `(N_max + min(N_max, P_sim)) x T_recon`, 11.5 s on the committed config"*.
+> Now the cap is `RiskConfig.reconcile_call_cap`, the validator reserves
+> `reconcile_call_cap x T_recon`, and the position limit no longer has to
+> cover `L + 1` because the cap does. **Unchanged:** the settlement term,
+> `min(N_max, P_sim) x T_recon`, which counts positions that can exit on one
+> bar; every configuration with `N_max >= L + 1`, including the committed one
+> (11.5 s of reconciliation terms, 29.5 s in all); and the figures in this
+> document. A single-position config with a take-profit now loads and is
+> budgeted at 3 reconciliation calls plus 1 settlement.
+
 | Symbol | Meaning | Source |
 |---|---|---|
 | `D` | `risk.dispatch_deadline_s` — the whole sequence, worst case the 3-call `CLOSE` | config |

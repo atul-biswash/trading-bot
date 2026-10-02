@@ -15,6 +15,16 @@ from decimal import Decimal
 
 import pytest
 
+from trading_bot.config.models import (
+    AppConfig,
+    BacktestConfig,
+    ExchangeConfig,
+    PairConfig,
+    RiskConfig,
+    RiskLimitsConfig,
+    StrategyConfig,
+    TradingConfig,
+)
 from trading_bot.core.enums import (
     OrderSide,
     OrderStatus,
@@ -183,6 +193,7 @@ def _position(
     *,
     stamp: datetime | None = None,
     stop_loss: Decimal | None = STOP,
+    take_profit: Decimal | None = None,
 ) -> Position:
     return Position(
         symbol=symbol,
@@ -194,6 +205,7 @@ def _position(
         order_list_id=CLIENT_LIST_ID,
         last_reconciled_at=stamp,
         stop_loss=stop_loss,
+        take_profit=take_profit,
     )
 
 
@@ -201,6 +213,24 @@ def _portfolio(*positions: Position) -> Portfolio:
     return Portfolio(
         free_quote=Decimal("10000"),
         positions={position.symbol: position for position in positions},
+    )
+
+
+TAKE = Decimal("49000.00")
+
+
+def _single_position_config() -> AppConfig:
+    """One 1m pair, `max_open_positions = 1`, a stop and a take-profit: `L = 2`.
+
+    The shape C20b refused at load and P-3o admits. Built through the real
+    `AppConfig`, so the budget under test is derived from validated config.
+    """
+    return AppConfig(
+        strategy=StrategyConfig(name="sma_crossover"),
+        backtesting=BacktestConfig(start_date="2024-01-01", end_date="2024-02-01"),
+        trading=TradingConfig(pairs=[PairConfig(symbol="BTCUSDT", timeframe="1m")]),
+        risk=RiskConfig(limits=RiskLimitsConfig(max_open_positions=1)),
+        exchange=ExchangeConfig(),
     )
 
 
@@ -232,10 +262,20 @@ class TestBudget:
 
         assert budget.dedup_interval == timedelta(minutes=1)
 
-    def test_max_calls_is_the_position_limit(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
-        """The coherence validator reserves `max_open_positions x
-        reconcile_deadline_s` and every call is bounded by that deadline, so the
-        reservation admits exactly that many calls."""
+    def test_max_calls_is_the_position_limit_when_the_limit_covers_l_plus_one(
+        self,
+        tmp_path,  # type: ignore[no-untyped-def]
+    ) -> None:
+        """The coherence validator reserves `reconcile_deadline_s` for the call cap
+        and every call is bounded by that deadline, so the reservation admits
+        exactly that many calls. On the committed shape the limit is 3 and
+        `L + 1` is 3, so the cap is the limit.
+
+        THIS WAS `test_max_calls_is_the_position_limit`, and its assertion is
+        unchanged; the name read as a rule and is now true only where the limit
+        already covers `L + 1` (P-3o, `M5l-086`). The cases below the boundary
+        are the next two tests.
+        """
         from tests.unit.test_modes import write_settings
 
         settings = write_settings(tmp_path)
@@ -243,6 +283,18 @@ class TestBudget:
         budget = ReconciliationBudget.from_config(settings.config, timeframes={"BTCUSDT": "1m"})
 
         assert budget.max_calls == settings.config.risk.limits.max_open_positions
+
+    def test_a_single_position_config_gets_a_call_cap_of_l_plus_one(self) -> None:
+        """Limit 1 with a stop and a take-profit: the cap is 3, not 1.
+
+        MUTATION: `max_calls = max_open_positions`, the old rule -- the cap
+        reads 1 and this fails.
+        """
+        budget = ReconciliationBudget.from_config(
+            _single_position_config(), timeframes={"BTCUSDT": "1m"}
+        )
+
+        assert budget.max_calls == 3
 
     def test_the_per_call_bound_is_the_reconcile_deadline_at_one_attempt(self, tmp_path) -> None:  # type: ignore[no-untyped-def]
         """`attempts x timeout_s <= T_recon` admits exactly one attempt at the
@@ -290,6 +342,41 @@ async def test_the_budget_reaches_the_client_on_every_call() -> None:
     await _driver(_portfolio(position), client)(_candle())
 
     assert client.bounds == [(3.0, 1), (3.0, 1)]
+
+
+async def test_a_single_position_config_completes_a_position_with_two_unresolved_legs() -> None:
+    """The `M5l-087` shape, now completing: limit 1, a stop and a take-profit, both
+    legs absent from the book.
+
+    Under C20b this configuration was refused at load, because the cap WAS the
+    limit and one call is spent enumerating, leaving nothing for the two point
+    queries (`M5l-086`, `M5l-087`: measured, neither a stop-only nor a
+    stop-and-target position ever completed at one call). With the cap at
+    `max(N, L + 1) = 3` the real pass and the real resolver spend one
+    enumeration and two queries in ONE pass, and the position is stamped.
+
+    MUTATION: `max_calls = max_open_positions`, the old rule -- the cap reads 1,
+    the resolver gets nothing, `queried` is empty and the stamp stays `None`.
+    """
+    budget = ReconciliationBudget.from_config(
+        _single_position_config(), timeframes={"BTCUSDT": "1m"}
+    )
+    position = _position("BTCUSDT", take_profit=TAKE)
+    sl = client_order_id("BTCUSDT", BAR, OrderListLeg.STOP_LOSS, generation=0)
+    tp = client_order_id("BTCUSDT", BAR, OrderListLeg.TAKE_PROFIT, generation=0)
+    client = _StubClient(
+        {"BTCUSDT": []},
+        orders={
+            sl: _order("BTCUSDT", OrderListLeg.STOP_LOSS),
+            tp: _order("BTCUSDT", OrderListLeg.TAKE_PROFIT),
+        },
+    )
+
+    await _driver(_portfolio(position), client, budget=budget)(_candle())
+
+    assert client.asked == ["BTCUSDT"]
+    assert sorted(client.queried) == sorted([sl, tp])
+    assert position.last_reconciled_at == NOW
 
 
 async def test_resolution_gets_the_calls_the_pass_did_not_spend(

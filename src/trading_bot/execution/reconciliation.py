@@ -574,6 +574,19 @@ async def reconcile_open_positions(
        the call cap and the position limit are one number. Decoupling them is
        P-3o's.
 
+    .. note::
+
+       **ANNOTATED AT M5l P89 (C41, P-3o): THE NOTE ABOVE IS SUPERSEDED, AND SO
+       IS ITS PHRASE "the call cap and the position limit are one number".**
+       ``max_calls`` is ``RiskConfig.reconcile_call_cap``, ``max(
+       max_open_positions, L + 1)``; the refusal in
+       ``AppConfig._check_the_call_cap_can_complete_a_position`` is removed,
+       because the cap is at least ``L + 1`` by construction. The first
+       paragraph's *"``max_open_positions x reconcile_deadline_s``"* reads the
+       cap too, the two being equal whenever ``max_open_positions >= L + 1``.
+       **What survives:** the arithmetic, the livelock argument, and that this
+       function spends exactly one call per returned assessment.
+
     **``L`` is DISCOVERED BY VISITING, not predicted**, and the reservation
     takes effect from the next iteration. It protects work already identified
     rather than work forecast, which is what lets it exist without lookahead.
