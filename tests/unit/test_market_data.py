@@ -832,3 +832,137 @@ async def test_stop_twice_before_start_does_the_work_once() -> None:
     await provider.stop()
 
     assert stream.stop_calls == 1
+
+
+# --------------------------------------------------------------------------
+# P-3l: gap detection in the append gate
+# --------------------------------------------------------------------------
+_PROVIDER_LOGGER = "trading_bot.data.market_data"
+
+
+def _gap_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    """The gap lines, selected by logger name and event and never by position."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == _PROVIDER_LOGGER and vars(record).get("event") == "bars_gap_detected"
+    ]
+
+
+async def _started_provider(
+    last_seeded: int = 4, **kwargs: Any
+) -> tuple[BufferedMarketDataProvider, FakeMarketDataStream]:
+    """A provider seeded with bars 0..``last_seeded``, started, ready for live bars."""
+    history = {("BTCUSDT", "1m"): [rest_candle(i) for i in range(last_seeded + 1)]}
+    provider, _, stream = build_provider(history, **kwargs)
+    await provider.start()
+    return provider, stream
+
+
+async def test_a_missing_bar_records_one_gap_and_logs_it_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Bars 6 and 7 never arrive, so bar 8 follows bar 5 with two missing.
+
+    The line is emitted at detection and not again while the bars that follow are
+    consecutive, so it is asserted by COUNT after four more bars have landed.
+
+    MUTATION: detect on every append (the early return refuses nothing) -- every
+    bar logs a gap and this fails on the count.
+    """
+    _provider, stream = await _started_provider()
+    with caplog.at_level(logging.INFO, logger=_PROVIDER_LOGGER):
+        await stream.emit("BTCUSDT", "1m", ws_candle(5))
+        await stream.emit("BTCUSDT", "1m", ws_candle(8))
+        for index in (9, 10, 11, 12):
+            await stream.emit("BTCUSDT", "1m", ws_candle(index))
+
+    lines = _gap_lines(caplog)
+    assert len(lines) == 1
+    fields = vars(lines[0])
+    assert fields.get("symbol") == "BTCUSDT"
+    assert fields.get("timeframe") == "1m"
+    assert fields.get("missing_bars") == 2
+    assert fields.get("from") == rest_candle(5).open_time.isoformat()
+    assert fields.get("to") == rest_candle(8).open_time.isoformat()
+
+
+async def test_bars_since_gap_counts_the_first_bar_after_it_as_one() -> None:
+    provider, stream = await _started_provider()
+    assert provider.bars_since_gap("BTCUSDT", "1m") is None
+
+    await stream.emit("BTCUSDT", "1m", ws_candle(8))
+    assert provider.bars_since_gap("BTCUSDT", "1m") == 1
+    await stream.emit("BTCUSDT", "1m", ws_candle(9))
+    await stream.emit("BTCUSDT", "1m", ws_candle(10))
+    assert provider.bars_since_gap("BTCUSDT", "1m") == 3
+
+
+async def test_contiguous_bars_record_no_gap(caplog: pytest.LogCaptureFixture) -> None:
+    provider, stream = await _started_provider()
+    with caplog.at_level(logging.INFO, logger=_PROVIDER_LOGGER):
+        for index in (5, 6, 7):
+            await stream.emit("BTCUSDT", "1m", ws_candle(index))
+
+    assert _gap_lines(caplog) == []
+    assert provider.bars_since_gap("BTCUSDT", "1m") is None
+
+
+async def test_a_redelivered_or_stale_bar_is_not_a_gap(caplog: pytest.LogCaptureFixture) -> None:
+    """A bar delivered twice replaces in place and a stale one is dropped; neither
+    is APPENDED, so neither can open a gap."""
+    provider, stream = await _started_provider()
+    with caplog.at_level(logging.INFO, logger=_PROVIDER_LOGGER):
+        await stream.emit("BTCUSDT", "1m", ws_candle(5))
+        await stream.emit("BTCUSDT", "1m", ws_candle(5, close="1"))
+        await stream.emit("BTCUSDT", "1m", ws_candle(2))
+        await stream.emit("BTCUSDT", "1m", ws_candle(6))
+
+    assert _gap_lines(caplog) == []
+    assert provider.bars_since_gap("BTCUSDT", "1m") is None
+
+
+async def test_a_second_gap_replaces_the_first_and_logs_again(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The count restarts at the second gap, because the window spans it too."""
+    provider, stream = await _started_provider()
+    with caplog.at_level(logging.INFO, logger=_PROVIDER_LOGGER):
+        await stream.emit("BTCUSDT", "1m", ws_candle(7))
+        await stream.emit("BTCUSDT", "1m", ws_candle(8))
+        await stream.emit("BTCUSDT", "1m", ws_candle(9))
+        assert provider.bars_since_gap("BTCUSDT", "1m") == 3
+        await stream.emit("BTCUSDT", "1m", ws_candle(12))
+
+    assert [vars(r).get("missing_bars") for r in _gap_lines(caplog)] == [2, 2]
+    assert provider.bars_since_gap("BTCUSDT", "1m") == 1
+
+
+async def test_bars_since_gap_survives_the_buffer_evicting_old_rows() -> None:
+    """The count is read off timestamps, not the deque's length.
+
+    A buffer of 5 rows holds nothing from before the gap after enough bars, and
+    the count must still say how many consecutive bars have followed it.
+    """
+    provider, stream = await _started_provider(history_limit=3, buffer_size=5)
+    await stream.emit("BTCUSDT", "1m", ws_candle(8))
+    for index in range(9, 16):
+        await stream.emit("BTCUSDT", "1m", ws_candle(index))
+
+    assert provider.candle_count("BTCUSDT", "1m") == 5
+    assert provider.bars_since_gap("BTCUSDT", "1m") == 8
+
+
+async def test_a_gap_inside_seeded_history_is_recorded() -> None:
+    """Seeding goes through the same gate: an indicator spans a REST gap too."""
+    history = {("BTCUSDT", "1m"): [rest_candle(0), rest_candle(1), rest_candle(4), rest_candle(5)]}
+    provider, _, _ = build_provider(history)
+    await provider.start()
+
+    assert provider.bars_since_gap("BTCUSDT", "1m") == 2
+
+
+def test_the_untracked_pair_still_raises_for_bars_since_gap() -> None:
+    provider, _, _ = build_provider()
+    with pytest.raises(DataError):
+        provider.bars_since_gap("ETHUSDT", "1m")

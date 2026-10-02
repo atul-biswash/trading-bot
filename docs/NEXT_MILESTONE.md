@@ -1214,6 +1214,29 @@ What the outage also cost, measured at P65 and recorded in
 
 *Arming condition:* **whoever next changes what triggers a reconciliation pass -- `ReconciliationDriver.__call__` in `execution/reconciliation_driver.py`, registered by `provider.on_candle` in `live_system` in `engine/modes.py` -- or the market-data reconnect path, `_run` in `exchange/websocket_client.py`.**
 
+> **ANNOTATED AT M5l P91 (C44), P-3l IS BEING CLOSED IN THREE COMMITS: GAP
+> DETECTION AND THE BUY GUARD LAND FIRST.** Under the P90 pins, measured and
+> guarded rather than repaired. **C44:** `BufferedMarketDataProvider._append`
+> records a gap when a bar's `open_time` is more than one timeframe after the
+> last, logs `bars_gap_detected` once per gap (`symbol`, `timeframe`,
+> `missing_bars`, `from`, `to`), and `bars_since_gap` counts the consecutive bars
+> since. `TradingEngine._on_candle` suppresses a **BUY only** while fewer than
+> `strategy.warmup_period` bars have followed the gap, logging
+> `buy_refused_bars_gap`, and logs `bars_contiguous_again` once when the window
+> clears. A CLOSE is never refused: the guard sits AFTER the signal exists and its
+> condition names `SignalAction.BUY`. So the P-3l item's *"The row-count SMA(50)
+> behind the next death cross spanned the gap undetected (M5l-063)"* is
+> historical, true of the capture and no longer of the tree. **What survives:**
+> the bars are still never fetched (backfill is deferred, pin 4), reconciliation
+> still stops with the candles (a timer is deferred, pin 2), and the heartbeat
+> and the transient-error handling are C45 and C46.
+>
+> **ARMING AUDIT AT C44.** P-2's and U7's *"whoever next edits
+> `config/models.py`'s coherence block"* fire on a comment C44 adds inside
+> `_check_dispatch_budget_fits_the_bar`, annotating C16's refusal text, and are
+> REAFFIRMED: no term, budget or refusal in the block moved. The conditions
+> naming the reconciliation trigger and `_run` are not fired by C44.
+
 #### P-3m. A call-cap deferral logs nothing (`M5l-075`)
 
 When the per-pass call cap stops before a due position, that position is not

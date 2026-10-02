@@ -61,8 +61,15 @@ def candle(index: int = 0, *, symbol: str = "BTCUSDT", interval: str = "1m") -> 
 class FakeMarketDataProvider(MarketDataProvider):
     """Port-conformant provider whose candle hook the test drives directly."""
 
-    def __init__(self, counts: dict[tuple[str, str], int] | None = None) -> None:
+    def __init__(
+        self,
+        counts: dict[tuple[str, str], int] | None = None,
+        gaps: dict[tuple[str, str], int | None] | None = None,
+    ) -> None:
         self._counts = counts or {}
+        #: ``bars_since_gap`` answers by pair. Absent means ``None``: no gap
+        #: recorded, which is what every test that predates the guard assumed.
+        self.gaps: dict[tuple[str, str], int | None] = dict(gaps or {})
         self.handlers: list[CandleHandler] = []
         self.frames: dict[tuple[str, str], pd.DataFrame] = {}
         self.start_calls = 0
@@ -91,6 +98,9 @@ class FakeMarketDataProvider(MarketDataProvider):
 
     def last_candle(self, symbol: str, timeframe: str) -> Candle | None:
         return None
+
+    def bars_since_gap(self, symbol: str, timeframe: str) -> int | None:
+        return self.gaps.get((symbol.upper(), timeframe))
 
     async def emit(self, bar: Candle) -> None:
         """Deliver ``bar`` as if a new candle had just closed."""
@@ -699,3 +709,117 @@ async def test_configured_strategies_run_without_quarantine(
     assert "NotImplementedError" not in caplog.text
     # Every bar was evaluated; the pair never went quiet.
     assert provider.dataframe_calls == [("BTCUSDT", "1m")] * 6
+
+
+# --------------------------------------------------------------------------
+# P-3l: the BUY guard -- an indicator window that spans a gap
+# --------------------------------------------------------------------------
+_ENGINE_LOGGER = "trading_bot.engine.live_engine"
+_WARMUP = 5
+
+
+def close_signal(symbol: str = "BTCUSDT") -> Signal:
+    return Signal(symbol=symbol, action=SignalAction.CLOSE, reason="test")
+
+
+def _engine_lines(caplog: pytest.LogCaptureFixture, event: str) -> list[logging.LogRecord]:
+    """Lines by logger name and event, never by position."""
+    return [
+        record
+        for record in caplog.records
+        if record.name == _ENGINE_LOGGER and vars(record).get("event") == event
+    ]
+
+
+async def _guarded_engine(
+    result: Signal, *, since: int | None
+) -> tuple[TradingEngine, FakeMarketDataProvider, list[Signal]]:
+    """An engine whose strategy always answers ``result`` and whose window is 5 bars."""
+    pair = ("BTCUSDT", "1m")
+    strategy = ScriptedStrategy(warmup=_WARMUP, result=result)
+    provider = FakeMarketDataProvider({pair: 100}, gaps={pair: since})
+    engine = TradingEngine(provider, {pair: strategy})
+    received: list[Signal] = []
+
+    async def handler(signal: Signal, _candle: Candle) -> None:
+        received.append(signal)
+
+    engine.on_signal(handler)
+    await engine.start()
+    return engine, provider, received
+
+
+async def test_a_gap_in_the_window_refuses_a_buy(caplog: pytest.LogCaptureFixture) -> None:
+    """Two bars have followed the gap and the window is five, so a BUY is suppressed.
+
+    The refusal is a WARNING naming the pair, the window and the count, and the
+    signal never reaches a handler.
+
+    MUTATION: remove the guard -- the BUY is emitted and this fails.
+    """
+    _engine, provider, received = await _guarded_engine(buy(), since=2)
+
+    with caplog.at_level(logging.INFO, logger=_ENGINE_LOGGER):
+        await provider.emit(candle(0))
+
+    assert received == []
+    lines = _engine_lines(caplog, "buy_refused_bars_gap")
+    assert len(lines) == 1
+    fields = vars(lines[0])
+    assert fields.get("symbol") == "BTCUSDT"
+    assert fields.get("window") == _WARMUP
+    assert fields.get("bars_since_gap") == 2
+
+
+async def test_a_close_passes_while_the_window_spans_a_gap() -> None:
+    """An exit is never refused: a CLOSE reaches the handler during the gap window.
+
+    This is the property the guard's placement exists for, and it holds because
+    the refusal condition names BUY. MUTATION: refuse any signal while the window
+    spans a gap -- the CLOSE is suppressed and this fails.
+    """
+    _engine, provider, received = await _guarded_engine(close_signal(), since=1)
+
+    await provider.emit(candle(0))
+
+    assert [signal.action for signal in received] == [SignalAction.CLOSE]
+
+
+async def test_no_gap_never_refuses(caplog: pytest.LogCaptureFixture) -> None:
+    _engine, provider, received = await _guarded_engine(buy(), since=None)
+
+    with caplog.at_level(logging.INFO, logger=_ENGINE_LOGGER):
+        await provider.emit(candle(0))
+
+    assert [signal.action for signal in received] == [SignalAction.BUY]
+    assert _engine_lines(caplog, "buy_refused_bars_gap") == []
+    assert _engine_lines(caplog, "bars_contiguous_again") == []
+
+
+async def test_a_window_of_consecutive_bars_lifts_the_refusal_and_says_so_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One bar short of the window still refuses; the full window lifts it.
+
+    ``since = 4`` against a window of 5 is the boundary a fence-post mutation
+    moves. The resumption line is logged when the window first clears and not on
+    the clean bars after it.
+
+    MUTATION: the window is ``warmup - 1`` -- the refusal lifts at ``since = 4``
+    and this fails.
+    """
+    _engine, provider, received = await _guarded_engine(buy(), since=_WARMUP - 1)
+
+    with caplog.at_level(logging.INFO, logger=_ENGINE_LOGGER):
+        await provider.emit(candle(0))
+        assert received == []
+        provider.gaps[("BTCUSDT", "1m")] = _WARMUP
+        await provider.emit(candle(1))
+        provider.gaps[("BTCUSDT", "1m")] = _WARMUP + 1
+        await provider.emit(candle(2))
+
+    assert [signal.action for signal in received] == [SignalAction.BUY, SignalAction.BUY]
+    again = _engine_lines(caplog, "bars_contiguous_again")
+    assert len(again) == 1
+    assert vars(again[0]).get("bars_since_gap") == _WARMUP
+    assert vars(again[0]).get("window") == _WARMUP

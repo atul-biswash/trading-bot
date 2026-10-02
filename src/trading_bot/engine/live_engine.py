@@ -40,6 +40,7 @@ import asyncio
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from trading_bot.core.enums import SignalAction
 from trading_bot.core.interfaces import (
     MarketDataProvider,
     SignalHandler,
@@ -54,6 +55,10 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 _log = get_logger(__name__)
 
 _EVENT_STOPPED = "engine_stopped"
+#: P-3l: a BUY suppressed because the indicator window spans a gap, and the line
+#: that says the window is clean again. Both name the pair; neither is a halt.
+_EVENT_BUY_REFUSED_GAP = "buy_refused_bars_gap"
+_EVENT_CONTIGUOUS_AGAIN = "bars_contiguous_again"
 
 _Key = tuple[str, str]
 
@@ -94,6 +99,9 @@ class TradingEngine:
         self._signal_handlers: list[SignalHandler] = []
         self._error_counts: dict[_Key, int] = {}
         self._quarantined: set[_Key] = set()
+        #: Pairs whose indicator window currently spans a gap, so the resumption
+        #: line is logged once when the window clears and not on every clean bar.
+        self._gap_blocked: set[_Key] = set()
         self._stop_requested = asyncio.Event()
         self._started = False
 
@@ -302,9 +310,63 @@ class TradingEngine:
             )
             return
 
+        refuse_buy = self._window_spans_a_gap(key, strategy.warmup_period)
         signal = self._evaluate(key, strategy, candle)
         if signal is not None:
+            # THE GUARD IS HERE, AFTER THE SIGNAL EXISTS, AND THAT IS WHAT MAKES IT
+            # BUY-ONLY. Placed before `_evaluate` it could not know the action and
+            # would suppress a CLOSE with everything else. The condition below
+            # names `SignalAction.BUY` and nothing else, so a CLOSE -- the exit,
+            # which must always be permitted -- reaches `_emit` whatever the window
+            # holds. A death cross computed over a spanned window may be wrong in
+            # value; closing on it is the cheap error, and refusing to close is not.
+            if refuse_buy and signal.action is SignalAction.BUY:
+                _log.warning(
+                    "BUY %s refused: the %d-bar indicator window spans a gap in the %s feed",
+                    signal.symbol,
+                    strategy.warmup_period,
+                    timeframe,
+                    extra={
+                        "event": _EVENT_BUY_REFUSED_GAP,
+                        "symbol": symbol,
+                        "timeframe": timeframe,
+                        "window": strategy.warmup_period,
+                        "bars_since_gap": self._provider.bars_since_gap(symbol, timeframe),
+                    },
+                )
+                return
             await self._emit(signal, candle)
+
+    def _window_spans_a_gap(self, key: _Key, window: int) -> bool:
+        """Whether ``window`` bars back from now reach across the pair's latest gap.
+
+        ``window`` is the strategy's ``warmup_period``, the number of rows its
+        indicators read at the signal bar (``slow_period + 1`` for the SMA
+        crossover). The provider counts consecutive bars since the gap; fewer than
+        ``window`` means at least one row in the window precedes it. Logs the
+        resumption once, when the count first reaches ``window``.
+        """
+        symbol, timeframe = key
+        since = self._provider.bars_since_gap(symbol, timeframe)
+        spans = since is not None and since < window
+        if spans:
+            self._gap_blocked.add(key)
+        elif key in self._gap_blocked:
+            self._gap_blocked.discard(key)
+            _log.info(
+                "%s/%s: %d consecutive bars since the gap; the indicator window is clean again",
+                symbol,
+                timeframe,
+                window,
+                extra={
+                    "event": _EVENT_CONTIGUOUS_AGAIN,
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "window": window,
+                    "bars_since_gap": since,
+                },
+            )
+        return spans
 
     def _evaluate(self, key: _Key, strategy: Strategy, candle: Candle) -> Signal | None:
         """Run one strategy against the current window, containing failures.

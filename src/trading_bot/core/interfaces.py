@@ -374,6 +374,18 @@ class MarketDataProvider(ABC):
         DataFrame, so no money value is ever derived from a binary float.
         """
 
+    @abstractmethod
+    def bars_since_gap(self, symbol: str, timeframe: str) -> int | None:
+        """Consecutive bars buffered since the pair's latest gap, or ``None`` if no gap.
+
+        ``None`` means no run of missing bars has been recorded on the pair, and
+        any other value counts the first bar AFTER the gap as 1. A gap is a bar
+        whose ``open_time`` is more than one timeframe after the one before it
+        (M5l P-3l). **Abstract rather than defaulted to ``None``**, because a
+        default would let a provider that never looks for gaps answer "no gap",
+        which is the one answer that disables the guard reading this.
+        """
+
     def is_ready(self, symbol: str, timeframe: str, warmup_period: int) -> bool:
         """Whether enough candles are buffered to satisfy ``warmup_period``.
 

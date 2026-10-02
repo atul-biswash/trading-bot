@@ -140,6 +140,9 @@ class FakeProvider(MarketDataProvider):
     def last_candle(self, symbol: str, timeframe: str) -> Candle | None:
         return self._candles.get(symbol)
 
+    def bars_since_gap(self, symbol: str, timeframe: str) -> int | None:
+        return None  # the risk manager does not read gaps; the engine does
+
 
 def ohlcv(
     bars: int, *, high: float = 101.0, low: float = 99.0, close: float = 100.0

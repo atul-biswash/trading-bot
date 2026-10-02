@@ -860,6 +860,13 @@ class AppConfig(_Model):
         # Every figure is printed EXACTLY, never rounded: with `:.1f` a total a
         # hair over the budget read "30.0s ... budget 30.0s" (`M5l-065`).
         shortest = min(enabled, key=lambda pair: timeframe_to_ms(pair.timeframe))
+        # ANNOTATED AT M5l P91 (C44, P-3l): the refusal text below says a lost bar
+        # makes SMA and ATR "silently span the gap". That is no longer the whole
+        # story: the provider now logs `bars_gap_detected` for the gap and the
+        # engine refuses a BUY while the window spans it. What survives: a lost
+        # bar still leaves no NaN, the indicators still count rows, and the
+        # window still spans the gap -- only "silently" and the absence of any
+        # refusal are no longer true. The string is code and is left as written.
         raise ValueError(
             f"risk.dispatch_deadline_s = {dispatch_s} x {p_sim} pair(s) that can close "
             f"simultaneously = {dispatch}s, plus risk.reconcile_deadline_s = {reconcile_s} x "

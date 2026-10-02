@@ -35,6 +35,15 @@ missing bars stay missing until the process restarts and re-seeds; the buffer
 stays *correct* (ordered, no duplicates) but may be *incomplete*. Gap detection
 plus a REST backfill on reconnect is the natural next hardening step.
 
+(ANNOTATED AT M5l P91, C44, P-3l: **gap DETECTION is now built, and the backfill
+is not.** :meth:`BufferedMarketDataProvider._append` records a gap when an
+appended bar's ``open_time`` is more than one timeframe after the last, logs
+``bars_gap_detected`` once per gap, and :meth:`bars_since_gap` reports how many
+consecutive bars have followed it, which is what the engine's BUY guard reads.
+Missing bars are still never fetched: a REST backfill is deferred by the project
+owner's ruling, P91 pin 4. What survives: everything above, including that the
+buffer stays ordered and may be incomplete.)
+
 Concurrency
 -----------
 State is mutated only from inside the asyncio event loop — by ``start()`` during
@@ -50,6 +59,8 @@ from __future__ import annotations
 
 from collections import deque
 from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime
 from typing import TYPE_CHECKING, Final
 
 import numpy as np
@@ -63,6 +74,7 @@ from trading_bot.core.interfaces import (
     MarketDataStream,
 )
 from trading_bot.core.models import Candle
+from trading_bot.utils.helpers import timeframe_to_ms
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -82,6 +94,21 @@ _DEFAULT_HISTORY_LIMIT: Final = 500
 _DEFAULT_BUFFER_SIZE: Final = 1000
 
 _Key = tuple[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class _Gap:
+    """The most recent run of missing bars on one pair.
+
+    ``resumed_from`` is the ``open_time`` of the first bar that arrived AFTER the
+    gap, from which contiguity is counted. A later gap replaces this record, so
+    it always describes the latest one and every bar since ``resumed_from`` is
+    consecutive.
+    """
+
+    missing_bars: int
+    last_before: datetime
+    resumed_from: datetime
 
 
 def _key(symbol: str, timeframe: str) -> _Key:
@@ -168,6 +195,9 @@ class BufferedMarketDataProvider(MarketDataProvider):
         self._owns_client = owns_client
 
         self._buffers: dict[_Key, deque[Candle]] = {}
+        # The latest gap per pair, written only by `_append`. Absent means no
+        # gap has been seen on this pair since the process started.
+        self._gaps: dict[_Key, _Gap] = {}
         # Memoised frames. Presence == clean; the key is dropped on every
         # accepted append. See get_dataframe() for why this is worth caching.
         self._frames: dict[_Key, pd.DataFrame] = {}
@@ -363,6 +393,24 @@ class BufferedMarketDataProvider(MarketDataProvider):
         buffer = self._buffers[self._require(symbol, timeframe)]
         return buffer[-1] if buffer else None
 
+    def bars_since_gap(self, symbol: str, timeframe: str) -> int | None:
+        """Consecutive bars buffered since the latest gap, or ``None`` if none was seen.
+
+        Counts the first bar after the gap as 1, so a gap that has just closed
+        reads ``1``. Computed from timestamps rather than from the buffer's
+        length, so it stays right after the deque evicts old rows, and it is only
+        sound because a later gap REPLACES the record: every bar since
+        ``resumed_from`` is consecutive by construction.
+        """
+        key = self._require(symbol, timeframe)
+        gap = self._gaps.get(key)
+        if gap is None:
+            return None
+        buffer = self._buffers[key]
+        step_ms = timeframe_to_ms(timeframe)
+        elapsed_ms = int((buffer[-1].open_time - gap.resumed_from).total_seconds() * 1000)
+        return elapsed_ms // step_ms + 1
+
     def _require(self, symbol: str, timeframe: str) -> _Key:
         """Resolve a pair to its key, or fail loudly if it was never tracked.
 
@@ -423,9 +471,49 @@ class BufferedMarketDataProvider(MarketDataProvider):
         if buffer and candle.open_time == buffer[-1].open_time:
             buffer[-1] = candle  # same bar re-delivered, possibly corrected
         else:
+            self._record_gap_if_any(key, candle)
             buffer.append(candle)  # the normal case: a new bar
         self._frames.pop(key, None)  # invalidate the memoised frame
         return True
+
+    def _record_gap_if_any(self, key: _Key, candle: Candle) -> None:
+        """Record and log a gap when ``candle`` is not exactly one timeframe after the last bar.
+
+        Called only for a bar that is about to be APPENDED, so a re-delivered or
+        stale bar can never register one. **Once per gap**: the log line is
+        emitted here, at detection, and never again while the bars that follow
+        are consecutive. Seeded history goes through the same gate, so a gap
+        inside REST history is recorded as well -- the window an indicator reads
+        spans it either way.
+        """
+        buffer = self._buffers[key]
+        if not buffer:
+            return
+        last = buffer[-1].open_time
+        step_ms = timeframe_to_ms(key[1])
+        delta_ms = int((candle.open_time - last).total_seconds() * 1000)
+        if delta_ms <= step_ms:
+            return
+        missing = max(delta_ms // step_ms - 1, 1)
+        self._gaps[key] = _Gap(
+            missing_bars=missing, last_before=last, resumed_from=candle.open_time
+        )
+        _log.warning(
+            "%s/%s: %d bar(s) missing between %s and %s",
+            key[0],
+            key[1],
+            missing,
+            last.isoformat(),
+            candle.open_time.isoformat(),
+            extra={
+                "event": "bars_gap_detected",
+                "symbol": key[0],
+                "timeframe": key[1],
+                "missing_bars": missing,
+                "from": last.isoformat(),
+                "to": candle.open_time.isoformat(),
+            },
+        )
 
     def _make_handler(self, key: _Key) -> CandleHandler:
         """Build the stream callback for one pair.
