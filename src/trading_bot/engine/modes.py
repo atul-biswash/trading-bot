@@ -831,6 +831,54 @@ async def _prime_pairs(
     return pairs
 
 
+def _require_one_quote_asset(pairs: Mapping[str, PairContext], quote_asset: str) -> None:
+    """Refuse the boot when an enabled pair is quoted in another asset (P-3g).
+
+    **One quote asset, because three things assume it and none checks.** The
+    portfolio holds ONE quote balance, ``Portfolio.quote_asset``. Settlement
+    subtracts a fee from a quote total only if the fee is in that asset
+    (``settle_exit``'s ``quote_asset`` argument and ``close_position``'s fee
+    guard), sizing divides ``equity`` -- a figure in that asset -- by a price,
+    and ``Portfolio.equity`` adds ``free_quote`` to ``quantity x mark``. A pair
+    quoted in EUR on a USDT portfolio would pass every one of them: the
+    arithmetic is ``Decimal`` against ``Decimal``, so it succeeds silently and
+    books a plausible number in the wrong currency, which is the class of error
+    the money rule exists to prevent one level down.
+
+    **At the boot, not at config load, because the quote asset is not known
+    there.** ``config.yaml`` carries a symbol such as ``BTCEUR``, and only the
+    venue's own ``exchangeInfo`` says what it is quoted in; guessing it from the
+    symbol's suffix would be writing a second source of truth. So this runs on
+    what :func:`_prime_pairs` fetched, immediately after it and ahead of every
+    other venue call and of everything that reads the store against the venue.
+    The boot makes no venue write at all -- every order is the executor's, on a
+    candle -- so "before any write" holds with every boot step still to come.
+
+    Compared against ``trading.base_currency``, upper-cased on both sides: that
+    is the value :func:`_seed_portfolio` puts on the portfolio, which does not
+    exist yet at this point in the boot. A pair on a symbol not enabled is never
+    primed and so never refused; disabling it is the remedy the message names.
+
+    :raises ConfigError: any primed pair's venue-reported quote asset differs.
+    """
+    wanted = quote_asset.upper()
+    foreign = {
+        symbol: context.symbol_info.quote_asset.upper()
+        for symbol, context in pairs.items()
+        if context.symbol_info.quote_asset.upper() != wanted
+    }
+    if not foreign:
+        return
+    detail = ", ".join(f"{symbol} (quote asset {asset})" for symbol, asset in foreign.items())
+    raise ConfigError(
+        f"Enabled pair(s) {detail} are not quoted in the portfolio's quote asset, "
+        f"{wanted} (trading.base_currency). Settlement, sizing and fees assume one "
+        "quote asset, so a pair quoted in another would be booked, sized and netted in "
+        "the wrong currency without any error. Disable the pair(s) in config.yaml, or "
+        "set trading.base_currency to the asset they are quoted in."
+    )
+
+
 def _seed_portfolio(
     balances: Sequence[Balance],
     *,
@@ -894,6 +942,13 @@ def _seed_portfolio(
     reads it once to pass it here, and nothing else in ``src/`` touches it. The
     **normalised** form is what lands on the portfolio, because it is
     interpolated into refusal messages and future code will compare against it.
+
+    (ANNOTATED AT M5l P88, C40, P-3g: *"``base_currency``'s only consumer"* is
+    no longer true. ``live_system`` reads it a second time, earlier in the boot, to
+    pass it to :func:`_require_one_quote_asset`, which compares it against every
+    primed pair's venue-reported quote asset. Both consumers normalise it
+    themselves, as this paragraph requires. What survives: this function is
+    still the only one that puts it on the portfolio.)
 
     ``get_balances`` returns every asset including zero balances, so an absent
     entry means genuinely absent -- a configured quote asset the account does not
@@ -988,6 +1043,12 @@ async def _snapshot_unmanaged_holdings(
     # USDT-denominated account. Two enabled pairs sharing a base asset *and* the
     # quote asset would let the last one win here; the exchange does not offer
     # such a duplicate, and `_pair_timeframes` already refuses duplicate symbols.
+    #
+    # ANNOTATED AT M5l P88 (C40, P-3g): the restriction below excluded a pair
+    # quoted elsewhere SILENTLY, and nothing refused one. From C40 the boot
+    # refuses such a pair before it reaches here (`_require_one_quote_asset`),
+    # so the filter excludes nothing on a booted system and stays as defence in
+    # depth. What survives: the reason the restriction is correct.
     by_base = {
         context.symbol_info.base_asset: symbol
         for symbol, context in pairs.items()
@@ -2185,6 +2246,10 @@ async def live_system(
     try:
         timeframes = _pair_timeframes(settings)
         pairs = await _prime_pairs(resolved_client, timeframes)
+        # P-3g: RIGHT AFTER THE PAIRS ARE PRIMED, which is where the venue first
+        # says what each is quoted in, and ahead of the account read, the store's
+        # resolution and both snapshots -- the first places a quote asset is used.
+        _require_one_quote_asset(pairs, settings.config.trading.base_currency)
         # ONE account read, shared by both consumers below. The saved round trip
         # is the smaller half: two reads could disagree if a balance moved
         # between them, and the seeded portfolio and the unmanaged-holdings

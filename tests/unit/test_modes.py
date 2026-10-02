@@ -237,12 +237,17 @@ class FakeRootClient(ExchangeClient):
         order_lists_error: Exception | None = None,
         own_open_orders: list[Order] | None = None,
         my_trades: list[Trade] | None = None,
+        quote_assets: Mapping[str, str] | None = None,
     ) -> None:
         self._balances = (
             balances
             if balances is not None
             else [Balance(asset="USDT", free=D("5000"), locked=D("0"))]
         )
+        #: A symbol's venue-reported quote asset where it is not USDT. ``None``
+        #: leaves every pair USDT-quoted, which is what every test in this file
+        #: assumed before P-3g's refusal made the assumption checked.
+        self._quote_assets = dict(quote_assets) if quote_assets is not None else {}
         self._unknown = unknown_symbols
         self._journal = journal if journal is not None else []
         self._balances_error = balances_error
@@ -267,7 +272,9 @@ class FakeRootClient(ExchangeClient):
         self._journal.append(f"symbol_info:{symbol}")
         if symbol in self._unknown:
             raise ExchangeAPIError(f"Unknown symbol: {symbol!r}")
-        return symbol_info(symbol=symbol)
+        info = symbol_info(symbol=symbol)
+        quote = self._quote_assets.get(symbol)
+        return info if quote is None else info.model_copy(update={"quote_asset": quote})
 
     async def get_balances(self) -> list[Balance]:
         self._journal.append("balances")
@@ -1310,10 +1317,16 @@ class TestBootRefusals:
         assert client.close_calls == 1
 
     async def test_a_missing_quote_asset_refuses_the_boot(self, tmp_path: Path) -> None:
+        # The pair is quoted in BUSD too (P-3g): a USDT pair on a BUSD portfolio is
+        # refused by `_require_one_quote_asset` before the account is read, and this
+        # test is about the LATER refusal, an account with no BUSD entry.
         settings = write_settings(tmp_path, base_currency="BUSD")
-        client = FakeRootClient(balances=[Balance(asset="USDT", free=D("5000"), locked=D("0"))])
+        client = FakeRootClient(
+            balances=[Balance(asset="USDT", free=D("5000"), locked=D("0"))],
+            quote_assets={SYMBOL: "BUSD"},
+        )
 
-        with pytest.raises(ConfigError, match="BUSD"):
+        with pytest.raises(ConfigError, match="no BUSD balance entry"):
             async with live_system(settings, client=client, stream=FakeStream()):
                 pass  # pragma: no cover - the refusal precedes the body
 
@@ -1327,6 +1340,123 @@ class TestBootRefusals:
 
         async with live_system(settings, client=client, stream=FakeStream()) as system:
             assert system.portfolio.free_quote == D("0")
+
+
+class _WriteForbiddenClient(FakeRootClient):
+    """A boot client for which ANY venue write fails the test and is recorded.
+
+    The five writes on the port are listed by name. ``FakeRootClient`` already
+    raises ``NotImplementedError`` from two of them, which a boot that caught
+    broad exceptions could swallow; this one raises ``AssertionError`` and ALSO
+    appends to ``writes``, so a test asserts the list is empty and a swallowed
+    raise still leaves its mark.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.writes: list[str] = []
+
+    def _forbid(self, name: str) -> None:
+        self.writes.append(name)
+        raise AssertionError(f"venue write {name} during a boot that must refuse first")
+
+    async def create_order(self, request: OrderRequest) -> Order:
+        self._forbid("create_order")
+        raise AssertionError  # pragma: no cover - _forbid raised
+
+    async def cancel_order(self, symbol: str, order_id: str) -> Order:
+        self._forbid("cancel_order")
+        raise AssertionError  # pragma: no cover - _forbid raised
+
+    async def create_otoco_order_list(self, *args: Any, **kwargs: Any) -> Any:
+        self._forbid("create_otoco_order_list")
+
+    async def create_oto_order_list(self, *args: Any, **kwargs: Any) -> Any:
+        self._forbid("create_oto_order_list")
+
+    async def cancel_order_list(self, *args: Any, **kwargs: Any) -> Any:
+        self._forbid("cancel_order_list")
+
+
+class TestOneQuoteAssetPerPortfolio:
+    """P-3g: an enabled pair quoted outside the portfolio's asset refuses the boot.
+
+    The check is `_require_one_quote_asset`, called in `live_system` right after
+    `_prime_pairs`. Its subject is the venue-reported quote asset against
+    `trading.base_currency`, so the fakes here set the venue's answer through
+    `FakeRootClient(quote_assets=...)` and never touch config.
+    """
+
+    async def test_a_usdt_pair_is_accepted(self, tmp_path: Path) -> None:
+        """Catches the refusal firing on the ordinary case, which every other boot
+        test also exercises -- this one names it, and asserts the boot got far
+        enough to seed the portfolio in the quote asset."""
+        settings = write_settings(tmp_path)
+        client = _WriteForbiddenClient()
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            assert system.portfolio.quote_asset == "USDT"
+
+        assert client.writes == []
+
+    async def test_a_pair_quoted_in_another_asset_refuses_before_any_venue_write(
+        self, tmp_path: Path
+    ) -> None:
+        """Catches the check being absent: a EUR pair on a USDT portfolio booted.
+
+        The client fails on any write and records it, so the empty ``writes``
+        asserts the refusal came first.
+        """
+        settings = write_settings(tmp_path, pairs=(("BTCEUR", "1m", True),))
+        client = _WriteForbiddenClient(quote_assets={"BTCEUR": "EUR"})
+
+        with pytest.raises(ConfigError, match="quote asset EUR"):
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the refusal precedes the body
+
+        assert client.writes == []
+        assert client.close_calls == 1
+
+    async def test_the_refusal_names_the_pair_and_both_assets_and_the_assumption(
+        self, tmp_path: Path
+    ) -> None:
+        """Catches a message that omits what an operator must act on.
+
+        Two pairs, one of them right: the message names the offending pair, its
+        quote asset and the portfolio's, says why it matters, and does NOT name
+        the pair that was fine as an offender.
+        """
+        settings = write_settings(tmp_path, pairs=((SYMBOL, "1m", True), ("ETHEUR", "5m", True)))
+        client = FakeRootClient(quote_assets={"ETHEUR": "EUR"})
+
+        with pytest.raises(ConfigError) as caught:
+            async with live_system(settings, client=client, stream=FakeStream()):
+                pass  # pragma: no cover - the refusal precedes the body
+
+        message = str(caught.value)
+        assert "ETHEUR (quote asset EUR)" in message
+        assert "portfolio's quote asset, USDT" in message
+        assert "Settlement, sizing and fees assume one quote asset" in message
+        assert f"{SYMBOL} (quote asset" not in message
+
+    async def test_the_refusal_precedes_every_account_read_and_the_seeding(
+        self, tmp_path: Path
+    ) -> None:
+        """Catches the refusal moving later in the boot (the ordering test).
+
+        The journal shows the symbols were primed, because that is where the
+        quote asset is learned, and shows NO account read, no order-list read,
+        no seed and no stream: the refusal is the next thing after the priming.
+        """
+        journal: list[str] = []
+        settings = write_settings(tmp_path, pairs=(("BTCEUR", "1m", True),))
+        client = FakeRootClient(journal=journal, quote_assets={"BTCEUR": "EUR"})
+
+        with pytest.raises(ConfigError):
+            async with live_system(settings, client=client, stream=FakeStream(journal)):
+                pass  # pragma: no cover - the refusal precedes the body
+
+        assert journal == ["symbol_info:BTCEUR", "close_client"]
 
 
 class TestQuoteAssetMatching:

@@ -599,6 +599,26 @@ MEASURED (code).
 
 *Arming condition:* **whoever next edits `_prime_pairs` in `engine/modes.py` or `settle_exit` in `core/portfolio.py`.**
 
+> **RESOLVED AT M5l P88 (C40): *"Nothing refuses a pair quoted outside the base
+> currency"* IS NO LONGER TRUE, AND THE ARMING CONDITION ABOVE IS DISCHARGED.**
+> `live_system` now calls `_require_one_quote_asset` immediately after
+> `_prime_pairs`, and an enabled pair whose venue-reported quote asset differs
+> from `trading.base_currency` (upper-cased on both sides, which is what
+> becomes the portfolio's `quote_asset`) refuses the boot with a `ConfigError`
+> naming the pair, its quote asset, the portfolio's, and that settlement,
+> sizing and fees assume one quote asset. **Why at the boot and not at config
+> load:** the quote asset is the venue's to say, from `exchangeInfo`, and a
+> config value is a bare symbol. **Ordering, MEASURED in the journal test:** it
+> runs after the symbols are primed and before the account read, the store's
+> resolution, both snapshots and every socket; the boot makes no venue write at
+> all, so it is also before any write. The sites that assume one quote asset
+> and were unchecked: `settle_exit`'s `quote_asset` argument, `close_position`'s
+> and `book_restored_exit`'s fee guards, `Portfolio.equity`, sizing's `equity`
+> and the affordability check, and the holdings filter in
+> `_snapshot_unmanaged_holdings`. **What survives:** the sentence's observation
+> that the holdings filter refused nothing, true until C40 and recorded by
+> `M5k-102`; the filter stays as defence in depth.
+
 #### P-3h. Four realised figures carry exponent -24 (`M5k-121`)
 
 In the capture `docs/RUN_LEDGER.md` §19 names, orders 327933, 4347037,
