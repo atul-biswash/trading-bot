@@ -991,6 +991,15 @@ _DUPLICATE_ORDER_RE = re.compile(r"^Duplicate order sent\.$", re.IGNORECASE)
 #: auto-cancelled both pending legs and the follow-up cancels each returned it).
 _UNKNOWN_ORDER_RE = re.compile(r"^Unknown order sent\.$", re.IGNORECASE)
 
+#: Also matched against the message of a ``-2011``, and the answer to cancelling
+#: an ORDER LIST the venue no longer works: "Unknown order list sent." MEASURED,
+#: Testnet, 2026-10-01T18:30Z (M5l P85): R3's synthetic CLOSE cancelled list
+#: 401075, an ALL_DONE list whose legs had been cancelled, and the venue answered
+#: ``-2011`` with this text. Anchored on the whole message, as the row above is.
+#: Until this row existed it fell to a generic ``OrderError``, so the close path
+#: read a benign teardown as a failed cancel and sold nothing (``M5l-161``).
+_UNKNOWN_ORDER_LIST_RE = re.compile(r"^Unknown order list sent\.$", re.IGNORECASE)
+
 #: Matched against the message of a ``-2013``, the answer to a GET of an order
 #: the venue has no record of. Anchored on the complete measured message, as
 #: the ``-2011`` pattern above is. MEASURED, Testnet, 2026-10-01 (M5l P82): a
@@ -1080,6 +1089,7 @@ _API_RULES: tuple[_ApiRule, ...] = (
     _ApiRule(_OVERLOADED_ORDER_CODE, _INSUFFICIENT_BALANCE_RE, InsufficientBalanceError),
     _ApiRule(_OVERLOADED_ORDER_CODE, _DUPLICATE_ORDER_RE, DuplicateOrderError),
     _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_RE, OrderNotFoundError),
+    _ApiRule(_UNKNOWN_ORDER_CODE, _UNKNOWN_ORDER_LIST_RE, OrderNotFoundError),
     _ApiRule(_ORDER_DOES_NOT_EXIST_CODE, _ORDER_DOES_NOT_EXIST_RE, OrderNotFoundError),
     _ApiRule(_FILTER_FAILURE_CODE, _FILTER_FAILURE_RE, FilterRejectedError, _filter_rejected),
     _ApiRule(

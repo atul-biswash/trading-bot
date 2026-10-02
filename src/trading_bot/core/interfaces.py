@@ -273,6 +273,14 @@ class ExchangeClient(ABC):
             distinguish *already cancelled* from *already filled*, and those
             demand opposite actions, which is why section 4b confirms by query
             afterwards and never by this response.
+
+            (ANNOTATED AT M5l P85, C35, ``M5l-161``: this was FALSE of the
+            venue's real answer to cancelling a LIST until C35. MEASURED on
+            Testnet, 2026-10-01T18:30Z: cancelling list 401075, an ``ALL_DONE``
+            list, answered ``-2011 'Unknown order list sent.'``, not the
+            ``'Unknown order sent.'`` of a leg, and it surfaced as a bare
+            ``OrderError``. C35 maps it here too. What survives: everything
+            above.)
         """
         ...
 

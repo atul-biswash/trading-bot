@@ -328,6 +328,14 @@ class OrderNotFoundError(OrderError):
     raised a bare ``ExchangeAPIError`` for it, and a catcher of this class
     never saw a venue-absent order. What survives: everything below.)
 
+    (ANNOTATED AT M5l P85, C35, ``M5l-161``: the answer to cancelling an ORDER
+    LIST the venue no longer works is ``-2011 'Unknown order list sent.'``,
+    MEASURED on Testnet on 2026-10-01 for list 401075, an ``ALL_DONE`` list. It
+    is a different text from the leg's ``'Unknown order sent.'`` quoted above
+    and classified to a bare ``OrderError`` until C35, so a catcher of this
+    class never saw it. From C35 it classifies here too. What survives:
+    everything else in this docstring.)
+
     **Benign is a property of the CALL SITE, not of this class, which is why it
     subclasses ``OrderError`` rather than sitting outside the order hierarchy.**
     On a cancel path it is the expected result of a list that already collapsed

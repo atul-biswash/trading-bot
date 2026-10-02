@@ -4925,6 +4925,28 @@ _CLOSE_BESIDE = store.PendingCloseRecord(
 )
 
 
+class _MeasuredListCancelClient(_RestoreCloseClient):
+    """`_RestoreCloseClient` whose list cancel fails as the venue really failed it.
+
+    MEASURED, Testnet, 2026-10-01T18:30Z (`M5l-161`): cancelling an ALL_DONE
+    list answered code -2011, "Unknown order list sent.". The payload goes
+    through the REAL ``translate_binance_error``, as ``BinanceClient._call``
+    sends it, so a mapper that does not classify it fails here and not only in
+    its own tests.
+    """
+
+    async def cancel_order_list(
+        self,
+        symbol: str,
+        order_list_id: int,
+        *,
+        timeout_s: float | None = None,
+        attempts: int | None = None,
+    ) -> OrderList:
+        self.calls.append("cancel_order_list")
+        raise translate_binance_error(_venue_error(code=-2011, message="Unknown order list sent."))
+
+
 def client_order_id_for(symbol: str, leg: OrderListLeg) -> str:
     """Our client id for one leg of the list at ``_LIST_BAR``."""
     return client_order_id(symbol, _LIST_BAR, leg)
@@ -5259,6 +5281,43 @@ class TestTheBootResolvesRestoredRecords:
 
             assert client.calls.count("create_order") == 1
             assert SYMBOL not in system.portfolio.positions
+
+    async def test_r3_sells_once_when_the_venue_answers_the_measured_list_cancel(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A4 failed on the real venue (`M5l-161`); this is the same answer, mapped.
+
+        The ALL_DONE list's cancel raises what the real mapper makes of the
+        measured payload, ``-2011 "Unknown order list sent."``. R3's synthetic
+        CLOSE must treat that as the benign teardown it is, re-confirm the
+        legs, send exactly one MARKET sell and book it, with no
+        ``close_cancel_failed``. MUTATION: remove the mapper's list row -- the
+        cancel then fails, nothing is sold, and ``close_cancel_failed`` is
+        logged.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _MeasuredListCancelClient()
+
+        with caplog.at_level(logging.DEBUG, logger="trading_bot.execution.executor"):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                closers = [h for h in system.provider._handlers if isinstance(h, _BootCloser)]  # type: ignore[attr-defined]
+                assert len(closers) == 1
+                await closers[0](candle())
+
+                failed = [
+                    r
+                    for r in caplog.records
+                    if r.name == "trading_bot.execution.executor"
+                    and vars(r).get("event") == "close_cancel_failed"
+                ]
+                assert failed == []
+                assert client.calls.count("cancel_order_list") == 1
+                assert client.calls.count("create_order") == 1
+                assert SYMBOL not in system.portfolio.positions
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.trades_count == 1
 
     async def test_a_read_failure_refuses_the_boot(self, tmp_path: Path) -> None:
         """Q6(a). MUTATION: drop the record whose leg could not be read."""

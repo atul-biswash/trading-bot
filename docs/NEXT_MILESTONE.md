@@ -938,6 +938,18 @@ measured message as the `-2011` row is.
   `CRITICAL`, the record is released and nothing is sold: the safe direction,
   and the position stays restored and UNKNOWN.
 
+> **ANNOTATED AT M5l P85 (C35): `M5l-141` IS RESOLVED BY MEASUREMENT, AND THE
+> SAFE DIRECTION IS WHAT HAPPENED.** The bullet above predicted *"If it
+> differs, the cancel fails at `CRITICAL`, the record is released and nothing
+> is sold"*, and at A4 of the P-3k supervised run it did: on Testnet at
+> `2026-10-01T18:30:03Z`, list 401075 (ETHUSDT, `ALL_DONE`), the venue answered
+> `-2011` with `'Unknown order list sent.'`, not `'Unknown order sent.'`; no
+> row matched, an ERROR `Unclassified message` was logged, `close_cancel_failed`
+> fired at `CRITICAL` and nothing was sold (`M5l-161`). C35 adds the row
+> `^Unknown order list sent\.$` to `OrderNotFoundError`. What survives: the
+> bullet's reasoning that a mismatch fails safe, which the run confirmed. The
+> arming condition below FIRED at C35 and is REAFFIRMED for the next row.
+
 `M5l-138`'s row is the first `_API_RULES` row keyed on a code that is not in
 `_ORDER_REJECT_CODES`, so a near-miss falls through to `ExchangeAPIError`
 rather than `OrderError`.

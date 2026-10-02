@@ -875,6 +875,7 @@ def test_the_rule_table_declares_its_order() -> None:
         (-2010, InsufficientBalanceError),
         (-2010, DuplicateOrderError),
         (-2011, OrderNotFoundError),
+        (-2011, OrderNotFoundError),
         (-2013, OrderNotFoundError),
         (-1013, FilterRejectedError),
         (-1100, MalformedRequestError),
@@ -964,6 +965,7 @@ def test_1111_is_unclassified_and_its_code_survives() -> None:
         (-2010, "Account has insufficient balance for requested action.", InsufficientBalanceError),
         (-2010, "Duplicate order sent.", DuplicateOrderError),
         (-2011, "Unknown order sent.", OrderNotFoundError),
+        (-2011, "Unknown order list sent.", OrderNotFoundError),
         (-2013, "Order does not exist.", OrderNotFoundError),
         (-1013, "Filter failure: NOTIONAL", FilterRejectedError),
         (-1100, "Illegal characters found in parameter 'symbol'; x", MalformedRequestError),
@@ -1531,6 +1533,62 @@ def test_an_unmatched_2013_message_logs_loudly(caplog: pytest.LogCaptureFixture)
 def test_the_measured_2013_message_does_not_log(caplog: pytest.LogCaptureFixture) -> None:
     """Quiet on the happy path: a guard that fired every call would train a skim."""
     exc = _api_error(code=-2013, status=400, message="Order does not exist.")
+    with caplog.at_level("ERROR", logger=m.__name__):
+        m.translate_binance_error(exc)
+
+    assert [r for r in caplog.records if r.name == m.__name__] == []
+
+
+# --------------------------------------------------------------------------
+# Error translation -- -2011 "Unknown order list sent.", the answer to cancelling
+# an order list the venue no longer works
+#
+# MEASURED on Testnet, 2026-10-01T18:30Z (M5l P85, finding M5l-161): R3's
+# synthetic CLOSE cancelled list 401075, an ALL_DONE list whose legs had been
+# cancelled, and the venue answered code -2011, message "Unknown order list
+# sent.". Only "Unknown order sent." was mapped, so it reached the close path as
+# a generic OrderError and the position was not sold.
+# --------------------------------------------------------------------------
+def test_the_measured_unknown_order_list_message_maps_to_order_not_found() -> None:
+    """The measured payload, not a fake raising the domain type directly.
+
+    Exact type AND ancestry, and the code kept. MUTATION: remove the row.
+    """
+    exc = _api_error(code=-2011, status=400, message="Unknown order list sent.")
+    result = m.translate_binance_error(exc)
+    assert type(result) is OrderNotFoundError
+    assert isinstance(result, OrderError)
+    assert result.code == -2011
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Unknown order list sent. Retry later.",
+        "Error: Unknown order list sent.",
+    ],
+)
+def test_a_reworded_unknown_order_list_message_does_not_map_to_order_not_found(
+    message: str,
+) -> None:
+    """The near-miss (M5c-AA): anchored on the whole measured string.
+
+    One case adds a tail and one a head, so loosening EITHER anchor is caught.
+    ``-2011`` is in the order-reject set, so the fallthrough is a plain
+    ``OrderError`` carrying its code. MUTATION: loosen the anchors.
+    """
+    exc = _api_error(code=-2011, status=400, message=message)
+    result = m.translate_binance_error(exc)
+    assert not isinstance(result, OrderNotFoundError)
+    assert type(result) is OrderError
+    assert result.code == -2011
+
+
+def test_the_measured_unknown_order_list_message_does_not_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Quiet on the happy path. Before the row it logged "Unclassified message"."""
+    exc = _api_error(code=-2011, status=400, message="Unknown order list sent.")
     with caplog.at_level("ERROR", logger=m.__name__):
         m.translate_binance_error(exc)
 
