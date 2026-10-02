@@ -1059,6 +1059,24 @@ deployment procedure gains the active-clone store source, the schema step
 with the expected lines. **P-3k is IMPLEMENTED (C28-C34)**, and its gate is
 open only to A1, A2 and A4 recorded in section 24.
 
+**ADDED AT M5l P85 (C35-C37), the supervised run's first results.** The
+run started at `d1074c6` and is recorded in `docs/RUN_LEDGER.md` section 25.
+**A1 passed** (`M5l-165`: both records restored, `free_quote` reconciled to the
+digit). **A4 FAILED** (`M5l-161`): R3's cancel of an `ALL_DONE` list was
+answered `-2011 'Unknown order list sent.'`, which no row mapped, so the
+close failed at `CRITICAL` and nothing was sold. **C35 (`244aa6b`) maps it**,
+and C36 (`d95cb5e`) corrects the cancel script's stale warning
+(`M5l-163`). **A2's line is already in the log** (`M5l-166`), from a Ctrl+C stop
+rather than the hard kill the arm names; whether it counts is the owner's
+judgement. **THE GATE STAYS CLOSED.** It opens only when **A4 is re-run on the
+commit carrying C35** -- `244aa6b` or a descendant, deployed as its own clone
+per the procedure -- and recorded in section 25. **A1's and A2's evidence from
+`d1074c6` stands**, because neither path cancels an order list: A1 restores
+records and reconciles, A2 books an exit the venue already filled, and the
+answer C35 changed is the answer to a list cancel, made only by the close path.
+The operator's release and manual ETHUSDT sale of that run cost
+`-6.91308000` USDT outside the ledger (`M5l-164`, section 25).
+
 **C33's S6 rows that remain by design.** Two S6 sentences are NOT changed, each
 for a stated reason. `modes.py`'s block message *"the position it belongs to
 was lost when the previous process ended"* is a code string, outside C33's

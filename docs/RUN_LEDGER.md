@@ -1817,6 +1817,10 @@ they mean for the milestone is reserved.
 
 ## 24. P-3k's supervised run: the template (NOT YET RUN)
 
+> **ANNOTATED AT M5l P85 (C37): THE RUN HAS BEGUN, AND THE HEADING'S
+> *"NOT YET RUN"* IS NO LONGER TRUE.** Section 25 records it. This section is
+> left as the template it was; what it holds is still the arms' expected lines.
+
 **This section is a TEMPLATE, written at M5l P83 (C33), and holds no
 observation.** Every `<...>` below is filled when the run happens, from the
 run's own log and the venue's own answers, never from memory. The live-trading
@@ -1897,3 +1901,200 @@ holds the answer. Record it VERBATIM from the log: either the
 A1, A2 and A4 recorded, each beside its instrument, is the condition the P-3k
 gate names. It is the project owner's to judge whether they are met. A3, A5, A6
 and A7 are recorded when they are run and gate nothing.
+
+## 25. P-3k's supervised run, as far as it has gone (A1 and A4 run, A2 in the log)
+
+**Recorded at M5l P85 (C37), from the deployment clone's own files only** --
+`logs\trading_bot.log`, `logs\release.log` and `F:\trading bot\deploy\arm_notes.txt`
+-- read and never written, plus one GET-only read of the venue for the
+operator's manual sale. The clone is `F:\trading bot\deploy\d1074c646cf6`, at
+`d1074c646cf6f8c27cc5791d57cdbf80e28b2163`, the commit before C35, so **the
+code under test is the code that failed A4** and carries no fix for it.
+Section 24 is the template this fills; it is left standing.
+
+### The capture
+
+| File | Bytes read | SHA-256 |
+|---|---|---|
+| `logs\trading_bot.log` | 195 lines, last line `2026-10-02T07:00:03Z`, pid 3608 | `b9d3b1947353d850b50aa19a4d11655c75eb29373e01e934a69e0b8ecee096fb` |
+| `logs\release.log` | 1 line | `cb754301e3cb1c3b17b698b6d7653f6e9e2a86e17c11b768a601efc17ebdf9da` |
+| `F:\trading bot\deploy\arm_notes.txt` | 8 lines | `26d946285ebee81177f664e3077b5eb8392f700bdade16dd34365758d636b7aa` |
+
+Every figure below is a claim about those bytes. The clone's `data\state.json`
+was not read; the stores' SHA-256 are quoted only from `release.log`.
+
+### The start records, one per launch
+
+All six are `boot_provenance verdict=accepted`, `install_kind=vcs`,
+`code_commit=d1074c646cf6f8c27cc5791d57cdbf80e28b2163`, `code_intact=true`
+over 69 files, `checkout_dirty=false`, `commits_agree=true`,
+`config_tracked=true`, `config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`,
+clone `F:\trading bot\deploy\d1074c646cf6`.
+
+| pid | boot_provenance | what it did |
+|---|---|---|
+| 19772 | `2026-10-01T06:03:57Z` | a banner and the provenance line only; no `Starting in` line, nothing else after the provenance line |
+| 22308 | `2026-10-01T16:34:46Z` | the run's first live process: placed BTCUSDT list 400545 at `17:14:04Z` and ETHUSDT list 401075 at `17:45:03Z`; last line `17:57:03Z`, no `engine_stopped` |
+| 14396 | `2026-10-01T17:58:40Z` | A1's restart; closed BTCUSDT by the strategy at `18:08:06Z`; last line `18:22:03Z`, no `engine_stopped` |
+| 16748 | `2026-10-01T18:27:16Z` | A4; `Received SIGINT` at `18:37:44Z`, `engine_stopped clean_shutdown=True` |
+| 21844 | `2026-10-01T19:47:46Z` | after the operator's release; placed BTCUSDT list 402643 at `20:06:04Z`; `Received SIGINT` at `20:07:29Z`, `engine_stopped clean_shutdown=True` |
+| 3608 | `2026-10-02T06:49:59Z` | A2's restart; booked BTCUSDT's stop at boot; opened and closed BTCUSDT list 410028 (`07:00:03Z`); last line `07:00:03Z` |
+
+Instrument: `grep "pid=<pid> "`, first and last match, over the capture above.
+
+**THE DEVIATION, `M5l-051`'s shape again.** The `arm_notes.txt` appends were
+made after the console had been seen, so the start records above were not
+written before the evidence was read. Its eight lines are `boot_provenance`
+lines copied from the log: pid 22308 twice, 14396, 16748 once each, 21844
+three times and 3608 once, and **none for 19772**. The duplicates are copies
+of one line and add nothing; the table above is built from the log.
+
+### A1 -- PASS (hard kill with live lists): both positions restored
+
+Pid 22308 had two live lists and was killed: no `engine_stopped`, last line
+`17:57:03Z`, the next process's first line `17:58:39Z`. Pid 14396 then logged
+`boot_position_restored` for **both** BTCUSDT (list 400545, entry fill
+84434.02, quote total 1803.51066720) and ETHUSDT (list 401075, entry fill
+2708.48, quote total 1803.84768000) at `17:58:51Z`, and
+`boot_positions_resolved records=2 restored=2 booked=0 held=0 dropped=0
+gone=0`. `boot_symbol_blocked` occurs on **0** lines of the capture. The first
+reconciliation pass after the restart, `17:59:03Z`, reads
+`positions=2 states="active=2"`.
+
+**The balance reconciles exactly (`free_quote`).** Pid 22308's composition root
+read `90276.07127200` USDT free; pid 14396's read `86668.71292480`:
+
+    90276.07127200 - 1803.51066720 - 1803.84768000 = 86668.71292480
+
+the two restored positions' own entry quote totals, to the last digit.
+
+**The restored BTC position then closed normally, by the strategy, at runtime:**
+`Signal CLOSE BTCUSDT` at `18:08:04Z`, `close_planned` (sell, both legs `NEW`,
+nothing executed), `close_window_open`, and `close_booked` at `18:08:06Z`,
+`quote_total=1810.43023920 quote_total_source=venue realised=6.9195720000
+fee=0E-8 fee_asset=USDT`. Pid 16748's boot then reads `88479.14316400` free,
+which is `86668.71292480 + 1810.43023920` exactly.
+
+The leg states and fills read before the restart, and the store's SHA-256
+before it, are **NOT RECORDED**: `arm_notes.txt` carries only provenance lines.
+
+### A4 -- FAIL: the venue's answer to cancelling an ALL_DONE list was not mapped (`M5l-161`)
+
+The operator cancelled ETHUSDT's list 401075 by hand between pid 14396's last
+line (`18:22:03Z`) and pid 16748's first (`18:27:16Z`), with
+`scripts/cancel_testnet_order_list.py`, which writes no log. Pid 16748's boot
+then read both legs `CANCELED` with nothing executed and logged, at `18:27:21Z`,
+`boot_position_unprotected` at `CRITICAL`, naming `scripts/release_position.py`
+and R3 (*"It is SOLD on this symbol's first candle (R3)"*). That half of the
+arm's expected lines is met.
+
+**On the symbol's first candle the sale did not go out.** Verbatim:
+
+    2026-10-01T18:30:03Z | INFO | pid=16748 | trading_bot.execution.executor | Close planned for ETHUSDT: sell event=close_planned symbol=ETHUSDT decision=sell detail="no protective leg executed across 2 leg(s); the position is still open and the sell may be dispatched" reads=2 ... sl_status=CANCELED sl_executed=0E-8 tp_status=CANCELED tp_executed=0E-8
+    2026-10-01T18:30:03Z | WARNING | pid=16748 | trading_bot.execution.executor | Cancelling protection to close ETHUSDT; the position is unprotected from here event=close_window_open symbol=ETHUSDT venue_order_list_id=401075 quantity=0.66600000 candle_time=2026-10-01T18:29:59.999000+00:00
+    2026-10-01T18:30:03Z | ERROR | pid=16748 | trading_bot.exchange.models | Unclassified message for Binance code -2011: 'Unknown order list sent.'. A rule keys on this code but no pattern matched, so it falls through to a generic error -- the wording may have changed at the venue.
+    2026-10-01T18:30:03Z | CRITICAL | pid=16748 | trading_bot.execution.executor | Cancel failed for ETHUSDT; the venue state is unknown and nothing was sold event=close_cancel_failed symbol=ETHUSDT venue_order_list_id=401075 error_type=OrderError error="Unknown order list sent." candle_time=2026-10-01T18:29:59.999000+00:00
+    2026-10-01T18:30:03Z | WARNING | pid=16748 | trading_bot.execution.executor | Dispatch refused event=dispatch_refused symbol=ETHUSDT action=CLOSE reason=close_cancel_failed candle_time=2026-10-01T18:29:59.999000+00:00
+
+Section 24's table for `M5l-141`, filled:
+
+| Field | Value |
+|---|---|
+| line | the `close_cancel_failed` line above |
+| `error_type` / `error` | `OrderError` / `Unknown order list sent.` |
+| the venue's code and message | `-2011`, `Unknown order list sent.` (Testnet, `2026-10-01T18:30:03Z`, list 401075, ETHUSDT, `ALL_DONE`) |
+| consequence | nothing was sold; the position stayed restored and UNKNOWN |
+
+**`M5l-141` is resolved as measured, and it fell in the direction it said it
+would**: the cancel failed at `CRITICAL`, the close record was released and
+nothing was sold. No `close_cancel_already_terminal` line occurs in the
+capture (0). From C35 (`244aa6b`) `-2011 'Unknown order list sent.'` maps to
+`OrderNotFoundError`. The reconciliation driver then logged `exit_unbookable`
+at `CRITICAL` for the position on every pass until `18:36:04Z`, and pid 16748
+was stopped by SIGINT at `18:37:44Z`.
+
+### The operator's release and the manual ETHUSDT sale
+
+`release.log`, one line, verbatim:
+
+    2026-10-01T19:42:12.206768+00:00 released symbol=ETHUSDT removed=[position:tb1-ETHUSDT-1790876699999-0-L] store_sha256_before=49a9abe83399ebdaa149a719c215d528eeac45d3614a2c71c484bc1afe0955fe store_sha256_after=f4e631831969af080adfd908c5fc56c7e77b773e00eff2c674153818fe313e3c
+
+The operator then sold the 0.66600000 ETH by hand: **orderId 7612414**, read
+by GET (`get_order`, `get_my_trades`; nothing written) on 2026-10-02: `SELL`
+`MARKET`, `FILLED`, 0.66600000 of 0.66600000, created and filled
+`2026-10-01T19:42:33.184Z` (21 seconds after the release), client id
+`x-HNA2TXFJ1a420cdaae8c37cf5b5118` (the library's own prefix, as the
+`clear_testnet_holdings.py` sale at section 22), one fill, trade 534559,
+price 2698.10000000, quote 1796.93460000, commission `0E-8` `USDT`. The
+entry order read by its derived client id `tb1-ETHUSDT-1790876699999-0-W`:
+orderId 7583838, `BUY` `LIMIT` `FILLED`, one fill, trade 532417, price
+2708.48000000, quote 1803.84768000, commission `0E-8` `ETH`.
+
+**The balance confirms the sale independently.** Pid 21844's root read
+`90276.07776400` free, which is pid 16748's `88479.14316400` plus the sale's
+`1796.93460000` exactly.
+
+### The operator-takeover cost (`M5l-164`, under `M5l-125`)
+
+**That round trip is outside the ledger.** The position's record was
+released before the sale, so no `close_position` ran and `realised_today`
+never saw it. From the venue's own fills:
+
+    proceeds        1796.93460000
+    entry cost     -1803.84768000
+    round trip         -6.91308000 USDT   (exit fee 0E-8 USDT; entry fee 0E-8 ETH)
+
+so **the daily-loss figure for 2026-10-01 understates that day's realised loss
+by 6.91308000 USDT.** Against the one booking the capture holds for that day,
+BTCUSDT's `realised=6.9195720000`, the account's realised result for the day
+is `+0.0064920000`, where the ledger reads `+6.9195720000`. The ledger is
+gross of entry fees by ruling and both commissions here are zero, so the figure
+carries no fee term. This is `M5l-125`'s rule working as written -- the
+operator acts at the venue, releases the record, and what the bot never booked
+is the operator's to account for -- and this is its first priced instance.
+It is MEASURED from the fills, and the 2026-10-01 total is a statement about
+this capture only: the clone's store was not read.
+
+### A2 -- the log already holds the arm's line (pending the owner's judgement)
+
+P85 listed A2 as pending. **The capture holds A2's expected line**, so it is
+recorded here and the judgement is left to the owner. Pid 21844 placed
+BTCUSDT list 402643 at `20:06:04Z`, and was stopped at `20:07:29Z` --
+**by SIGINT, `engine_stopped clean_shutdown=True`, not by a hard kill**, which
+is a deviation from the arm as written. The stop filled while the bot was
+down. Pid 3608's boot, `2026-10-02T06:50:10Z`, logged, verbatim in its
+fields:
+
+    event=boot_exit_booked symbol=BTCUSDT list_client_order_id=tb1-BTCUSDT-1790885159999-0-L leg=SL quote_total=1695.60837380 quote_total_source=venue order_id=8539100 quantity=0.02126000 fee=0E-8 fee_asset=USDT fills=2 filled_at=2026-10-02T05:25:58.122000+00:00 order_created_at=2026-10-01T20:06:01.530000+00:00 realised=-107.8378826000 booked_day=2026-10-02
+
+and `boot_positions_resolved records=1 restored=0 booked=1 held=0 dropped=0
+gone=0`. Against section 24's expected line: `leg=SL`, `quote_total_source=venue`,
+`fee_asset=USDT`, `filled_at` and `booked_day=2026-10-02` -- the fill's UTC day,
+not the boot's day nor the placement's -- are all present; there is no
+`boot_position_restored` for BTCUSDT in pid 3608; `booked=1`.
+
+**The balance is consistent with the booking.** Pid 21844's root read
+`90276.07776400` free, before it spent the position's entry cost, and pid
+3608's read `90168.23988140`, after the stop's `1695.60837380` came back:
+
+    90276.07776400 - 90168.23988140 = 107.83788260
+
+which is the booked `realised=-107.8378826000` to the digit. That holds only if
+nothing else moved the quote balance between the two reads; the venue's
+entry fill for list 402643 was not read, so the entry cost is implied by the
+arithmetic and not observed.
+
+The leg states and fills read before the restart, and the store's SHA-256, are
+**NOT RECORDED** (`arm_notes.txt` carries only provenance lines). Pid 3608 then
+traded normally: BTCUSDT list 410028 at `06:57:03Z`, `close_booked` at
+`07:00:03Z` with `realised=-0.991718400`.
+
+### What this section decides
+
+**Nothing.** A1 and A4 are recorded and A2's line is recorded; whether the
+P-3k gate's condition is met is the owner's to judge. A4 failed, and its cause
+is fixed by C35, so **the gate stays closed** until A4 is re-run on the commit
+carrying C35. A1's and A2's evidence from `d1074c6` stands, because neither
+path cancels an order list: A1 restores records and reconciles, and A2 books an
+exit the venue already filled, and the answer C35 changed is the answer to a
+list cancel, made only by the close path.
