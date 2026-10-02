@@ -17,6 +17,16 @@ socket in its own loop: on the sentinel (or any error) it tears the socket down,
 backs off, and opens a **fresh** socket — which resets the library's internal
 attempt counter, giving effectively unbounded reconnection.
 
+(ANNOTATED AT M5l P91, C46, P-3l: **"on the sentinel (or any error) it tears the
+socket down" is no longer true of every error dict.** The library's own
+transient errors -- ``ConnectionClosedError``, ``ConnectionClosedOK``,
+``IncompleteReadError``, ``gaierror`` and ``BinanceWebsocketClosed``, which it
+recovers from by itself -- are logged as ``stream_transient_error`` and read past,
+so the klines queued behind them survive. Anything else, including the sentinel
+and a read loop that has closed, still tears the socket down as before. What
+survives: the outer loop, the backoff, and that a fresh socket resets the
+library's attempt counter.)
+
 Testability seam
 ----------------
 The Binance socket is reached only through the :class:`KlineSocketSource` /
@@ -50,6 +60,36 @@ _WS_EVENT_TYPE = "e"
 _WS_EVENT_KLINE = "kline"
 # The sentinel ReconnectingWebsocket emits once it exhausts its own reconnects.
 _WS_EVENT_ERROR = "error"
+_EVENT_TRANSIENT_ERROR = "stream_transient_error"
+
+#: Error dicts the LIBRARY is recovering from by itself (P-3l, C46). python-binance
+#: 1.0.37's ``ReconnectingWebsocket._read_loop`` catches exactly these
+#: -- ``IncompleteReadError``, ``gaierror``, ``ConnectionClosedError``,
+#: ``ConnectionClosedOK`` and ``BinanceWebsocketClosed`` -- under the comment
+#: *"reports errors and continue loop"*: it pushes a dict with the exception's class
+#: name as ``type`` and goes on reconnecting, so tearing the socket down here
+#: discards the klines queued behind the dict and restarts a reconnect that was
+#: already under way. **A WHITELIST, and the direction is deliberate**: an
+#: unlisted type is TERMINAL. Treating a transient error as terminal costs one
+#: needless rebuild, today's behaviour; treating a terminal one as transient leaves
+#: a dead feed, which the feed watchdog reports but which nothing would repair.
+_TRANSIENT_ERROR_TYPES = frozenset(
+    {
+        "IncompleteReadError",
+        "gaierror",
+        "ConnectionClosedError",
+        "ConnectionClosedOK",
+        "BinanceWebsocketClosed",
+    }
+)
+
+#: The library's own queue cap, which ``BinanceSocketManager`` takes as
+#: ``max_queue_size`` (``binance/ws/streams.py``, default 100). A message that finds
+#: the queue full is DROPPED and the read loop breaks, so a consumer stalled for
+#: ~100 messages (about 100 s across two streams) loses every closed bar after it.
+#: Ten times the default buys a stall ten times as long before that loss, and the
+#: watchdog reports the stall itself.
+_MAX_QUEUE_SIZE = 1000
 
 # Returns a float in [0, 1); mirrors ``random.random`` and is injectable so the
 # jittered backoff is deterministic under test.
@@ -125,7 +165,7 @@ class _BinanceSocketSource:
             testnet=testnet,
             requests_params={"timeout": exchange.requests_timeout_s},
         )
-        return cls(client, BinanceSocketManager(client))
+        return cls(client, BinanceSocketManager(client, max_queue_size=_MAX_QUEUE_SIZE))
 
     def multiplex(self, streams: list[str]) -> KlineSocket:
         # multiplex_socket returns a ReconnectingWebsocket (typed Any here
@@ -327,10 +367,25 @@ class BinanceMarketDataStream(MarketDataStream):
                     while self._running:
                         message = await active.recv()
                         if message.get(_WS_EVENT_TYPE) == _WS_EVENT_ERROR:
-                            # Library gave up its own reconnects; rebuild fresh.
-                            raise _StreamDisconnectedError(
-                                str(message.get("type", _WS_EVENT_ERROR))
-                            )
+                            error_type = str(message.get("type", _WS_EVENT_ERROR))
+                            if error_type in _TRANSIENT_ERROR_TYPES:
+                                # The library is reconnecting itself and the klines
+                                # queued behind this dict are good: say so and read
+                                # on. Not a teardown, and `attempt` is not touched.
+                                _log.warning(
+                                    "Market-data stream error (%s); the library is "
+                                    "reconnecting itself",
+                                    error_type,
+                                    extra={
+                                        "event": _EVENT_TRANSIENT_ERROR,
+                                        "error_type": error_type,
+                                        "detail": str(message.get("m", "")),
+                                    },
+                                )
+                                continue
+                            # Terminal: the library gave up its own reconnects (or
+                            # the read loop broke); rebuild fresh.
+                            raise _StreamDisconnectedError(error_type)
                         # A good message means the connection is healthy again.
                         attempt = 0
                         await self._dispatch(message)

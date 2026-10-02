@@ -495,7 +495,10 @@ validator, and an edit there arms both items.
 > RESOLVED, the cap being `max(max_open_positions, L + 1)`. And C42: P-3m's
 > bullet, *"where a deferral still logs nothing"*, is no longer true of the
 > log; a deferral is logged as `reconciliation_deferred`, and the starvation
-> and churn shapes it names stay open.)
+> and churn shapes it names stay open. And C44 to C46: P-3l's bullet, *"where a
+> feed gap is still unreported"*, is no longer true; a gap is logged, a BUY across
+> it is refused, and a silent pair is reported, with the stopped reconciliation
+> accepted under P76.)
 >
 > Each keeps its own item and arming condition.
 
@@ -1263,6 +1266,29 @@ What the outage also cost, measured at P65 and recorded in
 > `provider.on_candle`) and `_run` is untouched until C46. The P-3k boot-
 > reconciliation condition names `live_system` only as where the snapshots run
 > and is not fired.
+>
+> **RESOLVED AT M5l P91 (C46), AS REPORTED, MEASURED AND GUARDED: P-3l IS
+> CLOSED UNDER THE P91 RULINGS, and the arming condition above, *"…or the
+> market-data reconnect path, `_run` in `exchange/websocket_client.py`"*, FIRED
+> at C46 and is DISCHARGED.** `_run` now reads past the library's own transient
+> error dicts -- `ConnectionClosedError`, `ConnectionClosedOK`,
+> `IncompleteReadError`, `gaierror` and `BinanceWebsocketClosed`, the five
+> python-binance 1.0.37 catches under *"reports errors and continue loop"* --
+> logging each as `stream_transient_error` at `WARNING` and tearing nothing
+> down, so the klines queued behind them survive (`M5l-061`, `M5l-199`). Anything
+> else, including `BinanceWebsocketUnableToConnect`, a queue overflow, a
+> cancelled loop and any type nobody listed, still rebuilds the socket; the
+> whitelist runs that way deliberately, because a transient error treated as
+> terminal costs one rebuild and the reverse leaves a dead feed. The socket
+> manager is given `max_queue_size=1000` where the library defaults to 100
+> (`binance/ws/streams.py`), so a stalled consumer loses closed bars ten times
+> later. **What the item's lines now are:** the 229 s delay (`M5l-060`) is
+> reported by the watchdog whenever it recurs; the lost bars (`M5l-062`) are
+> detected and logged and guarded (C44); the spanned SMA (`M5l-063`) refuses a
+> BUY; the silent stop of reconciliation is reported at `CRITICAL` and **accepted
+> under P76**, not repaired. **What stays open:** the cause of the original stall,
+> which is `M5l-198` and UNMEASURED until the lag and slow-chain lines catch an
+> occurrence; and the two deferred items below.
 
 #### P-3m. A call-cap deferral logs nothing (`M5l-075`)
 
@@ -1652,6 +1678,45 @@ this tree holds is `0.00000000`, including the six fills of M5l's evidence
 run, so no Testnet run can meet it as worded.
 
 *Arming condition:* **whoever next edits `refuse_live_trading` in `config/settings.py`, or rules on N6's first precondition.**
+
+### U11. DEFERRED: reconciliation on a timer, independent of candles -- ruled at M5l P91 (pin 2)
+
+P-3l's stopped reconciliation is reported and not repaired. A timer that ran the
+reconciler at the dedup interval, whether or not a candle arrived, would repair
+it, and it is **deferred by the owner's P91 ruling.** It would amend locked text,
+quoted here so a later author sees what the work costs:
+- *"Reconciliation runs, on any pair's candle, over every open position not held
+  under ruling A."* (the P74 re-ruling, `CLAUDE.md`, *Fills are observed by
+  polling*);
+- *"the driver still has to be a candle subscriber, because it still reconciles
+  every UNHELD position on any pair's candle while `on_signal` skips quiet
+  bars."* (the ruling A annotation under *Handler isolation is THREE layers*);
+- and it runs into *"A bounded queue with a single consumer was rejected: it
+  makes `Portfolio` writable from a task that is not the one reading it, and the
+  first bug that buys is a **duplicate entry**"* (*Execution*, *Dispatch stays
+  inline*), because a pass writes `Position` state and books exits. It would
+  need a serialisation rule against `_notify`.
+It would also fail visibly and recover nothing if REST is down with the socket
+(`M5l-201`).
+
+*Arming condition:* **whoever next edits `ReconciliationDriver.__call__` in `execution/reconciliation_driver.py` to be called from anywhere but `provider.on_candle`, or lifts the P76 acceptance.**
+
+### U12. DEFERRED: REST backfill after a gap -- ruled at M5l P91 (pin 4)
+
+C44 detects a gap and refuses a BUY across it; the missing bars are never
+fetched. A backfill would close the gap rather than guard it, and it is
+**deferred by the owner's P91 ruling.** Facts for whoever builds it: it must run
+before the first post-gap bar is appended, because `_append` drops
+`open_time < last`; `ExchangeClient.get_klines` takes `limit` and no start time,
+so a backfill reads the latest N bars and merges; and it makes a REST call on the
+candle path. Locked text it touches: *"The invariant that survives is **the
+candle pipeline must never be blocked by latency we do not bound ourselves** — a
+budget, not an abstinence"* (*Execution*), so it needs its own bound and a place
+in the coherence budget; and *"add every bar that never arrived because the feed
+dropped and the buffer does not backfill"* (*There is no static staleness
+guarantee*), which it would make false.
+
+*Arming condition:* **whoever next edits `_record_gap_if_any` in `data/market_data.py` to fetch bars, or adds a start time to `ExchangeClient.get_klines` in `core/interfaces.py`.**
 
 ### U10. OWNER ITEM: QC review of the protective order type before live trading -- added at M5l (P88)
 

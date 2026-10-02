@@ -12,15 +12,20 @@ infinite-vs-bounded retry semantics, and per-handler exception isolation.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import logging
 from decimal import Decimal
 from pathlib import Path
 from random import Random
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from trading_bot.config.settings import get_settings
+from trading_bot.core.enums import TradingMode
 from trading_bot.core.models import Candle
+from trading_bot.data.watchdog import FeedWatchdog
 from trading_bot.exchange.websocket_client import (
     BinanceMarketDataStream,
     _BinanceSocketSource,
@@ -561,3 +566,259 @@ async def test_stop_cancels_the_task_and_closes_the_source() -> None:
     assert stream._task is None
     assert socket.entered == 1 and socket.exited == 1  # opened then cleanly closed
     assert source.aclose_calls == 1
+
+
+class _Clock:
+    """A monotonic clock the test moves by hand."""
+
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+# --------------------------------------------------------------------------
+# P-3l, C46: the library's own transient errors are read past, not torn down on
+# --------------------------------------------------------------------------
+_STREAM_LOGGER = "trading_bot.exchange.websocket_client"
+_WATCHDOG_LOGGER = "trading_bot.data.watchdog"
+_TRANSIENT_TYPES = [
+    "ConnectionClosedError",
+    "ConnectionClosedOK",
+    "IncompleteReadError",
+    "gaierror",
+    "BinanceWebsocketClosed",
+]
+#: Terminal, or UNKNOWN -- an unlisted type is terminal by design, so a renamed or
+#: new library error reaches today's behaviour (a rebuild) and not a dead feed.
+_TERMINAL_TYPES = [
+    "BinanceWebsocketUnableToConnect",
+    "BinanceWebsocketQueueOverflow",
+    "CancelledError",
+    "SomeErrorNobodyListed",
+]
+
+
+def _recording_yielding_sleep(recorded: list[float]) -> Any:
+    """A back-off that records its delay AND yields, for the tests that drive ``_run``.
+
+    The suite's plain recording sleep returns without ever yielding, so a stream
+    that fails in a loop spins forever and starves ``_drive`` -- a HANG under a
+    mutation instead of a failure. Found by the survey: two mutations of the
+    classification hung the run, and this is what turned them into kills.
+    """
+
+    async def sleep(delay: float) -> None:
+        recorded.append(delay)
+        await asyncio.sleep(0)
+
+    return sleep
+
+
+async def _yielding_sleep(_delay: float) -> None:
+    """A back-off that yields to the loop, so a stream that spins on failures cannot starve
+    the test driving it."""
+    await asyncio.sleep(0)
+
+
+def _error(error_type: str) -> dict[str, Any]:
+    return {"e": "error", "type": error_type, "m": "scripted"}
+
+
+async def _drive(stream: BinanceMarketDataStream, until: Any, *, spins: int = 500) -> None:
+    """Run ``_run`` as a task until ``until()`` holds, then stop it.
+
+    The scripted sockets park when their script is empty, so the loop never ends by
+    itself and the test decides when it has seen enough.
+    """
+    stream._running = True
+    task = asyncio.create_task(stream._run())
+    try:
+        for _ in range(spins):
+            await asyncio.sleep(0)
+            if until():
+                break
+    finally:
+        stream._running = False
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+def _lines(caplog: pytest.LogCaptureFixture, logger: str, event: str) -> list[Any]:
+    return [
+        record
+        for record in caplog.records
+        if record.name == logger and vars(record).get("event") == event
+    ]
+
+
+@pytest.mark.parametrize("error_type", _TRANSIENT_TYPES)
+async def test_a_transient_error_dict_is_logged_and_the_queued_klines_survive(
+    error_type: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """The library is reconnecting itself, so the klines behind the dict are good.
+
+    One socket, no backoff, both candles delivered, one ``stream_transient_error``
+    line naming the type.
+
+    MUTATION: treat every error dict as terminal (today's behaviour) -- the socket
+    is torn down at the dict, a second one is asked for, and the candle queued
+    behind it is lost, so this fails.
+    """
+    source = FakeSocketSource(
+        [FakeSocket([BTC_CLOSED, _error(error_type), BTC_CLOSED_2], park_when_empty=True)]
+    )
+    slept: list[float] = []
+    stream = _make(source, sleep=_recording_yielding_sleep(slept))
+    received: list[Candle] = []
+
+    async def handler(candle: Candle) -> None:
+        received.append(candle)
+
+    stream.subscribe("BTCUSDT", "1m", handler)
+    with caplog.at_level(logging.INFO, logger=_STREAM_LOGGER):
+        await _drive(stream, lambda: len(received) == 2)
+
+    assert [c.close for c in received] == [Decimal("65050.00"), Decimal("65075.00")]
+    assert len(source.multiplex_calls) == 1
+    assert slept == []
+    lines = _lines(caplog, _STREAM_LOGGER, "stream_transient_error")
+    assert len(lines) == 1
+    assert vars(lines[0]).get("error_type") == error_type
+    assert not any("disconnected" in r.getMessage() for r in caplog.records)
+
+
+@pytest.mark.parametrize("error_type", _TERMINAL_TYPES)
+async def test_a_terminal_or_unknown_error_dict_still_tears_the_socket_down(
+    error_type: str,
+) -> None:
+    """Everything the library does not recover from is a rebuild, and so is anything nobody listed.
+
+    MUTATION: treat every error dict as transient -- the dict is read past, the
+    first socket parks with its script empty, no second socket is asked for and
+    this fails.
+    """
+    source = FakeSocketSource(
+        [
+            FakeSocket([_error(error_type)], park_when_empty=True),
+            FakeSocket([BTC_CLOSED], park_when_empty=True),
+        ]
+    )
+    slept: list[float] = []
+    stream = _make(source, sleep=_recording_yielding_sleep(slept))
+    received: list[Candle] = []
+
+    async def handler(candle: Candle) -> None:
+        received.append(candle)
+
+    stream.subscribe("BTCUSDT", "1m", handler)
+    await _drive(stream, lambda: len(received) == 1)
+
+    assert len(source.multiplex_calls) == 2
+    assert slept == [5.0]
+    assert [c.close for c in received] == [Decimal("65050.00")]
+
+
+async def test_after_a_transient_and_then_a_terminal_drop_the_bars_resume_and_the_watchdog_is_quiet(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The heartbeat's view of the classification: a transient dict then a terminal one.
+
+    The terminal dict must still rebuild the socket, so the second candle arrives
+    and the pair never reads as silent. MUTATION: every dict transient -- the first
+    socket parks silently after the terminal dict, the second candle never comes,
+    the stream stays on one socket and this fails.
+    """
+    clock = _Clock()
+    watchdog = FeedWatchdog(clock=clock)
+    watchdog.arm([("BTCUSDT", "1m")])
+    first = FakeSocket(
+        [BTC_CLOSED, _error("ConnectionClosedError"), _error("BinanceWebsocketUnableToConnect")],
+        park_when_empty=True,
+    )
+    source = FakeSocketSource([first, FakeSocket([BTC_CLOSED_2], park_when_empty=True)])
+    stream = _make(source, sleep=_yielding_sleep)
+    received: list[Candle] = []
+
+    async def handler(candle: Candle) -> None:
+        received.append(candle)
+        watchdog.on_chain(candle, clock.now, clock.now)
+
+    stream.subscribe("BTCUSDT", "1m", handler)
+    with caplog.at_level(logging.INFO, logger=_WATCHDOG_LOGGER):
+        await _drive(stream, lambda: len(received) == 2)
+        clock.now = 60.0
+        watchdog.check()
+
+    assert len(received) == 2
+    assert len(source.multiplex_calls) == 2
+    assert [r for r in caplog.records if r.name == _WATCHDOG_LOGGER] == []
+
+
+async def test_a_socket_that_goes_quiet_after_a_transient_is_caught_by_the_heartbeat(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Reading past a transient dict must not hide a feed that then dies.
+
+    Nothing tears the socket down, so the only thing that can notice is the
+    watchdog, and it does: 91 s of silence on a 1m pair is a warning.
+    """
+    clock = _Clock()
+    watchdog = FeedWatchdog(clock=clock)
+    watchdog.arm([("BTCUSDT", "1m")])
+    source = FakeSocketSource(
+        [FakeSocket([BTC_CLOSED, _error("ConnectionClosedError")], park_when_empty=True)]
+    )
+    stream = _make(source, sleep=_yielding_sleep)
+    received: list[Candle] = []
+
+    async def handler(candle: Candle) -> None:
+        received.append(candle)
+        watchdog.on_chain(candle, clock.now, clock.now)
+
+    stream.subscribe("BTCUSDT", "1m", handler)
+    with caplog.at_level(logging.INFO, logger=_WATCHDOG_LOGGER):
+        await _drive(stream, lambda: False, spins=30)
+        clock.now = 91.0
+        watchdog.check()
+
+    assert len(received) == 1
+    assert len(source.multiplex_calls) == 1
+    assert len(_lines(caplog, _WATCHDOG_LOGGER, "feed_silent")) == 1
+
+
+async def test_the_socket_manager_is_given_the_larger_queue_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``BinanceSocketManager`` takes ``max_queue_size`` (``binance/ws/streams.py``,
+    default 100) and the source passes 1000, so a stalled consumer loses closed bars
+    ten times later. Asserted on the CALL, since a default would pass every other test.
+
+    MUTATION: drop the argument -- the manager is built with its default and this
+    fails.
+    """
+    import binance
+    import binance.ws.streams as streams
+
+    captured: dict[str, Any] = {}
+
+    class _Manager:
+        def __init__(self, client: Any, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+    async def _create(**_kwargs: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(binance.AsyncClient, "create", staticmethod(_create))
+    monkeypatch.setattr(streams, "BinanceSocketManager", _Manager)
+    settings = SimpleNamespace(
+        mode=TradingMode.TESTNET,
+        binance_credentials=lambda: ("key", "secret"),
+        config=SimpleNamespace(exchange=SimpleNamespace(requests_timeout_s=10)),
+    )
+
+    await _BinanceSocketSource.create(settings)  # type: ignore[arg-type]
+
+    assert captured.get("max_queue_size") == 1000
