@@ -258,7 +258,8 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_arming_conditions.py · run_census.py
                  · mutation_survey.py · abc_double_census.py
                  · cancel_testnet_order_list.py · clear_testnet_holdings.py
-                 · probe_x1.py
+                 · probe_x1.py · release_position.py
+                 · normalize_ledger_exponents.py
 ```
 
 ### `__all__` declares importability, not authorship

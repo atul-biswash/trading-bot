@@ -751,6 +751,58 @@ computed from an entry term that is `entry_fill_price x quantity`, and
 > commit writes none -- every log assertion asserts a length first); and every
 > condition naming `_settle`, `hold_settlement` or `_SETTLEMENT_RETRY_BARS`.
 
+> **ADDED AT M5l P93 (C49), THE OTHER HALF OF P-3h: THE PERSISTED EXPONENT
+> (the owner's P92-7).** C48 stops new bookings carrying exponent -24; nothing
+> repairs what is already on disk, because `Decimal` addition keeps the finest
+> exponent (`M5l-210`). `scripts/normalize_ledger_exponents.py [--store PATH]
+> [--apply]` is that repair, a ONE-OFF.
+>
+> - **Lossless-only, proved per value.** A ledger figure finer than eight decimal
+>   places is quantised to eight only if the result EQUALS it. One that would
+>   lose a digit is never rounded: the tool lists every such value, writes
+>   nothing and exits 1. A figure already at -8 or coarser is left alone.
+> - **It touches the ledger's three money sites and nothing else**: the open
+>   day's `realised_pnl`, each `daily_history[...].realised`, and
+>   `lifetime_realised`. Positions, pending records, dates and counts are carried
+>   through `store.load` and `store.save` as they were.
+> - **It refuses a store at another schema.** `store.save` writes the current
+>   schema, so normalising an older file would upgrade it and add `positions`.
+>   MEASURED on a copy of the 2026-09-17 store: schema 1 came back as schema 2
+>   with `positions: []`. Run the bot's own build once, which does that, then
+>   this.
+> - **It refuses while the bot runs**, with the bot's own non-blocking instance
+>   lock held for the whole run, as `release_position.py` does; and it writes
+>   only on `--apply`, printing what it would change otherwise.
+> - **It logs both SHA-256s**: one line appended to `logs/normalize.log` and
+>   printed, `store_sha256_before` and `store_sha256_after`.
+>
+> **MEASURED on COPIES of the evidence store** (SHA-256 `5164ccc0...`, the same
+> file `M5l-210` read), in scratch directories with that file untouched. The
+> copy is at schema 1, and the final tool REFUSED it, as above. Upgraded the way
+> the bot's build does (`store.save(store.load())`, SHA-256 `a25ddfef...`), the
+> tool changed six values -- the open day's `5.0814517000`, the `2026-09-10`
+> row's `2.885073700000000000000000`, three more history rows at exponent -10,
+> and `lifetime_realised` `-209.601849800000000000000000` -- each to eight
+> places and each equal in value, to the file whose SHA-256 is
+> `15c91a0d239f8881f3ebba81e2366dbe64d14e3638fdeb86754afef4f6ed1b2c`; a second run
+> found nothing to do. An earlier build of the tool without the schema check,
+> run straight on the schema-1 copy, produced the same final bytes plus the
+> schema upgrade, which is why the check exists.
+>
+> **OPERATOR RULE.** Stop the bot. From the clone whose store is to be repaired,
+> run the tool WITHOUT `--apply` and read what it would change, then with it.
+> Run it once. **Its lock covers the clone it is run from and no other**, as the
+> release tool's does (`M5l-155`). The ACTIVE deployment clone's store has not
+> been read or changed by this commit; whether it carries exponent -24 is still
+> UNMEASURED, and running this against it is the owner's act.
+>
+> *Arming condition for the tool's reuse of the store:* **whoever next edits
+> `store.save` or `PersistedState` in `persistence/store.py`, or the instance
+> lock's path handling in `utils/instance_lock.py`, now has TWO reusers --
+> `scripts/release_position.py` and `scripts/normalize_ledger_exponents.py`.**
+> The release tool's condition (above, C34) is REAFFIRMED and not fired: this
+> commit edits none of those symbols.
+
 #### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
 
 `remainder = self._budget.max_calls - len(assessments)` covers the pass and
