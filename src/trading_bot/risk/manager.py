@@ -388,10 +388,24 @@ class RiskManager(RiskManagerPort):
         # stop-disabled case above.
         stale = self._stale_positions(portfolio, now=now)
         if stale:
+            # P-3d (the owner's P94): a HELD position (R2, or P-3b's timeout) is
+            # no longer reconciled, so its stamp stops and it reaches THIS
+            # refusal by ageing -- and until now the text blamed reconciliation
+            # for a position whose exit had already filled and could not be
+            # booked. Naming it tells an operator the work is at the venue and
+            # the release tool, not in waiting for a pass. Only held symbols
+            # that ARE in the stale set are named; one still inside the bound
+            # refuses as COMMITTED_RISK_UNKNOWN below, which this does not touch.
+            held = [
+                position.symbol
+                for position in portfolio.open_positions
+                if position.settlement_hold and position.symbol in stale
+            ]
+            held_clause = f" (held: {', '.join(held)})" if held else ""
             return refuse(
                 f"{len(stale)} open position(s) have not been fully reconciled within "
-                f"{self._config.max_position_staleness_s}s ({', '.join(stale)}); the ledger "
-                "is not current enough for any limit to mean anything",
+                f"{self._config.max_position_staleness_s}s ({', '.join(stale)}){held_clause}; "
+                "the ledger is not current enough for any limit to mean anything",
                 stage=RefusalStage.POSITION_STALE,
             )
 

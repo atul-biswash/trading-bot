@@ -2094,6 +2094,89 @@ class TestStaleness:
 
         assert assessment.stage is RefusalStage.POSITION_STALE
 
+    def test_the_stale_refusal_names_a_held_position_and_only_that_one(self) -> None:
+        """P-3d (the owner's P94): `(held: ETHUSDT)`, and not the unheld stale one beside it.
+
+        Two stale positions, one held. MUTATIONS: remove the clause, or name
+        every stale symbol as held (BTCUSDT would then appear in the clause).
+        """
+        manager, signal = self._manager_and_signal()
+        held = long_position(
+            symbol="ETHUSDT",
+            stop_loss=D("90"),
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+            last_reconciled_at=NOW - timedelta(hours=1),
+        )
+        held.hold_settlement()
+        plain = long_position(
+            symbol=SYMBOL,
+            stop_loss=D("90"),
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+            last_reconciled_at=None,
+        )
+        portfolio = Portfolio(free_quote=D("10000"), positions={"ETHUSDT": held, SYMBOL: plain})
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert assessment.stage is RefusalStage.POSITION_STALE
+        assert "2 open position(s) have not been fully reconciled" in assessment.reason
+        assert "(held: ETHUSDT)" in assessment.reason
+        assert "held: ETHUSDT, BTCUSDT" not in assessment.reason
+
+    def test_a_stale_refusal_with_no_held_position_has_no_held_clause(self) -> None:
+        """The other direction: an unheld stale position is not described as held.
+
+        MUTATION: emit the clause unconditionally.
+        """
+        manager, signal = self._manager_and_signal()
+        portfolio = Portfolio(
+            free_quote=D("10000"),
+            positions={
+                "ETHUSDT": long_position(
+                    symbol="ETHUSDT",
+                    stop_loss=D("90"),
+                    protection=ProtectionState.ABSENT_BY_DESIGN,
+                    last_reconciled_at=None,
+                )
+            },
+        )
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert assessment.stage is RefusalStage.POSITION_STALE
+        assert "held" not in assessment.reason
+
+    def test_a_held_position_that_is_not_stale_is_not_named_beside_one_that_is(self) -> None:
+        """Only held symbols IN the stale set are named.
+
+        ETHUSDT is held and fresh; BTCUSDT is unheld and stale, so the refusal
+        is `POSITION_STALE` for BTCUSDT alone. MUTATION: drop the
+        `symbol in stale` filter -- ETHUSDT is then named as held.
+        """
+        manager, signal = self._manager_and_signal()
+        fresh_held = long_position(
+            symbol="ETHUSDT",
+            stop_loss=D("90"),
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+            last_reconciled_at=NOW - timedelta(seconds=10),
+        )
+        fresh_held.hold_settlement()
+        stale = long_position(
+            symbol=SYMBOL,
+            stop_loss=D("90"),
+            protection=ProtectionState.ABSENT_BY_DESIGN,
+            last_reconciled_at=None,
+        )
+        portfolio = Portfolio(
+            free_quote=D("10000"), positions={"ETHUSDT": fresh_held, SYMBOL: stale}
+        )
+
+        assessment = manager.evaluate(signal, portfolio=portfolio)
+
+        assert assessment.stage is RefusalStage.POSITION_STALE
+        assert "1 open position(s) have not been fully reconciled" in assessment.reason
+        assert "held" not in assessment.reason
+
 
 class TestEvaluate:
     def test_unknown_pair_is_refused(self) -> None:

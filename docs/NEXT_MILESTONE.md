@@ -645,6 +645,25 @@ REASONED.
 
 *Arming condition:* **whoever next edits `hold_settlement` in `core/models.py` or `_stale_positions` in `risk/manager.py`.**
 
+> **RESOLVED AT M5l P94 (C51): *"the `POSITION_STALE` refusal text does not name
+> the hold"* IS NO LONGER TRUE.** The refusal in `RiskManager.evaluate` gains
+> `(held: <symbols>)` when a held position contributes: the held symbols that
+> are IN the stale set, so a held position still inside the bound -- which
+> refuses as `COMMITTED_RISK_UNKNOWN`, untouched -- is not named beside a stale
+> one. The text now reads, for one stale held position, *"1 open position(s)
+> have not been fully reconciled within 180.0s (BTCUSDT) (held: BTCUSDT); the
+> ledger is not current enough for any limit to mean anything"*. It covers both
+> holds a driver makes: R2's, and P-3b's `settlement_timeout_held`.
+>
+> **THE ARMING CONDITION NAMED THE WRONG SITES FOR THIS FIX, and it was
+> resolved by content rather than by symbol:** the refusal's text is built in
+> `evaluate`, which the condition's `_stale_positions` feeds but is not. Neither
+> `hold_settlement` nor `_stale_positions` was edited, so the condition did NOT
+> fire and is REAFFIRMED as written (`M5l-235`). **What survives:** *"After its
+> one `CRITICAL`, a held position's only recurring trace is each refused
+> entry"* -- the refusal now says why, but nothing emits a recurring line of its
+> own, which the item's title still describes.
+
 #### P-3e. A close labelled BOOKED may have written nothing (`M5k-073`)
 
 `close_position` returns `Decimal(0)` for a symbol it does not hold, after its
@@ -885,6 +904,20 @@ drives the driver's hold, the stopped stamp and the elapsed time together.
 REASONED.
 
 *Arming condition:* **whoever next edits `hold_settlement` in `core/models.py`, `_stale_positions` in `risk/manager.py`, or the held filter in `reconcile_open_positions` in `execution/reconciliation.py`.**
+
+> **RESOLVED AT M5l P94 (C51): *"Nothing drives the driver's hold, the stopped
+> stamp and the elapsed time together"* IS NO LONGER TRUE.**
+> `tests/unit/test_hold_to_stale.py` runs a REAL `ReconciliationDriver` pass that
+> holds a position, for both ways it holds (a foreign fee, one fetch; and P-3b's
+> five failed passes), then the real `RiskManager.evaluate`: inside the bound the
+> refusal is `COMMITTED_RISK_UNKNOWN` and names no hold; a later driver pass
+> makes no read and moves no stamp (ruling A); past the bound it is
+> `POSITION_STALE` and names `BTCUSDT` as held. The existing ruling-A row, which
+> hand-builds the position and calls `hold_settlement()`, is left as it is.
+>
+> **The condition did not fire, as for P-3d** (`M5l-235`): this commit edits none
+> of `hold_settlement`, `_stale_positions` or the held filter. REAFFIRMED. **What
+> survives:** the item's observation about the hand-built row.
 
 #### P-3k. A restart orphans an ordinary open position (`M5l-045`, `M5l-044`)
 
