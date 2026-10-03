@@ -16,10 +16,12 @@ from pathlib import Path
 from types import ModuleType
 
 from trading_bot.core.models import ExitSettlement, Fee, HeldExit
+from trading_bot.engine import modes as modes_module
 from trading_bot.execution import executor as executor_module
 from trading_bot.execution import reconciliation_driver as driver_module
 from trading_bot.execution.booking_line import (
     disagreement_fields,
+    entry_total_fields,
     hold_fields,
     quote_total_fields,
     settlement_fields,
@@ -203,6 +205,49 @@ def test_the_provenance_fields_carry_the_total_beside_its_source() -> None:
     assert fields == {"quote_total": total, "quote_total_source": "fills"}
     assert fields["quote_total"] is total
     assert str(fields["quote_total"]) == "1786.22691640"
+
+
+def test_the_entry_total_is_the_positions_own_value_or_absent_never_null() -> None:
+    """P-3h, P92-8: `{"entry_quote_total": total}` when present, an EMPTY dict when not.
+
+    The exponent crosses unchanged. `not in` is the only assertion that
+    separates an omitted field from a `null` one. MUTATION: emit
+    `"entry_quote_total": None` for an absent total, or drop the field.
+    """
+    total = D("1813.74857660")
+
+    present = entry_total_fields(total)
+    absent = entry_total_fields(None)
+
+    assert present == {"entry_quote_total": total}
+    assert str(present["entry_quote_total"]) == "1813.74857660"
+    assert type(present["entry_quote_total"]) is Decimal
+    assert absent == {}
+    assert "entry_quote_total" not in absent
+
+
+def test_all_four_booking_lines_carry_the_entry_total_through_the_helper() -> None:
+    """P-3h's census: the three runtime emitters AND the boot's call `entry_total_fields`.
+
+    The boot's `exit_booked` line books through the same ledger method, so it
+    is the fourth. None of the four writes the key itself -- a dict display
+    keeps the LAST of two equal keys silently. MUTATION: drop the call at one
+    site, or write `"entry_quote_total": ...` literally at one.
+    """
+    runtime = _functions_calling(executor_module, "entry_total_fields") | _functions_calling(
+        driver_module, "entry_total_fields"
+    )
+    assert runtime == _BOOKING_EMITTERS
+    assert _functions_calling(modes_module, "entry_total_fields") == {"_book_boot_exit"}
+
+    for module, functions in (
+        (executor_module, _BOOKING_EMITTERS),
+        (driver_module, _BOOKING_EMITTERS),
+        (modes_module, {"_book_boot_exit"}),
+    ):
+        for function in functions:
+            written = _literal_keys_in(module, function) & {"entry_quote_total"}
+            assert written == set(), f"{module.__name__}.{function} writes {sorted(written)}"
 
 
 def test_the_disagreement_fields_pair_both_amounts_with_the_asset() -> None:

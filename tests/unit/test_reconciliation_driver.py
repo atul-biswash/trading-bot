@@ -2280,3 +2280,58 @@ async def test_the_retry_count_is_on_the_position_and_the_driver_stores_nothing(
     assert set(vars(driver)) == before
     assert "failed_settlement_passes" not in store.PositionRecord.model_fields
     assert _booking_position().failed_settlement_passes == 0
+
+
+# --------------------------------------------------------------------------
+# P-3h (M5l P93): the booking is computed from the entry's own quote total, and says so
+# --------------------------------------------------------------------------
+#: `BOOK_ENTRY_FILL x BOOK_QTY` to the cent: what the entry actually cost, as the
+#: venue's own total would report it, at exponent -8.
+BOOK_ENTRY_TOTAL = Decimal("1822.67849330")
+
+
+async def test_a_booking_is_computed_from_the_entry_total_and_its_line_carries_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """`exit total - entry total`, both the venue's: exponent -8, where the price route is -10.
+
+    Equal in VALUE to `BOOK_EXACT`, so the exponent is what tells the routes
+    apart. MUTATIONS: ignore the total (exponent -10), drop the field from the
+    `exit_booked` line, or build the position without it.
+    """
+    assert BOOK_ENTRY_FILL * BOOK_QTY == BOOK_ENTRY_TOTAL  # the fixture is coherent
+    position = _booking_position().model_copy(update={"entry_quote_total": BOOK_ENTRY_TOTAL})
+    portfolio = _portfolio(position)
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    assert portfolio.ledger.realised_pnl.as_tuple().exponent == -8
+    booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    assert len(booked) == 1
+    assert vars(booked[0]).get("entry_quote_total") == BOOK_ENTRY_TOTAL
+    assert vars(booked[0]).get("realised") == BOOK_EXACT
+
+
+async def test_a_booking_with_no_entry_total_uses_the_quotient_and_omits_the_field(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The fallback, unchanged: exponent -10, and the line OMITS the field (never `null`).
+
+    MUTATION: write `entry_quote_total: None` for an absent total.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]})
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    assert portfolio.ledger.realised_pnl.as_tuple().exponent == -10
+    booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
+    assert len(booked) == 1
+    assert "entry_quote_total" not in vars(booked[0])

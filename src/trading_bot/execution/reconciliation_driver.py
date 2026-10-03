@@ -69,6 +69,7 @@ from trading_bot.execution.booking_line import (
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
     disagreement_fields,
+    entry_total_fields,
     hold_fields,
     quote_total_fields,
     settlement_fields,
@@ -759,6 +760,7 @@ class ReconciliationDriver:
                     total=total,
                     source=source,
                     realised=realised,
+                    entry_quote_total=position.entry_quote_total,
                 )
         finally:
             self._persist_booked(booked)
@@ -954,8 +956,13 @@ class ReconciliationDriver:
         total: Decimal,
         source: TotalSource,
         realised: Decimal,
+        entry_quote_total: Decimal | None,
     ) -> None:
         """One line per booked exit, carrying the settlement it was booked net of.
+
+        **``entry_quote_total`` is the position's** (P-3h, P92-8): the entry
+        term the realised figure was computed from, omitted when the position
+        had none -- see ``entry_total_fields``.
 
         ``venue_time`` is GONE from this line: it was the order record's
         creation time under a name ruled misleading at R3. ``order_created_at``
@@ -981,6 +988,7 @@ class ReconciliationDriver:
                 "event": _EVENT_BOOKED,
                 "symbol": symbol,
                 **quote_total_fields(total, source),
+                **entry_total_fields(entry_quote_total),
                 "realised": realised,
                 **settlement_fields(settlement, order_created_at=fill.order_created_at),
             },

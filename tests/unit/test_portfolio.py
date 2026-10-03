@@ -696,3 +696,163 @@ class TestBookRestoredExit:
             )
 
         assert portfolio.ledger is None
+
+
+# --------------------------------------------------------------------------
+# P-3h (M5l P93): the entry's own quote total, so realised carries the venue's exponent
+# --------------------------------------------------------------------------
+#: **ORDER 316324's EIGHT FILLS, MEASURED** -- `(price, quantity, quote quantity)` from
+#: the `myTrades` capture whose SHA-256 is
+#: `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`. It is
+#: the entry that opened the position whose exit, order 327933, booked
+#: `realised=5.201974900000000000000000` -- exponent -24 -- on 2026-09-10
+#: (`M5l-209`). Eight prices, so `average_price` is a 28-digit quotient.
+ENTRY_316324_FILLS = [
+    ("78212.01000000", "0.01205000", "942.45472050"),
+    ("78212.02000000", "0.00332000", "259.66390640"),
+    ("78212.03000000", "0.00051000", "39.88813530"),
+    ("78212.13000000", "0.00026000", "20.33515380"),
+    ("78212.17000000", "0.00026000", "20.33516420"),
+    ("78212.53000000", "0.00100000", "78.21253000"),
+    ("78213.64000000", "0.00026000", "20.33554640"),
+    ("78214.00000000", "0.00553000", "432.52342000"),
+]
+ENTRY_316324_QTY = D("0.02319000")
+ENTRY_316324_TOTAL = D("1813.74857660")
+#: Order 327933's quote total, the exit of that position, from the log capture
+#: whose SHA-256 is
+#: `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`.
+EXIT_327933_TOTAL = D("1818.95055150")
+EXIT_327933_REALISED = D("5.20197490")
+#: What the quotient route logged: the same VALUE, exponent -24.
+EXIT_327933_REALISED_VIA_QUOTIENT = D("5.201974900000000000000000")
+
+
+def _entry_316324(*, with_total: bool, side: PositionSide = PositionSide.LONG) -> Position:
+    """The position that entry opened: price = the quotient `to_order` computes."""
+    return Position(
+        symbol=SYMBOL,
+        side=side,
+        quantity=ENTRY_316324_QTY,
+        entry_price=D("78214.00"),
+        entry_fill_price=ENTRY_316324_TOTAL / ENTRY_316324_QTY,
+        entry_quote_total=ENTRY_316324_TOTAL if with_total else None,
+        entry_bar_time=NOW,
+        protection=ProtectionState.UNKNOWN,
+        opened_at=NOW,
+        last_reconciled_at=NOW,
+    )
+
+
+class TestEntryQuoteTotal:
+    """Both terms of realised are the venue's totals when the position carries one."""
+
+    def test_the_fixture_is_the_measured_entry(self) -> None:
+        """Eight distinct price levels, summing to the measured total and quantity.
+
+        Without this the tests below could be passing on an invented number.
+        """
+        assert len({price for price, _qty, _quote in ENTRY_316324_FILLS}) == 8
+        assert sum((D(qty) for _p, qty, _q in ENTRY_316324_FILLS), D(0)) == ENTRY_316324_QTY
+        assert sum((D(quote) for _p, _q, quote in ENTRY_316324_FILLS), D(0)) == ENTRY_316324_TOTAL
+        # The quotient is the 28-digit number that put exponent -24 on the ledger.
+        assert (ENTRY_316324_TOTAL / ENTRY_316324_QTY).as_tuple().exponent == -23
+
+    def test_a_multi_price_entry_books_at_exponent_minus_8_from_its_total(self) -> None:
+        """THE FIX: `exit total - entry total`, both the venue's, exponent -8.
+
+        MUTATIONS: ignore the total and take the quotient (the exponent test
+        fails: it is -24), or subtract the total from the wrong side.
+        """
+        portfolio = Portfolio(
+            free_quote=D("10000"), positions={SYMBOL: _entry_316324(with_total=True)}
+        )
+
+        pnl = portfolio.close_position(
+            SYMBOL, exit_quote_total=EXIT_327933_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+        )
+
+        assert pnl == EXIT_327933_REALISED
+        assert pnl.as_tuple().exponent == -8
+        assert portfolio.ledger is not None
+        assert portfolio.ledger.realised_pnl == EXIT_327933_REALISED
+        assert portfolio.ledger.realised_pnl.as_tuple().exponent == -8
+
+    def test_without_the_total_the_same_entry_books_the_quotients_exponent(self) -> None:
+        """THE FALLBACK, unchanged: the same VALUE at exponent -24, as the capture logged.
+
+        MUTATION: the fallback is not taken (the position then books from no
+        entry term at all and this fails).
+        """
+        portfolio = Portfolio(
+            free_quote=D("10000"), positions={SYMBOL: _entry_316324(with_total=False)}
+        )
+
+        pnl = portfolio.close_position(
+            SYMBOL, exit_quote_total=EXIT_327933_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+        )
+
+        assert pnl == EXIT_327933_REALISED_VIA_QUOTIENT
+        assert pnl.as_tuple().exponent == -24
+        assert pnl == EXIT_327933_REALISED  # equal in VALUE: the defect is the exponent only
+
+    def test_the_exit_fee_is_subtracted_once_from_the_total_based_figure(self) -> None:
+        """R-a: net of the EXIT fee, gross of the entry's. MUTATION: subtract it twice, or not at all."""
+        portfolio = Portfolio(
+            free_quote=D("10000"), positions={SYMBOL: _entry_316324(with_total=True)}
+        )
+        fee = Fee(amount=D("0.37000000"), asset="USDT")
+
+        pnl = portfolio.close_position(SYMBOL, exit_quote_total=EXIT_327933_TOTAL, now=NOW, fee=fee)
+
+        assert pnl == EXIT_327933_REALISED - D("0.37000000")
+        assert pnl.as_tuple().exponent == -8
+
+    def test_a_short_books_the_entry_total_less_the_exit_total(self) -> None:
+        """The side convention, with a total: a short's P&L is entry minus exit.
+
+        MUTATION: flip the SHORT branch. FABRICATED: no short has ever been opened.
+        """
+        position = _entry_316324(with_total=True, side=PositionSide.SHORT)
+        portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: position})
+
+        pnl = portfolio.close_position(
+            SYMBOL, exit_quote_total=EXIT_327933_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+        )
+
+        assert pnl == -EXIT_327933_REALISED
+
+    def test_a_restored_exit_books_from_the_entry_total_too(self) -> None:
+        """`book_restored_exit` shares `_realised_from_total`, so boot gets the fix too.
+
+        MUTATION: ignore the total there.
+        """
+        portfolio = Portfolio(free_quote=D("1000"))
+
+        pnl = portfolio.book_restored_exit(
+            _entry_316324(with_total=True),
+            exit_quote_total=EXIT_327933_TOTAL,
+            fee=USDT_ZERO_FEE,
+            filled_at=NOW,
+        )
+
+        assert pnl == EXIT_327933_REALISED
+        assert pnl.as_tuple().exponent == -8
+
+    def test_a_total_with_no_fill_price_is_still_refused(self) -> None:
+        """The cost-basis check runs BEFORE the total is read.
+
+        `classify_bookability`'s cost-basis fact already refuses a position
+        with no `entry_fill_price`, and `unrealized_pnl` raises on it; the
+        total does not make it bookable. MUTATION: read the total first.
+        """
+        position = _entry_316324(with_total=True).model_copy(update={"entry_fill_price": None})
+        portfolio = Portfolio(free_quote=D("10000"), positions={SYMBOL: position})
+
+        with pytest.raises(ValueError, match="no entry_fill_price"):
+            portfolio.close_position(
+                SYMBOL, exit_quote_total=EXIT_327933_TOTAL, now=NOW, fee=USDT_ZERO_FEE
+            )
+
+        assert SYMBOL in portfolio.positions
+        assert portfolio.ledger is None

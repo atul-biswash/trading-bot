@@ -222,6 +222,7 @@ class FakeClient:
         place_error: Exception | None = None,
         fill_price: str | None = "98.00000000",
         filled_quantity: str = "0.5",
+        entry_quote_total: str | None = None,
         order_error: Exception | None = None,
         leg_answers: dict[str, Order | Exception] | None = None,
         cancel_answer: Exception | None = None,
@@ -264,6 +265,11 @@ class FakeClient:
         #: ``None`` makes the entry leg report no fill -- an expired FOK.
         self.fill_price = fill_price
         self.filled_quantity = filled_quantity
+        #: The entry leg's ``cummulativeQuoteQty`` (P-3h). ``None`` keeps the
+        #: response exactly as it was -- a price and no total, which production
+        #: cannot produce (``to_order``) and which every test written before
+        #: P-3h relies on to exercise the quotient fallback.
+        self.entry_quote_total = entry_quote_total
         #: Makes the fill query itself fail, which is a different `None` than
         #: the one above and must stay separately expressible.
         self.order_error = order_error
@@ -308,6 +314,11 @@ class FakeClient:
             quantity=D(self.filled_quantity),
             filled_quantity=filled,
             average_price=None if self.fill_price is None else D(self.fill_price),
+            filled_quote_quantity=(
+                None
+                if self.fill_price is None or self.entry_quote_total is None
+                else D(self.entry_quote_total)
+            ),
             client_order_id=client_order_id,
         )
 
@@ -5126,6 +5137,120 @@ class TestSettlement:
         assert len(values) == 1
         assert isinstance(values[0], ast.Name)
         assert values[0].id == "SETTLEMENT_RETRY_LIMIT"
+
+
+class TestTheEntryQuoteTotal:
+    """P-3h, the owner's P92-6 and P92-8: the entry's own quote total, from the entry GET.
+
+    Memory only, on `Position`; set at dispatch and on the recovery path from
+    the SAME response as the fill price; the open DEBIT and every booking line
+    use it. The fake's total is `48.99999999`, one satoshi-of-quote away from
+    `0.5 x 98 = 49`, so a debit or a booking computed from the price cannot
+    pass for one computed from the total.
+    """
+
+    TOTAL = D("48.99999999")
+
+    async def test_the_dispatch_entry_total_lands_on_the_position_and_is_the_debit(self) -> None:
+        """MUTATIONS: dispatch passes `None` for the total (the position test fails),
+        or the debit stays `quantity x price` (the balance test fails)."""
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor, _, _ = build(
+            client=FakeClient(entry_quote_total="48.99999999"), portfolio=portfolio
+        )
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_quote_total == self.TOTAL
+        assert position.entry_fill_price == D("98.00000000")  # the price still lands
+        assert portfolio.free_quote == D("10000") - self.TOTAL
+        assert portfolio.free_quote != D("10000") - D("0.5") * D("98")
+
+    async def test_a_response_with_no_total_leaves_it_absent_and_debits_the_price(self) -> None:
+        """The fallback, unchanged: no total on the response, no total on the position.
+
+        MUTATION: invent a total (the price x the quantity) when the response
+        gives none.
+        """
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor, _, _ = build(client=FakeClient(), portfolio=portfolio)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert portfolio.positions[SYMBOL].entry_quote_total is None
+        assert portfolio.free_quote == D("10000") - D("0.5") * D("98")
+
+    async def test_a_live_resolution_carries_the_entry_total_and_debits_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The recovery path is the second `_open_position` caller and the half a
+        dispatch-only test cannot reach. MUTATION: that call passes `None`."""
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor, _, _ = build(
+            client=FakeClient(place_error=TimeoutError("reset"), entry_quote_total="48.99999999"),
+            portfolio=portfolio,
+        )
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        assert portfolio.positions[SYMBOL].entry_quote_total == self.TOTAL
+        assert portfolio.free_quote == D("10000") - self.TOTAL
+
+    @pytest.mark.parametrize("held_total", [None, "40.00000000"], ids=["absent", "present"])
+    async def test_the_own_close_booking_line_carries_the_entry_total_or_omits_it(
+        self, held_total: str | None, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site A's `close_booked`: the field is the position's, and ABSENT -- never
+        `null` -- when it had none. Realised is computed from it when present.
+
+        MUTATION: drop the field from the line, write `null` for an absent
+        one, or book against the quotient while the line says otherwise.
+        """
+        portfolio = _held()
+        if held_total is not None:
+            portfolio.positions[SYMBOL].entry_quote_total = D(held_total)
+        client = _settling_client([sell_trade()])
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        lines = _records(caplog, "close_booked")
+        assert len(lines) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        fields = vars(lines[0])
+        if held_total is None:
+            assert "entry_quote_total" not in fields
+        else:
+            assert fields.get("entry_quote_total") == D(held_total)
+            assert fields.get("realised") == fields["quote_total"] - D(held_total) - D("0")
+
+    async def test_the_resolved_close_booking_line_carries_the_entry_total(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site B's `close_booked`: the position is READ BEFORE `close_position` deletes it.
+
+        Deferred at the sell, booked on the next candle. MUTATION: read the
+        position after the booking (the field is then absent), or omit it.
+        """
+        portfolio = _held()
+        portfolio.positions[SYMBOL].entry_quote_total = D("40.00000000")
+        client = _settling_client([], [sell_trade()])
+        executor, _, _ = build(client=client, portfolio=portfolio)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            assert _records(caplog, "close_booked") == []
+            await executor(_bar(1))
+
+        lines = _records(caplog, "close_booked")
+        assert len(lines) == 1
+        assert vars(lines[0]).get("entry_quote_total") == D("40.00000000")
 
 
 class TestTheCloseGuard:

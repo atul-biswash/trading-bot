@@ -64,6 +64,7 @@ from trading_bot.execution.booking_line import (
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
     disagreement_fields,
+    entry_total_fields,
     hold_fields,
     quote_total_fields,
     settlement_fields,
@@ -710,6 +711,11 @@ class _EntryFill:
     #: Whether the venue answered at all. ``False`` means the query failed, so
     #: nothing about the leg is known -- NOT that the leg did not fill.
     answered: bool
+    #: The venue's own quote total for the fill, from the SAME response as
+    #: ``price`` (P-3h, the owner's P92-6) -- no second call. ``None`` whenever
+    #: ``price`` is: ``to_order`` derives the price from the total, so a price
+    #: implies a total in production.
+    quote_total: Money | None = None
 
     @property
     def expired(self) -> bool:
@@ -986,6 +992,7 @@ class OrderExecutor:
                     quantity=record.quantity,
                     entry_limit=record.entry_limit,
                     entry_fill_price=fill.price,
+                    entry_quote_total=fill.quote_total,
                     stop_loss=record.stop_loss,
                     take_profit=record.take_profit,
                     entry_bar_time=record.entry_bar_time,
@@ -1351,6 +1358,7 @@ class OrderExecutor:
             quantity=intent.quantity,
             entry_limit=intent.entry_limit,
             entry_fill_price=fill.price,
+            entry_quote_total=fill.quote_total,
             stop_loss=intent.levels.stop_loss,
             take_profit=intent.levels.take_profit,
             entry_bar_time=entry_bar_time,
@@ -1456,10 +1464,12 @@ class OrderExecutor:
 
         # A fill total with no quantity cannot yield a price, and an FOK that
         # expired reports exactly that. `average_price` is the venue's own
-        # quotient; `filled_quote_quantity` is the total it came from. The
-        # total is preferred nowhere here because a PRICE is what a position
-        # stores -- the total's exactness matters at BOOKING, which divides
-        # nothing.
+        # quotient; `filled_quote_quantity` is the total it came from. BOTH
+        # are returned from this one response (P-3h): the price is what the
+        # position's mark-to-market reads, and the total is what booking
+        # subtracts -- this comment read "the total is preferred nowhere here
+        # because a PRICE is what a position stores" until M5l P93, and the
+        # exponent -24 bookings it let through are `M5l-209`.
         if order.filled_quantity <= 0 or order.average_price is None:
             _log.warning(
                 "Entry leg reports no fill; the position's cost basis is unknown",
@@ -1473,7 +1483,9 @@ class OrderExecutor:
             # ANSWERED, and the answer was no. An FOK that found no
             # counterparty: no trade happened, and the caller refuses.
             return _EntryFill(price=None, answered=True)
-        return _EntryFill(price=order.average_price, answered=True)
+        return _EntryFill(
+            price=order.average_price, answered=True, quote_total=order.filled_quote_quantity
+        )
 
     def _open_position(
         self,
@@ -1482,6 +1494,7 @@ class OrderExecutor:
         quantity: Money,
         entry_limit: Money,
         entry_fill_price: Money | None,
+        entry_quote_total: Money | None,
         stop_loss: Money | None,
         take_profit: Money | None,
         entry_bar_time: datetime,
@@ -1489,6 +1502,11 @@ class OrderExecutor:
         venue_order_list_id: int | None,
     ) -> None:
         """Construct the position this placement opened, UNKNOWN until reconciled.
+
+        **``entry_quote_total`` is REQUIRED, as ``entry_fill_price`` is** (P-3h):
+        a caller that forgot it would silently book against the quotient, so it
+        cannot omit it. It is the venue's own total from the entry GET, and the
+        open DEBIT uses it when present -- see the comment at the debit.
 
         **R19 / M5e-075: every ``Position`` is constructed with
         ``ProtectionState.UNKNOWN``.** M5e's grounds, and they are not restated
@@ -1538,6 +1556,7 @@ class OrderExecutor:
             quantity=quantity,
             entry_price=entry_limit,
             entry_fill_price=entry_fill_price,
+            entry_quote_total=entry_quote_total,
             entry_bar_time=entry_bar_time,
             protection=ProtectionState.UNKNOWN,
             # BOTH IDENTIFIER SPACES, under names that say which is which. The
@@ -1558,9 +1577,10 @@ class OrderExecutor:
         # positions.
         #
         # WHERE THE ERROR WENT, and it is NOT the ledger. `close_position`
-        # derives realised P&L from `unrealized_pnl`, which reads
-        # `entry_fill_price` and never this debit -- so `realised_pnl` was
-        # already correct once 6a landed. The debit's error lands in
+        # derives realised P&L from the position's entry term -- from M5l P93
+        # its `entry_quote_total`, and before it `entry_fill_price x quantity`,
+        # which `unrealized_pnl` also read -- and never this debit, so
+        # `realised_pnl` was already correct once 6a landed. The debit's error lands in
         # `free_quote`, and closing credits back `quantity * exit_price`, so
         # it NEVER UNWINDS: a permanent per-trade drift for the life of the
         # process, bounded only by the next boot re-seeding from the venue.
@@ -1579,6 +1599,15 @@ class OrderExecutor:
         # and the position is UNBOOKABLE anyway, because `unrealized_pnl`
         # raises on an absent fill price. So the fallback's error cannot reach
         # the ledger.
+        #
+        # **THE DEBIT IS THE ENTRY'S OWN QUOTE TOTAL WHEN WE HAVE ONE** (P-3h,
+        # the owner's P92-6): that is literally what left the balance, to the
+        # venue's exponent, where `quantity * entry_fill_price` re-multiplies a
+        # quotient (`M5l-215`). The price path stays as the fallback, and the
+        # requested limit under it, exactly as above.
+        if entry_quote_total is not None:
+            self._portfolio.open_position(position, cost=entry_quote_total)
+            return
         cost_basis = entry_fill_price
         if cost_basis is None:
             cost_basis = entry_limit
@@ -2502,6 +2531,7 @@ class OrderExecutor:
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": signal.symbol,
                 **quote_total_fields(total, source),
+                **entry_total_fields(position.entry_quote_total),
                 "realised": realised,
                 # `order_id` and `quantity` are the settlement's, EQUAL BY
                 # CONSTRUCTION to `order.order_id` and `order.filled_quantity`,
@@ -3282,6 +3312,10 @@ class OrderExecutor:
         reported TWICE and agrees with itself, where before it was reported
         twice and contradicted itself.
         """
+        # READ BEFORE THE BOOKING: `close_position` deletes the position, and the
+        # booking line carries the entry term it was computed from (P-3h).
+        held_position = self._portfolio.positions.get(symbol)
+        entry_quote_total = None if held_position is None else held_position.entry_quote_total
         try:
             realised = self._portfolio.close_position(
                 symbol, exit_quote_total=total, now=utc_now(), fee=settlement.fee
@@ -3308,6 +3342,7 @@ class OrderExecutor:
                 "event": _EVENT_CLOSE_BOOKED,
                 "symbol": symbol,
                 **quote_total_fields(total, source),
+                **entry_total_fields(entry_quote_total),
                 "realised": realised,
                 **settlement_fields(settlement, order_created_at=order_created_at),
                 "candle_time": candle.close_time.isoformat(),

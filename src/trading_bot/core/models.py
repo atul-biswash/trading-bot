@@ -735,7 +735,8 @@ class Position(BaseModel):
     entry_price: Money
     #: What the entry ACTUALLY filled at, or ``None``.
     #:
-    #: **P&L is computed against this and never against
+    #: **P&L is computed against this -- or, for a booked exit, against
+    #: :attr:`entry_quote_total` when that is present -- and never against
     #: :attr:`entry_price`.** MEASURED: the requested limit over-stated the
     #: true fill by 76.65 and 2.09 per unit on the two positions of
     #: 2026-09-02 -- 1.81 and 1.59 USDT of cost the account never paid.
@@ -762,6 +763,31 @@ class Position(BaseModel):
     #: substituting a number. Telling them apart needs the log line at the
     #: site that failed.
     entry_fill_price: Money | None = None
+    #: **THE VENUE'S OWN QUOTE TOTAL FOR THE ENTRY** -- Binance's
+    #: ``cummulativeQuoteQty`` for the working leg, as ``Order.filled_quote_quantity``
+    #: carries it -- or ``None``. P-3h, the owner's P92-6.
+    #:
+    #: **Realised P&L is computed against THIS when it is present**, as
+    #: ``exit total - entry total - exit fee``, and against
+    #: ``entry_fill_price x quantity`` only when it is absent. The price is a
+    #: QUOTIENT this codebase divided (``cummulativeQuoteQty / executedQty``),
+    #: and an entry that filled across several price levels yields a 28-digit
+    #: one: MEASURED, four bookings carried exponent -24 for exactly that
+    #: reason, and the exponent then sticks to every running total
+    #: ``Decimal`` addition touches (``M5l-209``, ``M5l-210``). The total is
+    #: exact, so nothing is divided and nothing re-multiplied.
+    #:
+    #: **MEMORY ONLY, and recorded nowhere** -- the owner's R2 (P-3k) and the
+    #: Q12 record in ``docs/NEXT_MILESTONE.md``: *"P-3h's entry quote total: a
+    #: memory-only field on Position, set by the dispatch GET and the boot
+    #: GET."* It is not in ``store.PositionRecord``; boot re-fetches it with the
+    #: same GET that supplies :attr:`entry_fill_price`.
+    #:
+    #: **In production a price implies a total** (``to_order`` derives the one
+    #: from the other), so ``None`` beside a present price is a position built
+    #: without one -- a fixture, or a restored record whose GET gave none --
+    #: and booking then takes the quotient, exactly as before this field.
+    entry_quote_total: Money | None = None
     #: Close time of the bar this entry was decided on. Deterministic across a
     #: restart, unlike :attr:`opened_at`, which is why it -- not ``opened_at``
     #: -- seeds a derivable client order ID.

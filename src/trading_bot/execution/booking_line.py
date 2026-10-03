@@ -38,6 +38,15 @@ booked total is the venue's own or the sum of the order's own fills, and
 three booking lines. When the venue's total exists and the fills sum to
 something else, the venue's is booked and each site emits ONE WARNING through
 :func:`disagreement_fields`, both amounts paired with their asset.
+
+**AND THE ENTRY'S QUOTE TOTAL** (P-3h, the owner's P92-8): every booking line
+also carries ``entry_quote_total`` through :func:`entry_total_fields`, so a
+reader can see which term the realised figure was computed from. It is OMITTED
+when the position had none -- never ``null`` -- and then the realised figure
+was computed from ``entry_fill_price x quantity``, which is what the absence
+says. **The FOUR booking lines, not three**: the boot's ``exit_booked``
+line (``engine/modes.py``) books through the same ledger method and carries it
+too.
 """
 
 from __future__ import annotations
@@ -57,6 +66,7 @@ __all__ = [
     "EVENT_SETTLEMENT_HELD",
     "HOLD_MESSAGE",
     "disagreement_fields",
+    "entry_total_fields",
     "hold_fields",
     "quote_total_fields",
     "settlement_fields",
@@ -90,6 +100,19 @@ def quote_total_fields(total: Decimal, source: TotalSource) -> dict[str, Decimal
     spreads the result and writes neither key itself.
     """
     return {"quote_total": total, "quote_total_source": source}
+
+
+def entry_total_fields(entry_quote_total: Decimal | None) -> dict[str, Decimal]:
+    """The entry's quote total for a booking line, or nothing. P-3h.
+
+    ``{"entry_quote_total": total}`` when the position carried one, and an
+    EMPTY dict when it did not: the field is omitted, never ``null``, per the
+    log schema's rule that a field which would have to lie is absent. A caller
+    spreads the result and must not write the key itself.
+    """
+    if entry_quote_total is None:
+        return {}
+    return {"entry_quote_total": entry_quote_total}
 
 
 def disagreement_fields(

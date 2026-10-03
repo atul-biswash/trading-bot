@@ -702,6 +702,55 @@ computed from an entry term that is `entry_fill_price x quantity`, and
 
 *Arming condition:* **whoever next edits `_realised_from_total` in `core/portfolio.py` or `_open_position` in `execution/executor.py`, which sets `entry_fill_price`.**
 
+> **RESOLVED AT M5l P93 (C48): *"The cause is UNMEASURED"* WAS ALREADY FALSE AT
+> `M5l-100` AND IS NOW MEASURED, AND THE ARMING CONDITION ABOVE FIRED AND IS
+> DISCHARGED.** `M5l-209`: in all four `-24` bookings the entry order filled
+> across 6 to 8 price levels, so `average_price` is a 28-digit quotient and
+> `average_price x quantity` carries exponent -24; a replay reproduced value and
+> exponent for 106 of 106 covered booking lines, 103 of them single-price
+> entries at exponent -2. Instruments: log capture
+> `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, fills
+> capture `111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970`, and
+> one read-only Testnet GET for order 5731709. **The values were exact in all
+> four; the defect was the exponent** (`M5l-210`).
+>
+> **The owner's P92-6 and P92-8, built.** `Position.entry_quote_total` is a
+> memory-only `Money | None`, set at dispatch and on the recovery path from the
+> SAME entry GET as the price (no second call) and at boot from the boot GET's
+> `Restore` decision; it is in no store record. `_realised_from_total` computes
+> `exit total - entry total` and falls back to `entry_fill_price x quantity` only
+> when the total is absent -- in production only for a position built without
+> one, since a price implies a total (`M5l-214`). The open DEBIT is the entry
+> total when present (`M5l-215`). All four booking lines -- the driver's, the
+> executor's two, and the boot's -- carry `entry_quote_total`, omitted when
+> absent and never `null`. The cost-basis check (`entry_fill_price is None`)
+> still runs first, so a total does not make a priceless position bookable.
+>
+> **WHAT THIS DOES NOT DO, and it is the other half of the owner's P92-7:
+> persisted totals keep the exponent they already have.** `Decimal` addition
+> keeps the finest exponent, so a ledger whose `lifetime_realised` is at -24
+> stays there after every later booking; that is what C49's
+> `scripts/normalize_ledger_exponents.py` is for, and this commit does not touch
+> any persisted file. **What survives:** the item's measurement of the four
+> bookings, and the observation that the figures were value-correct.
+>
+> **ARMING AUDIT AT C48, by content, of every condition the checker lists for
+> the symbols this commit edits.** *Fired and DISCHARGED:* P-3h's, above.
+> *Fired and REAFFIRMED:* P-3e's *"`_book_resolved_close` in
+> `execution/executor.py`"* -- the method now reads the position BEFORE
+> `close_position` deletes it, for the line's entry total, and returns the same
+> `True` it did, so P-3e's unwritten-ledger case is unchanged; the A5 item's
+> *"`_book_exits` in `execution/reconciliation_driver.py`"* and the orphan-guard
+> item's *"its caller in `_book_exits`"* -- the only edit is one more keyword on
+> the `_log_booked` call, and the guard and the `ExitFill` agreement are
+> untouched; A6's *"the booking line: `_log_booked` in that file or
+> `execution/booking_line.py`"* -- the line gained a field, and A6's point (two
+> calls, not one decision path; the remedy is wording) is unaffected. *Not
+> fired:* P-3e's other limb, `close_position`'s absent-symbol return (its
+> docstring changed, the return did not); `M5i-104`'s unpack condition (this
+> commit writes none -- every log assertion asserts a length first); and every
+> condition naming `_settle`, `hold_settlement` or `_SETTLEMENT_RETRY_BARS`.
+
 #### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
 
 `remainder = self._budget.max_calls - len(assessments)` covers the pass and

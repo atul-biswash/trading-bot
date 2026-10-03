@@ -173,6 +173,7 @@ from trading_bot.execution.booking_line import (
     EVENT_SETTLEMENT_HELD,
     HOLD_MESSAGE,
     disagreement_fields,
+    entry_total_fields,
     hold_fields,
     quote_total_fields,
     settlement_fields,
@@ -1527,6 +1528,10 @@ def _restored_position(
         quantity=source.quantity,
         entry_price=source.entry_limit,
         entry_fill_price=decision.entry_fill_price,
+        # P-3h, from the SAME GET as the price (the owner's R2, "re-fetched at
+        # boot by GET of the entry order through its client id"): the venue's
+        # own entry total, memory-only on the Position and recorded nowhere.
+        entry_quote_total=decision.entry_quote_total,
         entry_bar_time=source.entry_bar_time,
         protection=ProtectionState.UNKNOWN,
         order_list_id=decision.order_list.list_client_order_id,
@@ -2102,8 +2107,9 @@ def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
         if booking.decision.leg is None
         else {"leg": booking.decision.leg.value}
     )
+    basis = _restored_position(booking.source, booking.decision)
     realised = portfolio.book_restored_exit(
-        _restored_position(booking.source, booking.decision),
+        basis,
         exit_quote_total=booking.total,
         fee=settlement.fee,
         filled_at=settlement.filled_at,
@@ -2117,6 +2123,7 @@ def _book_boot_exit(booking: _Booking, portfolio: Portfolio) -> None:
             "list_client_order_id": booking.decision.order_list.list_client_order_id,
             **exit_field,
             **quote_total_fields(booking.total, booking.total_source),
+            **entry_total_fields(basis.entry_quote_total),
             **settlement_fields(settlement, order_created_at=booking.leg.created_at),
             "realised": realised,
             "booked_day": settlement.filled_at.astimezone(timezone.utc).date().isoformat(),

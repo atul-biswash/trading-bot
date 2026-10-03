@@ -5151,6 +5151,60 @@ class TestTheBootResolvesRestoredRecords:
             assert position.entry_fill_price == _RESTORE_FILL
             assert system.portfolio.free_quote == D("5000")
 
+    async def test_a_restored_position_carries_the_entry_total_from_the_same_get(
+        self, tmp_path: Path
+    ) -> None:
+        """P-3h, the owner's R2 and Q12: memory-only, set at boot from the entry GET.
+
+        The working leg's `cummulativeQuoteQty` reaches `Position.entry_quote_total`
+        beside the price, and is NOT in the record the store keeps. MUTATION:
+        `_restored_position` stops passing it, or the store's record gains it.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(legs=_LIVE_LEGS, order_lists=[_our_list()])
+
+        async with live_system(settings, client=client, stream=FakeStream()) as system:
+            position = system.portfolio.positions[SYMBOL]
+            assert position.entry_quote_total == _RESTORE_TOTAL
+            assert str(position.entry_quote_total) == "1388.3127720000"
+
+        assert "entry_quote_total" not in store.PositionRecord.model_fields
+
+    async def test_a_boot_booking_is_computed_from_the_entry_total_and_says_so(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """P-3h at boot: `exit total - entry total - fee`, and the line carries the total.
+
+        The value equals the quotient route's (`_EXIT_REALISED`), so the EXPONENT
+        is what tells them apart: the entry total's is -10, where
+        `entry_fill_price x quantity` is -16. MUTATION: `book_restored_exit`
+        ignores the total (exponent -16), the position is built without it, or
+        the booking line omits it.
+        """
+        settings = write_settings(tmp_path, pairs=_TWO_PAIRS)
+        store.save(store.PersistedState(positions=(_record(),)))
+        client = _ResolvingRootClient(
+            legs=_stopped_legs(),
+            order_lists=[_our_list(status="ALL_DONE")],
+            my_trades=[_exit_trade()],
+        )
+
+        with caplog.at_level(logging.DEBUG, logger=_MODES_LOGGER):
+            async with live_system(settings, client=client, stream=FakeStream()) as system:
+                ledger = system.portfolio.ledger
+                assert ledger is not None
+                assert ledger.realised_pnl == _EXIT_REALISED
+                assert ledger.realised_pnl.as_tuple().exponent == -10
+
+        lines = [
+            r
+            for r in caplog.records
+            if r.name == _MODES_LOGGER and vars(r).get("event") == "boot_exit_booked"
+        ]
+        assert len(lines) == 1
+        assert vars(lines[0]).get("entry_quote_total") == _RESTORE_TOTAL
+
     async def test_a_restored_symbol_is_not_blocked_by_its_own_live_list(
         self, tmp_path: Path
     ) -> None:

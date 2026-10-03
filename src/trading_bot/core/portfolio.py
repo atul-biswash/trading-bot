@@ -611,10 +611,11 @@ class Portfolio(BaseModel):
         **What becomes exact, stated narrowly.** With ``exit_quote_total`` the
         credit to :attr:`free_quote` is exactly the venue's figure -- no
         division and no multiplication, ours or anyone's. The realised P&L is
-        **not** exact, because its entry term is ``entry_fill_price x
-        quantity`` and ``entry_fill_price`` is itself a quotient this codebase
-        computed. See :meth:`_realised_from_total`, which says what closing
-        that would take.
+        exact too **when the position carries ``entry_quote_total``** (P-3h,
+        from M5l P93): both its terms are then the venue's totals. Without
+        one its entry term is ``entry_fill_price x quantity``, and
+        ``entry_fill_price`` is itself a quotient this codebase computed. See
+        :meth:`_realised_from_total`.
 
         **Illegal combinations are refused, never resolved**, and refused
         *before* the absent-symbol return -- an illegal call is a programming
@@ -818,21 +819,26 @@ class Portfolio(BaseModel):
         drift between the two conventions, and it is the reason the duplication
         is recorded here rather than left for a reader to find.
 
-        **THE ENTRY TERM IS NOT EXACT, AND THIS DOES NOT MAKE IT SO.**
-        ``entry_fill_price`` is ``Order.average_price``, which
-        ``exchange/models.py`` computes as ``cummulativeQuoteQty /
-        executedQty`` -- our own division, with exactly the failure the exit
-        side had. MEASURED: ``Q=0.01234000`` against ``T=945.85721234``
-        round-trips to a delta of ``-1E-25``. So this path makes the EXIT term
-        exact and the realised figure strictly less wrong; it does **not** make
-        the realised figure exact. Closing that needs :class:`Position` to
-        carry the entry's quote TOTAL rather than its price, which is a field
-        change and an open ruling for the project owner.
+        **THE ENTRY TERM IS THE ENTRY'S OWN QUOTE TOTAL WHEN THE POSITION HAS ONE**
+        (P-3h, the owner's P92-6): ``position.entry_quote_total``, the venue's
+        ``cummulativeQuoteQty`` for the entry, used as it arrived -- so both
+        terms are the venue's and the realised figure is exact, at the venue's
+        exponent. **Only when it is absent does this fall back to
+        ``entry_fill_price x quantity``**, which is a QUOTIENT: ``Order.
+        average_price`` is ``cummulativeQuoteQty / executedQty``, our own
+        division, and MEASURED a multi-price entry makes it a 28-digit number
+        whose product carries exponent -24 (``M5l-209``). In production the
+        total is absent only for a position built without one, since a price
+        implies a total (``to_order``); the fallback keeps every such
+        position bookable exactly as it was.
 
         :raises ValueError: :attr:`entry_fill_price` is ``None`` -- the same
             refusal ``unrealized_pnl`` makes, on the same three states it
             conflates, for the same reason: the cost basis is unknown and the
-            requested ``entry_price`` is not a substitute.
+            requested ``entry_price`` is not a substitute. **Checked before
+            the total is read**, so a position with a total and no price is
+            still refused, as ``classify_bookability``'s cost-basis fact
+            already refuses it.
         """
         if position.entry_fill_price is None:
             raise ValueError(
@@ -840,7 +846,11 @@ class Portfolio(BaseModel):
                 "realised P&L cannot be booked. The requested entry_price is NOT a substitute; "
                 "see Position.unrealized_pnl for the three states this value conflates"
             )
-        entry_cost = position.entry_fill_price * position.quantity
+        entry_cost = (
+            position.entry_quote_total
+            if position.entry_quote_total is not None
+            else position.entry_fill_price * position.quantity
+        )
         if position.side is PositionSide.LONG:
             return gross - entry_cost
         if position.side is PositionSide.SHORT:

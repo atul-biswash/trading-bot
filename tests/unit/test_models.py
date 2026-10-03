@@ -398,6 +398,7 @@ _POSITION_MONEY_FIELDS = [
     "quantity",
     "entry_price",
     "entry_fill_price",
+    "entry_quote_total",
     "stop_loss",
     "take_profit",
     "trailing_stop",
