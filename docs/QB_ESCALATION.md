@@ -189,6 +189,16 @@ Three categories, not two. The distinction is **what can clear it**.
 > **What survives:** the five sites and their categories, and the
 > `exit_settlement_held` row.
 
+> **ANNOTATED AT M5l P94 (C53): ANOTHER EMITTER NO ROW NAMES.** The executor
+> (`executor.py`, `_hold_unbookable_close`, P-3c) logs `close_unbookable_held` at
+> `CRITICAL` when `require_bookable` refuses a verdict AFTER the bot's own MARKET
+> sell filled, and holds the position. It is **Terminal**: nothing the bot can do
+> while running resolves a booking guard that refused a filled sell, and a
+> restart is the only retry, through the boot's re-settlement from the record.
+> Emitted once, the log line alone, with no halt flag (`M5k-006`), and
+> unreachable under the ruled ladder. It is not one of the five sites.
+> **What survives:** the five sites and their categories.
+
 **Self-clearing (4).** The refusal frees the budget the reconciler needs, so the
 condition resolves on its own. Escalate at a *distinct* marker and promote to
 terminal only if it fails to clear within N reconciliation cycles. Escalating a

@@ -637,6 +637,39 @@ measured it escaping when the ladder is reordered.
 
 *Arming condition:* **whoever next edits `require_bookable` in `execution/bookability.py` or `_sell_and_book` in `execution/executor.py`.**
 
+> **RESOLVED AT M5l P94 (C53): *"a raise there escapes to the engine's handler"*
+> IS NO LONGER TRUE, AND THE ARMING CONDITION ABOVE FIRED (`_sell_and_book` was
+> edited) AND IS DISCHARGED.** The owner's P94 ruling: no raise from
+> `require_bookable` may go unreported after a MARKET sell.
+>
+> **STEP 0, the question the ruling put: can the guard's inputs be checked BEFORE
+> the sell? No** (`M5l-239`). The verdict is built from the sell's own results --
+> `order.filled_quantity`, `order.filled_quote_quantity` and the settlement's
+> fills total -- so P (completeness) and Q (a priced total) exist only after it;
+> only A and C, position facts, could be known earlier, and those are not what
+> raises. So the guard stays where it is and a **reported catch** was built:
+> `_sell_and_book` catches the `ValueError`, and `_hold_unbookable_close` calls
+> `position.hold_settlement()`, clears the retention count, KEEPS the close record
+> (so `dispatch`'s `close_pending` guard refuses a second sell and `__call__`
+> skips it) and logs ONE `CRITICAL`, `close_unbookable_held`, `site=sell`, whose
+> resolution ends with the owner's *"A restart re-settles from the record: ..."*
+> sentence. **Its own event, not `exit_settlement_held`**, because `HeldExit`'s
+> `cause` has two members and this refusal is neither (`M5l-212`'s shape, and
+> C47's answer to it).
+>
+> **What survives:** the item's observation that the case is unreachable under the
+> ruled ladder, and that the orderings survey measured the escape when the ladder
+> is reordered -- the new tests patch the guard to raise for the same reason. **Not
+> covered, and reported rather than changed:** Site B (`_resolve_close`) calls
+> `require_bookable` too; a raise there runs `_resolve_close`'s `finally` as
+> *"settlement unreadable"* (retained, then released as `settlement_timeout`) and
+> is then reported by `__call__`'s `_log_failure("resolve-close")`. It is
+> reported, but under a label that names the wrong cause (`M5l-240`).
+>
+> *Audit by content.* The P-3c condition fired and is discharged, as above. N3's
+> *"`_settle` or `_defer_settlement` in `execution/executor.py`"* did not fire:
+> neither was edited (the new method sits beside `_defer_settlement`).
+
 #### P-3d. A held position emits no recurring line of its own (`M5k-083`)
 
 After its one `CRITICAL`, a held position's only recurring trace is each

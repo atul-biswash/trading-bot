@@ -5400,6 +5400,127 @@ class TestAnAbsentPositionIsNeverReportedBooked:
         assert portfolio.ledger is None
 
 
+class TestAnUnbookableVerdictAfterTheSellIsHeld:
+    """P-3c (`M5k-110`), M5l P94: a raise from `require_bookable` after the MARKET sell is HELD.
+
+    It used to escape `dispatch` to the engine's handler, logged as
+    `collaborator_failed` far from the close, with the close record kept and the
+    position neither held nor booked. It is **unreachable under the ruled ladder**
+    -- `classify_bookability` decides every fact before the guard is called -- so
+    each test PATCHES the guard to raise, as the orderings survey measured it
+    doing when the ladder is reordered.
+    """
+
+    _GUARD = (
+        "a partial_fill verdict reached booking, which books only a bookable one: "
+        "the fill is partial"
+    )
+
+    @staticmethod
+    async def _dispatch_close(executor: OrderExecutor, bar: Candle) -> None:
+        """Dispatch the CLOSE, and turn an ESCAPING raise into an assertion failure.
+
+        A test whose contract is "this must not raise" can only fail by the
+        exception leaving it, which the survey classifies as a crash
+        (`M5i-115`); `pytest.fail` makes the same regression a kill.
+        """
+        try:
+            await executor.dispatch(close_signal(), exit_assessment(), bar)
+        except ValueError as exc:
+            pytest.fail(f"the booking guard's raise escaped dispatch: {exc}")
+
+    @staticmethod
+    def _raising(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+        def _refuse(_verdict: object) -> None:
+            raise ValueError(message)
+
+        monkeypatch.setattr("trading_bot.execution.executor.require_bookable", _refuse)
+
+    async def test_a_raise_after_the_sell_is_held_with_one_critical_and_nothing_escapes(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """No exception escapes; ONE CRITICAL; the position held; the record KEPT; nothing booked.
+
+        MUTATIONS: remove the `except` (the raise escapes `dispatch`), hold without
+        the CRITICAL, emit the CRITICAL without `hold_settlement`, or release the
+        close record after holding.
+        """
+        self._raising(monkeypatch, self._GUARD)
+        client = _settling_client([sell_trade()])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        position = portfolio.positions[SYMBOL]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await self._dispatch_close(executor, candle())
+
+        assert client.sold, "the MARKET sell was sent before the guard ran"
+        lines = _records(caplog, "close_unbookable_held")
+        assert len(lines) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        assert lines[0].levelno == logging.CRITICAL
+        fields = vars(lines[0])
+        assert fields.get("site") == "sell"
+        assert fields.get("error_type") == "ValueError"
+        assert self._GUARD in str(fields.get("error"))
+        assert fields.get("executed_qty") == CLOSE_QTY
+        assert fields.get("quote_total") == SELL_TOTAL
+        resolution = fields.get("resolution")
+        assert isinstance(resolution, str)
+        assert "DO NOT SELL IT BY HAND" in resolution
+        assert resolution.endswith(
+            "A restart re-settles from the record: the boot books it if the fills now read, "
+            "and otherwise refuses the boot (then use the release tool)."
+        )
+        assert position.settlement_hold is True
+        assert position.protection is ProtectionState.UNKNOWN
+        assert portfolio.positions.get(SYMBOL) is position
+        assert portfolio.ledger is None
+        assert getattr(executor._pending.get(SYMBOL), "kind", None) == "close"
+        assert SYMBOL not in executor._settlement_deferrals
+        assert _records(caplog, "close_booked") == []
+        assert _records(caplog, "collaborator_failed") == []
+
+    async def test_a_held_unbookable_close_is_never_resolved_again_and_a_second_close_is_refused(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The record that was kept does its job: a held close is skipped on every bar and a
+        second sell is refused BEFORE any read. MUTATION: release the record on the hold.
+        """
+        self._raising(monkeypatch, self._GUARD)
+        client = _settling_client([sell_trade()])
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await self._dispatch_close(executor, candle())
+            calls = list(client.venue_calls)
+            for minute in range(1, 8):
+                await executor(_bar(minute))
+            await self._dispatch_close(executor, _bar(8))
+
+        assert client.venue_calls == calls
+        assert len(_records(caplog, "close_unbookable_held")) == 1
+        assert _records(caplog, "close_record_resolved") == []
+        refusals = _records(caplog, "dispatch_refused")
+        assert [vars(r).get("reason") for r in refusals] == ["close_pending"]
+
+    async def test_a_verdict_that_books_still_books_and_holds_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The control: the guard unpatched, the same close books and the new path is silent.
+
+        MUTATION: hold on every close.
+        """
+        client = _settling_client([sell_trade()])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+
+        assert _records(caplog, "close_unbookable_held") == []
+        assert len(_records(caplog, "close_booked")) == 1
+        assert SYMBOL not in portfolio.positions
+        assert SYMBOL not in executor._pending
+
+
 class TestTheCloseGuard:
     """Ruling B: a CLOSE for a HELD position is refused, before any read."""
 

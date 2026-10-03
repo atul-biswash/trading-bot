@@ -241,6 +241,9 @@ _EVENT_CLOSE_CANCEL_FAILED = "close_cancel_failed"
 _EVENT_CLOSE_ABANDONED = "close_abandoned_after_cancel"
 _EVENT_CLOSE_BOOKED = "close_booked"
 _EVENT_CLOSE_BOOK_FAILED = "close_book_failed"
+#: P-3c (the owner's P94): a bookability verdict that was not BOOKABLE reached the
+#: booking guard AFTER the MARKET sell. HELD, with this CRITICAL, never a raise.
+_EVENT_CLOSE_UNBOOKABLE_HELD = "close_unbookable_held"
 _EVENT_CLOSE_NAKED = "close_position_naked"
 #: A pending close record was resolved: the venue was asked what became of the
 #: sell and whatever was learned was LOGGED. Its own event rather than reusing
@@ -2246,7 +2249,20 @@ class OrderExecutor:
         # 3b-2b this fall-through was unguarded here: it booked whatever the
         # re-taken verdict carried, safe only because the ladder's order made it
         # BOOKABLE.
-        booked_total, source = require_bookable(verdict)
+        #
+        # **P-3c (the owner's P94): A RAISE HERE IS HELD AND REPORTED, NEVER LEFT TO
+        # ESCAPE.** The sell has already filled, so nothing above can be undone
+        # and a bare raise reaches the engine's handler as a `collaborator_failed`
+        # far from the close it interrupted, with the close record kept and the
+        # position neither held nor booked. The inputs to the verdict -- the
+        # sell's own executed quantity and quote total, and the settlement's fills
+        # -- exist only AFTER the sell, so the check cannot move before it
+        # (`M5l-239`); this catches it instead. Unreachable under the ruled ladder.
+        try:
+            booked_total, source = require_bookable(verdict)
+        except ValueError as exc:
+            self._hold_unbookable_close(position, candle, order=order, total=total, failure=exc)
+            return
         self._book_close(
             signal,
             position,
@@ -2332,6 +2348,59 @@ class OrderExecutor:
                     quote_total=quote_total,
                 ),
             },
+        )
+
+    def _hold_unbookable_close(
+        self,
+        position: Position,
+        candle: Candle,
+        *,
+        order: Order,
+        total: Money | None,
+        failure: ValueError,
+    ) -> None:
+        """P-3c: the sell FILLED and the booking guard refused it. HOLD, KEEP the record, say it once.
+
+        The same mechanism as :meth:`_hold_close` -- ``hold_settlement`` marks the
+        position and writes ``UNKNOWN`` to its protection, the retention count is
+        cleared, and the close record is KEPT so ``dispatch``'s close_pending
+        guard refuses a second sell and ``__call__`` skips it -- with a CRITICAL
+        of its OWN, because ``HeldExit`` cannot describe it: its ``cause`` has two
+        members and ``require_bookable``'s refusal is neither (``M5l-212``'s
+        shape, and C47's answer to it). ``failure`` is the guard's own message,
+        which names the verdict's outcome and reason. ``quote_total`` is OMITTED
+        when the venue gave none, never ``null``.
+        """
+        position.hold_settlement()
+        self._settlement_deferrals.pop(position.symbol, None)
+        fields: dict[str, object] = {
+            "event": _EVENT_CLOSE_UNBOOKABLE_HELD,
+            "symbol": position.symbol,
+            "site": "sell",
+            "order_id": order.order_id,
+            "executed_qty": order.filled_quantity,
+            "close_client_order_id": close_client_order_id(
+                position.symbol, position.entry_bar_time, generation=_CLOSE_GENERATION
+            ),
+            "error_type": type(failure).__name__,
+            "error": str(failure),
+            "candle_time": candle.close_time.isoformat(),
+            "resolution": (
+                "THE SELL FILLED and THE BOOKING GUARD REFUSED IT. NOTHING WAS BOOKED. THE BASE "
+                "IS ALREADY SOLD: DO NOT SELL IT BY HAND. The position is HELD in memory with "
+                "untrusted protection and its close record is kept, so a second sell is refused "
+                "and ENTRIES ARE REFUSED PORTFOLIO-WIDE until an operator acts. "
+                "A restart re-settles from the record: the boot books it if the fills now read, "
+                "and otherwise refuses the boot (then use the release tool)."
+            ),
+        }
+        if total is not None:
+            fields["quote_total"] = total
+        _log.critical(
+            "%s: the close sell FILLED and the booking guard refused it -- NOTHING WAS BOOKED and "
+            "the position is HELD until an operator acts",
+            position.symbol,
+            extra=fields,
         )
 
     def _defer_settlement(
