@@ -199,6 +199,15 @@ Three categories, not two. The distinction is **what can clear it**.
 > unreachable under the ruled ladder. It is not one of the five sites.
 > **What survives:** the five sites and their categories.
 
+> **ANNOTATED AT M5l P95 (C55): THE SAME EMITTER NOW SERVES A SECOND SITE.**
+> `close_unbookable_held` is also logged from `_resolve_close` (Site B), with
+> `site=resolution`, when `require_bookable` refuses the verdict for a sell a
+> later bar's re-read found filled. Same classification as the row above:
+> **Terminal**, emitted once, the log line alone, with no halt flag (`M5k-006`),
+> unreachable under the ruled ladder, and not one of the five sites. Before P95 that
+> raise ran as a failed read and ended as `settlement_timeout` (`M5l-240`).
+> **What survives:** the five sites and their categories.
+
 **Self-clearing (4).** The refusal frees the budget the reconciler needs, so the
 condition resolves on its own. Escalate at a *distinct* marker and promote to
 terminal only if it fails to clear within N reconciliation cycles. Escalating a

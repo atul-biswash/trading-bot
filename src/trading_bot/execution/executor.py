@@ -503,14 +503,17 @@ _RESOLVED_BOOK_FAILED: Final = _CloseResolutionText(
         "Booking credits the free quote balance BEFORE it accrues the realised "
         "P&L, so the proceeds may be credited with the P&L unaccrued. DO NOT "
         "assume the ledger is untouched, and DO NOT assume it holds this trade. "
-        "THE POSITION IS STILL IN MEMORY while the venue is flat, so this bot's "
-        "book and the account disagree about what is held. Check the free quote "
-        "balance and the realised P&L against the venue before acting; the error "
-        "that caused this is recorded below."
+        "IF THE PORTFOLIO HOLDS THE POSITION IT IS STILL IN MEMORY while "
+        "the venue is flat, so this bot's book and the account disagree about "
+        "what is held; IF IT NO LONGER HOLDS ONE, nothing was written and the "
+        "book has already lost it -- the error recorded below says which. Check "
+        "the free quote balance and the realised P&L against the venue before "
+        "acting."
     ),
     message=(
         "%s: a pending close record was resolved -- the sell FILLED and BOOKING IT "
-        "FAILED; the POSITION SURVIVES and the ledger may be half-applied"
+        "FAILED; a position the portfolio still holds SURVIVES, and the ledger may be "
+        "half-applied"
     ),
 )
 
@@ -2261,7 +2264,9 @@ class OrderExecutor:
         try:
             booked_total, source = require_bookable(verdict)
         except ValueError as exc:
-            self._hold_unbookable_close(position, candle, order=order, total=total, failure=exc)
+            self._hold_unbookable_close(
+                position, candle, order=order, total=total, failure=exc, site="sell"
+            )
             return
         self._book_close(
             signal,
@@ -2358,8 +2363,16 @@ class OrderExecutor:
         order: Order,
         total: Money | None,
         failure: ValueError,
+        site: str,
     ) -> None:
         """P-3c: the sell FILLED and the booking guard refused it. HOLD, KEEP the record, say it once.
+
+        **ONE HOLD FOR BOTH SITES, and ``site`` says which** (``"sell"`` from
+        ``_sell_and_book``, ``"resolution"`` from ``_resolve_close``: the
+        vocabulary ``exit_settlement_held`` and ``close_settlement_deferred``
+        already use for these two places). It is required, with no default, so a
+        caller cannot forget to say. From M5l P95 (C55, ``M5l-240``) Site B
+        calls it too.
 
         The same mechanism as :meth:`_hold_close` -- ``hold_settlement`` marks the
         position and writes ``UNKNOWN`` to its protection, the retention count is
@@ -2376,7 +2389,7 @@ class OrderExecutor:
         fields: dict[str, object] = {
             "event": _EVENT_CLOSE_UNBOOKABLE_HELD,
             "symbol": position.symbol,
-            "site": "sell",
+            "site": site,
             "order_id": order.order_id,
             "executed_qty": order.filled_quantity,
             "close_client_order_id": close_client_order_id(
@@ -2578,8 +2591,10 @@ class OrderExecutor:
             )
         except Exception as exc:
             # The credit may have landed and the accrual raised -- the C12
-            # residual, and this is a second caller of it. The position survives,
-            # so the failure is visible and repeating rather than silent.
+            # residual, and this is a second caller of it. A position the
+            # portfolio still holds survives, so the failure is visible and
+            # repeating rather than silent; if it holds none, `close_position`
+            # raised `PositionNotHeldError` before writing anything (P-3e).
             _log.critical(
                 "Booking the close of %s failed after the sell landed",
                 signal.symbol,
@@ -2998,6 +3013,12 @@ class OrderExecutor:
         # `total` into the booking.
         fetched = False
         source: TotalSource | None = None
+        # P-3c at Site B (the owner's P95, `M5l-240`): the booking guard's own
+        # raise, caught at its one call below. It is NOT a read failure -- a read
+        # failure is RETURNED by `_settle` -- so it must never reach the `elif
+        # fetched` branch, which would count it toward the five-bar bound, retain
+        # it and then release it as `settlement_timeout`.
+        refused: ValueError | None = None
         try:
             order, failure = await self._read_close_outcome(record, bounds=bounds)
             # A FILL IS `executedQty`, NOT THE MERE PRESENCE OF AN ANSWER.
@@ -3043,8 +3064,12 @@ class OrderExecutor:
                             )
                         # THE ONE GUARD between the re-classification and the
                         # ledger write; `settlement` is bound only past it.
-                        total, source = require_bookable(verdict)
-                        settlement = settled
+                        try:
+                            total, source = require_bookable(verdict)
+                        except ValueError as exc:
+                            refused = exc
+                        else:
+                            settlement = settled
                     elif isinstance(settled, HeldExit):
                         held = settled
                     else:
@@ -3079,6 +3104,28 @@ class OrderExecutor:
                     )
                     else _RESOLVED_BOOK_FAILED
                 )
+            elif refused is not None:
+                # P-3c AT SITE B (`M5l-240`): the guard refused a FILLED sell. Not a
+                # read failure and never counted: `_settlement_deferrals` is not
+                # touched here (and `_hold_unbookable_close` clears any entry), so
+                # it cannot time out into `settlement_timeout`. HELD like Site A's,
+                # with the record KEPT. With no position to hold -- unreachable,
+                # since a bookable verdict needs one -- it is released unbooked
+                # like every other fact A decides, and still says so at CRITICAL.
+                held_position = self._portfolio.positions.get(symbol)
+                if held_position is not None and order is not None:
+                    self._hold_unbookable_close(
+                        held_position,
+                        candle,
+                        order=order,
+                        total=total,
+                        failure=refused,
+                        site="resolution",
+                    )
+                    kept_held = True
+                else:
+                    self._drop_position_unbooked(symbol)
+                    texts = _RESOLVED_RELEASED
             elif (
                 held is not None
                 and order is not None
@@ -3389,9 +3436,10 @@ class OrderExecutor:
         ``error_type=PositionNotHeldError``, the method returns ``False``, and
         the caller selects ``_RESOLVED_BOOK_FAILED``, never the booked label.
         Reaching it is unreachable in practice -- a bookable verdict requires the
-        position -- so the CRITICAL's and the label's "the position survives"
-        is untrue of THIS case, and is left as written because the ruling
-        routes it to the existing path (``M5l-233``).
+        position. **The wording that said "the position survives" was untrue of
+        THIS case until M5l P95 (``M5l-233``)**; the CRITICAL, ``_RESOLVED_BOOK_FAILED``'s
+        message and its resolution now say that a position the portfolio STILL
+        HOLDS survives, and that a portfolio holding none had nothing written.
         """
         # READ BEFORE THE BOOKING: `close_position` deletes the position, and the
         # booking line carries the entry term it was computed from (P-3h).
@@ -3403,8 +3451,8 @@ class OrderExecutor:
             )
         except Exception as exc:
             _log.critical(
-                "Booking the resolved close for %s FAILED; the position survives and the "
-                "ledger may be short this trade",
+                "Booking the resolved close for %s FAILED; a position the portfolio still holds "
+                "survives, and the ledger may be short this trade",
                 symbol,
                 extra={
                     "event": _EVENT_CLOSE_BOOK_FAILED,

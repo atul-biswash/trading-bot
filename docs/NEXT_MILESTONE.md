@@ -669,6 +669,30 @@ measured it escaping when the ladder is reordered.
 > *Audit by content.* The P-3c condition fired and is discharged, as above. N3's
 > *"`_settle` or `_defer_settlement` in `execution/executor.py`"* did not fire:
 > neither was edited (the new method sits beside `_defer_settlement`).
+>
+> **RESOLVED AT M5l P95 (C55): THE SITE B GAP NAMED ABOVE IS CLOSED (`M5l-240`).**
+> The owner's P95 ruling: a `require_bookable` raise in `_resolve_close` is not a
+> settlement read failure. `_resolve_close` now catches it where it is raised and
+> the `finally` routes it to the same `_hold_unbookable_close` Site A uses, which
+> gained a required `site` argument rather than a copy: `position.hold_settlement()`,
+> the retention count cleared, the close record KEPT, and ONE `CRITICAL`,
+> `close_unbookable_held`, now with `site=resolution` (the vocabulary
+> `exit_settlement_held` already uses for this site; the ruling's *"site=B"* names
+> the same place). It never advances the deferral count, so it cannot time out
+> into `settlement_timeout`. **STEP 0 CONFIRMED the account above and CORRECTS
+> it in four particulars** (`M5l-246`): the deferral `WARNING` carries
+> `error_type=None`, because there is no read failure to type; the
+> `collaborator_failed` `ERROR` is repeated on every bar, not once; each of those
+> bars spends a settlement fetch, so the wrong-cause path also cost venue calls;
+> and the eventual `settlement_timeout` `CRITICAL` carries the venue's total for a
+> sell the bot had in fact read. **What survives:** the item's observation that the
+> case is unreachable under the ruled ladder.
+>
+> *Audit by content.* Conditions naming the edited sites: `_sell_and_book`'s
+> P-3c condition, above, was discharged at C53 and is REAFFIRMED as discharged;
+> N3's *"`_settle` or `_defer_settlement`"* did not fire (neither edited); the
+> N = 5 bound (`_SETTLEMENT_RETRY_BARS`) is read, not edited, here. No condition
+> names `_resolve_close` or `_hold_unbookable_close` by symbol.
 
 #### P-3d. A held position emits no recurring line of its own (`M5k-083`)
 
@@ -738,6 +762,18 @@ measured the label; the unwritten ledger is REASONED from the early return.
 > unreachable today. The CRITICAL's and the resolution text's *"the position
 > survives"* is untrue of THIS case and is left as written, because the ruling
 > routes it to the existing path (`M5l-233`).
+>
+> **RESOLVED AT M5l P95 (C55): *"The CRITICAL's and the resolution text's 'the
+> position survives' is untrue of THIS case and is left as written"* IS NO LONGER
+> TRUE (`M5l-233`, `M5l-248`).** The owner's P95 ruling: each message saying the
+> position survives must be true for every case that reaches it. Reworded: the
+> `_RESOLVED_BOOK_FAILED` resolution and message now say *"IF THE PORTFOLIO HOLDS
+> THE POSITION IT IS STILL IN MEMORY"*, the `_book_resolved_close` `CRITICAL` says
+> a position the portfolio *still holds* survives and the ledger may be short this
+> trade, and the `_book_close` comment and the `PositionNotHeldError` docstring
+> paragraph say the same. The case this item named -- the symbol is not held -- is
+> now described as such. No assertion was edited: the one test that pins the
+> wording reads the phrase `STILL IN MEMORY`, which the conditional form keeps.
 
 #### P-3f. Eleven tests trip the disagreement warning without meaning to (`M5k-111`)
 

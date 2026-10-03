@@ -5523,6 +5523,117 @@ class TestAnUnbookableVerdictAfterTheSellIsHeld:
         assert SYMBOL not in executor._pending
 
 
+class TestAnUnbookableVerdictAtSiteBIsHeld:
+    """P-3c at Site B (`M5l-240`), M5l P95: a raise from `require_bookable` in `_resolve_close`
+    is HELD like Site A's, and is never counted as a failed settlement read.
+
+    It used to run the `finally` as "settlement unreadable": the record was retained
+    and, five bars later, released as `settlement_timeout` -- "could not be settled"
+    for a sell that HAD settled -- with `collaborator_failed` repeating each bar. The
+    guard is unreachable under the ruled ladder, so each test PATCHES it to raise.
+    The close is first deferred at Site A (an empty read) so a record exists for
+    Site B to pick up on the next bar, whose read then answers with the real fill.
+    """
+
+    _GUARD = TestAnUnbookableVerdictAfterTheSellIsHeld._GUARD
+
+    async def test_a_guard_raise_at_site_b_is_held_with_one_critical_and_no_collaborator_failure(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Held, the record KEPT, ONE CRITICAL with `site=resolution`, nothing booked.
+
+        MUTATIONS: remove the catch (the raise falls into the deferral path and is
+        reported by `collaborator_failed`), or hold without the CRITICAL.
+        """
+        TestAnUnbookableVerdictAfterTheSellIsHeld._raising(monkeypatch, self._GUARD)
+        client = _settling_client([], [sell_trade()])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+        position = portfolio.positions[SYMBOL]
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            assert position.settlement_hold is False, "Site A deferred on the empty read"
+            await executor(_bar(1))
+
+        lines = _records(caplog, "close_unbookable_held")
+        assert len(lines) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        assert lines[0].levelno == logging.CRITICAL
+        fields = vars(lines[0])
+        assert fields.get("site") == "resolution"
+        assert fields.get("error_type") == "ValueError"
+        assert self._GUARD in str(fields.get("error"))
+        resolution = fields.get("resolution")
+        assert isinstance(resolution, str)
+        assert resolution.endswith(
+            "A restart re-settles from the record: the boot books it if the fills now read, "
+            "and otherwise refuses the boot (then use the release tool)."
+        )
+        assert position.settlement_hold is True
+        assert position.protection is ProtectionState.UNKNOWN
+        assert portfolio.positions.get(SYMBOL) is position
+        assert portfolio.ledger is None
+        assert getattr(executor._pending.get(SYMBOL), "kind", None) == "close"
+        assert _records(caplog, "close_booked") == []
+        assert _records(caplog, "collaborator_failed") == []
+
+    async def test_the_site_b_hold_never_times_out_and_is_never_resolved_again(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Six more bars: no `settlement_timeout`, no further read, the count gone.
+
+        MUTATIONS: remove the catch, or let the guard raise advance the deferral
+        count (the held record would then be dropped at the bound).
+        """
+        TestAnUnbookableVerdictAfterTheSellIsHeld._raising(monkeypatch, self._GUARD)
+        client = _settling_client([], [sell_trade()])
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            await executor(_bar(1))
+            calls = list(client.venue_calls)
+            for minute in range(2, 8):
+                await executor(_bar(minute))
+
+        assert client.venue_calls == calls
+        assert _records(caplog, "close_record_resolved") == []
+        # Site A's one deferral (the empty read) is the only one: Site B never defers.
+        assert len(_records(caplog, "close_settlement_deferred")) == 1
+        assert len(_records(caplog, "close_unbookable_held")) == 1
+        assert SYMBOL not in executor._settlement_deferrals
+        assert SYMBOL in executor._pending
+        assert SYMBOL in portfolio.positions
+
+    async def test_a_genuine_read_failure_at_site_b_still_defers_and_times_out(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """The control: a failed READ never reaches the guard and is never held.
+
+        The guard is patched to raise, yet no read ever answers, so it is not
+        called. MUTATION: route a read failure to the hold.
+        """
+        TestAnUnbookableVerdictAfterTheSellIsHeld._raising(monkeypatch, self._GUARD)
+        client = _settling_client([], ExchangeConnectionError("timed out"))
+        executor, _, portfolio = build(client=client, portfolio=_held())
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(close_signal(), exit_assessment(), candle())
+            for minute in range(1, 5):
+                await executor(_bar(minute))
+                assert SYMBOL in executor._pending, f"dropped early, at bar {minute}"
+            await executor(_bar(5))
+
+        resolved = _records(caplog, "close_record_resolved")
+        assert len(resolved) == 1
+        assert vars(resolved[0]).get("outcome") == "settlement_timeout"
+        assert _records(caplog, "close_unbookable_held") == []
+        assert (
+            portfolio.positions.get(SYMBOL) is None
+            or not portfolio.positions[SYMBOL].settlement_hold
+        )
+        assert SYMBOL not in executor._pending
+
+
 class TestTheCloseGuard:
     """Ruling B: a CLOSE for a HELD position is refused, before any read."""
 
