@@ -272,6 +272,9 @@ class TestNormalising:
         assert rc == 0
         assert _sha() == normalised
         assert "NOTHING TO NORMALISE" in capsys.readouterr().out
+        # Asserted to EXIST before it is read: a missing log would otherwise raise
+        # FileNotFoundError, a crash, where the mutation should fail an assertion.
+        assert NORMALIZE_LOG_PATH.exists()
         assert len(NORMALIZE_LOG_PATH.read_text(encoding="utf-8").splitlines()) == 1
 
     def test_a_store_with_no_ledger_is_nothing_to_do(

@@ -5070,10 +5070,12 @@ class TestSettlement:
             assert _records(caplog, "close_record_resolved") == []
             await executor(_bar(5))
 
-        (record,) = _records(caplog, "close_record_resolved")
+        resolved = _records(caplog, "close_record_resolved")
+        assert len(resolved) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        record = resolved[0]
         assert record.levelno == logging.CRITICAL
-        assert record.outcome == "settlement_timeout"  # type: ignore[attr-defined]
-        assert "COULD NOT BE SETTLED" in record.resolution  # type: ignore[attr-defined]
+        assert vars(record).get("outcome") == "settlement_timeout"
+        assert "COULD NOT BE SETTLED" in str(vars(record).get("resolution"))
         assert SYMBOL not in executor._pending
         assert SYMBOL not in portfolio.positions
         assert portfolio.ledger is None

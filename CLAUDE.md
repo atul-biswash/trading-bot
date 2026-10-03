@@ -1594,6 +1594,16 @@ data.
   > candle."* **What survives:** N = 5, Variant L, the stalled-feed limit, and
   > the count's being in memory only.
 
+  > **ANNOTATED AT M5l P93 (C47), with the text the project owner ruled at P94,
+  > verbatim:** *"ANNOTATED AT M5l P93 (C47): the line quoted above now reads
+  > `_SETTLEMENT_RETRY_BARS: Final = SETTLEMENT_RETRY_LIMIT`, the value 5 being
+  > `bookability.SETTLEMENT_RETRY_LIMIT`, which the reconciliation driver also
+  > reads. The executor reads the settlement once at Site A and once on each of
+  > the five bars, the fifth read being the one that drops (M5l-216). What
+  > survives: N = 5, Variant L and the stalled-feed limit."* Recorded in this
+  > commit, C54, because C47 made the line false and the owner ruled the text
+  > afterwards (`M5l-219`).
+
 - **AN EXIT THE LEDGER CANNOT BOOK IS HELD -- FETCHED ONCE, ONE `CRITICAL`, AND
   NEVER RETRIED -- by the project owner's ruling R2 at M5k.** The ruling,
   verbatim from the commit whose subject begins `feat(execution): hold an exit

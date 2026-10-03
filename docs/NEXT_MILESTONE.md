@@ -2278,6 +2278,26 @@ recorded, so the two figures are not the same instrument.
 
 *Arming condition:* **whoever next writes or edits a single-element unpack of `_records` in `tests/unit/test_executor.py`, or of `caplog.records` in `tests/unit/test_reconciliation_driver.py`.**
 
+> **FIRED AT M5l P94 (C54) AND REAFFIRMED, WITH THE SWEEP ONE SITE SHORTER.** The
+> owner's P94 ruling rewrote the unpack in
+> `test_a_deferred_close_is_kept_through_bar_five_and_dropped_at_bar_six`
+> (`M5l-217`, the two parametrised rows `transport` and `empty`) as a length
+> assertion, and read its fields through `vars(record).get`. **Measured on the
+> final bytes, C47's `m10` (the executor's drop one read late) went from 5 kills
+> and 2 crashes to 7 kills and 0 crashes**: both formerly-crashing rows now fail as
+> `AssertionError`, where they raised `ValueError` from the unpack. **The
+> instrument is the one the item states** -- lines matching
+> `^\s*\(\s*\w+\s*,\s*\)\s*=` -- and it now finds **15 in
+> `tests/unit/test_executor.py` and 2 in `tests/unit/test_reconciliation_driver.py`,
+> 17 where it found 18** (16 and 2). The sweep is carried, not finished: nothing
+> here claims the other 17 sites crash a mutation, only that the pattern that
+> crashed these two is still present at them.
+>
+> The same commit made `M5l-231`'s fix: C49's idempotence test asserts the log
+> EXISTS before reading it, and C49's `m10` went from 5 kills and 1 crash to 6
+> kills and 0 crashes. **C50 to C53 wrote no unpack** -- every log assertion in
+> them asserts a length first -- so this condition did not fire for them.
+
 The condition was re-pointed at M5k's rotation. It read *"whoever next edits
 `test_a_partial_fill_with_no_cost_basis_still_goes_naked`, or runs a survey
 whose predicted killers include it"*, which names a test already resolved
@@ -2592,6 +2612,19 @@ It was needed at P87, whose prompt named three files to write while the
 annotation authority covers README.md as well: the README text P87's ruling
 made false was reported (`M5l-175`) rather than annotated, and C39 annotates
 it.
+
+**A SOURCE EDIT MADE BY SCRIPT IS ASSERTED, LF-SAFE AND REPORTED -- a standing
+rule of the project owner at M5l P94, verbatim:**
+
+> "A source edit made by script must assert exactly one match per site, write
+> with newline='' so LF is preserved, and be reported as a script edit."
+
+Earned by `M5g-046` (a heredoc script wrote CRLF into two LF-pinned fixtures and
+`git diff` hid it). It has since worked once: at P94 a script's second
+replacement asserted a match count of two -- its own first replacement had
+created the second match -- and wrote nothing, so the file was left as it was.
+First reported under the rule at C50, whose commit message carries the report.
+It binds edits to `src/`, `tests/`, `scripts/` and the documents alike.
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 
