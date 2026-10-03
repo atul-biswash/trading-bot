@@ -608,8 +608,10 @@ class ReconciliationDriver:
         came from ``portfolio.open_positions``, and orphans bypass this
         structurally rather than by a test. The check exists for the future edit
         that routes one here anyway -- it refuses loudly instead of calling
-        ``close_position`` for a symbol the portfolio does not hold, which would
-        return ``Decimal(0)`` and look like a clean no-op. A ``raise`` and not an
+        ``close_position`` for a symbol the portfolio does not hold -- which
+        returned ``Decimal(0)`` and looked like a clean no-op until M5l P93, and
+        now raises ``PositionNotHeldError`` (P-3e) -- or for one it holds under
+        a DIFFERENT object, which would book that one. A ``raise`` and not an
         ``assert``, which vanishes under ``-O``; the caller's ``try`` turns it
         into a logged phase failure, so the driver's never-raise contract holds.
 
@@ -677,7 +679,8 @@ class ReconciliationDriver:
                         f"{position.symbol} reached exit booking without being the portfolio's own "
                         "position for that symbol. An orphan has no Position and cannot arrive here; "
                         "reaching this means a caller now pairs assessments with something other than "
-                        "portfolio.open_positions, and booking it would silently no-op"
+                        "portfolio.open_positions, and booking it would raise PositionNotHeldError or book a "
+                        "different position than the one assessed"
                     )
 
                 # **ROWS 2, 3 AND 5 ARE NOW ONE CALL.** They asked three of

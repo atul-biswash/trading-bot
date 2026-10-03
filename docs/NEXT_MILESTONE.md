@@ -654,6 +654,39 @@ measured the label; the unwritten ledger is REASONED from the early return.
 
 *Arming condition:* **whoever next edits `_book_resolved_close` in `execution/executor.py` or `close_position`'s absent-symbol return in `core/portfolio.py`.**
 
+> **RESOLVED AT M5l P94 (C50): *"`close_position` returns `Decimal(0)` for a
+> symbol it does not hold"* IS NO LONGER TRUE, AND BOTH LIMBS OF THE ARMING
+> CONDITION FIRED AND ARE DISCHARGED.** `close_position` now raises
+> `PositionNotHeldError` (`core/exceptions.py`) for a symbol the portfolio does
+> not hold, after the illegal-combination and fee-denomination guards and before
+> any write. `_book_resolved_close` and `_book_close` need no new branch: the
+> raise lands in each one's existing `except Exception`, which logs ONE
+> `CRITICAL` (`close_book_failed`, `error_type=PositionNotHeldError`) and returns
+> `False`, so the caller selects `_RESOLVED_BOOK_FAILED` and no `close_booked`
+> line is written.
+>
+> **STEP 0, every caller of `close_position` and what it does with the return**
+> (H6): `_book_close` (executor) and `_book_resolved_close` (executor) assign it
+> to `realised` and put it in the `close_booked` line, then return `True`;
+> `_book_exits` (driver) does the same into `exit_booked` and counts
+> `booked += 1`. **None branches on a zero**, and none can reach an absent
+> symbol in production: the first two are handed a position, `_book_resolved_close`
+> is reached only past a bookability verdict that requires one, and the driver's
+> orphan guard precedes it. The only things that relied on the zero were two
+> TESTS, `test_close_position_on_a_symbol_not_held_is_a_normal_zero` and
+> `test_an_absent_symbol_returns_zero_and_writes_nothing_at_all`
+> (`tests/unit/test_risk_manager.py`), which pinned the docstring's *"a normal
+> outcome, not an error, since a `CLOSE` can arrive for a symbol the bot does not
+> hold"*. That is answered upstream (`NOTHING_TO_CLOSE`, `close_no_position`), so
+> the zero only ever let a booking path report a trade it had not written. Both
+> were rewritten under the owner's ruled-overturn authority.
+>
+> **What survives:** the item's observation that the booking label was computed
+> from a `True` that meant nothing was written, and that the path is
+> unreachable today. The CRITICAL's and the resolution text's *"the position
+> survives"* is untrue of THIS case and is left as written, because the ruling
+> routes it to the existing path (`M5l-233`).
+
 #### P-3f. Eleven tests trip the disagreement warning without meaning to (`M5k-111`)
 
 Their close re-read is `_sold()` at `1810.57726950` against the default
@@ -2108,6 +2141,17 @@ then.
 
 *Arming condition:* **whoever next edits the orphan guard or its caller in
 `_book_exits`.**
+
+> **FIRED AT M5l P94 (C50) AND REAFFIRMED: THE GUARD'S TEXT CHANGED, ITS LOGIC
+> DID NOT.** The `ValueError`'s message said *"booking it would silently no-op"*,
+> true while `close_position` returned `Decimal(0)` for a symbol it did not hold
+> and false once it raises `PositionNotHeldError`; it now says *"booking it
+> would raise PositionNotHeldError or book a different position than the one
+> assessed"*, the second clause being the case the guard's identity check also
+> covers. The docstring's *"would return `Decimal(0)` and look like a clean
+> no-op"* is corrected the same way. The item's *"unchanged in logic since"*
+> still holds: the condition, the raise and its type are as they were
+> (`M5l-234`).
 
 ### `M5i-095`. Two tests reach the mutated point and assert only portfolio state
 

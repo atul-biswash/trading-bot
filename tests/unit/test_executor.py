@@ -44,6 +44,7 @@ from trading_bot.core.exceptions import (
 )
 from trading_bot.core.models import (
     Candle,
+    ExitSettlement,
     Fee,
     Order,
     OrderList,
@@ -5251,6 +5252,83 @@ class TestTheEntryQuoteTotal:
         lines = _records(caplog, "close_booked")
         assert len(lines) == 1
         assert vars(lines[0]).get("entry_quote_total") == D("40.00000000")
+
+
+class TestAnAbsentPositionIsNeverReportedBooked:
+    """P-3e (`M5k-073`), M5l P94: a booking path that finds no position reports a FAILURE.
+
+    `close_position` used to return `Decimal(0)` for a symbol it did not hold, and
+    both booking methods then logged `close_booked` and returned `True` with
+    nothing written. It raises now, and each method's existing `except` turns
+    that into ONE CRITICAL, no booked line, and `False`. **Unreachable in
+    production** -- a bookable verdict requires the position -- so each test
+    drives the method directly with a portfolio that holds nothing.
+    """
+
+    SETTLEMENT = ExitSettlement(
+        order_id="777",
+        fee=Fee(amount=D("0.00000000"), asset="USDT"),
+        quote_quantity=D("2.25"),
+        quantity=CLOSE_QTY,
+        filled_at=BAR,
+        fill_count=1,
+    )
+
+    async def test_the_resolved_close_reports_a_failure_not_a_booking(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site B. MUTATION: restore the zero return -- `close_booked` is then logged and
+        the method returns `True`, so all three assertions fail."""
+        executor, _, portfolio = build()
+        assert SYMBOL not in portfolio.positions
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            booked = executor._book_resolved_close(
+                SYMBOL,
+                candle(),
+                total=D("2.25"),
+                source="venue",
+                settlement=self.SETTLEMENT,
+                order_created_at=None,
+            )
+
+        assert booked is False
+        assert _records(caplog, "close_booked") == []
+        failures = _records(caplog, "close_book_failed")
+        assert len(failures) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        assert failures[0].levelno == logging.CRITICAL
+        assert vars(failures[0]).get("error_type") == "PositionNotHeldError"
+        assert portfolio.ledger is None
+
+    async def test_the_own_close_reports_a_failure_not_a_booking(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Site A: the position object is in hand but the portfolio no longer holds it.
+
+        MUTATION: restore the zero return.
+        """
+        executor, _, portfolio = build()
+        orphan = _held().positions[SYMBOL]
+        assert SYMBOL not in portfolio.positions
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            booked = executor._book_close(
+                close_signal(),
+                orphan,
+                candle(),
+                total=D("2.25"),
+                source="venue",
+                order=sell_fill(),
+                settlement=self.SETTLEMENT,
+            )
+
+        assert booked is False
+        assert _records(caplog, "close_booked") == []
+        failures = _records(caplog, "close_book_failed")
+        assert len(failures) == 1
+        assert failures[0].levelno == logging.CRITICAL
+        assert vars(failures[0]).get("error_type") == "PositionNotHeldError"
+        assert portfolio.ledger is None
 
 
 class TestTheCloseGuard:

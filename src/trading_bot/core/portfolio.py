@@ -48,6 +48,7 @@ from trading_bot.core.exceptions import (
     FeeFillsIncompleteError,
     FeeUnresolvableError,
     NonSellFillError,
+    PositionNotHeldError,
 )
 from trading_bot.core.models import ExitSettlement, Fee, HeldExit, Money, Position
 
@@ -580,9 +581,19 @@ class Portfolio(BaseModel):
     ) -> Decimal:
         """Close ``symbol``, credit the proceeds, and book the realised P&L.
 
-        Returns the realised P&L (negative for a loss), or ``Decimal(0)`` when
-        there was no position to close -- which is a normal outcome, not an
-        error, since a `CLOSE` can arrive for a symbol the bot does not hold.
+        Returns the realised P&L (negative for a loss).
+
+        **A SYMBOL THIS PORTFOLIO DOES NOT HOLD RAISES** :class:`~trading_bot.
+        core.exceptions.PositionNotHeldError`, *after* the illegal-combination
+        and fee-denomination guards. **It RETURNED ``Decimal(0)`` until M5l P93
+        (P-3e, ``M5k-073``)**, on the grounds that *"a `CLOSE` can arrive for a
+        symbol the bot does not hold"* -- and that is true, but it is answered
+        UPSTREAM: the risk manager answers ``NOTHING_TO_CLOSE`` and the
+        executor refuses at ``close_no_position``, so no caller of this method
+        passes a symbol it does not hold. The zero therefore never meant "a
+        normal outcome" to anyone; it meant a booking path that reached here
+        with the position already gone could log a trade as BOOKED when nothing
+        had been written. Reaching it is a bug, and a bug is reported.
 
         **TWO WAYS TO SAY WHAT THE EXIT WAS WORTH, AND THE TOTAL IS THE
         ACCURATE ONE.** Exactly one of ``exit_quote_total`` and ``exit_price``
@@ -715,7 +726,10 @@ class Portfolio(BaseModel):
 
         position = self.positions.get(symbol)
         if position is None:
-            return Decimal(0)
+            raise PositionNotHeldError(
+                f"close_position was asked to book {symbol}, which this portfolio does not hold; "
+                "nothing was written"
+            )
 
         if exit_quote_total is not None:
             pnl = self._realised_from_total(position, exit_quote_total) - fee.amount

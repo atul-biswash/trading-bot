@@ -40,7 +40,7 @@ from trading_bot.core.enums import (
     SignalAction,
     StopType,
 )
-from trading_bot.core.exceptions import FeeUnresolvableError
+from trading_bot.core.exceptions import FeeUnresolvableError, PositionNotHeldError
 from trading_bot.core.interfaces import MarketDataProvider
 from trading_bot.core.interfaces import RiskManager as RiskManagerPort
 from trading_bot.core.models import (
@@ -603,11 +603,20 @@ class TestPortfolio:
         assert portfolio.free_quote == D("1019.5")
         assert portfolio.realised_today(NOW) == D("19.5")
 
-    def test_close_position_on_a_symbol_not_held_is_a_normal_zero(self) -> None:
+    def test_close_position_on_a_symbol_not_held_raises_and_books_nothing(self) -> None:
+        """P-3e. **THIS WAS `..._is_a_normal_zero` UNTIL M5l P94**, asserting
+        `== D("0")`: the contract that *a `CLOSE` can arrive for a symbol the bot
+        does not hold* and that the ledger should answer zero. That is answered
+        upstream (`NOTHING_TO_CLOSE`), so the zero only ever let a booking path
+        report a trade it had not written (`M5k-073`). Overturned under the
+        owner's ruled-overturn authority; what survives is that nothing is
+        written. MUTATION: restore the zero return.
+        """
         portfolio = Portfolio(free_quote=D("1000"))
-        assert portfolio.close_position(
-            SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE
-        ) == D("0")
+
+        with pytest.raises(PositionNotHeldError, match="does not hold"):
+            portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
+
         assert portfolio.free_quote == D("1000")
         assert portfolio.realised_today(NOW) == D("0")
 
@@ -830,8 +839,11 @@ class TestPortfolio:
         assert SYMBOL not in portfolio.positions
         assert not portfolio.has_position(SYMBOL)
 
-    def test_an_absent_symbol_returns_zero_and_writes_nothing_at_all(self) -> None:
-        """The early return precedes every write and must stay there.
+    def test_an_absent_symbol_raises_and_writes_nothing_at_all(self) -> None:
+        """The raise precedes every write and must stay there.
+
+        **THIS RETURNED `Decimal(0)` UNTIL M5l P94 (P-3e)**; the ordering claim
+        is unchanged and only the outcome moved from a return to a raise.
 
         MUTATION: move the ``position is None`` guard below the arithmetic, or
         credit before checking. Distinct from the existing absent-symbol test,
@@ -842,9 +854,8 @@ class TestPortfolio:
         portfolio = Portfolio(free_quote=D("1000"), positions={"ETHUSDT": long_position()})
         before = portfolio.ledger
 
-        assert portfolio.close_position(
-            SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE
-        ) == D("0")
+        with pytest.raises(PositionNotHeldError):
+            portfolio.close_position(SYMBOL, exit_price=D("110"), now=NOW, fee=USDT_ZERO_FEE)
 
         assert portfolio.free_quote == D("1000")
         assert portfolio.ledger is before  # identity: not even rebuilt

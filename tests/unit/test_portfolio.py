@@ -33,10 +33,13 @@ from pydantic import ValidationError
 
 from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
 from trading_bot.core.exceptions import (
+    ExchangeError,
     FeeAssetUnresolvableError,
     FeeFillsIncompleteError,
     FeeUnresolvableError,
     NonSellFillError,
+    PositionNotHeldError,
+    TradingBotError,
 )
 from trading_bot.core.models import Fee, Position, Trade
 from trading_bot.core.portfolio import Ledger, Portfolio, held_exit, settle_exit
@@ -856,3 +859,40 @@ class TestEntryQuoteTotal:
 
         assert SYMBOL in portfolio.positions
         assert portfolio.ledger is None
+
+
+# --------------------------------------------------------------------------
+# P-3e (M5l P94): a symbol the ledger does not hold raises; it never reports a booking
+# --------------------------------------------------------------------------
+class TestAnAbsentSymbolIsNeverBooked:
+    """`close_position` used to return `Decimal(0)` here, which a caller read as a booking."""
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [{"exit_price": D("110")}, {"exit_quote_total": D("220")}],
+        ids=["by_price", "by_total"],
+    )
+    def test_an_absent_symbol_raises_a_typed_error_and_writes_nothing(
+        self, kwargs: dict[str, Decimal]
+    ) -> None:
+        """Both exit limbs. Everything is compared by identity or value afterwards.
+
+        MUTATION: restore the `return Decimal(0)`. A held symbol alongside
+        proves the raise is about the NAMED symbol, not about an empty book.
+        """
+        held = _position()
+        portfolio = Portfolio(free_quote=D("1000"), positions={"ETHUSDT": held})
+        ledger_before = portfolio.ledger
+
+        with pytest.raises(PositionNotHeldError, match="BTCUSDT"):
+            portfolio.close_position(SYMBOL, now=NOW, fee=USDT_ZERO_FEE, **kwargs)
+
+        assert portfolio.free_quote == D("1000")
+        assert portfolio.ledger is ledger_before
+        assert portfolio.ledger is None
+        assert portfolio.positions == {"ETHUSDT": held}
+
+    def test_the_error_is_a_trading_bot_error_and_not_an_exchange_error(self) -> None:
+        """Typed so a caller can tell it from a venue failure. MUTATION: derive it from ExchangeError."""
+        assert issubclass(PositionNotHeldError, TradingBotError)
+        assert not issubclass(PositionNotHeldError, ExchangeError)

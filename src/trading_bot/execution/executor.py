@@ -3311,6 +3311,18 @@ class OrderExecutor:
         exception, which the resolution line does not -- so the failure is
         reported TWICE and agrees with itself, where before it was reported
         twice and contradicted itself.
+
+        **A SYMBOL THE PORTFOLIO NO LONGER HOLDS (P-3e, M5l P94).**
+        ``close_position`` raises ``PositionNotHeldError`` for it, where it used
+        to return ``Decimal(0)`` -- and this method then logged the resolved
+        close as BOOKED and returned ``True`` with nothing written (``M5k-073``).
+        The raise lands in the ``except`` below: the CRITICAL fires with
+        ``error_type=PositionNotHeldError``, the method returns ``False``, and
+        the caller selects ``_RESOLVED_BOOK_FAILED``, never the booked label.
+        Reaching it is unreachable in practice -- a bookable verdict requires the
+        position -- so the CRITICAL's and the label's "the position survives"
+        is untrue of THIS case, and is left as written because the ruling
+        routes it to the existing path (``M5l-233``).
         """
         # READ BEFORE THE BOOKING: `close_position` deletes the position, and the
         # booking line carries the entry term it was computed from (P-3h).

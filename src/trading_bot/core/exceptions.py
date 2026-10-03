@@ -74,6 +74,18 @@ class NonSellFillError(FeeUnresolvableError):
     """
 
 
+class PositionNotHeldError(TradingBotError):
+    """The ledger was asked to book the close of a symbol it does not hold. P-3e.
+
+    Raised by ``Portfolio.close_position``, which used to return ``Decimal(0)``
+    here and so let a caller report a booking nothing had written (``M5k-073``).
+    **Not an ``ExchangeError``**, and not a refusal to be retried: no booking
+    path in ``src/`` can reach it with a position it holds, so reaching it means
+    something removed the position first -- a bug to be reported, which the
+    caller's existing ``except Exception`` and its ``CRITICAL`` do.
+    """
+
+
 # --- Exchange ---------------------------------------------------------------
 class ExchangeError(TradingBotError):
     """Base class for exchange-related failures."""
