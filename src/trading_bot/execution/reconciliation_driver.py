@@ -58,6 +58,7 @@ from trading_bot.core.exceptions import (
 # the same fact. Making it public is a `core/` decision and is not taken here.
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION, held_exit, settle_exit
 from trading_bot.execution.bookability import (
+    SETTLEMENT_RETRY_LIMIT,
     BookabilityOutcome,
     classify_bookability,
     require_bookable,
@@ -118,8 +119,32 @@ _EVENT_BOOK_REFUSED = "exit_book_refused"
 _EVENT_LEDGER_UNWRITABLE = "ledger_unwritable"
 _EVENT_EXIT_UNBOOKABLE = "exit_unbookable"
 #: A bookable exit whose settlement could not be read or used this pass. The
-#: position is KEPT and the next pass retries; WARNING, like a refusal.
+#: position is KEPT and the next pass retries -- up to ``SETTLEMENT_RETRY_LIMIT``
+#: failed passes (P-3b), then it is HELD; WARNING, like a refusal.
 _EVENT_SETTLEMENT_DEFERRED = "exit_settlement_deferred"
+#: P-3b: the ONE CRITICAL a position's ``SETTLEMENT_RETRY_LIMIT``-th failed
+#: settlement pass emits, beside ``Position.hold_settlement()``. Its OWN event,
+#: not ``exit_settlement_held``: that one is the terminal-fee hold, fed by a
+#: ``HeldExit`` this does not widen, and its text says a restart re-derives the
+#: hold from the fills -- which would be false for an exit whose fills do not read.
+_EVENT_SETTLEMENT_TIMEOUT_HELD = "settlement_timeout_held"
+#: The clause an UNPRICED exit's failure lines carry (P-3a, the owner's P92-5):
+#: the venue gave no quote total, so the fills this read could not deliver are
+#: the only source of one. A priced exit's failure lines do not say it.
+_UNPRICED_CLAUSE = (
+    "the venue gave no quote total for this exit, so its fills are the only source of one"
+)
+#: What an operator is told when the bound is reached. **THE LAST SENTENCE IS THE
+#: OWNER'S, VERBATIM** (P92-1): a restart is the hold's only retry.
+_TIMEOUT_HELD_RESOLUTION = (
+    "THE EXIT FILLED and ITS SETTLEMENT COULD NOT BE READ in {limit} passes. NOTHING WAS "
+    "BOOKED. THE BASE IS ALREADY SOLD: DO NOT SELL IT BY HAND. The position is HELD in "
+    "memory with untrusted protection and is no longer reconciled, so ENTRIES ARE REFUSED "
+    "PORTFOLIO-WIDE until an operator acts -- as committed risk unknown at first, then as "
+    "a stale position once it ages. "
+    "A restart re-settles from the record: the boot books it if the fills now read, and "
+    "otherwise refuses the boot (then use the release tool)."
+)
 #: P-3i: the calls one phase spent, said once when settlement made any, because
 #: a settlement fetch runs outside ``max_calls`` and nothing else reports it.
 _EVENT_PHASE_CALLS = "reconciliation_phase_calls"
@@ -553,7 +578,9 @@ class ReconciliationDriver:
         BOOKED from the sum of its order's own fills -- that absence means *a
         leg filled and the venue gave no total*, which is a different fact from
         ``exit_fill is None`` and must not pass silently; a supply that cannot
-        be read skips the position and the next pass retries it. A PARTIAL
+        be read skips the position and the next pass retries it, **up to
+        ``SETTLEMENT_RETRY_LIMIT`` failed passes, when it is HELD** (P-3b,
+        ``_settle``). A PARTIAL
         fill is not booked: it keeps ``UNKNOWN``, which is today's behaviour,
         and the existing ``COMMITTED_RISK_UNKNOWN`` interlock refuses
         portfolio-wide. No ``exit_fill`` at all on a healthy state is the
@@ -621,7 +648,11 @@ class ReconciliationDriver:
         fill. A fetch that raises
         from the exchange family, or a fill list the ledger refuses as
         INCOMPLETE, SKIPS that position at WARNING and the loop goes on; the
-        position survives, so the next pass retries. A settlement the ledger
+        position survives, so the next pass retries -- **each such pass counts
+        on ``Position.failed_settlement_passes``, and the
+        ``SETTLEMENT_RETRY_LIMIT``-th HOLDS the position at ``CRITICAL``
+        (``settlement_timeout_held``) instead of skipping it again** (P-3b: the
+        retry was unbounded until M5l P93). A settlement the ledger
         refuses TERMINALLY -- a fee in an asset it cannot subtract, or a fill
         that is not a sell -- HOLDS the position instead, at CRITICAL, and no
         later pass visits it (R2 with ruling A); it too survives, and the loop
@@ -738,12 +769,21 @@ class ReconciliationDriver:
 
         Catches the exchange family around the FETCH only, and
         ``FeeUnresolvableError`` around the SETTLEMENT only. A fetch failure
-        and ``FeeFillsIncompleteError`` skip this position at WARNING and leave
-        it for the next pass. Any OTHER ``FeeUnresolvableError`` is terminal
-        (R2): the position is HELD, one CRITICAL says so, and ruling A keeps
-        every later pass away from it. Anything else --
-        a programming error, a malformed record the mapper refuses --
-        propagates to ``_PHASE_BOOKING`` with its traceback.
+        and ``FeeFillsIncompleteError`` each COUNT one failed pass on the
+        position (``failed_settlement_passes``) and skip it at WARNING for the
+        next pass -- **until the count reaches ``SETTLEMENT_RETRY_LIMIT``**
+        (P-3b, the owner's P92-1 and P92-2), when the position is HELD and one
+        CRITICAL, ``settlement_timeout_held``, says so instead of the WARNING.
+        Any OTHER ``FeeUnresolvableError`` is terminal (R2): the position is
+        HELD at once, one CRITICAL says so, and ruling A keeps every later pass
+        away from it. Anything else -- a programming error, a malformed record
+        the mapper refuses -- propagates to ``_PHASE_BOOKING`` with its
+        traceback.
+
+        **An UNPRICED exit's failure lines say so** (P-3a, P92-5): a fill with
+        no ``filled_quote_quantity`` carries ``_UNPRICED_CLAUSE``, so an
+        operator can tell a failed supply from a failed settlement of a priced
+        exit. A priced exit's lines do not carry it.
         """
         try:
             trades = await self._client.get_my_trades(
@@ -753,17 +793,22 @@ class ReconciliationDriver:
                 attempts=self._budget.attempts,
             )
         except ExchangeError as exc:
-            _log.warning(
-                "Settlement fetch for %s failed; it is retried next pass",
-                symbol,
-                extra={
-                    "event": _EVENT_SETTLEMENT_DEFERRED,
-                    "symbol": symbol,
-                    "order_id": fill.order_id,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                },
-            )
+            failed = self._count_failed_pass(symbol, fill, reason=f"{type(exc).__name__}: {exc}")
+            if failed is None:
+                return None
+            fields: dict[str, str | int] = {
+                "event": _EVENT_SETTLEMENT_DEFERRED,
+                "symbol": symbol,
+                "order_id": fill.order_id,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "failed_passes": failed,
+                "limit": SETTLEMENT_RETRY_LIMIT,
+            }
+            message = "Settlement fetch for %s failed; it is retried next pass"
+            if fill.filled_quote_quantity is None:
+                message += f" ({_UNPRICED_CLAUSE})"
+            _log.warning(message, symbol, extra=fields)
             return None
         try:
             return settle_exit(
@@ -774,11 +819,19 @@ class ReconciliationDriver:
             )
         except FeeFillsIncompleteError as exc:
             # WAITING CAN CURE THIS (Variant L), so it is refused at WARNING and
-            # the next pass retries it, exactly as before.
+            # the next pass retries it -- but it COUNTS, and the limit-th one holds.
+            failed = self._count_failed_pass(symbol, fill, reason=str(exc))
+            if failed is None:
+                return None
+            reason = f"{exc} -- so it is not booked and the position keeps its untrusted protection"
+            if fill.filled_quote_quantity is None:
+                reason += f"; {_UNPRICED_CLAUSE}"
             self._refuse_booking(
                 symbol,
                 fill.order_id,
-                f"{exc} -- so it is not booked and the position keeps its untrusted protection",
+                reason,
+                failed_passes=failed,
+                limit=SETTLEMENT_RETRY_LIMIT,
             )
             return None
         except FeeUnresolvableError as exc:
@@ -810,6 +863,59 @@ class ReconciliationDriver:
                 },
             )
             return None
+
+    def _count_failed_pass(self, symbol: str, fill: ExitFill, *, reason: str) -> int | None:
+        """Count one failed settlement pass; HOLD at the limit. P-3b.
+
+        Returns the new count while the position is still being retried, and
+        ``None`` when THIS pass reached ``SETTLEMENT_RETRY_LIMIT``: the
+        position is held (``hold_settlement`` writes the untrusted protection
+        first and the mark last), one ``CRITICAL`` has said so, and the caller
+        emits nothing more. A held position is not reconciled again (ruling
+        A), so the count is never read after this.
+
+        **The ``CRITICAL`` is its own event and does not widen ``HeldExit``**
+        (the owner's P92-1): that value's ``fees`` cannot be empty and its
+        ``cause`` has two members, and an exit whose fills do not read has no
+        fees to name. ``reason`` is the failure that was this pass's, as the
+        WARNING would have worded it. ``quote_total`` is OMITTED when the venue
+        gave none -- never ``null`` -- and ``reason`` then ends with the P-3a
+        clause, as the WARNING lines' text does.
+
+        A symbol with no position is unreachable here (the orphan guard ran
+        first) and returns ``0``: nothing is counted, nothing is held, and the
+        caller's line is the one the old code wrote.
+        """
+        position = self._portfolio.positions.get(symbol)
+        if position is None:
+            return 0
+        failed = position.record_failed_settlement()
+        if failed < SETTLEMENT_RETRY_LIMIT:
+            return failed
+        position.hold_settlement()
+        fields: dict[str, Decimal | str | int] = {
+            "event": _EVENT_SETTLEMENT_TIMEOUT_HELD,
+            "symbol": symbol,
+            "site": "reconciliation",
+            "order_id": fill.order_id,
+            "quantity": fill.filled_quantity,
+            "failed_passes": failed,
+            "limit": SETTLEMENT_RETRY_LIMIT,
+            "reason": reason,
+            "resolution": _TIMEOUT_HELD_RESOLUTION.format(limit=SETTLEMENT_RETRY_LIMIT),
+        }
+        if fill.filled_quote_quantity is not None:
+            fields["quote_total"] = fill.filled_quote_quantity
+        else:
+            fields["reason"] = f"{reason}; {_UNPRICED_CLAUSE}"
+        _log.critical(
+            "%s: an exit FILLED and its settlement could not be read in %d passes -- NOTHING WAS "
+            "BOOKED and the position is HELD until an operator acts",
+            symbol,
+            SETTLEMENT_RETRY_LIMIT,
+            extra=fields,
+        )
+        return None
 
     def _warn_if_totals_disagree(
         self, symbol: str, venue_total: Decimal | None, settlement: ExitSettlement
@@ -908,8 +1014,14 @@ class ReconciliationDriver:
             )
 
     @staticmethod
-    def _refuse_booking(symbol: str, order_id: str | None, reason: str) -> None:
+    def _refuse_booking(
+        symbol: str, order_id: str | None, reason: str, **fields: str | int
+    ) -> None:
         """One line for a fill that was seen and not booked.
+
+        ``fields`` are extra structured fields for the one caller that has them
+        (P-3b's ``failed_passes`` and ``limit``); the four keys the line always
+        carries cannot be overridden by them.
 
         ``WARNING`` rather than ``CRITICAL``: every refusal here leaves the
         position PRESENT and untrusted, so the committed-risk interlock is
@@ -921,6 +1033,7 @@ class ReconciliationDriver:
             "Exit fill for %s was not booked",
             symbol,
             extra={
+                **fields,
                 "event": _EVENT_BOOK_REFUSED,
                 "symbol": symbol,
                 "order_id": order_id,

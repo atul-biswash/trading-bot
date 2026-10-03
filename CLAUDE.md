@@ -1644,6 +1644,15 @@ data.
   > re-derived the same way. The previous annotation's *"is still released by a
   > restart until C32b-3"* is past, as C32b-3 records.
 
+  > **ANNOTATED AT M5l P93 (C47), with the text the project owner ruled at
+  > P92-3, verbatim:** *"From M5l P93 the driver also holds an exit whose
+  > settlement cannot be read after five failed passes (P-3b); a restart is that
+  > hold's only retry, through the boot's re-settlement from the persisted
+  > record. A fee-unresolvable hold is still fetched once and never retried."*
+  > The heading's *"NEVER RETRIED"* stays true of the hold the ruling above
+  > describes; the second hold is a different one. **What survives:** the
+  > ruling quoted in this bullet, entire.
+
   **"R2" NAMES TWO DIFFERENT RULINGS IN THIS FILE (`P45-F14`), and this bullet
   is M5k's.** The M5h paragraph under Current state cites an earlier R2, from
   the close-resolution work (C5c): *"R2's grounds were that the cost basis is

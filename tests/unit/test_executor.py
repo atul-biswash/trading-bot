@@ -56,6 +56,7 @@ from trading_bot.core.models import (
     Trade,
 )
 from trading_bot.core.portfolio import Portfolio
+from trading_bot.execution.bookability import SETTLEMENT_RETRY_LIMIT
 from trading_bot.execution.dispatch_budget import CallBounds, DispatchBudget
 from trading_bot.execution.executor import (
     OrderExecutor,
@@ -5068,6 +5069,63 @@ class TestSettlement:
         assert "from the order's own trades at the venue" in resolution
         assert "commission the venue reports" in resolution
         assert "the quote total below" not in resolution
+
+    @pytest.mark.parametrize(
+        "failure", [ExchangeConnectionError("timed out"), []], ids=["transport", "empty"]
+    )
+    async def test_a_deferred_close_is_read_six_times_before_it_is_dropped(
+        self, failure: list[Trade] | Exception
+    ) -> None:
+        """**M5l-216, pinned: ONE read at Site A, then FIVE on the symbol's own bars.**
+
+        The drop happens on the read that finds the count at the limit, so the
+        record is read SIX times in all -- `1 + SETTLEMENT_RETRY_LIMIT` -- and
+        not five. REPORTED, NOT FIXED (the owner's P93): the ruling's text, *"five
+        bars of the symbol's timeframe, counted from the first deferral"*, is
+        met -- the drop is on the fifth bar after the first deferral -- and
+        *"retained for five of its own symbol's bars"* is met too, bars 1 to 5
+        retaining it; what the text does not state is that the dropping bar
+        reads as well. MUTATION: `>` for `>=` (seven reads), or N of 4 (five).
+        """
+        client = _settling_client([], failure)
+        executor, _, _ = build(client=client, portfolio=_held())
+
+        await executor.dispatch(close_signal(), exit_assessment(), candle())
+        assert len(client.settlements) == 1  # Site A's read, at the sell
+        for bar in range(1, 5):
+            await executor(_bar(bar))
+            assert len(client.settlements) == 1 + bar
+            assert SYMBOL in executor._pending
+        await executor(_bar(5))
+
+        assert SYMBOL not in executor._pending
+        assert len(client.settlements) == 6
+        assert len(client.settlements) == 1 + SETTLEMENT_RETRY_LIMIT
+
+    def test_the_retry_number_is_the_one_the_driver_reads(self) -> None:
+        """The executor's bound IS `bookability.SETTLEMENT_RETRY_LIMIT`, by name.
+
+        A value comparison cannot tell a shared constant from a second literal
+        5, so the assignment's right-hand side is read from the source. MUTATION:
+        write the literal `5` back.
+        """
+        from trading_bot.execution import executor as executor_module
+        from trading_bot.execution import reconciliation_driver as driver_module
+
+        assert SETTLEMENT_RETRY_LIMIT == 5
+        assert driver_module.SETTLEMENT_RETRY_LIMIT == SETTLEMENT_RETRY_LIMIT
+        tree = ast.parse(inspect.getsource(executor_module))
+        values = [
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.target.id == "_SETTLEMENT_RETRY_BARS"
+            and node.value is not None
+        ]
+        assert len(values) == 1
+        assert isinstance(values[0], ast.Name)
+        assert values[0].id == "SETTLEMENT_RETRY_LIMIT"
 
 
 class TestTheCloseGuard:

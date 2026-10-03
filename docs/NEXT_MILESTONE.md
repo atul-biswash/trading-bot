@@ -544,6 +544,23 @@ at `4544b3a`.
 > Each entry keeps its text and its arming condition until the work that
 > resolves it lands.
 
+> **RECORDED AT M5l P93 (C47): THE OWNER'S Q12, VERBATIM, CONFIRMED BY THE OWNER
+> AT P78. THIS RESOLVES `M5l-208`.** P92 found that no tracked file and no
+> commit body held the text of the question P78 confirmed with *"Q12 and Q13
+> confirmed"*, so the ruling existed only as reported speech. Its text, as the
+> owner supplied it at P93:
+>
+> *"12. In-memory homes for P-3b and P-3h. P-3b's retry count: a memory-only
+> field on Position beside settlement_hold, since the driver stays stateless
+> (M5e). P-3h's entry quote total: a memory-only field on Position, set by the
+> dispatch GET and the boot GET. Neither is recorded. Confirm."*
+>
+> It is the same ruling as P-3k's R2, *"The record holds only requested
+> values. ... P-3b's retry count lives in memory and resets on restart."*, and
+> is cited by content and by this record, never by the bare label. **What it
+> governs:** `Position.failed_settlement_passes` (C47) and, in C48, the entry
+> quote total. Neither is in `store.PositionRecord`.
+
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
 At the driver an unpriced exit whose fills cannot be read is reported only by
@@ -552,6 +569,18 @@ an operator cannot tell a failed supply from a failed settlement of a priced
 exit. REASONED from code.
 
 *Arming condition:* **whoever next edits `_settle` in `execution/reconciliation_driver.py` or the Q branch of `_book_exits` there.**
+
+> **RESOLVED AT M5l P93 (C47): *"none of them says the venue gave no quote
+> total"* IS NO LONGER TRUE, AND THE ARMING CONDITION ABOVE FIRED AND IS
+> DISCHARGED.** By the owner's P92-5, `_settle`'s two failure lines carry a
+> clause when the exit fill was unpriced (`filled_quote_quantity is None`):
+> *"the venue gave no quote total for this exit, so its fills are the only
+> source of one"*. It is in the `exit_settlement_deferred` message and in the
+> `exit_book_refused` `reason`, and in the `reason` of the new
+> `settlement_timeout_held` CRITICAL, which omits `quote_total` as the hold line
+> does. A priced exit's lines do not carry it. **What survives:** the
+> observation that an operator could not tell the two apart before this; the
+> Q branch's logic is unchanged.
 
 #### P-3b. The driver re-refuses without bound where Site B stops at five (PIN-4, `M5k-104`)
 
@@ -562,6 +591,41 @@ condition after `_SETTLEMENT_RETRY_BARS` of the symbol's own candles. Order
 capture `docs/RUN_LEDGER.md` §17 names.
 
 *Arming condition:* **whoever next edits `_settle` in `execution/reconciliation_driver.py` or `_SETTLEMENT_RETRY_BARS` in `execution/executor.py`.**
+
+> **RESOLVED AT M5l P93 (C47): *"is refused and fetched again on every due pass,
+> with no bound"* IS NO LONGER TRUE, AND THE ARMING CONDITION ABOVE FIRED AND IS
+> DISCHARGED.** Rulings of the owner (P92-1 to P92-4): `_settle` counts each
+> failed settlement pass on `Position.failed_settlement_passes` -- a transport
+> failure and a `FeeFillsIncompleteError` both count, N = 5 -- and the fifth
+> calls `position.hold_settlement()` and logs one separate `CRITICAL`,
+> `settlement_timeout_held`, whose resolution ends *"A restart re-settles from
+> the record: the boot books it if the fills now read, and otherwise refuses the
+> boot (then use the release tool)."* `HeldExit` is not widened. The bound is
+> `bookability.SETTLEMENT_RETRY_LIMIT`; the executor's `_SETTLEMENT_RETRY_BARS`
+> is that object under its own unit name, and a test pins that it is.
+>
+> **The item's evidence was already corrected by `M5l-098`:** order 300642's 18
+> refusals are the partial-fill path, which makes no venue call, and the
+> fills-read-short refetch has no measured instance (`M5l-211`). **What
+> survives:** that the disposition differs by site -- the executor RELEASES
+> unbooked at the bound, the driver HOLDS -- by the owner's ruling, and that
+> `_SETTLEMENT_RETRY_BARS` reads the executor's own read count at **six**, not
+> five (`M5l-216`, pinned and reported, not changed).
+>
+> **ARMING AUDIT AT C47, by content, of every condition P92 T4 listed.**
+> *Fired and DISCHARGED:* P-3a's and P-3b's, above. *Fired and REAFFIRMED:*
+> the A5 evidence-gap item's *"`_book_exits` in `execution/reconciliation_driver.py`
+> or `_refine` in `execution/reconciliation.py`"* (`_book_exits`'s docstring was
+> corrected; its logic and the callers' agreement on an absent `ExitFill` are
+> unchanged); P-3d's and P-3j's *"`hold_settlement` in `core/models.py`"*
+> (its docstring gained the P-3b caller; the hold still emits one `CRITICAL` and
+> nothing recurring, so P-3d's observation now covers the timeout hold too, and
+> P-3j's end-to-end staleness test is still unwritten -- C47's test drives the
+> hold and the silence after it, not the staleness). *Not fired:* the orphan
+> guard item (the guard and its call are untouched), P-3c's `require_bookable`
+> (`bookability.py` gained a constant only), N3's executor `_settle` or
+> `_defer_settlement`, and the `_log_booked` item (the booking line is untouched
+> until C48).
 
 #### P-3c. A `require_bookable` raise after the sell is contained only by the signal handler (`M5k-110`)
 

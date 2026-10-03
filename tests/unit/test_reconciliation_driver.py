@@ -2047,3 +2047,236 @@ async def test_the_driver_hold_writes_unknown_over_a_trusted_state(
     assert len(lines) == 1
     assert lines[0].levelno == logging.CRITICAL
     assert vars(lines[0]).get("cause") == _CAUSE[refusal]
+
+
+# --------------------------------------------------------------------------
+# P-3a + P-3b (M5l P93): a settlement that cannot be read is retried up to a
+# limit and then HELD; an unpriced exit's failure lines say so
+# --------------------------------------------------------------------------
+_OWNERS_RESOLUTION_SENTENCE = (
+    "A restart re-settles from the record: the boot books it if the fills now read, and "
+    "otherwise refuses the boot (then use the release tool)."
+)
+_UNPRICED_CLAUSE = (
+    "the venue gave no quote total for this exit, so its fills are the only source of one"
+)
+#: The three ways a settlement read fails and waiting can cure. FABRICATED.
+_UNREADABLE: dict[str, list[Trade] | Exception] = {
+    "transport": ExchangeConnectionError("timed out"),
+    "no_fills": [],
+    "short_fills": [_trade(quantity=Decimal("0.02000000"))],
+}
+
+
+class _Pass:
+    """A clock the test moves by hand, two minutes a pass: past the one-minute dedup."""
+
+    def __init__(self) -> None:
+        self.passes = 0
+        self.now = NOW
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self) -> None:
+        self.passes += 1
+        self.now = NOW + timedelta(minutes=2 * self.passes)
+
+
+def _timeout_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == "settlement_timeout_held"]
+
+
+def _failure_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if getattr(r, "event", None) in ("exit_settlement_deferred", "exit_book_refused")
+    ]
+
+
+@pytest.mark.parametrize("failure", ["transport", "no_fills", "short_fills"])
+async def test_a_settlement_that_cannot_be_read_is_held_at_the_fifth_failed_pass(
+    failure: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    """P-3b, the owner's P92-1 and P92-2: four retries, then HOLD with one CRITICAL.
+
+    Parametrised over the three failures waiting can cure -- a transport error
+    and the two shapes of an incomplete list -- so a count that skips either
+    kind fails its row. Passes 1 to 4 keep the position unheld and say it at
+    WARNING; pass 5 holds it and says it ONCE at CRITICAL, with no WARNING
+    beside it; pass 6 makes no venue call at all (ruling A). MUTATIONS: the
+    bound off by one (`>` for `>=`), a transport failure not counted, an
+    incomplete list not counted, the hold without the CRITICAL, the CRITICAL
+    without `hold_settlement`.
+    """
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": _UNREADABLE[failure]}
+    )
+    tick = _Pass()
+    driver = _driver(portfolio, client, clock=tick)
+
+    with caplog.at_level(logging.DEBUG):
+        for expected in range(1, 5):
+            await driver(_candle())
+            assert position.failed_settlement_passes == expected
+            assert position.settlement_hold is False
+            assert len(_failure_lines(caplog)) == expected
+            assert _timeout_lines(caplog) == []
+            tick.advance()
+
+        await driver(_candle())
+
+        assert position.failed_settlement_passes == 5
+        assert position.settlement_hold is True
+        assert position.protection is ProtectionState.UNKNOWN
+        assert len(_failure_lines(caplog)) == 4  # the fifth pass added no WARNING
+        lines = _timeout_lines(caplog)
+        assert len(lines) == 1  # asserted, never unpacked: a ValueError is a crash (M5i-115)
+        assert lines[0].levelno == logging.CRITICAL
+        assert client.settled == ["777"] * 5
+        assert portfolio.positions["BTCUSDT"] is position
+        assert portfolio.ledger is None
+        asked, queried = list(client.asked), list(client.queried)
+
+        tick.advance()
+        await driver(_candle())
+
+    assert client.asked == asked
+    assert client.queried == queried
+    assert client.settled == ["777"] * 5
+    assert len(_timeout_lines(caplog)) == 1
+    assert position.failed_settlement_passes == 5
+
+
+async def test_the_timeout_critical_names_the_limit_and_ends_with_the_owners_sentence(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The CRITICAL's fields, read through `vars()` so an absent one is an assertion.
+
+    A PRICED exit: `quote_total` is present, and the failure's own text is the
+    `reason`. The resolution ends with the owner's sentence VERBATIM (P92-1).
+    MUTATION: drop the sentence, the limit, or the quantity.
+    """
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": _UNREADABLE["transport"]}
+    )
+    tick = _Pass()
+    driver = _driver(portfolio, client, clock=tick)
+
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(5):
+            await driver(_candle())
+            tick.advance()
+
+    lines = _timeout_lines(caplog)
+    assert len(lines) == 1
+    fields = vars(lines[0])
+    assert fields.get("site") == "reconciliation"
+    assert fields.get("order_id") == "777"
+    assert fields.get("quantity") == BOOK_QTY
+    assert fields.get("failed_passes") == 5
+    assert fields.get("limit") == 5
+    assert fields.get("quote_total") == BOOK_TOTAL
+    assert "ExchangeConnectionError" in str(fields.get("reason"))
+    assert _UNPRICED_CLAUSE not in str(fields.get("reason"))
+    resolution = fields.get("resolution")
+    assert isinstance(resolution, str)
+    assert resolution.endswith(_OWNERS_RESOLUTION_SENTENCE)
+    assert "DO NOT SELL IT BY HAND" in resolution
+
+
+async def test_a_settlement_that_reads_before_the_limit_books_and_ignores_the_count() -> None:
+    """Four failed passes, then a whole list: booked, the position gone, nothing held.
+
+    MUTATION: hold on any failed pass at all, or never book once the count is
+    non-zero.
+    """
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    answers: dict[str, list[Trade] | Exception] = {"777": ExchangeConnectionError("timed out")}
+    client = _StubClient({"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades=answers)
+    tick = _Pass()
+    driver = _driver(portfolio, client, clock=tick, persist_ledger=_RecordingWriter())
+
+    for _ in range(4):
+        await driver(_candle())
+        tick.advance()
+    assert position.failed_settlement_passes == 4
+    answers["777"] = [_trade()]
+    await driver(_candle())
+
+    assert "BTCUSDT" not in portfolio.positions
+    assert position.settlement_hold is False
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+
+
+@pytest.mark.parametrize("failure", ["transport", "short_fills"])
+@pytest.mark.parametrize("priced", [True, False], ids=["priced", "unpriced"])
+async def test_an_unpriced_exits_failure_lines_say_the_venue_gave_no_total(
+    failure: str, priced: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    """P-3a, the owner's P92-5: a clause in BOTH failure lines when the fill was unpriced.
+
+    The deferred line carries it in its message and the refusal in its
+    `reason`; a priced exit's lines carry neither. The fifth pass's CRITICAL
+    carries it in its `reason` and omits `quote_total`, as the hold line does.
+    MUTATIONS: the clause always present (the priced rows fail), never present
+    (the unpriced rows fail), or on one line only (one `failure` row fails).
+    """
+    quote = BOOK_TOTAL if priced else None
+    portfolio = _portfolio(_booking_position())
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT", filled_quote_quantity=quote)]},
+        trades={"777": _UNREADABLE[failure]},
+    )
+    tick = _Pass()
+    driver = _driver(portfolio, client, clock=tick)
+
+    with caplog.at_level(logging.DEBUG):
+        await driver(_candle())
+        failures = _failure_lines(caplog)
+        assert len(failures) == 1
+        text = failures[0].getMessage() + " " + str(vars(failures[0]).get("reason"))
+        assert (_UNPRICED_CLAUSE in text) is (not priced)
+        for _ in range(4):
+            tick.advance()
+            await driver(_candle())
+
+    criticals = _timeout_lines(caplog)
+    assert len(criticals) == 1
+    fields = vars(criticals[0])
+    assert (_UNPRICED_CLAUSE in str(fields.get("reason"))) is (not priced)
+    assert ("quote_total" in fields) is priced
+
+
+async def test_the_retry_count_is_on_the_position_and_the_driver_stores_nothing() -> None:
+    """M5e and R2: the count is memory on `Position`, and the driver's own attributes do not move.
+
+    Also pins that the count is NOT in the persisted record: `P-3b's retry
+    count lives in memory and resets on restart`. MUTATION: remember the count
+    on the driver instead, or add the field to the store's record.
+    """
+    from trading_bot.persistence import store
+
+    position = _booking_position()
+    portfolio = _portfolio(position)
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]}, trades={"777": _UNREADABLE["transport"]}
+    )
+    tick = _Pass()
+    driver = _driver(portfolio, client, clock=tick)
+    before = set(vars(driver))
+
+    for _ in range(3):
+        await driver(_candle())
+        tick.advance()
+
+    assert position.failed_settlement_passes == 3
+    assert set(vars(driver)) == before
+    assert "failed_settlement_passes" not in store.PositionRecord.model_fields
+    assert _booking_position().failed_settlement_passes == 0

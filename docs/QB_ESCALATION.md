@@ -171,6 +171,23 @@ Three categories, not two. The distinction is **what can clear it**.
 > It is not one of the five sites. **What survives:** the five sites and their
 > categories; the count of `_log.critical(` sites in the M5k annotation above is
 > a dated measurement and is left as it was.
+>
+> **ANNOTATED AT M5l P93 (C47): ANOTHER EMITTER NO ROW NAMES.** The
+> reconciliation driver (`reconciliation_driver.py`, `_count_failed_pass`, P-3b)
+> logs `settlement_timeout_held` at `CRITICAL` on a position's fifth failed
+> settlement pass, with `Position.hold_settlement()`. It is **Terminal**, as
+> the promotion of a condition that was **resolvable by observation** until
+> then: each earlier failed pass is a `WARNING` (`exit_settlement_deferred` or
+> `exit_book_refused`, carrying `failed_passes`), and a later whole read books it.
+> It is the same shape as the `settlement_timeout` row above -- a distinct
+> marker first, promotion after N -- with the count on the position rather than
+> held by the executor, and with HOLD where the executor RELEASES: a restart is
+> the hold's only retry, through the boot's re-settlement from the persisted
+> record. It is its own event and not `exit_settlement_held`, because that
+> event's hold is the terminal-fee hold fed by a `HeldExit` this commit does
+> not widen. Emitted once, the log line alone, with no halt flag (`M5k-006`).
+> **What survives:** the five sites and their categories, and the
+> `exit_settlement_held` row.
 
 **Self-clearing (4).** The refusal frees the budget the reconciler needs, so the
 condition resolves on its own. Escalate at a *distinct* marker and promote to

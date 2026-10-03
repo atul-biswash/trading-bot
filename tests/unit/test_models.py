@@ -228,6 +228,30 @@ def test_hold_settlement_marks_protection_unknown_then_records_the_hold() -> Non
     assert pos.last_reconciled_at == at
 
 
+def test_record_failed_settlement_counts_from_zero_and_returns_the_new_count() -> None:
+    """P-3b: memory-only, zero at birth, one write per call, never negative.
+
+    MUTATION: return the OLD count, or start above zero. The count is compared
+    with `SETTLEMENT_RETRY_LIMIT` by the caller, never here.
+    """
+    pos = Position(
+        symbol="BTCUSDT",
+        side=PositionSide.LONG,
+        quantity=Decimal("2"),
+        entry_price=Decimal("100"),
+        entry_bar_time=BAR_TIME,
+        protection=ProtectionState.UNKNOWN,
+    )
+    assert pos.failed_settlement_passes == 0  # true of every position at birth
+
+    assert [pos.record_failed_settlement() for _ in range(3)] == [1, 2, 3]
+    assert pos.failed_settlement_passes == 3
+    assert pos.settlement_hold is False  # counting does not hold; the caller decides
+
+    with pytest.raises(ValidationError):
+        pos.failed_settlement_passes = -1
+
+
 # --------------------------------------------------------------------------
 # Money fields refuse to be built from binary floats
 # --------------------------------------------------------------------------

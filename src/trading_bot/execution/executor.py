@@ -52,6 +52,7 @@ from trading_bot.core.models import (
 from trading_bot.core.portfolio import held_exit, settle_exit
 from trading_bot.exchange.ids import OrderListLeg, client_order_id, close_client_order_id
 from trading_bot.execution.bookability import (
+    SETTLEMENT_RETRY_LIMIT,
     BookabilityOutcome,
     BookabilityVerdict,
     classify_bookability,
@@ -337,7 +338,13 @@ _CLOSE_GENERATION: Final = 0
 #: its settlement before it is dropped unbooked at CRITICAL, outcome
 #: `settlement_timeout`. Ruled by the project owner: five bars of the symbol's
 #: timeframe, counted from the first deferral. See `_settlement_deferrals`.
-_SETTLEMENT_RETRY_BARS: Final = 5
+#:
+#: **THE NUMBER IS SHARED AND THE NAME IS NOT.** From M5l P93 (P-3b) the value
+#: is `bookability.SETTLEMENT_RETRY_LIMIT`, which the reconciliation driver
+#: also reads, there as FAILED PASSES. This name stays because it states THIS
+#: site's unit -- the symbol's own bars -- and a test pins that the two are one
+#: object, so neither site can move the number without the other.
+_SETTLEMENT_RETRY_BARS: Final = SETTLEMENT_RETRY_LIMIT
 
 _REASON_UNPROTECTED = "unprotected_branch"
 _REASON_NO_BUDGET = "budget_exhausted"

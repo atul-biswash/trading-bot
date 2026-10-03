@@ -816,7 +816,9 @@ class Position(BaseModel):
     #: reconciliation pass reaches it.
     last_reconciled_at: datetime | None = None
     #: ``True`` once an exit of this position FILLED and was refused as
-    #: terminally unbookable -- R2, named by the project owner's ruling PIN-1.
+    #: terminally unbookable -- R2, named by the project owner's ruling PIN-1 --
+    #: **or, from M5l P93 (P-3b), once its settlement failed to read in
+    #: ``SETTLEMENT_RETRY_LIMIT`` reconciliation passes** (:attr:`failed_settlement_passes`).
     #: ``False`` is true of every position at birth: an exit cannot precede its
     #: position. Set once, by :meth:`hold_settlement`, and never cleared; the
     #: mark is in memory only, so a restart releases it.
@@ -830,6 +832,19 @@ class Position(BaseModel):
     #: position stays counted in committed risk because its protection is
     #: untrusted, not because of this field.
     settlement_hold: bool = False
+    #: **P-3b: how many reconciliation passes have FAILED to read this position's
+    #: exit settlement.** A transport failure and an incomplete fill list both
+    #: count (the owner's P92-2). At ``bookability.SETTLEMENT_RETRY_LIMIT`` the
+    #: driver calls :meth:`hold_settlement` and says so at ``CRITICAL``.
+    #:
+    #: **MEMORY ONLY, and recorded nowhere** -- the owner's R2 (P-3k) and the
+    #: Q12 record in ``docs/NEXT_MILESTONE.md``: *"P-3b's retry count lives in
+    #: memory and resets on restart."* The driver stays stateless (M5e); the
+    #: count is on the position, beside the hold it leads to. It is not in
+    #: ``store.PositionRecord`` and a restored position starts at zero. **A
+    #: restart is the hold's only retry**: boot re-settles an exit from the
+    #: persisted record, books it if the fills now read, and otherwise refuses.
+    failed_settlement_passes: int = Field(default=0, ge=0)
     stop_loss: Money | None = None
     take_profit: Money | None = None
     trailing_stop: Money | None = None
@@ -953,7 +968,12 @@ class Position(BaseModel):
         self.protection = protection
 
     def hold_settlement(self) -> None:
-        """Mark this position's exit terminal and unbookable. R2, PIN-5.
+        """Mark this position's exit terminal and unbookable. R2, PIN-5, and P-3b.
+
+        Called for a fee this ledger cannot subtract or a fill that is not a
+        sell (R2), and, from M5l P93, when an exit's settlement has failed to
+        read ``SETTLEMENT_RETRY_LIMIT`` times (P-3b): the driver counts, this
+        marks.
 
         **One method rather than two assignments**, for the reason
         :meth:`record_reconciliation` gives: with ``validate_assignment`` on,
@@ -969,6 +989,16 @@ class Position(BaseModel):
         """
         self.protection = ProtectionState.UNKNOWN
         self.settlement_hold = True
+
+    def record_failed_settlement(self) -> int:
+        """Count one failed settlement pass and return the new count. P-3b.
+
+        **One write**, so the count is never observable between a read and its
+        increment under ``validate_assignment``. The caller compares the result
+        with ``SETTLEMENT_RETRY_LIMIT``; this object holds no limit.
+        """
+        self.failed_settlement_passes += 1
+        return self.failed_settlement_passes
 
 
 class SizingDecision(_Frozen):

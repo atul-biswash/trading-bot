@@ -968,6 +968,27 @@ first candle; the count is not persisted and does not need to be.
 
 **Status: PLACEHOLDER — NOT MEASURED.**
 
+> **ANNOTATED AT M5l P93 (C47): THE NUMBER IS NOW SHARED, AND TWO SENTENCES
+> ABOVE STOP BEING TRUE.** *"`_SETTLEMENT_RETRY_BARS: Final = 5` in
+> `execution/executor.py`"* is false: that line reads `_SETTLEMENT_RETRY_BARS:
+> Final = SETTLEMENT_RETRY_LIMIT`, and the value, **5**, is
+> `bookability.SETTLEMENT_RETRY_LIMIT`, which the reconciliation driver also
+> reads (P-3b, the owner's P92-4). And *"a module constant, not a config field"*
+> is true of both names. **The driver reads it as FAILED SETTLEMENT PASSES, not
+> bars,** counted on `Position.failed_settlement_passes`; at the bound it HOLDS
+> the position at `CRITICAL` (`settlement_timeout_held`) where the executor
+> RELEASES it unbooked. One pass is one due-position read, which is one
+> shortest-timeframe bar on a healthy feed. **What survives:** the unit
+> description, the stalled-feed limit and the in-memory-only count for the
+> executor, and the status -- still PLACEHOLDER, still not measured.
+>
+> **The executor's read count at the bound is SIX, not five** (`M5l-216`):
+> Site A reads once at the sell, then five bars of the symbol's own candles
+> each read, and the read on the fifth is the one that drops. Pinned by
+> `test_a_deferred_close_is_read_six_times_before_it_is_dropped`. REPORTED, not
+> changed: the ruling's wording, *"five bars of the symbol's timeframe,
+> counted from the first deferral"*, is met by it.
+
 ---
 
 ## The coherence constraint

@@ -129,17 +129,31 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import Final, Literal
 
 from trading_bot.core.models import Money, Position
 
 __all__ = [
+    "SETTLEMENT_RETRY_LIMIT",
     "BookabilityOutcome",
     "BookabilityVerdict",
     "TotalSource",
     "classify_bookability",
     "require_bookable",
 ]
+
+#: How many times an exit whose settlement cannot be read is retried before the
+#: retrying stops: **N = 5**, ruled by the project owner, and the ONE number both
+#: booking sites read. It lives here because both already import this module.
+#:
+#: **THE UNIT DIFFERS BY SITE, and the number is shared on purpose.** The
+#: executor counts the symbol's OWN candles from a close's first deferral
+#: (``OrderExecutor``'s ``_SETTLEMENT_RETRY_BARS``), and at the bound drops the
+#: record unbooked at ``CRITICAL``. The reconciliation driver counts FAILED
+#: SETTLEMENT PASSES on ``Position.failed_settlement_passes`` (P-3b, ruled at
+#: M5l P93), and at the bound HOLDS the position at ``CRITICAL``. A pass is one
+#: due-position read, so on a healthy feed it is one shortest-timeframe bar.
+SETTLEMENT_RETRY_LIMIT: Final = 5
 
 #: Where a bookable total came from. ``"venue"`` is the order's own
 #: ``cummulativeQuoteQty``; ``"fills"`` is the sum of that order's fills'
