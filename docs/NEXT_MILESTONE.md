@@ -715,6 +715,40 @@ asserting its absence would fail on all of them.
 
 *Arming condition:* **whoever next edits `_sold` or `_resolving_client` in `tests/unit/test_executor.py`.**
 
+> **RESOLVED AT M5l P94 (C52): `exit_quote_totals_disagree` NOW FIRES ONLY IN THE
+> TESTS THAT INTEND IT, AND THE ITEM'S OWN FIGURES WERE STALE.** *"fires in 13
+> tests where 2 intend it ... No assertion reads the warning in the other 11"*
+> is not what the tree measured at `e3ff798`. A scratch pytest plugin that
+> records every test during which the event is logged (its own handler on the
+> root logger, NOT `caplog`, which a `caplog.at_level(CRITICAL)` blinds) found
+> **9 tests, not 13: 4 intend it and 5 do not** -- `test_executor.py` twice,
+> `test_modes.py` once, `test_reconciliation_driver.py` once, each already
+> asserting `len(...) == 1`, and the five unintended all in `test_executor.py`
+> (`M5l-237`). Instrument: that plugin over `tests/unit`, 2139 passed, 1 skipped.
+>
+> **The cause the item named is right.** Each of the five paired a close answer
+> `_sold()` at `1810.57726950` with `FakeClient.get_my_trades`' default
+> settlement, one fill at `sell_trade()`'s `51.25`. **The fix is in the fake, not
+> in `_sold()`**: four assertions depend on `1810.57726950`
+> (`record.quote_total`, `free_quote`, `venue_quote_total`), so `_sold()` could not
+> move without weakening them. `FakeClient._default_settlement` now mirrors the
+> close answer it is paired with -- the same quantity at the same quote total
+> when that answer is a priced, filled `Order` -- so the venue's total and its
+> fills agree; an unpriced answer or none keeps the old default. A test that
+> intends a disagreement configures `trades_answers` itself and requests the new
+> `expect_disagreement` fixture.
+>
+> **A guard holds the rest.** An autouse fixture in `test_executor.py` counts the
+> event with its own handler and fails, in teardown, any test that did not request
+> `expect_disagreement` and saw one, and any that did and did not see exactly one.
+> Re-measured with the same plugin: the four intended tests, once each, and no
+> others. **Test-only, and no assertion weakened or removed.**
+>
+> *Arming condition, REAFFIRMED and not fired by symbol:* neither `_sold` nor
+> `_resolving_client` was edited; the fix landed in `FakeClient` and a fixture, the
+> same name-versus-site mismatch `M5l-235` records. **What survives:** the item's
+> cause and its remedy's direction.
+
 #### P-3g. Nothing refuses a pair quoted outside the base currency (`M5k-102`)
 
 Both `_settle`s pass `quote_asset=self._portfolio.quote_asset` to

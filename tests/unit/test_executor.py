@@ -17,7 +17,7 @@ from __future__ import annotations
 import ast
 import inspect
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -231,9 +231,11 @@ class FakeClient:
         trades_answers: list[list[Trade] | Exception] | None = None,
     ) -> None:
         #: What `get_my_trades` answers, in order; the LAST answer repeats.
-        #: ``None`` answers one fill mirroring the default sell -- the whole
-        #: executed quantity at the venue's total, fee `0.00000000` USDT, the
-        #: measured value -- so a close that only needs to book settles.
+        #: ``None`` answers one fill mirroring the CLOSE ANSWER it is paired with
+        #: (`_default_settlement`, P-3f): the whole executed quantity at that
+        #: answer's own quote total when it is priced, else the default sell's,
+        #: fee `0.00000000` USDT, the measured value -- so a close that only
+        #: needs to book settles, and the venue's total and its fills agree.
         self._trades_answers = trades_answers
         #: ``(order_id, timeout_s, attempts)`` per settlement fetch.
         self.settlements: list[tuple[str | None, float | None, int | None]] = []
@@ -367,6 +369,32 @@ class FakeClient:
             return self._sell_answer
         return sell_fill()
 
+    def _default_settlement(self, order_id: str) -> Trade:
+        """The settlement fill this fake answers when a test configured none. P-3f.
+
+        **IT MIRRORS THE CLOSE ANSWER IT IS PAIRED WITH.** When the close's own
+        point query (`leg_answers["CL"]`) is a PRICED, filled `Order`, the
+        settlement is one fill of exactly that quantity and quote total, so the
+        venue's total and the sum of its fills AGREE and `exit_quote_totals_disagree`
+        does not fire. It used to answer `sell_trade()`'s `51.25` whatever the
+        order said, so every test whose close was `_sold()` at `1810.57726950`
+        logged a disagreement nobody asked for (`M5k-111`). A test that INTENDS
+        one configures `trades_answers` itself and requests `expect_disagreement`.
+        Anything else -- no `CL` answer, an unpriced one -- keeps the old default.
+        """
+        answer = (self._leg_answers or {}).get("CL")
+        if (
+            isinstance(answer, Order)
+            and answer.filled_quantity > 0
+            and answer.filled_quote_quantity is not None
+        ):
+            return sell_trade(
+                order_id=order_id,
+                quantity=answer.filled_quantity,
+                quote=answer.filled_quote_quantity,
+            )
+        return sell_trade(order_id=order_id)
+
     async def get_my_trades(
         self,
         symbol: str,
@@ -380,7 +408,7 @@ class FakeClient:
         self.venue_calls.append("get_my_trades")
         self.settlements.append((order_id, timeout_s, attempts))
         if self._trades_answers is None:
-            return [sell_trade(order_id=order_id or "777")]
+            return [self._default_settlement(order_id or "777")]
         answer = (
             self._trades_answers.pop(0)
             if len(self._trades_answers) > 1
@@ -473,6 +501,47 @@ def build(
         persist_pending=persist,
     )
     return executor, resolved_client, resolved_portfolio
+
+
+@pytest.fixture
+def expect_disagreement() -> None:
+    """Opt a test IN to `exit_quote_totals_disagree` firing, exactly once. P-3f.
+
+    Requested by name and used by nothing else: the guard below reads the
+    request's fixture names, so a test that INTENDS the line says so in its
+    signature and a test that does not is held to its absence.
+    """
+
+
+@pytest.fixture(autouse=True)
+def _disagreement_fires_only_where_intended(request: pytest.FixtureRequest) -> Iterator[None]:
+    """P-3f: `exit_quote_totals_disagree` fires in the tests that ask for it, once, and nowhere else.
+
+    It counts with its own handler on the root logger, NOT `caplog`, because a
+    test that raises `caplog.at_level(CRITICAL)` hides a WARNING from `caplog`
+    -- the blindness that let eleven tests log a disagreement nobody read
+    (`M5k-111`). A check in TEARDOWN, so it reports against the test that
+    caused the line. MUTATIONS: revert the fake's mirrored default settlement
+    (five tests fail), or log the line twice (the intended tests fail).
+    """
+    lines: list[logging.LogRecord] = []
+
+    class _Catch(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            if vars(record).get("event") == "exit_quote_totals_disagree":
+                lines.append(record)
+
+    handler = _Catch(level=logging.DEBUG)
+    root = logging.getLogger()
+    root.addHandler(handler)
+    try:
+        yield
+    finally:
+        root.removeHandler(handler)
+    if "expect_disagreement" in request.fixturenames:
+        assert len(lines) == 1, f"an intended disagreement must fire exactly once, saw {len(lines)}"
+    else:
+        assert lines == [], f"{len(lines)} unintended exit_quote_totals_disagree line(s)"
 
 
 def _records(caplog: pytest.LogCaptureFixture, event: str) -> list[logging.LogRecord]:
@@ -2790,7 +2859,7 @@ class TestTheCloseExecutes:
         assert portfolio.ledger is None
 
     async def test_a_priced_sell_that_disagrees_with_its_fills_books_the_venue_total_and_warns(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, expect_disagreement: None
     ) -> None:
         """H at Site A: the VENUE'S total is booked, and ONE WARNING names both, with the asset.
 
@@ -4137,7 +4206,7 @@ class TestAResolvedFillIsBooked:
         assert _records(caplog, "close_record_resolved") == []
 
     async def test_a_resolved_priced_fill_that_disagrees_with_its_fills_warns(
-        self, caplog: pytest.LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture, expect_disagreement: None
     ) -> None:
         """H at Site B: the VENUE'S total is booked, and ONE WARNING names both, with the asset.
 
