@@ -4923,3 +4923,40 @@ See `docs/RUN_LEDGER.md` §19 and `docs/NEXT_MILESTONE.md`.
 > - *"Every commission any capture records is `0.00000000`"*: the evidence run's
 >   six fills are zero too (`M5l-054`). *"Booking net of fees has never
 >   subtracted a non-zero fee outside a test"* is unchanged.
+
+**M5l is complete, in 65 numbered commits and 9 rotation commits, with 280 findings declared
+across `M5l-001`-`M5l-280`, every commit but the owner's `9f364dd` carrying a block.** It
+answered M5k's central fact, that nothing M5k added was shown to have run as committed and the
+bot recorded nothing that could show it.
+
+*The proof.* `main` logs `boot_provenance` on every boot and refuses `run` unless the install
+is a VCS install, every installed `.py` is in pip's `RECORD` with its hash, the launch checkout
+is clean and at the install's commit, and the config is tracked and inside it. The running
+code's commit comes from pip's record and not from git. The runs M5l recorded were made from
+deployment clones of pushed commits.
+
+*The restart.* Every open position keeps a record in `data/state.json` at schema 2. A boot
+classifies each against the venue: a position restores, a fill made while down books
+ledger-only, a protection that is gone sells once, and an exit the ledger cannot book keeps a
+held record with no `Position`, re-derived from the venue's fills at every boot until an operator
+releases it with `scripts/release_position.py`. The owner closed P-3k's gate at P87 on the
+supervised run's arms A1, A2 and A4.
+
+*Staleness, the call cap and the feed.* A staleness bound a healthy feed cannot reach is refused
+at load; the call cap is `max(max_open_positions, L + 1)`; a missing bar is detected and a
+`BUY` is refused while the window spans it; a watchdog reports a silent pair, a lagging loop and
+a slow handler chain and acts on nothing; the library's transient stream errors are read past.
+Timer-driven reconciliation and a REST backfill are deferred.
+
+*Accounting.* Realised is the exit's quote total less the entry's own quote total, so no
+quotient reaches the ledger, and an exit whose settlement cannot be read is held after five
+failed passes. `scripts/normalize_ledger_exponents.py` brought the active store's 20 figures at
+exponents -24 and -10 to -8 losslessly. A booking guard that refuses a filled sell holds the
+position, at both close sites.
+
+*The run.* The last evidence is `docs/RUN_LEDGER.md` section 26: 8.356 h from a deployment clone
+of `51a5f27`, six round trips each booked equal to the venue's fills by GET, the ledger chained to
+the last digit, and no feed-health event. **What it did not show is the thing to keep in view:**
+every commission any capture records is zero, so the fee capture is unmet, and base-quantity
+netting is unbuilt. **Live trading stays blocked by exactly those two**, and
+`refuse_live_trading` is unchanged. M5m's scope is not decided; see `docs/NEXT_MILESTONE.md`.

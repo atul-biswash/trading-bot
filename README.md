@@ -142,6 +142,17 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > - that every fee read is zero, in both;
 > - `HALT` at zero;
 > - and every figure above, as a measurement of the capture it names.
+>
+> **ANNOTATED AT M5l'S CLOSE (P98): WHAT M5l ADDED TO THIS PICTURE.** The bot now proves which
+> code it runs (`boot_provenance` on every boot, and a refusal to `run` unless the install, its
+> record, the checkout and the config all agree), a restart keeps every open position in
+> `data/state.json`, and the committed code has run end to end from a deployment clone: the last
+> run, 8.356 h from a clone of `51a5f27`, booked six round trips each equal to the venue's fills
+> by GET and logged none of the feed-health events (`docs/RUN_LEDGER.md` section 26). **What
+> survives of every paragraph above:** every commission any capture records is `0.00000000`, the
+> fee capture is unmet, base-quantity netting is unbuilt, and live trading stays refused at every
+> entry point by exactly those two gates. M5m's scope is not decided; see
+> `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,

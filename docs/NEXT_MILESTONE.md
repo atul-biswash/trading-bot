@@ -1086,6 +1086,13 @@ something a build log protects.
 caller that must decide whether a new entry's headline may state a claim the
 entry will later annotate.
 
+> **FIRED AT M5l P98 (R6) AND REAFFIRMED.** The M5l entry in `docs/PHASE_HISTORY.md` was
+> written by the closing commit, which is the caller the condition names. Its headline and its
+> opening paragraphs state only what the entry does not later annotate: they give the
+> milestone's shape and its counts, and every claim in them is repeated, with its finding, below
+> and is not corrected there. **The reserved question stands and is the owner's:** the M5h and
+> M5i entries' headlines are unchanged, and no remedy is proposed.
+
 ### A5. Position-level `DIVERGED` has never been observed in production — the residue of `M5j-011`
 
 **The code gap is closed and indexed above**: since `3e444f0` a pass whose

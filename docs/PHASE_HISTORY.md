@@ -3664,3 +3664,318 @@ separate decisions recorded above, not exceptions to the headline.
 **M5k's scope and its rulings were the project owner's; the method rules were
 approved by the owner at the rotation; everything else was ruled by the
 architect or by the reviewer under delegation.**
+
+
+## Phase 5 M5l — the run that proves its own code, a restart that keeps its positions, and a staleness bound a healthy feed can reach
+
+M5k closed on a central fact: nothing it added was shown to have run as committed, and the
+bot recorded nothing that could show it (`M5k-123`, `M5k-132`). M5l's scope was the owner's
+three priorities -- startup provenance, the staleness bound against the reconciliation dedup
+interval, and the silent and unhedged failure modes M5k catalogued -- and its shape was
+evidence-first: the runs it recorded were made from deployment clones of pushed commits. **74 commits including this one -- 65 numbered and 9 of rotation -- and 280
+findings declared across `M5l-001`-`M5l-280`, every commit but the owner's blockless
+`9f364dd` carrying a block.** Counted with `git rev-list --count milestone/M5k..HEAD`,
+`scripts/check_findings.py milestone/M5k..HEAD M5l` and the display command before this entry
+was written, which read 73 commits and 277 declared with no gap and no duplicate; this commit,
+the last, adds itself and its three.
+
+### The commits
+
+| # | SHA | What it closed |
+|---|---|---|
+| 1 | `fdf8d7b` | feat(config): settings carry the loaded config's path and digest |
+| 2 | `ac1162d` | feat(provenance): read the launch checkout through a bounded git |
+| 3 | `d74f78b` | feat(provenance): classify the install, verify RECORD, decide the verdict |
+| 4 | `f8898de` | feat(main): log startup provenance on every boot and refuse an unproven run |
+| 5 | `63d4615` | feat(provenance): a module RECORD does not list is not intact |
+| 6 | `5cac7ae` | docs: startup provenance landed -- the doctrine's banner, and P-1 resolved |
+| 7 | `9f364dd` | config: operator settings for testnet runs |
+| 8 | `c2cab79` | fix(provenance): every refusal names its cause; unknown means unknown |
+| 9 | `bf2e44d` | docs(readme): the utils/ list names provenance |
+| 10 | `1f4a718` | docs: the owner's committed config -- tracked, clean, and inside the budget at 2.3 |
+| 11 | `b84e7b9` | docs: the deployment procedure, and reconciliation latency measured |
+| 12 | `06089d5` | docs(next): a restart orphans an open position, gated before live |
+| 13 | `71b591a` | docs(ledger): M5l's evidence run, and the runs before it |
+| 14 | `639870f` | docs: the deployment-clone runs, annotated where they made text false |
+| 15 | `bee5fe5` | docs(ledger): the evidence run's end record, before its census |
+| 16 | `ac07ebb` | docs: M5l's evidence run -- census, venue cross-check, and what it made false |
+| 17 | `9a131a6` | docs(readme): what M5l's evidence run and the live gates made false |
+| 18 | `f2182a6` | docs: P-3l, the outage measured, and what P-2's design must meet |
+| 19 | `25dbc61` | fix(config): the coherence check adds exactly |
+| 20 | `5d6f115` | fix(config): the coherence refusal prints exact figures and true words |
+| 21 | `517348f` | test(reconciliation): pin the dedup boundary |
+| 22 | `6e7c9f2` | docs(src): docstrings that said what the samples and the stamp no longer do |
+| 23 | `4a094c5` | docs: P-2's items resolved or held, and what STEP 0 measured |
+| 24 | `f20e839` | feat(config): a staleness bound a healthy feed can reach is refused at load |
+| 25 | `90355df` | feat(config): a position cap that cannot complete one position is refused at load |
+| 26 | `cf37cda` | docs: P-2 resolved item by item, and an unstamped position said by case |
+| 27 | `9f188c4` | docs: the staleness default is ruled kept; P-2 stays open on one clause |
+| 28 | `40a9e67` | docs: P-2's locked text held back on a bound missing its precondition |
+| 29 | `127be9a` | docs(src): churn adds deferrals beyond n - 1, with no bound claimed |
+| 30 | `5721a5c` | docs: the polling decision re-ruled with its precondition; P-2 closed |
+| 31 | `a77e02c` | docs: the P-3 triage rulings, verbatim, and the owner's order |
+| 32 | `131f1c9` | feat(store): a record per open position, at schema 2 |
+| 33 | `4b57f34` | feat(portfolio): restore a position, and book an exit made while down |
+| 34 | `989edfc` | feat(persistence): each save carries a record per open position |
+| 35 | `f7ebce9` | feat(execution): a pure boot classifier for restored records |
+| 36 | `5a2307c` | feat(boot): resolve the store's records at boot |
+| 37 | `fa06d77` | feat(boot): book an exit that filled while down, or hold its record |
+| 38 | `a14aa6c` | feat(boot): restore and sell a position whose protection is gone |
+| 39 | `4f2cc49` | fix(exchange): -2013 maps to OrderNotFoundError |
+| 40 | `2081389` | feat(boot): a close beside a position record is read, booked or sold once |
+| 41 | `cde0fb0` | test(execution): a raise after a placed list keeps its pending record |
+| 42 | `e4004ab` | feat(scripts): release one symbol's records from the store |
+| 43 | `d1074c6` | docs: P-3k's text corrected, the deployment procedure and a run template |
+| 44 | `244aa6b` | fix(exchange): -2011 'Unknown order list sent.' maps to OrderNotFoundError |
+| 45 | `d95cb5e` | fix(scripts): the cancel script's warning says what the boot now does |
+| 46 | `5e22bc6` | docs: record the P-3k supervised run so far, and the ETH takeover cost |
+| 47 | `8403673` | docs: A4 passed at 5e22bc6; P-3k's gate closed by the owner's ruling |
+| 48 | `5709b04` | docs: annotate the closed P-3k gate, catalogue the stop-loss review |
+| 49 | `0c1a802` | fix(boot): an enabled pair quoted outside the portfolio's asset refuses the boot |
+| 50 | `31281fa` | feat(reconciliation): the call cap is max(N, L + 1), not the position limit |
+| 51 | `b29a658` | feat(reconciliation): a call-cap deferral is logged, one line per position |
+| 52 | `4c2e55c` | feat(reconciliation): a phase reports the calls it spent, settlement included |
+| 53 | `a519d9e` | feat(data): a missing bar is detected, and a BUY is refused while the window spans it |
+| 54 | `68ffa47` | feat(data): a watchdog reports a silent pair, a lagging loop and a slow handler chain |
+| 55 | `1046a01` | feat(exchange): the library's transient errors are read past, and P-3l is closed |
+| 56 | `441b5b2` | feat(reconciliation): an unreadable settlement is held after five failed passes |
+| 57 | `4341c5c` | feat(accounting): realised is the exit total less the entry's own quote total |
+| 58 | `f9e606e` | feat(scripts): a one-off that normalises the ledger's exponents, losslessly or not at all |
+| 59 | `cdc6c2e` | fix(portfolio): closing a symbol the ledger does not hold raises, and is never reported booked |
+| 60 | `e3ff798` | feat(risk): the stale refusal names a held position, and a test drives one end to end |
+| 61 | `b5975ff` | test(executor): exit_quote_totals_disagree fires only in the tests that intend it |
+| 62 | `bf6f9a8` | fix(executor): a booking guard that refuses a filled sell holds the position and says so |
+| 63 | `b430ea4` | test(executor): the two weak tests detect as assertions, and the N = 5 annotation is recorded |
+| 64 | `51a5f27` | fix(executor): Site B holds an unbookable close as Site A does, and the "position survives" wording is true |
+| 65 | `7489581` | docs(run-ledger): M5l's observation run at 51a5f27, its census and its venue cross-check |
+
+**The rotation took nine commits, this one included**, in the order the procedure's step 1
+being written last requires:
+- `810eaa3`: the standing authorities moved into `CLAUDE.md`, verbatim, by the owner's ruling;
+- `456d38b`: the 18 gate-count lines in `CLAUDE.md` and `README.md`, from a fresh run;
+- `ad24ace`: five letter-only rule citations replaced by quotations;
+- `9fc8b8d`: pre-existing false text swept, 23 candidates by content;
+- `d8724dd`, `6937c89`, `e531822`: `NEXT_MILESTONE.md` rotated to M5m in three parts, because
+  the whole is 1,999 changed lines and the ceiling admits no waiver;
+- `5bd8575`: the arming registers re-run and the mode-3 pass;
+- this commit, steps 1, 2 and 5: this entry, the "Current state" paragraphs in `CLAUDE.md`
+  and `README.md`, and the tag.
+
+### What was built, in order
+
+**First the proof (`fdf8d7b`, `ac1162d`, `d74f78b`, `f8898de`, `63d4615`, `c2cab79`).**
+Settings gained the loaded config's resolved path and the digest of the bytes parsed. A
+bounded git reads the LAUNCH checkout, with timeouts that survive a grandchild holding the
+output pipe (`M5l-014`) and a Windows resolver that will not run a decoy `git` from the
+working directory (`M5l-018`, `M5l-022`). The running code's commit is not asked of git but of
+pip's own record: the install is classified from PEP 610's `direct_url.json` and its `RECORD`
+verified file by file, a `.py` the record does not list refusing (`M5l-004`, `M5l-017`,
+`M5l-026`, `M5l-028`). `main` logs `boot_provenance` on every boot and refuses `run` unless
+every condition holds, and from `c2cab79` every refusal names its cause and an unknown is a
+refusal reason and never a pass.
+
+**Then the first run on known code (`b84e7b9`, `06089d5`, `71b591a`, `639870f`, `bee5fe5`,
+`ac07ebb`, `9a131a6`, `f2182a6`).** The deployment procedure was written and built, 300
+reconciliation-call latencies were measured (`M5l-039`), and the evidence run, pid 21520 at
+`06089d5`, wrote three `close_booked` lines carrying `quote_total_source=venue` that
+reconcile exactly against the venue's fills (`M5l-053`, `M5l-054`). It also lived through a
+market-data outage in which the bot's disconnect warning came 229 s after the library's first
+error and no reconciliation pass ran for 300 s (`M5l-055`, `M5l-060` to `M5l-063`), which
+became P-3l.
+
+**P-2, the staleness bound (`25dbc61`, `5d6f115`, `517348f`, `6e7c9f2`, `4a094c5`, `f20e839`,
+`90355df`, `cf37cda`, `9f188c4`, `40a9e67`, `127be9a`, `5721a5c`).** The coherence check
+adds exactly, a bound a healthy feed cannot reach is refused at load, the strict `>` of
+`_is_due` is pinned, and the locked polling decision is annotated with the owner's re-ruled
+text and its precondition rather than rewritten.
+
+**P-3k, a restart that keeps its positions (`a77e02c`, `131f1c9`, `4b57f34`, `989edfc`,
+`f7ebce9`, `5a2307c`, `fa06d77`, `a14aa6c`, `4f2cc49`, `2081389`, `cde0fb0`, `e4004ab`,
+`d1074c6`, `244aa6b`, `d95cb5e`, `5e22bc6`, `8403673`, `5709b04`).** Every open position keeps
+a record in `data/state.json` at schema 2; a pure classifier reads each at boot against the
+venue; a position restores, a fill made while down books ledger-only, a protection that is
+gone sells once, a close beside a record is read, and an exit the ledger cannot book keeps a
+held record with no `Position`. `scripts/release_position.py` releases one by hand. The first
+supervised run failed A4 on a venue answer nothing mapped (`M5l-161`), the mapping landed
+(`244aa6b`), A4 passed at `5e22bc6`, and the owner closed the gate at P87.
+
+**The rest of P-3, one commit each (`0c1a802`, `31281fa`, `b29a658`, `4c2e55c`, `a519d9e`,
+`68ffa47`, `1046a01`, `441b5b2`, `4341c5c`, `f9e606e`, `cdc6c2e`, `e3ff798`, `b5975ff`,
+`bf6f9a8`, `b430ea4`, `51a5f27`).** A pair quoted outside the base currency refuses the boot;
+the call cap is `max(N, L + 1)`; a call-cap deferral and a phase's calls are logged; a missing
+bar is detected and a `BUY` refused while the window spans it; a watchdog reports a silent
+pair, a lagging loop and a slow chain; the library's transient stream errors are read past; an
+unreadable settlement is held after five failed passes; realised is the exit total less the
+entry's own quote total, and a one-off normalises the persisted exponents losslessly; closing a
+symbol the ledger does not hold raises; the stale refusal names a held position; a booking
+guard that refuses a filled sell holds the position, at Site A and then at Site B.
+
+**Last, the observation run (`7489581`).** 8.356 h from a deployment clone of `51a5f27`: six
+round trips, every booking equal to the venue's fills by GET, the ledger chained from the
+normaliser's output to the end store to the last digit, and none of the feed-health events
+(`docs/RUN_LEDGER.md` section 26).
+
+### The decisions, and the alternatives rejected
+
+- **The running code's commit comes from pip's record, not from git.** A runtime `git` read
+  against a package installed into a venv inside a checkout reported that checkout's later
+  `HEAD` as clean while the installed code was older (`M5l-005`), and a non-editable install
+  outside any checkout reaches no `.git` at all (`M5l-006`). So git answers the launch
+  checkout and the record answers the running code, and the boot line says whether they agree.
+- **P-2 kept the strict `>` and annotated the locked text, and kept the 180 s default as the
+  owner's policy choice.** Changing the comparison to `>=`, or deduplicating against a shorter
+  interval, was the alternative; the floor is derived and refused at load instead
+  (`M5l-069`, `M5l-084`), and the default's status stays PLACEHOLDER because keeping a value
+  does not measure it.
+- **The call cap is `max(max_open_positions, L + 1)`, sketch (a).** Of the owner's three
+  sketches only (b), `n * (1 + L)`, failed the committed coherence budget, 36.4 s against
+  30.0 s (`M5l-101`).
+- **A position record holds requested values only, and a hold is re-derived at boot from the
+  venue's immutable fills.** Persisting the hold and the retry count was the alternative the
+  owner's Q12 ruled out (the text is in `docs/NEXT_MILESTONE.md` at `9fc8b8d` and lifted in
+  that file's rulings section). A held record has no `Position` (Q5(b)), because a restored
+  one would overstate equity (`M5l-112`); "start empty and adopt" is unavailable at HEAD
+  (`M5l-037`).
+- **The synthetic `CLOSE` at boot sells once, and a failed venue read refuses the boot.**
+  Reading a generic API error as an absent order would restore a position beside a sell that
+  may have filled (`M5l-148`).
+- **P-3l reports and does not repair.** The watchdog acts on nothing (`M5l-203`); a REST
+  backfill and a timer-driven pass were catalogued as deferred U12 and U11 (`M5l-207`), so
+  the stopped reconciliation is accepted under the owner's P76 and not fixed.
+- **The entry's own quote total is memory-only on `Position`**, set from the one entry GET,
+  and realised is the exit total less it. The alternative was to keep multiplying a 28-digit
+  quotient (`M5l-209`, `M5l-210`); persisting the total was ruled out with the hold.
+- **The normaliser is lossless or it refuses.** It never rounds a figure that would lose a
+  digit and it refuses a store at another schema, because `store.save` would upgrade it as well
+  (`M5l-227`, `M5l-228`).
+- **Site B holds as Site A does, through one hold with a `site` argument and not a copy.** A
+  pre-sell guard was impossible, because the verdict is built from the sell's own results
+  (`M5l-239`, `M5l-245`).
+
+### What measurement overturned
+
+- **`D <= 10.5 s`**, stated in `CLAUDE.md` and four places in `M5_NUMBERS.md`, had been false
+  since the settlement term: varying only `dispatch_deadline_s`, 9.25 s is accepted and 9.26 s
+  refused (`M5l-034`).
+- **P-2's first item**, that a bound between one and two intervals refuses a healthy system,
+  was wrong (`M5l-066`, `M5l-067`), and the polling decision's *"at least bounded by its own
+  cadence"* was false (`M5l-097`). The deferral count is `k <= n - 1` without churn and
+  reached `n + 1` with it (`M5l-084`, `M5l-088`, `M5l-092`).
+- **`-2013` did not reach `OrderNotFoundError`** (`M5l-138`), and **`-2011 'Unknown order list
+  sent.'` was unmapped**, which failed A4 on the real venue (`M5l-161`).
+- **P-3h's "the cause is UNMEASURED"** was already false and is now measured: four bookings
+  filled across 6 to 8 price levels (`M5l-100`, `M5l-209`).
+- **A stop-loss filled about 4.2 percent beyond its trigger** (`M5l-170`), which is why the
+  protective order type is marked for review before live trading.
+- **The A5 item's "the escalation has never run"** was false of the supervised run
+  (`M5l-195`), and **two documents' text on the P-3k gate** still read closed after the owner
+  had ruled it satisfied (`M5l-175`).
+- **The 229 s stall's cause is not the consumer's own code** (`M5l-196`), which narrows it
+  and measures nothing more (`M5l-198`).
+- **A first expectation of the observation run's ledger was wrong**: `lifetime_realised`
+  moves when a day rolls and not when a booking is made (`M5l-254`).
+
+### What did NOT happen
+
+- **Live trading was not enabled and was not brought closer.** Every commission any M5l capture
+  records is `0.00000000`, the observation run's included, so the fee capture is unmet and no
+  non-zero fee was ever netted outside a test; base-quantity netting is unbuilt. The two gates
+  the owner's M5k ruling names are the ones that remain, and `refuse_live_trading` is unchanged.
+- **No protective leg filled in the observation run**, ETHUSDT never opened a position and
+  nothing restarted in it, so the emitters M5l added for feed health were quiet and are shown
+  to raise no false alarm, not to fire (`M5l-252`).
+- **Whether Binance omits a kline for an interval with no trades** was not measured, since
+  neither committed pair had a zero-trade bar (`M5l-202`, `M5l-251`), and the stall's cause
+  (`M5l-198`) is still unmeasured.
+- **A timer-driven reconciliation, a REST backfill, the confirm-step ruling (five calls or
+  four), the request weight and the trailing-stop milestone** were not done; each is carried
+  with its condition.
+
+### What the rotation's steps found
+
+- **Step 1** (`810eaa3`): the seven standing authorities, the owner's rulings and the records of
+  them, lived in the one file the rotation rewrites; they now stand in `CLAUDE.md` verbatim
+  (`M5l-244`, `M5l-257`).
+- **Step 2** (`456d38b`): the 18 gate-count lines had not moved since before M5l while the
+  suite grew from 1956 to 2010 to 2148 passed (`M5l-124`, `M5l-160`, `M5l-258`).
+- **R3** (`ad24ace`): five rule citations by bare letter became quotations. `M5l-013` turned out
+  to be part wrong, because the lettered list had been in this file since `31f03d4`
+  (`M5l-259`, `M5l-260`).
+- **R5** (`9fc8b8d`): 23 declared false or unedited sentences were checked by content, 8 already
+  fixed, 8 already annotated, 2 not false text, 2 annotated, and 3 carried because they live in
+  `src/` or `tests/`, plus one new one in `dispatch_budget.py` (`M5l-261` to `M5l-264`).
+- **Step 3** (`d8724dd`, `6937c89`, `e531822`): the file was 1,999 changed lines, so it was split
+  three ways; seven owner rulings that stood only inside struck items were lifted verbatim; and
+  the owner's P98 list named U10 a blocker where the owner's P87 ruling says it is not a gate
+  (`M5l-265` to `M5l-273`).
+- **Step 4 and the mode-3 pass** (`5bd8575`): three real firings of two conditions, U0 and U3, had
+  never been recorded; ten of the thirteen firings the instrument could not tie to a commit were
+  artifacts of what the condition named (`M5l-274` to `M5l-277`).
+
+### The method rules, keyed
+
+The twelve rules the M5k entry above lists as (a) to (l) are in `CLAUDE.md`, each under the
+heading below, so a letter cited in `docs/PHASE_HISTORY.md` can be followed without leaving this
+file's pointers. (a) *"ANY TEXT A CHANGE MAKES FALSE IN A FILE IT IS AUTHORISED TO EDIT IS
+CORRECTED OR ANNOTATED IN PLACE, AND LISTED"*; (b) *"A MUTATION SURVEY RUNS ONLY IN A
+DISPOSABLE WORKTREE OUTSIDE THE REPOSITORY"*; (c) *"AND THE FORMATTER RUNS BEFORE THE SURVEY"*;
+(d) *"A SEARCH FOR A SENTENCE A CHANGE MAY FALSIFY TOLERATES EMPHASIS AND LINE BREAKS -- AND DOES
+NOT STRIP `_`"*; (e) *"EVERY `git diff` AND `git show` NAMES ITS PATHS"*; (f) *"A MISS IS NOT
+SYMMETRIC"*; (g) *"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT
+THAT CARRIES AN ARMING CONDITION"*; (h) *"A DIFF OVER 1,500 CHANGED LINES HALTS, AND THE COMMIT
+IS SPLIT"*; (i) *"READ A LOG FIELD THROUGH `vars(record).get(key)`, AND ASSERT A LENGTH BEFORE
+INDEXING"*; (j) *"`DOCUMENTED` IS A FOURTH MARK"*; (k) *"A RULING ID IS QUALIFIED BY THE PROMPT
+THAT GAVE IT"*; (l) *"AT M5k's ROTATION: `scripts/check_gate_counts.py` RUNS TWICE, OUTGOING
+FIGURES FIRST"*. Rule (h) was used for the first time as a split at this rotation, where it
+turned one file's rotation into three commits of 843, 454 and 780 changed lines.
+
+### The architect's own errors, by class
+
+Counted over the findings declared by this commit's parent, by the sentence each carries: **14
+say "Owned by the architect" in so many words, 15 with `M5l-013`, whose text names the architect's
+drafts, and 16 with `M5l-059`, shared with the implementer.** By class:
+- **A rule cited by a paraphrase or a bare label instead of its text: 2**, `M5l-013` and
+  `M5l-027`, the second quoting a ceiling as a total when the ruling counts per commit.
+- **An authorisation drawn from testimony and not from a grep, or omitting a file or authority it
+  needed: 4**, `M5l-032`, `M5l-079`, `M5l-131` and `M5l-132`, with `M5l-059` shared. The standing
+  authorities and the widened file list are the fix.
+- **A ruling or draft that changed a pinned test without authorising it, or confirmed a ruling
+  without deriving what it collided with: 3**, `M5l-115`, `M5l-126` and `M5l-127`. The
+  ruled-overturn authority is the fix.
+- **A derivation or draft error caught before any code: 6**, `M5l-074`, `M5l-078`, `M5l-083`,
+  `M5l-091`, `M5l-093` and `M5l-095`, each a bound, a comparison or a locked-text draft stated
+  without its precondition.
+Fourteen of the 280 declared findings own an error of the architect's outright, and each was
+caught by a halt or a measurement and not by review of the prompt. One more, `M5l-145`, records a
+prediction of the architect's P82 table that the code cannot produce and does not say whose it
+was, so it is not counted. The instrument is `grep` over the declared findings' text, so it counts
+what a finding SAYS and not what it should have said.
+
+### What carries into M5m
+
+The scope is **not decided**, and the owner's order for the first three is N6, U9 and U10, the
+items that block live trading, with a discrepancy the owner holds: P98 lists U10 among them and
+the P87 ruling says it is not a gate. Carried, each with its caller-named arming condition, in
+`docs/NEXT_MILESTONE.md`: K1 to K5 (the store's two reusers, P-3k's three residues, four
+pre-existing false sentences in `src/` and `tests/`, the stall's cause, the natural-gap rate of a
+new pair); P-3i's request weight; P-3m's starvation and churn; P-3n with U7, the confirm-step
+ruling; N1 to N6; U0 to U12; A1 to A3, A5 and A6; the `M5i` items, with the unpack sweep at 17
+sites; W1 to W6; X2b, `HALT` never observed in 16 more close plans; and the blocked trailing-stop
+milestone.
+
+### The historical figures in this entry
+
+**Pinned to their commits, not a live count.**
+- **At `5bd8575`**, the last commit before this one: `ruff format` 142 files, `mypy` 84 source
+  files, 2148 passed and 1 skipped with Testnet credentials (2145 and 4 derived); 277 findings
+  and 73 commits.
+- **At this rotation's gate**: the same 142 / 84 / 2148 passed, 1 skipped, credentialed, since
+  the rotation changed no `.py` file; 280 findings and 74 commits including this one.
+- The captures the rotation read are SHA-256 `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`
+  (the evidence run), `bcf01bb15b54c08e1db6b6049c680b49ba3177406ce7c0bed7191b0d14825cf3` and
+  `85e1c64391089b1f425ae0efe3954aa705a271d2369ac4bab85ad425871c71bb` (the P-3k clones' logs) and
+  `023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb` (the observation run).
+
+**M5l's scope, the P-3 order, the P-2 re-ruled text, P-3k's design questions and its gate, the call-cap
+sketch, the deferrals, the standing authorities and the P98 rulings were the project owner's;
+everything else was ruled by the architect or by the reviewer under delegation.**
