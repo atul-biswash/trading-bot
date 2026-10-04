@@ -1,56 +1,148 @@
-# Next milestone — M5l
+# Next milestone — M5m
 
-## M5l's SCOPE — ruled by the project owner
+*Rotated at M5l's close (P98). This is the single home for live open items. Rules do
+not live here: they are in `CLAUDE.md`, including its **Standing authorities for
+commits**. Every item below is either carried from M5l with its arming condition and
+its annotations, or indexed as resolved with the commits that resolved it.*
 
-The ruling, verbatim:
+## M5m's SCOPE — NOT DECIDED; reserved to the project owner
 
-> "Verdict: Approved. Directives: The architectural live-trading block remains
-> strictly active. No live execution will be scheduled until a non-zero fee
-> capture is empirically established on a live-quoted venue and base-asset
-> quantity netting is fully implemented in the entry sizing pipeline. M5l
-> priorities: Startup VCS commit/dirty-state enforcement, configuration
-> validation alignment (`max_position_staleness_s` vs. timeframe dedup
-> intervals), and eliminating the unhedged/silent failure modes cataloged
-> across M5k."
+**The rotation does not choose M5m's scope.** It lists the candidates, each carried
+below with its condition, and orders them only where the owner has already ruled an
+order or the tree decides one.
 
-Where the bot may be run from is already ruled, by `CLAUDE.md`'s locked
-bullet *"THE BOT IS NEVER LAUNCHED FROM A DEVELOPMENT WORKING TREE"*, landed at
-`ae8c914`. It is pointed to here, not restated.
+**The owner's order for the first three, ruled at P98: the items that block live
+trading come first.**
 
-**The milestone's shape is EVIDENCE-FIRST.** M5k's code is not shown to have
-run as committed -- see THE CENTRAL FACT below. So M5l's first run on known
-code executes from a deployment checkout of a pushed commit, per that
-doctrine. `docs/RUN_LEDGER.md` records its start -- the commit, the config's
-digest and the UTC instant -- before its evidence is read. Its census then
-answers, against the unobserved-surface table below, which of the 22 log
-events and the 8 `RefusalStage` members never observed at M5k's close it
-exercises. No such run has started as this is written.
+1. **N6 -- base-asset quantity netting in the entry sizing and placement pipeline**,
+   with entry-fee deduction (A1). One of the two preconditions the owner's M5k ruling
+   names for lifting the live-trading block. Nothing in `src/` nets a fee out of a
+   quantity.
+2. **U9 -- how the non-zero fee capture on a live-quoted venue is to be met.** The
+   other precondition. Every commission in every capture is `0.00000000`, M5l's
+   observation run included (`docs/RUN_LEDGER.md` section 26).
+3. **U10 -- the QC review of the protective order type before live trading**, from
+   the stop-loss that filled about 4.2 percent beyond its trigger (`M5l-170`).
+   **A DISCREPANCY FOR THE OWNER:** P98 lists U10 among the items that block live
+   trading, and the tree records the opposite. The owner's P87 ruling, quoted at N6
+   below, says the review *"is not a gate by the owner's ruling; it is marked for QC
+   before live trading"*. Both cannot stand, and the owner is the one who rules
+   which.
 
-> **ANNOTATED AT M5l (P63): *"No such run has started as this is written"* IS
-> NO LONGER TRUE.** It was true when `583e480` wrote it. The run started at
-> `2026-09-27T13:30:56Z`: pid 21520, from `F:\trading bot\deploy\06089d5e01cb`
-> at `06089d5`, and `docs/RUN_LEDGER.md` section 21 records its start. Two
-> earlier runs, pids 20112 and 12808, came from a deployment clone at
-> `9f364dd`, before C4, with no start record (`M5l-050`); section 22 records
-> them. **What survives:** the rest of this paragraph. The census against the
-> table below has not been taken.
+**The rest, in no order the rotation has the right to give:**
 
-> **ANNOTATED AT M5l (P64): TWO MORE STATEMENTS HERE ARE NO LONGER TRUE.**
-> *"M5k's code is not shown to have run as committed"*: pid 21520, at
-> `06089d5`, wrote three `close_booked` lines carrying
-> `quote_total_source=venue` (`M5l-053`). The block above's *"The census …
-> has not been taken"*: it was taken after the run stopped at `16:53:22Z`, and
-> `docs/RUN_LEDGER.md` §23 holds it.
->
-> Its answer, against the capture whose SHA-256 is
-> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`: of the
-> 22 log events never observed at M5k's close, **none**. Of `boot_provenance`,
-> added after that close, **yes**. Of the 8 `RefusalStage` members, **none**:
-> the run refused nothing.
->
-> **What survives:** that this run started from a deployment checkout of a
-> pushed commit, and that its start is recorded. That record was committed
-> after the log was first read (`M5l-051`).
+- **Rulings the owner holds:** U7 with P-3n (does the confirm step query three legs or
+  two, five calls against four); U11 and U12, deferred under the P91 rulings; U0 to U6
+  and U8, carried from earlier milestones.
+- **Work, each with its condition:** P-3i's request weight (needs the port to carry
+  response headers); P-3m's starvation and churn; K4, the cause of the 229 s stall
+  (`M5l-198`); K5, the natural-gap rate of a pair other than BTCUSDT or ETHUSDT
+  (`M5l-202`, ruled at P98); `M5i-104`'s sweep, 17 sites; K3, four pre-existing false
+  sentences in `src/` and `tests/`; K1 and K2, the residues of P-3k.
+- **Carried small items:** N1 to N5, A1 to A3, A5, A6, `M5i-065`, `M5i-095`,
+  `M5i-126` and the `_go_naked` family's fourth candidate.
+- **Blocked:** the trailing-stop milestone, on Q-C section 3's leg set.
+
+**What M5m's scope is NOT: a fix for anything M5l's observation run found.** It found
+nothing to fix. See *M5l's CLOSE* below.
+
+---
+
+## Before M5m starts — the namespace
+
+**IDs are `M5m-NNN`: three digits, zero-padded, starting at `M5m-001`.** Not letters.
+`CLAUDE.md` prescribes the digit form in its rescued rule 2; this paragraph is carried
+forward so that a reader of this file meets it first. **A rotation that rewrites this
+file must carry this paragraph forward.**
+
+**M5l's range is closed by the tag `milestone/M5l`**, applied to the closing commit of
+M5l's rotation, and its count is read with one command and never written here:
+
+```
+.venv\Scripts\python.exe scripts/check_findings.py milestone/M5k..milestone/M5l M5l
+```
+
+The M5m namespace is to be confirmed empty by the same tool, over
+`milestone/M5l..HEAD`, before `M5m-001` is written. **A tag is a ref and `git push`
+does not carry it**: the owner pushes `milestone/M5l` as its own act.
+
+> **THE M5i RESERVED BLOCK IS STILL RESERVED.** `M5i-068`, `M5i-071` and `M5i-073` are
+> cited in the tree and declared nowhere. That is deliberate and the extractors report
+> it every time as `cited-not-declared`; it is not a defect to be closed by inventing
+> declarations for them.
+
+> **AND THREE MORE M5i IDS ARE UNRECORDED ANYWHERE (`M5k-018`).**
+> `scripts/check_findings.py` reports the M5i range's gaps as 68 through 73. The
+> reserved block accounts for three of them; `M5i-069`, `M5i-070` and `M5i-072` appear
+> in no commit message and no tracked file, and no document mentions them. They are not
+> to be invented either.
+
+> **`9f364dd` IS BLOCKLESS, KNOWN AND DECLARED (`M5l-031`).**
+> `scripts/check_findings.py` reports `blockless commits : [9f364dd]` on every run over
+> a range that contains it, and exits non-zero for it. It is the owner's commit
+> *"config: operator settings for testnet runs"*, pushed during P58 with no `Findings:`
+> block; pushed, so it cannot be amended. **It belongs to M5l's range and not to M5m's**:
+> a run over `milestone/M5l..HEAD` will not list it. That is deliberate to leave
+> standing; it is not a defect to be closed by rewriting history or by inventing a block.
+
+---
+
+## THE CENTRAL FACT — read this before anything else
+
+**M5l showed the committed code running, end to end, and found nothing wrong in it.
+That is evidence about six round trips on one pair, and it is not evidence about live
+trading.** Against the capture
+`trading_bot.m5l-observation-run-pid24980.log`, SHA-256
+`023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb`, from a deployment
+clone of the pushed commit `51a5f27` (`docs/RUN_LEDGER.md` section 26):
+
+- **What it established.** 8.356 h; six BTCUSDT round trips, each booked with its
+  `entry_quote_total` at exponent -8 and equal to the venue's fills by GET; a ledger
+  chained from the normaliser's output to the end store with no difference to the last
+  digit; and none of the feed-health events, with the venue's own klines showing no
+  missing interval.
+- **What it did not.** Every commission it saw is `0.00000000`, so no non-zero fee was
+  ever netted outside a test and the live gate's fee capture is unmet. No protective
+  leg filled, ETHUSDT never opened a position, and nothing restarted. The feed-health
+  emitters were quiet because nothing happened to them, which measures no false positive
+  and not a firing.
+- **The live-trading block stands.** `refuse_live_trading` is unchanged, and N6's two
+  preconditions are exactly what remains. P-3k's gate was satisfied by the owner at P87.
+
+**The standard of evidence still holds**, and it lives in `CLAUDE.md`: *"A CAPTURE-BOUND
+CLAIM CARRIES ITS DIGEST INLINE, IN THE SENTENCE."*
+
+---
+
+## M5l's CLOSE — the milestone, its run, and the owner's rulings at the rotation
+
+**The tag.** `milestone/M5l`, an annotated tag at the closing commit of this rotation,
+created and verified to resolve there. The first M5l commit is `fdf8d7b`; the last is the
+closing commit, which `docs/PHASE_HISTORY.md`'s M5l entry names as *"this commit"* and
+which carries the entry's own count. **The findings count is read with
+`scripts/check_findings.py milestone/M5k..milestone/M5l M5l` and is not written here.**
+`docs/PHASE_HISTORY.md` holds the milestone's build log; `docs/RUN_LEDGER.md` holds its
+runs, the last of them section 26.
+
+**The owner's rulings at the rotation, P98, as the prompt named them:**
+
+- *"M5l-255 resolved by M5l-209."* The 15 ledger figures at exponent -10 are explained by
+  `M5l-209`'s measurement: the entry term was `average_price x quantity`, and 103 of the
+  106 booking lines it replayed were single-price entries at price exponent -2, which
+  times a quantity at exponent -8 is -10; the exponent -24 bookings were entries filled
+  across 6 to 8 price levels. So the origin that `docs/RUN_LEDGER.md` section 26 left
+  UNMEASURED is accounted for by the cause C48 removed. The replay is MEASURED and the
+  exponent arithmetic is REASONED from it.
+- *"M5l-202 left open with the arming condition 'whoever next enables a pair other than
+  BTCUSDT or ETHUSDT measures its natural-gap rate before trading it'."* Carried as K5.
+- *"The OBS note lines are dropped from the run sheet."* `arm_notes.txt` held no `OBS
+  launch` or `OBS stop` line after the observation run (`M5l-256`), and the sheet no
+  longer asks for them. The start of a run is recorded from its `boot_provenance` line.
+- *"Every standing authority moves into CLAUDE.md (M5l-244)."* Done at `810eaa3`; the
+  section here is a pointer.
+
+**The observation run, as recorded at P97 (C56)**, carried here verbatim from the scope
+section it was annotated into:
 
 > **ANNOTATED AT M5l P97 (C56): THE OBSERVATION RUN AT `51a5f27` IS RECORDED, AND
 > NO OBSERVATION NEEDS A RULING BEFORE THE ROTATION.** From a deployment clone of
@@ -89,473 +181,13 @@ exercises. No such run has started as this is written.
 > The table below keeps its own denominators against its own captures, and this run's
 > are not summed into them.
 
----
-
-Struck and repaired at M5k's rotation, in its first part. Every item below was
-re-verified by content against `ae8c914`; anything M5k closed is reduced to one
-index line naming the resolving commit and its findings, and its full text
-lives in git history and in `docs/PHASE_HISTORY.md`'s M5k entry. M5l's scope,
-priorities and new carried items are the rotation's second part. **This is the
-single home for live open items.**
+> **ANNOTATED AT M5l P98 (R7): THREE OF THE OWNER'S CHOICES LISTED ABOVE ARE NOW RULED.** *Whether to measure `M5l-202` deliberately on a thin Testnet pair*: ruled as K5's condition, that a pair other than BTCUSDT or ETHUSDT is measured before it is traded. *Whether to chase the origin of the 15 ledger figures at exponent -10*: moot, `M5l-255` being resolved by `M5l-209` (above). *Whether the run sheet's two note lines are worth keeping*: ruled, they are dropped. **What survives:** every measurement above.
 
 ---
 
-## Before M5l starts — the namespace
+## THE OWNER'S RULINGS RECORDED INSIDE THE STRUCK ITEMS, VERBATIM
 
-**IDs are `M5l-NNN`: three digits, zero-padded, starting at `M5l-001`.** Not
-letters. `CLAUDE.md` prescribes the digit form in its rescued rule 2; this
-paragraph is carried forward so that a reader of this file meets it first.
-**A rotation that rewrites this file must carry this paragraph forward.**
-
-**M5k's range is closed by the tag `milestone/M5k`**, applied to the closing
-commit of M5k's rotation, and its count is read with one command rather than
-written here, once that tag exists:
-
-```
-.venv\Scripts\python.exe scripts/check_findings.py milestone/M5j..milestone/M5k M5k
-```
-
-It prints the declared, distinct and maximum ids, and every duplicate, gap,
-id cited but never declared, and commit with no block. The M5l namespace is to
-be confirmed empty by the same tool, over `milestone/M5k..HEAD`, before
-`M5l-001` is written.
-
-> **THE M5i RESERVED BLOCK IS STILL RESERVED.** `M5i-068`, `M5i-071` and
-> `M5i-073` are cited in the tree and declared nowhere. That is deliberate and
-> the extractors report it every time as `cited-not-declared`; it is not a
-> defect to be closed by inventing declarations for them.
-
-> **AND THREE MORE M5i IDS ARE UNRECORDED ANYWHERE (`M5k-018`).**
-> `scripts/check_findings.py` reports the M5i range's gaps as 68 through 73.
-> The reserved block accounts for three of them; `M5i-069`, `M5i-070` and
-> `M5i-072` appear in no commit message and no tracked file, and no document
-> mentions them. They are not to be invented either.
-
-> **`9f364dd` IS BLOCKLESS, KNOWN AND DECLARED (`M5l-031`).**
-> `scripts/check_findings.py` reports `blockless commits : [9f364dd]` on every
-> run over a range that contains it, and exits non-zero for it. It is the
-> owner's commit *"config: operator settings for testnet runs"*, pushed during
-> P58 with no `Findings:` block; pushed, so it cannot be amended. That is
-> deliberate to leave standing and the extractors will report it every time;
-> it is not a defect to be closed by rewriting history or by inventing a block.
-
----
-
-## THE CENTRAL FACT — read this before anything else
-
-**Nothing M5k added is shown to have run as committed, and the bot records
-nothing that could show it.** Measured against the capture
-`trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
-`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, taken at
-M5k's close; `docs/RUN_LEDGER.md` §19 holds its census:
-
-- **No line logged by code as committed at or after `651d334` is shown to
-  exist.** Eight booking lines carry `fee=0E-8 fee_asset=USDT`, a key no commit
-  before `651d334` writes. The first is at `2026-09-24T10:38:02Z`, seven hours
-  before that commit existed, while the reflog held HEAD at `e511e6d`: the fee
-  settlement ran from uncommitted code (`M5k-123`). No line carries
-  `quote_total_source`, which every booking line writes from `c5dd7d5`, and
-  none of the six events M5k added appears.
-- **The bot records no commit** (`M5k-132`). Its startup banner is ASCII art
-  and a mode line, and no line in any capture names a commit, a version or a
-  dirty tree. `CLAUDE.md`'s deployment doctrine rules that this change, and
-  marks the banner NOT YET IMPLEMENTED.
-- **`RefusalStage.POSITION_STALE` fired once**, at `2026-09-24T19:25:00Z`
-  (`M5k-124`) — the first time in any capture.
-- **No run was writing when the capture was taken.** The bytes it adds to the
-  previous capture hold six runs, every one ending in `engine_stopped` after a
-  `SIGINT`; its last line is `pid=23236`'s, at `2026-09-25T16:16:10Z`.
-  `pid=24772`, still appending when M5j's rotation wrote this section, last
-  logged at `2026-09-19T09:42:02Z` and records no `engine_stopped`.
-
-> **ANNOTATED AT M5l (P64): THE HEADLINE AND THE FIRST TWO BULLETS ARE NO
-> LONGER TRUE.** Each was true of the capture named above, and each bullet's
-> claims about that capture still are.
->
-> - **"Nothing M5k added is shown to have run as committed"**, and the first
->   bullet's *"No line carries `quote_total_source`"*: pid 21520 ran from a
->   deployment clone at `06089d5`, verified by its `boot_provenance` line. It
->   wrote three `close_booked` lines carrying `quote_total_source=venue` and
->   `fee=0E-8 fee_asset=USDT`, in the capture whose SHA-256 is
->   `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`
->   (`M5l-053`, `docs/RUN_LEDGER.md` §23). Each one reconciles exactly against
->   the venue's fills (`M5l-054`). None of the six events M5k added appears
->   there either.
-> - **"The bot records no commit"** and *"marks the banner NOT YET
->   IMPLEMENTED"*: false since `f8898de`, which added `boot_provenance` after
->   the banner on every boot. It was false when M5l's P-1 landed, not because
->   of any run. `CLAUDE.md`'s doctrine carries the P-1 annotation.
->
-> **What survives:** the `POSITION_STALE` bullet and the no-writer bullet, both
-> scoped to that capture, and the standard of evidence below.
-
-**The standard of evidence M5j set still holds.** A claim derived from a
-capture names its digest in the sentence that makes it, or it cannot age
-visibly.
-
----
-
-## M5l's PRIORITIES — the owner's three, in the architect's order
-
-The owner ruled the three; their order is the architect's. Provenance comes
-first because without it no later run can say which code produced its
-evidence, and the other two are judged by that evidence.
-
-### P-1. Startup provenance -- RESOLVED in code; no run has exercised it
-
-**Resolved by five commits:** `fdf8d7b` (the config's resolved path and the
-digest of the bytes parsed), `ac1162d` (the bounded git runner and the
-launch checkout), `d74f78b` (the install, RECORD and the verdict), `f8898de`
-(the boot line and the refusal in `main`) and `63d4615` (an unrecorded
-module refuses); findings `M5l-001`--`M5l-028`. `main` logs one
-`event=boot_provenance` line after the banner on every boot and refuses `run`
-unless the install is a VCS install whose RECORD verifies, the launch
-checkout is clean at the installed commit, and the config is tracked there.
-The bot got its own module, `utils/provenance.py`; `describe_vcs_state` was
-not moved and U8 did not fire. `trading_bot.__file__` is logged, as
-`module_file`. `CLAUDE.md`'s deployment doctrine carries the install
-procedure the refusal accepts.
-
-**What stays open is evidence, as for every M5l item:** no run has booted
-through it yet, so `boot_provenance` is absent from every capture. The
-condition that read *"whoever next edits `_BANNER` or the startup block of
-`main` in `src/trading_bot/main.py`"* fired at `f8898de`, was satisfied
-there, and is struck.
-
-> **ANNOTATED AT M5l (P63): THE HEADING'S *"no run has exercised it"* AND
-> *"no run has booted through it yet"* ARE NO LONGER TRUE.** Both were true
-> when `5cac7ae` wrote them. The provenance check has now accepted six boots
-> from deployment clones:
-> - at `9f364dd`, before C4: pids 22740, 20112 and 12808 (`M5l-050`,
->   `docs/RUN_LEDGER.md` section 22);
-> - at `06089d5`: the dry boot pid 22088 and the evidence run pid 21520
->   (section 21);
-> - plus P59's scratch-clone boot at `1f4a718` (`M5l-041`).
->
-> **What survives:** *"`boot_provenance` is absent from every capture"*. No
-> capture has been taken since those boots, and the lines are in the clones'
-> own logs, not in any capture.
-
-> **ANNOTATED AT M5l (P64): THAT SURVIVING CLAUSE IS NO LONGER TRUE.** The
-> capture of pid 21520's log, SHA-256
-> `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`, holds
-> two `boot_provenance` lines: pid 22088's dry boot and pid 21520's run
-> (`docs/RUN_LEDGER.md` §23). **What survives:** P-1's code, and that every
-> boot it has seen from a deployment clone was accepted.
-
-### P-2. Staleness against the reconciliation dedup interval
-
-`risk.max_position_staleness_s` and the dedup interval are coupled by meaning
-and not by code, and `docs/M5_NUMBERS.md` §4 already says *"nothing checks
-it"*. The dedup interval is the shortest enabled timeframe:
-`ReconciliationBudget.from_config` builds `dedup_interval` from
-`shortest_ms`. A position is not re-read until its stamp is that old, so a
-staleness threshold at or below it refuses entries on a healthy system for
-part of every interval (`M5k-075`, REASONED). The guard has now fired once in
-production (`M5k-124`). P-2 is a config validation that refuses a
-`max_position_staleness_s` at or below the shortest enabled timeframe's dedup
-interval.
-
-> **ANNOTATED AT M5l (P70, C20): THE VALIDATION BUILT IS NOT THE ONE PLANNED
-> HERE.** The rule planned above, refusing a value *"at or below the shortest
-> enabled timeframe's dedup interval"*, is too low: the guard reads a stamp
-> up to one bar old plus that candle's handling, plus a bar per call-cap
-> deferral (`M5l-066`, `M5l-084`). C20 refuses a value below
-> `(1.5 + n - 1) x T + 1.0 s + 5 s`, with `n = min(max_open_positions, enabled
-> pairs)` -- 156 s on the committed config. It is exact, through C15's
-> helper. So the next paragraph's *"passes only on 1m"* narrows: the 180 s
-> default passes at a 1m shortest bar only while `n <= 2` (216 s at
-> `n = 3`), and at 2m the floor is already 186 s. **What survives:** that it
-> is a config-load validation beside the coherence check, and that the
-> default's fate is P-2's design question.
-
-**The model default would fail it.** MEASURED from the code:
-`config/models.py` declares `max_position_staleness_s: float = Field(180.0,
-gt=0)`. A 3m timeframe is 180 s, so under an at-or-below rule the default is
-refused by any configuration whose shortest enabled timeframe is 3m or
-longer, and passes only on 1m. The committed `config.yaml` enables BTCUSDT on
-1m alone, so it passes. `M5k-075` records a shortest timeframe of 5m in the
-owner's working copy, which would not. **Fixing the default -- a fixed figure,
-or one derived from the timeframe -- is P-2's design question.**
-
-*Arming condition:* **whoever next edits `config/models.py`'s coherence block.**
-
-This is U7's site, deliberately: the check belongs beside the coherence
-validator, and an edit there arms both items.
-
-> **ADDED AT M5l (P65): FOUR FACTS FOR P-2's DESIGN, THE SECOND OF THEM FOR
-> THE OWNER'S RULING.**
->
-> 1. **`M5l-056`: the strict `>` in `_is_due`.** In
->    `execution/reconciliation.py`: `return now - position.last_reconciled_at >
->    dedup_interval`. MEASURED at M5l's evidence run, with a position open and
->    a 1m shortest timeframe: inter-pass gaps were about 60 s 21 times and
->    about 120 s 33 times. So in practice a position is re-read up to two
->    dedup intervals apart. A staleness bound between one and two intervals
->    refuses entries on a healthy system too, so *"at or below the dedup
->    interval"* is not the whole unsafe range. The same run's outage added one
->    gap of 300 s (`M5l-055`, P-3l).
->
->    > **ANNOTATED AT M5l (P68, C19): THE LAST TWO SENTENCES ARE WRONG
->    > (`M5l-067`).** The C17 test now pins the strict `>`, and the measured
->    > gaps stand. But *"A staleness bound between one and two intervals
->    > refuses entries on a healthy system too"* confuses the gap between
->    > passes with the age the guard reads. The guard reads the stamp only in
->    > `evaluate`, after the reconciler on the same candle. So on a healthy
->    > feed it sees at most one bar plus the time from that candle's close to
->    > its read, plus one bar for each bar the position was due and not
->    > refreshed (`M5l-066`). The 300 s outage gap is sampled by no read,
->    > because no candle arrived (`M5l-068`). **What survives:** the
->    > measurement, and that the at-or-below rule is not by itself the floor.
-> 2. **The locked decision, contradicted by measurement since M5g, is for the
->    owner's ruling.** `CLAUDE.md`, *Fills are observed by polling*:
->    *"Reconciliation runs over **every** open position on **any** pair's
->    candle, so staleness is bounded by the *shortest* configured timeframe
->    rather than the slowest position's."* Two measurements contradict it: run
->    2's gaps of 119 to 121 s (`docs/M5_NUMBERS.md` §4) and `M5l-056`'s. The
->    locked bullet after it already says *"The shortest timeframe is a floor,
->    not a bound"*, but it names latency, skipped budget and dropped bars as
->    the causes, not the dedup comparison. Whether to annotate the locked
->    text, change `>` to `>=`, or dedup against a shorter interval is the
->    owner's call.
->
->    > **ANNOTATED AT M5l (P68, C19): STILL OPEN, AND THE CORRECTED TEXT
->    > OFFERED AT P68 DOES NOT FIT THE CODE (`M5l-081`).** P68 offered a
->    > re-ruled text whose deferral clauses say *"about 3·T when the per-pass
->    > call cap defers it"* and *"plus one T for a call-cap deferral"*.
->    >
->    > MEASURED by driving the real pass and resolver:
->    > - With three open positions -- an oldest healthy one, one whose
->    >   protective legs are absent, and a newest due one -- the newest was
->    >   deferred on two consecutive bars.
->    > - Its stamp reached 181 s at `T` = 60 s before it was read.
->    >
->    > So on a healthy feed `k` reaches 2, where the text allows 1. A position's
->    > own partial reconciliation followed by a neighbour's deferral reaches it
->    > the same way (REASONED). With at most two positions -- the committed
->    > config's two enabled pairs -- `k` is at most 1.
->    >
->    > So nothing was added to `CLAUDE.md`'s locked text, and the floor P68
->    > specified (`2.5·T + 1.0 s + 5 s`, which assumes `k <= 1`) was not built.
->    > Still open, for the owner: the locked text, the floor (derived at P67
->    > STEP 0 as `T + H + k·T`, with `k` now shown to reach 2 at three
->    > positions), the default, and the 180 s rationale (`M5l-072`).
->    >
->    > > **ANNOTATED AT M5l (P70, C20): *"the floor"* AND *"the 180 s
->    > > rationale"* ARE NO LONGER OPEN.** The floor is built, with
->    > > `k_max = n - 1` per the owner's P69 ruling, and it is 156 s on the
->    > > committed config. The 180 s docstring now states that derivation.
->    > > **What stays open:** the locked text, and whether the floor should
->    > > widen for position churn, which adds one deferral beyond `n - 1`
->    > > (`M5l-088`). The default stays at 180 s, PLACEHOLDER.
-> 3. **The coherence validator compares floats and prints one decimal.** In
->    `config/models.py` it tests `if dispatch + reconcile + settlement <=
->    budget:` with every term a `float` product, and the refusal prints `{dispatch
->    + reconcile + settlement:.1f}s` against `budget {budget:.1f}s`.
->    MEASURED through `AppConfig` on the committed config (`M5l-065`): of 120
->    configurations whose total is exactly 30.0 s in decimal, 9 are refused,
->    each with a message reading *"is 30.0s. That exceeds 50% … budget
->    30.0s"*. D = 9.4 with T_recon = 2.24 is one. The committed config, at
->    29.5 s, is unaffected. The coherence block is this item's arming site.
->
->    > **ANNOTATED AT M5l (P68, C15): THE ARITHMETIC HALF IS RESOLVED.**
->    > *"compares floats"* and *"with every term a `float` product"* are no
->    > longer true. Every term is now a `Decimal`: each duration goes through
->    > `_exact_seconds`, which is pydantic's own conversion, and `T_min` comes
->    > from integer milliseconds. *"of 120 … 9 are refused"* was true at
->    > `f2182a6`; now 0 are. `test_every_exact_boundary_configuration_is_accepted`
->    > pins it. **What survives:** *"prints one decimal"*, since the message
->    > still renders `:.1f` until C16.
->
->    > **ANNOTATED AT M5l (P68, C16): ITEM 3 IS RESOLVED.** *"prints one
->    > decimal"* is no longer true, and neither is the note above that it
->    > survives. The refusal now prints each duration, each product, the
->    > total and the budget exactly, for example *"is 30.02s"*.
->    > `test_the_refusal_prints_the_exact_sum_and_its_terms` pins it.
-> 4. **`M5l-049`'s stale docstring still stands.** `ReconciliationBudget.from_config`
->    in `execution/reconciliation_driver.py` says *"splitting ``T_recon`` into a
->    per-attempt share would be a tail claim that the only samples in existence
->    -- six, bimodal, from one host -- cannot support."* It has been false since
->    P59's 300 samples (`M5l-039`). It is in `src/`, which no M5l documents
->    commit may edit.
->
->    > **ANNOTATED AT M5l (P68, C18): ITEM 4 IS RESOLVED.** *"still stands"*
->    > is no longer true. The docstring now reads *"a tail claim the samples
->    > cannot support: P59's 300 readings came from one session on one host
->    > (``M5l-039``, maximum 0.467 s)"*. C18 also fixed the same claim in
->    > `RiskManager._stale_positions` (`M5l-070`), the status of
->    > `reconcile_deadline_s` (`M5l-071`), and `record_partial_reconciliation`'s
->    > account of an old stamp (`M5l-076`).
->
-> **One sentence above went stale at `9f364dd`, and is annotated here:**
-> *"The committed `config.yaml` enables BTCUSDT on 1m alone"*. The committed
-> config also enables ETHUSDT on 5m. Its conclusion survives: the shortest
-> enabled timeframe is still 1m, so the default passes.
-
-> **ANNOTATED AT M5l (P71, C22): P-2 IS RESOLVED EXCEPT FOR ITS LOCKED TEXT
-> AND ITS DEFAULT.** Item by item, with the commit that resolved each:
->
-> - **The validation this item plans:** built at `f20e839` (C20). Config
->   load refuses a `max_position_staleness_s` below the healthy-feed floor,
->   `(1.5 + n - 1) x T + 1.0 s + 5 s`, which is 156 s on the committed
->   config. `90355df` (C20b) adds the precondition that floor rests on:
->   `max_open_positions >= L + 1`, where `L` is the number of enabled
->   protective legs (`M5l-087`, P-3o).
-> - **Item 1, the strict `>`:** pinned at `517348f` (C17). What the
->   measured gaps mean was corrected by C19's annotation above
->   (`M5l-067`). Whether to change it to `>=` goes with item 2.
-> - **Item 2, the locked decision: STILL OPEN.** The owner's re-ruled text
->   was offered at P71 as C21 and was not added. It says that once a stamp
->   passes the floor, the guard refuses every entry. That is not what the
->   code does. The guard compares against the CONFIGURED bound
->   (`risk.max_position_staleness_s`, 180 s committed), not against the
->   floor (156 s). A stamp between the two is refused by nothing. The floor
->   and the 180 s rationale were resolved at `f20e839`, as noted under
->   item 2.
-> - **Item 3, float arithmetic and one-decimal output:** resolved at
->   `25dbc61` (C15) and `5d6f115` (C16).
-> - **Item 4, `M5l-049`'s docstring:** resolved at `6e7c9f2` (C18).
-> - **Churn (`M5l-088`), measured against the guard (`M5l-089`).** The
->   real pass, resolver and `RiskManager.evaluate` were driven over 8
->   bars, at `n = 2` and `n = 3` with the call cap `M = 3`. A position
->   opened on every freed slot. Churn pushed a healthy stamp past the floor
->   in every run: 182 s at `n = 2`, and 242 s at `n = 3`, where it was
->   deferred on three consecutive bars, so `k` reached `n`. **No entry was
->   admitted after any stamp passed the bound**: `evaluate` refused as
->   `position_stale`, or earlier as `committed_risk_unknown`. The probe
->   models the reopened position with an expired FOK entry, so it never
->   resolves, and `committed_risk_unknown` then refuses every later bar. So
->   churn costs refusals, not admissions. Whether the floor should widen for
->   churn stays a question about false refusals, not about safety.
-> - **The default: STILL OPEN.** It stays at 180 s, PLACEHOLDER. It passes
->   the floor on the committed config.
->
-> **What survives:** the locked-decision question, and the default's value.
-
-> **ANNOTATED AT M5l (P72, C23): THE DEFAULT IS RULED; P-2 STAYS OPEN ON ONE
-> CLAUSE OF ITS LOCKED TEXT.**
->
-> - **The default: RULED, kept at 180 s.** The owner rules it kept because it
->   passes the derived floor on the committed config (180 s against 156 s).
->   A configuration it does not fit is refused at load, and the refusal
->   names a value to set: *"Set risk.max_position_staleness_s to at least"*
->   the floor, in `_check_staleness_bound_covers_a_healthy_feed`. Its status
->   stays PLACEHOLDER, since keeping a value does not measure it. This makes
->   three sentences above no longer true: *"The default: STILL OPEN"*, *"the
->   default's value"* in the survival line above, and the P-2 body's
->   *"Fixing the default -- a fixed figure, or one derived from the
->   timeframe -- is P-2's design question"*, with the C20 annotation's
->   *"the default's fate is P-2's design question"*.
-> - **Item 2, the locked decision: STILL OPEN, on one clause.** The owner's
->   re-ruled text, offered at P72 as C23, was not added to `CLAUDE.md`. One
->   clause disagrees with P72's STEP 0 (`M5l-092`): *"Churn ... can add
->   deferrals, up to n in a row as measured at M5l"*. In the stress arm, a
->   newcomer's take-profit filled before its first read. At `n = 3`, under
->   the 216 s bound that is `n = 3`'s floor, the healthy position was then
->   deferred on four consecutive bars, which is `n + 1`. Its stamp reached
->   242 s and then 302 s, and it was read on the fifth bar. Every other
->   clause agrees with STEP 0 and with the code. That includes *"the guard
->   refuses every entry once any stamp exceeds the configured bound"*:
->   `_stale_positions` appends any position whose stamp is `None` or older
->   than the bound, and `evaluate` refuses if the list is non-empty. No entry
->   was admitted while any stamp exceeded the bound, in any of the six
->   measured runs.
-> - **The C20 annotation's *"position churn, which adds one deferral beyond
->   `n - 1`"* understates.** The same stress arm
->   added two deferrals beyond `n - 1`. Recorded here, not corrected.
->
-> **What survives:** the locked-decision question, now narrowed to how many
-> deferrals churn can add in a row. P-2 is not closed.
-
-> **ANNOTATED AT M5l (P73, C24): THE CHURN CLAUSE IS RESOLVED; P-2 STAYS OPEN
-> ON A MISSING PRECONDITION.**
->
-> - **The owner's rule for locked text:** locked text states enforced
->   guarantees and derived bounds with their preconditions, never counts
->   measured in adversarial arms as limits.
-> - **The churn clause is resolved.** The owner's P73 text says churn *"can
->   add deferrals beyond n - 1 (measured up to n + 1, M5l-092); no bound is
->   claimed for it"*. That agrees with `M5l-092`.
-> - **Item 2, the locked decision: STILL OPEN, on one clause.** P73's text,
->   offered as C24, was not added to `CLAUDE.md`. Its sentence *"so the age it
->   observes is at most T plus the time from the candle's close to that read,
->   plus one T for each consecutive call-cap deferral of that position"*
->   states a derived bound without its precondition, a healthy feed. The
->   finding it rests on carries that precondition: `M5l-066` reads *"so on a
->   healthy feed the age it observes is at most one bar plus the handling
->   time"*. MEASURED at P73 (`M5l-095`), with the real pass, resolver and
->   `evaluate`: after a 360 s gap with no candle, a neighbour whose
->   take-profit filled during the gap was visited first. On the first candle
->   after the gap, the healthy position was deferred once, and `evaluate`
->   read its stamp at 361 s, where the clause allows 121 s. The guarantee
->   held: `evaluate` refused as `position_stale`. Every other clause has a
->   supporting code line or declared finding.
->
-> **What survives:** the locked-decision question, narrowed to the bound's
-> precondition. P-2 is not closed. The commits it rests on so far are
-> `f20e839`, `90355df`, `cf37cda`, `9f188c4` and this one.
-
-> **ANNOTATED AT M5l (P74, C26): P-2 IS CLOSED.** The owner's re-ruled text,
-> with "on a healthy feed" restored to the age bound and a sentence added for
-> a feed gap, is annotated onto `CLAUDE.md`'s locked decision *Fills are
-> observed by polling*. Every clause has a supporting code line or declared
-> finding. So these sentences are no longer true:
->
-> - *"P-2 is not closed"*, here and in C23's annotation;
-> - *"Item 2, the locked decision: STILL OPEN"*, in C22's, C23's and C24's
->   annotations;
-> - item 2's *"Whether to annotate the locked text, change `>` to `>=`, or
->   dedup against a shorter interval is the owner's call"*, and item 1's
->   *"Whether to change it to `>=` goes with item 2"*. Both are ruled: the
->   locked text is annotated, and it keeps the strict `>`.
->
-> The commits that resolved P-2:
->
-> - `f20e839` (C20): the staleness floor;
-> - `90355df` (C20b): the `L + 1` call-cap precondition;
-> - `cf37cda` (C22): the item-by-item record;
-> - `9f188c4` (C23): the default, kept at 180 s;
-> - `40a9e67` (C24): the owner's rule for locked text;
-> - `127be9a` (C25): the churn wording at `M5l-094`'s sites;
-> - this commit: the locked text.
->
-> The earlier items stand as recorded by C22: `517348f` (C17), `25dbc61`
-> (C15), `5d6f115` (C16) and `6e7c9f2` (C18).
->
-> **What survives:** nothing of P-2 is carried. Its neighbours are:
->
-> - P-3m, where a deferral still logs nothing;
-> - P-3o, where the call cap is still the position limit;
-> - P-3l, where a feed gap is still unreported.
->
-> (ANNOTATED AT M5l P89, C41: P-3o's bullet is no longer true; its item is
-> RESOLVED, the cap being `max(max_open_positions, L + 1)`. And C42: P-3m's
-> bullet, *"where a deferral still logs nothing"*, is no longer true of the
-> log; a deferral is logged as `reconciliation_deferred`, and the starvation
-> and churn shapes it names stay open. And C44 to C46: P-3l's bullet, *"where a
-> feed gap is still unreported"*, is no longer true; a gap is logged, a BUY across
-> it is refused, and a silent pair is reported, with the stopped reconciliation
-> accepted under P76.)
->
-> Each keeps its own item and arming condition.
-
-### P-3. The silent and unhedged failure modes catalogued in M5k
-
-Each is its own carried item with its own condition, re-verified by content
-at `4544b3a`.
-
-> **ANNOTATED AT M5l (P65): TRUE OF P-3a TO P-3j, NOT OF P-3k OR P-3l.** Both
-> were catalogued at M5l, not M5k. P-3k was added at `06089d5` and P-3l by
-> the commit that writes this annotation, each against the tree of its own
-> commit. Neither was re-verified at `4544b3a`, which predates both. P-3k
-> should have carried this note when it landed. **What survives:** the
-> heading's scope for P-3a to P-3j, and the rule that each item carries its
-> own condition.
->
-> **AND P-3m AND P-3n (P68, C19)**, both catalogued at M5l by the commit
-> that adds them, and likewise not re-verified at `4544b3a`.
->
-> **AND P-3o (P71, C20b)**, on the same terms.
+Seven paragraphs in the items this rotation strikes were the ONLY place in the tree where an owner's ruling stood in the owner's own words (`M5l-099`, `M5l-116` and `M5l-208` are what happens to a ruling held only as reported speech). They are lifted here **unchanged**, from `docs/NEXT_MILESTONE.md` at `9fc8b8d`, so that none of them lives only in git history. The rest of the struck items' text, their annotations and designs, is in git history at that commit.
 
 > **THE OWNER'S P-3 ORDER, ruled at M5l P76 (C27).** The work runs in this
 > order:
@@ -597,6 +229,185 @@ at `4544b3a`.
 > is cited by content and by this record, never by the bare label. **What it
 > governs:** `Position.failed_settlement_passes` (C47) and, in C48, the entry
 > quote total. Neither is in `store.PositionRecord`.
+
+> **P-3k IS CLOSED, BY THE OWNER'S RULING AT M5l P87 (C38) -- THE FIRST
+> SENTENCE'S GATE, *"stays closed until the supervised run's arms A1, A2 and
+> A4 are recorded"*, IS DISCHARGED.** The ruling, verbatim: *"The P-3k gate is
+> satisfied: A1 (hard kill, restore), A2 (protective fill while down, booked at
+> boot) and A4 (protection cancelled while down, R3 sells once) passed on the
+> supervised Testnet run of 2026-10-01/02, A1 and A2 at d1074c6 and A4 at
+> 5e22bc6. A2's Ctrl+C stop does not change the path it tests. P-3k no longer
+> blocks live trading. The fee-capture and base-asset-netting gates remain, so
+> live trading stays blocked."* The arms are recorded in `docs/RUN_LEDGER.md`
+> section 25 (`M5l-168`, `M5l-169`). **What survives:** the item's history and
+> every annotation beneath it, the *"Live trading additionally stays blocked
+> until an open position survives a restart"* ruling at P76 as the record of
+> what the gate was, and **live trading itself, which stays blocked by N6's two
+> remaining preconditions** -- the non-zero fee capture and base-asset
+> netting. Closing P-3k lifts one of three gates and none of the code block:
+> `refuse_live_trading` is unchanged.
+
+> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"Live trading
+> additionally stays blocked until an open position survives a restart,
+> clean or by power cut, with its protective fills booked to the ledger."*
+> Until P76 the tree recorded this gate only as the owner's addition at P61,
+> in reported speech (`M5l-099`). The ruling also states what lifting it
+> requires: survival of both a clean restart and a power cut, AND the
+> protective fills booked.
+
+- **Deployment, verbatim:** "No deployment or supervised run may use any
+  commit from 131f1c9 up to C32b's: records are written from C30, and boot
+  reads them only from C32, so each boot's first save erases them (today's
+  behaviour, not a regression)."
+  > ANNOTATED AT M5l P81 (C32a): *"each boot's first save erases them"* is
+  > no longer true of a record not beside a pending close; the boot now
+  > restores or drops it. The restriction itself stands, through C32b.
+- **The accepted residual, verbatim:** "One kill during one ambiguous
+  placement write loses that position's durability (M5l-110); accepted by the
+  owner at P78 (Q2(b))." The ambiguous-placement path, `_persist_dropping`, is
+  unchanged by C30.
+
+**A POSITION RECORD BESIDE A PENDING CLOSE -- the owner's rulings, P81
+amendment 1.**
+
+- *Interim, C32a, verbatim:* "a position record whose symbol has a pending
+  CLOSE record is neither classified nor restored. It is left out of the
+  classifier's input, and boot's save does not carry it, which is today's
+  behaviour. Site B handles the close as today."
+- *Final design, for C32b, verbatim:* "For a close record beside a position
+  record, read the close's sell by the client id in the close record:"
+  - "FILLED: settle at boot. On success, book ledger-only (I7), satisfying
+    Q13. On FeeUnresolvable, keep a held record with no Position (Q5(b),
+    M5l-112). Remove the close record either way."
+  - "Absent, or terminal and unfilled, with the legs CANCELED and base >=
+    quantity: RestoreAndClose, dropping the close record, so exactly one sell
+    goes out."
+  - "List live: Restore; the close record's fate is decided in P82 after STEP
+    0 reads Site B."
+  - "Anything else: RefuseBoot."
+  - "The two restart tests' assertions change once, in C32b."
+- Why it was needed (`M5l-126`): the bot's own close cancels the protective
+  legs by design, so the classifier reads that list as `Gone` or
+  `RestoreAndClose`, and Q13 collides with Q5(b) on the same disk shape.
+
+**Not a gate on live trading**, by the project owner's ruling at P65.
+
+> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"The market-data outage
+> is not a gate on live trading, because venue-side protection remains in
+> force through it."* Until P76 the tree recorded the P65 ruling above only
+> in reported speech (`M5l-099`).
+
+---
+
+## RESOLVED AT M5l -- one index line each
+
+Each item's full text is in git history at `9fc8b8d` and in `docs/PHASE_HISTORY.md`'s M5l entry. An item resolved only in part is indexed here AND carried below with its residue and its condition: P-3i and P-3m, whose resolved halves are `4c2e55c` (C43) and `b29a658` (C42); and P-3n, which is a ruling and not code.
+
+- **P-1, startup provenance** -- resolved by `fdf8d7b`, `ac1162d`, `d74f78b`, `f8898de` and `63d4615`, with `c2cab79` (every refusal names its cause); the accepted verdict is logged on the boot of each of the four deployment clones whose logs were read (`06089d5`, `d1074c6`, `5e22bc6` and `51a5f27`). Findings: `M5l-001` to `M5l-032`, the provenance design.
+- **P-2, staleness against the reconciliation dedup interval** -- CLOSED by the owner's re-ruled text at P74, `5721a5c`, after `25dbc61`, `5d6f115`, `517348f`, `6e7c9f2`, `4a094c5`, `f20e839`, `90355df`, `cf37cda`, `9f188c4`, `40a9e67` and `127be9a`. Findings: `M5l-056` to `M5l-097`, the staleness bound and its derivation.
+
+---
+
+## NEW CARRIED ITEMS, AT M5l's CLOSE
+
+Each is the residue of an M5l item that was closed in the main and left something
+standing, written once here so that its condition outlives the item it came from.
+
+### K1. The store's save and the instance lock have two reusers
+
+`scripts/release_position.py` and `scripts/normalize_ledger_exponents.py` each read the
+store through `store.load`, write it through `store.save`, and take the bot's
+non-blocking instance lock for the whole operation. **The lock is resolved against the
+working directory, so a tool excludes the bot of the clone it is run from and no other**
+(`M5l-155`): a store changed from a different clone than the one running the bot is not
+protected. `store.save` always writes the current schema, so saving a store written by
+an older build upgrades it as well, which is why the normaliser refuses another schema
+(`M5l-228`). Carried from P-3k's release-tool item and P-3h's normaliser item, which are
+indexed below.
+
+*Arming condition:* **whoever next edits `store.save` or `PersistedState` in `persistence/store.py`, or the instance lock's path handling in `utils/instance_lock.py`, which `scripts/release_position.py` and `scripts/normalize_ledger_exponents.py` reuse.**
+
+### K2. What P-3k leaves standing
+
+P-3k is closed by the owner's ruling at P87, and three things it records stay true:
+
+- **R3's synthetic `CLOSE` is attempted once per symbol, on its first candle** (`M5l-137`).
+  If the executor refuses it, the position stays restored and `UNKNOWN`, every entry is
+  refused, and nothing retries it; the strategy's own `CLOSE` path is still open. Not
+  ruled; chosen to avoid a refusal line on every candle. REASONED.
+- **R3's "base held" is read from the account balance** (`M5l-125`), which cannot tell the
+  position's base from a manual holding of the same asset. With both protective legs
+  cancelled and a human holding at least the quantity, `RestoreAndClose` sells it. A
+  consequence of Q4(b) as ruled; the operator rule is in `CLAUDE.md`'s deployment
+  procedure. Its first priced instance is `M5l-164`, the ETHUSDT takeover that cost
+  `-6.91308000` USDT outside the ledger.
+- ***"Only a restart forgets"*** in `executor.py` under U2's Reading A is still true: the
+  unconfirmed placement's durable record is dropped on purpose.
+
+*Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
+
+### K3. Four pre-existing false sentences in `src/` and `tests/`, reported and not edited
+
+Declared, each made false by something other than the commit that found it, and left
+standing because the rotation that records them is documents only. Nothing here is a
+control defect; each describes the tree wrongly.
+
+- **`engine/modes.py`, `_snapshot_live_order_lists`' block message** says the position
+  *"was lost when the previous process ended"* (`M5l-159`). After P-3k that is true only
+  of a live list with no record.
+- **`tests/unit/test_reconciliation_pass.py`,
+  `test_a_budget_below_one_plus_l_cannot_complete_the_position`'s docstring** says
+  `max_open_positions >= L + 1` is *"a config relation nothing validates"* (`M5l-188`).
+  False since C20b, and since C41 the call cap is `max(max_open_positions, L + 1)` so the
+  relation is not a configuration constraint at all.
+- **`execution/booking_line.py`'s header**, *"ONE FIELD SET FOR THREE EMITTERS"*
+  (`M5l-226`): the boot's `boot_exit_booked` line also consumes `settlement_fields`, so
+  there are four, and the census test covers the executor and the driver only.
+- **`execution/dispatch_budget.py`'s module docstring**, *"The only latency samples in
+  existence are six `get_open_orders` reads"* (`M5l-263`). `M5l-039`'s 300
+  reconciliation-call samples exist from P59. The same claim was fixed in two other
+  docstrings and missed in this one.
+
+*Arming condition:* **whoever next edits `_snapshot_live_order_lists` in `engine/modes.py`, `settlement_fields` in `execution/booking_line.py`, `DispatchBudget` in `execution/dispatch_budget.py`, or `test_a_budget_below_one_plus_l_cannot_complete_the_position` in `tests/unit/test_reconciliation_pass.py`.**
+
+### K4. The cause of the 229 s stall is UNMEASURED (`M5l-198`)
+
+At `13:53Z` on 2026-09-27 the bot's disconnect warning came 229 s after the library's
+first error. The consumer's own code does not stall between the library error and the
+warning (`M5l-196`, measured by probe: a blocked handler produces a delay equal to the
+block), and at 13:53:00 the handler chain should not have blocked and the log holds no
+line from it. **What held the consumer is unmeasured.** `FeedWatchdog`'s lag and
+slow-chain lines are the instrument built for it (`M5l-203`), and **M5l's observation run
+produced none**: 0 `event_loop_lagging` and 0 `handler_chain_slow` over 8.356 h, because
+nothing stalled (`docs/RUN_LEDGER.md` section 26). So the instrument is built, quiet on a
+healthy feed, and has not yet caught an occurrence. UNMEASURED.
+
+*Arming condition:* **whoever next edits `FeedWatchdog` in `data/watchdog.py`, or `_run` in `exchange/websocket_client.py`.**
+
+### K5. The natural-gap rate of a pair other than BTCUSDT or ETHUSDT (`M5l-202`)
+
+**Left open, by the project owner's ruling at P98**, with this condition, verbatim:
+*"whoever next enables a pair other than BTCUSDT or ETHUSDT measures its natural-gap rate
+before trading it."* Whether Binance omits a kline for an interval with no trades is
+UNMEASURED. On an illiquid pair the gap detector would read a quiet interval as a gap and
+the guard would refuse `BUY`s for a window. **Measured for the committed pairs only:**
+BTCUSDT/1m and ETHUSDT/5m had no missing interval and no zero-trade bar over 8.356 h,
+and the detector logged 0 gaps (`M5l-251`, `docs/RUN_LEDGER.md` section 26), so the
+omission behaviour was never exercised.
+
+*Arming condition:* **whoever next enables a pair other than BTCUSDT or ETHUSDT in `enabled_pairs` in `config.yaml` measures its natural-gap rate before trading it.**
+
+---
+
+## M5l's PRIORITIES — the owner's three, in the architect's order
+
+The owner ruled the three; their order is the architect's. Provenance comes
+first because without it no later run can say which code produced its
+evidence, and the other two are judged by that evidence.
+
+### P-3. The silent and unhedged failure modes catalogued in M5k
+
+*Resolved items are struck and indexed above as this rotation proceeds; P-3i, P-3m and P-3n are carried. This heading goes with the last of them.*
 
 #### P-3a. A failed supply is reported as a failed settlement (PIN-3, `M5k-107`)
 
