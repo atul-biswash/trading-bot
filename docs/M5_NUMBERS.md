@@ -306,6 +306,16 @@ soak**. The re-derivation is expected, not a surprise.
 The floor on the shipped config is `60 s + T_recon`, so any value at or below ~63 s
 fires on a healthy system.
 
+> **ANNOTATED AT M5l P98 (R5): THE RATIONALE *"two consecutive budget skips are normal"*
+> DOES NOT HOLD UNDER STRICT DEDUP (`M5l-072`, PRE-EXISTING).** Under `_is_due`'s strict `>`
+> a skipped bar plus two unrefreshed due bars puts the stamp's age at about 3T plus the
+> handling time, which is over a bound of 3T, so the multiplier does not follow from the
+> rationale it was given. The multiplier is a policy choice and the paragraph says so; what
+> it lacked was a mechanism, and `RiskConfig`'s own docstring already says the old rationale
+> *"named no mechanism in this code and did not hold under strict dedup"*. **What survives:**
+> the 180 s default, which the owner ruled KEPT at `9f188c4` as a policy choice and not a
+> measurement; the floor, whose derivation the P70 annotation below supersedes.
+
 **Shipped at M5a as `180.0`.** Its meaning is coupled to the shortest enabled
 timeframe and its type is not: an operator who lengthens their shortest bar must
 raise this by hand and **nothing checks it**. That asymmetry is deliberate rather

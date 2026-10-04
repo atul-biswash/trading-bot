@@ -2317,6 +2317,20 @@ not fired either: every line on which a requested leg did not rest also carried
 a sibling fill clause, so booking took the fill branch. **A sibling is not a
 mechanism.**
 
+> **ANNOTATED AT M5l P98 (R5): *"the escalation has never run"* IS FALSE, AND SO IS THE
+> HEADING FOR A DELIBERATE ARM (`M5l-195`, PRE-EXISTING, found by P-3k's run and left
+> unannotated until now).** The count of zero is true of the capture named above and of no
+> other. `exit_unbookable` was logged at `CRITICAL` in P-3k's supervised run:
+> `docs/RUN_LEDGER.md` section 25 records it for ETHUSDT on every pass of 2026-10-01
+> until `18:36:04Z` (the A4 failure, list 401075, pid 16748) and once for BTCUSDT at
+> `2026-10-02T12:02:00Z` (the A4 re-run, pid 12472, `state=diverged`), where it is one of
+> the sheet's expected lines. So the position-level `DIVERGED` verdict and the escalation
+> HAVE run in production, **under a deliberate arm**: the owner's cancel script removed the
+> position's protection and the bot was restarted. **What survives:** `M5k-005`'s
+> observation that every organic line on which a requested leg did not rest also carried a
+> sibling fill clause, and that a sibling is not a mechanism, so no UNARMED divergence has
+> been observed. The arming condition below is unchanged.
+
 *Arming condition:* **whoever next edits `_book_exits` in
 `execution/reconciliation_driver.py` or `_refine` in
 `execution/reconciliation.py`** — the two callers that would have to agree on
