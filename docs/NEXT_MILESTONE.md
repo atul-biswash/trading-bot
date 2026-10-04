@@ -673,20 +673,10 @@ residue and its condition.
 - **`M5i-109`, two stale sentences in a test docstring** — resolved at
   `c5dd7d5`, whose rewrite of the test removed the docstring; recorded in that
   commit's arming audit.
-
----
-
-## CARRIED FROM M5k'S PRIORITIES
-
-### 3. Regularising the arming conditions
-
-Done at M5j's rotation for this file, and widened at M5k's by `CLAUDE.md`'s
-*"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT THAT CARRIES AN ARMING CONDITION"*,
-under which the audit reads every document that carries a condition.
-**Two conditions are left unparsed deliberately**, one in this file -- Q-C §3's
-leg set -- and one in `docs/QB_ESCALATION.md` -- the halt flag's first writer.
-Closing either needs a ruling rather than an edit. See the note under **Arming
-conditions** below, which carries the measured registers.
+- **Priority 3, regularising the arming conditions** — done at M5j's rotation for this
+  file and widened at M5k's by `CLAUDE.md`'s rule that the audit reads every document that
+  carries a condition; the registers are re-measured at every rotation, and M5l's are
+  below. The two unparsed candidates it names are kept by ruling.
 
 ---
 
@@ -695,15 +685,41 @@ conditions** below, which carries the measured registers.
 `scripts/check_arming_conditions.py` keeps a parsed and an unparsed register and
 **exits non-zero while the unparsed register is non-empty**. Under `CLAUDE.md`'s
 *"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT THAT CARRIES AN ARMING CONDITION"*
-it is run on every document that carries a condition. MEASURED at M5k's
-rotation, on the tree this commit leaves:
+it is run on every document that carries a condition. **MEASURED at M5l's rotation, on
+the tree this commit leaves** (`scripts/check_arming_conditions.py`, one run per document,
+P98):
 
-| document | candidates | parsed | unparsed |
-|---|---:|---:|---:|
-| `docs/NEXT_MILESTONE.md` | 38 | 37 | 1 |
-| `CLAUDE.md` | 2 | 2 | 0 |
-| `docs/QB_ESCALATION.md` | 1 | 0 | 1 |
-| `docs/QC_PROTECTIVE_ORDERS.md` | 0 | 0 | 0 |
+| document | candidates | parsed | unparsed | exit |
+|---|---:|---:|---:|---:|
+| `docs/NEXT_MILESTONE.md` | 38 | 37 | 1 | 1 |
+| `CLAUDE.md` | 2 | 2 | 0 | 0 |
+| `docs/QB_ESCALATION.md` | 1 | 0 | 1 | 1 |
+| `docs/QC_PROTECTIVE_ORDERS.md` | 0 | 0 | 0 | 0 |
+| `docs/M5_NUMBERS.md` | 0 | 0 | 0 | 0 |
+| `README.md` | 0 | 0 | 0 | 0 |
+| `docs/RUN_LEDGER.md` | 0 | 0 | 0 | 0 |
+| `docs/PHASE_HISTORY.md` | 0 | 0 | 0 | 0 |
+
+**The first four rows are the four documents M5k's table read, and they are unchanged in
+count**, but `docs/NEXT_MILESTONE.md`'s 38 is not M5k's 38: the conditions of the struck
+M5l items retired with them, and K1 to K5 and U9 to U12 were added. **Every new
+condition parses**, `M5l-202`'s included, which is the owner's wording verbatim with its
+site named, `enabled_pairs` in `config.yaml`. The four rows below the first four are
+new in this table: those documents carry no condition and the checker reads none. The
+two unparsed candidates are the two that M5k left unparsed deliberately, Q-C section 3's
+leg set here and the halt flag's first writer in `docs/QB_ESCALATION.md`, and the exit
+code of 1 for each is the register doing its job, as the paragraphs below record.
+
+**Two labels that said "MEASURED at M5k's rotation" were re-measured, and neither moved.**
+`CLAUDE.md`'s *"MEASURED at M5k's rotation: this machine's `.venv` lists
+`binance-trading-bot 0.1.0` as editable at this repository's path"*: `pip list` still
+lists it, `pip show` gives *"Editable project location"* as this repository, and run from
+`C:\Users\User\AppData\Local\Temp` the interpreter still resolves
+`trading_bot.__file__` to this repository's `src/trading_bot/__init__.py`. That sentence is
+in `CLAUDE.md`'s locked text, which the annotation authority excludes, so it is recorded
+here and not annotated there. And W6's `getMessage()` count, below. The third label, THE
+GATE BASELINE, was re-measured in R7.
+
 
 At M5j's rotation the tool read 22 candidates here, 15 parsed and 7 unparsed,
 every failure for the same reason: the bold span named no backticked symbol.
@@ -739,7 +755,67 @@ caller-phrase with no symbol is the alternative, and it is the owner's call.
 
 ---
 
-## THE MODE-3 RECORD — what M5k's rotation pass found
+## THE MODE-3 RECORD — what M5l's rotation pass found
+
+`CLAUDE.md`'s failure mode 3 is a condition that FIRES and nothing notices, and its
+rotation procedure asks only that the rotation LOOK. M5l's rotation looked the way M5k's
+did, with the same instrument, over **the 65 M5l commits from `fdf8d7b` to `7489581`**
+(the rotation's own commits edit documents only): for each condition the carried file
+lists, the exact source segment of each `def` or `class` it names, extracted with `ast`,
+compared at the commit and at its parent. The script is `p98_firings.py`, beside
+`p98_events.py` in `F:\trading bot\deploy\arm_tools`; it reads the register with
+`scripts/check_arming_conditions.py` and not by hand.
+
+**What it measured.** 39 conditions were read (37 parsed in this file and 2 in
+`CLAUDE.md`; Q-C section 3's candidate is unparsed by design) and **32 are measurable**
+by this instrument. The other seven name nothing that is a `def` or `class`: K5 (`enabled_pairs`, a config
+key), P-3n and U7 (`_CLOSE_SEQUENCE_CALLS`, a constant), U6 (`paper/simulator.py` and
+`backtesting/engine.py`, files that are still stubs), A3 (a document,
+`docs/PHASE_HISTORY.md`), `M5i-126` (`_UNREAD_OUTPUT`, a constant) and the census item
+(`scripts/run_census.py`, a script). **Four more are measurable in part**, one of their
+names resolving and another not: U11's `provider.on_candle` (an attribute), A6's
+`_log_booked`, `M5i-104`'s `caplog.records` and `CLAUDE.md`'s `TradingMode.LIVE` (an enum
+member). **54 firings occur across the 32**, a firing being a commit that changed any
+resolved symbol's source. **41 of the 54** name the symbol in the commit
+message or in the lines the commit added to this file, which is the cheapest honest test of
+an audit and a proxy for one. **13 do not**, and they were read by content:
+
+- **Four are P-3k's own implementation**, `5a2307c`, `fa06d77`, `a14aa6c` and `2081389`
+  (C32a to C32b-3). They edit `live_system`, which the condition names only as a
+  description of the two snapshot functions it guards, and at C32a they edit
+  `_snapshot_unmanaged_holdings` and `_snapshot_live_order_lists` themselves. They ARE the
+  work the condition guards, and the item records it.
+- **Two are a class named where a method is meant.** `cdc6c2e` (C50) edits
+  `Portfolio.close_position`; N5's condition is *"whoever first adds a halt field to
+  `Portfolio`"* and `M5i-095`'s is a test asserting over `Portfolio`. No halt field was
+  added and no such test written, so neither fired in substance.
+- **Six are U3's, and two are real.** U3's condition is *"the placement site in
+  `OrderExecutor`"*, and the class is named. Four of the six edit other methods, by their
+  diffs: `2081389` (`_resolve_close` and two others), `cdc6c2e` (`_book_resolved_close`),
+  `bf6f9a8` and `51a5f27` (the close-sequence guards). **`989edfc` (C30) edits
+  `dispatch`**, whose placement success path it reordered, **and `4341c5c` (C48) edits
+  `dispatch`, `_open_position` and `_entry_fill_price`**, the placement caller, and U3 was
+  recorded as *"Carried, unfired"*: see its annotation.
+- **One is U0's, and it is real.** `fa06d77` (C32b-1) changed what both persistence
+  closures write, and the item recorded the firings at C30 and C32a and not this one: see
+  its annotation.
+
+**So the pass found three real firings of two conditions that nothing recorded**, U0 at
+C32b-1 and U3 at C30 and at C48, all REAFFIRMED by content in their annotations. That is
+the mode-3 shape again, and in the cheap direction: none moved the thing its item is about.
+
+**What the instrument cannot see**, stated so the record is not read as complete. It
+resolves a name to the first `def` or `class` of that name in the module, so a name shared
+by two methods reads as one. It cannot see a constant, a key, an attribute or a document.
+The checker lists descriptive symbols as if they were sites (`live_system`,
+`TradingMode.LIVE`, `caplog.records`), and a class named in place of a method fires on any
+edit to the class. The "names the symbol" test is a proxy for an audit and not an audit. A
+firing the instrument reports as named may still have been judged wrongly; one it
+reports as unnamed may have been judged well.
+
+---
+
+## THE M5k RECORD, carried — what M5k's rotation pass found
 
 `CLAUDE.md`'s failure mode 3 is a condition that FIRES and nothing notices.
 M5k's rotation read every condition against every M5k commit that edited its
@@ -874,6 +950,15 @@ from the boot's own save when there was one, so after a boot that settled
 restored placements it does not write them back (`M5l-128`). The carry itself,
 `pending=persisted.pending`, is unchanged.
 
+> **FIRED AT M5l P78 (C32b-1, `fa06d77`) AND NEVER RECORDED UNTIL P98 (R4); REAFFIRMED
+> BY CONTENT.** `p98_firings.py` found it: both closures' `positions=` argument now reads
+> `(*held_records, *_position_records(portfolio.open_positions, reported=unrecorded))`,
+> where the records boot HELD (Q5(b)) have no `Position` and so *"ride every save"*. That
+> changes what `_persist_pending` and `_persist_ledger` write, which is this condition's
+> subject, and the item recorded the firings at C30 and C32a and not this one. **What
+> survives:** the carry itself, `pending=persisted.pending`, is untouched, and the held
+> records are positions and not pending placements. REAFFIRMED. See THE MODE-3 RECORD.
+
 *Arming condition:* **whoever next changes what `_persist_pending` or
 `_persist_ledger` writes in `engine/modes.py`.** A docstring correction is not
 that.
@@ -896,6 +981,17 @@ words.
 ### U3. Whether to consume `orderReports` — `M5f-038`
 
 Carried, unfired.
+
+> **ANNOTATED AT M5l P98 (R4): *"Carried, unfired"* IS FALSE, AND THE CONDITION BELOW
+> FIRED TWICE IN M5L (`p98_firings.py`); REAFFIRMED BY CONTENT.** `989edfc` (C30)
+> reordered `dispatch`'s placement success path, so a raise after a successful placement
+> keeps the pending record (`M5l-120`), and `4341c5c` (C48) edited `dispatch`,
+> `_open_position` and `_entry_fill_price` to carry the entry order's own quote total.
+> Neither commit's body or annotations names U3. **What survives, and it is the question
+> this item asks:** whether to consume `orderReports` from the placement response. C48's
+> total comes from the entry order's GET (`get_order`), the same call as the entry price,
+> and nothing reads `orderReports`. The other four `OrderExecutor` firings in the
+> instrument's list edit the close sequence and are not the placement site.
 
 *Arming condition:* **the placement site in `OrderExecutor`.**
 
@@ -1196,6 +1292,10 @@ Re-measured at M5k's rotation, at `ae8c914`: `grep -c 'getMessage()'` over
 `tests/unit/test_executor.py` counts **6** lines. The instrument behind the
 earlier 7 is not recorded, so the difference is not established as a change.
 
+**Re-measured at M5l's rotation (P98), at `e531822`**: the same `grep -c
+'getMessage()'` over `tests/unit/test_executor.py` still counts **6** lines, so the count
+has not moved since M5k's rotation.
+
 **Why that is not reassurance:** a message is safe while its call site serves
 ONE outcome, and nothing enforces that property.
 
@@ -1345,6 +1445,15 @@ capture**, which is the tool that produces every figure in this table.
 > §23: `boot_provenance` observed, the other 22 absent events and all 8
 > stages not, and 3 close plans, all `decision=sell`. The condition stands for
 > the next capture that extends this one.
+>
+> **FIRED AGAIN AT M5l P98 (R7), AND REAFFIRMED.** `scripts/run_census.py` was run against a
+> copy of the observation run's log, SHA-256
+> `023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb`, frozen in the evidence
+> directory. It agrees with P97's own counts (237 lines for pid 24980, 211 event records, ten
+> event names). That is another run's log and not an extension of the capture this table
+> measures, so no capture-scoped row is re-derived; the one row that counts the tree, the
+> defined events, is corrected in place and annotated above. The condition stands for the next
+> capture that extends M5k's.
 
 ---
 
