@@ -2303,3 +2303,287 @@ here.
 **Nothing beyond what the owner's ruling above states.** A1, A2 and A4 are
 recorded, each beside its instrument; the owner has ruled the P-3k gate
 satisfied; the fee-capture and base-asset-netting gates remain.
+
+## 26. M5l's observation run at 51a5f27: the start record, the census and the venue cross-check
+
+Recorded at M5l P97 (C56), from the clone `F:\trading bot\deploy\51a5f2711a09` after
+the owner stopped the bot. **THE START RECORD BELOW IS WRITTEN AFTER THE LOG WAS
+READ**, which is the shape `M5l-051` recorded for the first evidence run: P96's
+run sheet asked for the start to be noted in `arm_notes.txt` and no `OBS launch`
+line was written, and no commit recorded the start before P97 read the log. The
+figures in it are the log's own `boot_provenance` line, so the record is accurate
+and its timing is not what the doctrine asks (`M5l-256`).
+
+An observation log, so this section only adds. Every figure sits beside the command
+or read that produced it. **Every count states its instrument**, because 249, 251
+and 252 are all correct line counts of the same file.
+
+### The start record (taken from the log's `boot_provenance` line, pid 24980)
+
+| Field | Value |
+|---|---|
+| `code_commit` | `51a5f2711a0984697a915b192bb481f65949567f` |
+| `checkout_commit`, `commits_agree` | the same, `true` |
+| `config_sha256` | `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0` |
+| `config_tracked`, `checkout_dirty`, `code_intact` | `true`, `false`, `true` over 70 files |
+| `verdict` | `accepted`, `install_kind=vcs` |
+| UTC instant | `2026-10-03T20:08:25Z` (process banner `20:08:24Z`) |
+| pid, clone | 24980, `F:\trading bot\deploy\51a5f2711a09` |
+| interpreter | Python 3.12.10, package 0.1.0, module under the clone's own `.venv` |
+
+Instrument: `Select-String -Path logs\trading_bot.log -Pattern 'boot_provenance'`,
+read at P97. P96's dry boot of `strategies` left an identical line under **pid
+10720** at `2026-10-03T19:58:03Z`, which is excluded throughout.
+
+### The capture
+
+Read at P97 with `Get-FileHash` (SHA-256, lowercase) after a check that no Python
+process was running (`Get-CimInstance Win32_Process`, 0 found).
+
+| File | SHA-256 | Size and lines |
+|---|---|---|
+| `logs\trading_bot.log` | `023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb` | 53021 bytes; 251 newline characters (`wc -l`), 249 non-empty lines (`Measure-Object -Line`), 252 elements of `split("\n")`; CRLF endings, 251 CR |
+| `logs\normalize.log` | `7c834cbeb765e2380b0b86c922ba57a0949ee2cb6d044e735f3890c411a95930` | 253 bytes, 1 line |
+| `data\state.json` (END of run) | `d2d83eed081bb14ae00469d39bd136b58d989bee80f601f0aed9d9dbe9f1c2d4` | 1926 bytes |
+| `F:\trading bot\deploy\arm_notes.txt` | `828c91f5568af47f5d388769a2b31de40fa23bd06de711df6a0bdaa9e8f2640c` | 11 lines; ONE is this run's: the `boot_provenance` line, pid 24980 |
+
+The log carries 237 records tagged `pid=24980` (`p97_reads.py`, lines containing
+`| pid=24980 |`): 230 `INFO` and 7 `WARNING`, no `ERROR`, no `CRITICAL`. The other
+15 elements of the 252 are 2 records tagged pid 10720 (the dry boot's banner start and
+provenance line) and 13 untagged ones: 12 banner continuation lines, 6 per boot, and the
+trailing empty element. Reads left the store and the log
+unchanged: `Get-FileHash` before and after each read, equal.
+
+The tools, as read at P97 (`Get-FileHash`), all under `F:\trading bot\deploy\arm_tools`:
+
+| File | SHA-256 |
+|---|---|
+| `read_ledger.py` | `fe44c15a5e88b3e77bd657931fb925ca598b2ea37a8eb3cc8949a74a75737534` |
+| `p97_reads.py` | `1f11761c6a9e59037fd96b540313474a07969127843eefa1303a52285b169724` |
+| `p97_ledger.py` | `c7d537a82d1eb008e418fc68eba1a99b356b838d26defd593ec0d5a276f82b9f` |
+| `observation_sheet.md` | `d7a4c68f948949c3f112264489d5321b826288fd7b953f0472c2ed7bd0d7a2f4` |
+
+`p97_reads.py` is GET only (`get_order`, `get_my_trades`, raw `get_klines`) and
+`p97_ledger.py` is offline on copies. Neither prints a key.
+
+### (a) The launch
+
+**One launch, pid 24980**, and no restart. Its boot printed no `boot_positions_resolved`
+line, and the store it booted from held no position or pending record (below).
+It ended as the owner asked: `2026-10-04T04:29:49Z` `Received SIGINT; shutting down
+gracefully`, then `2026-10-04T04:29:50Z`
+`Trading engine stopped event=engine_stopped clean_shutdown=True`.
+
+- Run length, first record to last: `20:08:24Z` to `04:29:50Z` = 30086 s (8 h 21 m 26 s).
+- Engine started `20:08:29Z`, stopped `04:29:50Z` = **30081 s = 8.356 h**, the
+  denominator for every rate below.
+- **The owner's stop instant.** P97's prompt carried the placeholder
+  `<<< UTC instant from the owner >>>` unfilled, and `arm_notes.txt` holds no
+  `OBS stop` line, so the stop is the log's own `04:29:49Z` (`M5l-256`).
+- **Flat at stop: confirmed, three ways, none of them the owner's read.** The
+  last `close_booked` is `04:11:02Z` and no `order_placed` follows it; the end
+  store holds `positions=0 pending=0` (`read_ledger.py`); and a GET read at
+  `2026-10-04T04:35:52Z` (`preflight.py`, **a read of that instant and of no
+  other**) shows `open_orders=0 live_lists=0` and base `0E-8` free and locked on
+  both symbols.
+
+### (b) The normaliser, and both SHAs chained
+
+`logs\normalize.log`, verbatim:
+
+    2026-10-03T20:08:10.511157+00:00 normalised store=data\state.json values_changed=20 store_sha256_before=710db3ae0a695f0d65e652d899aff6cd528dea4bad709a1b7fc906eb32c93d3f store_sha256_after=7755930768628f15c692f15654b259e3e44fa0d810b0eb49f124a1e478c6de21
+
+- **`before` equals P96's copied store.** P96 recorded `710DB3AE...C93D3F` for the
+  retired clone's `state.json` and for its copy into the new clone, SHA-256-equal
+  (`Get-FileHash`). `p97_ledger.py` hashed the retired clone's file again at P97
+  and printed `equals normaliser 'before': True`.
+- **`after` is the store the run booted from, REPRODUCED rather than read.** The
+  start store no longer exists as a file: the bot rewrote it. `p97_ledger.py`
+  copied the retired clone's store to a temp directory, ran the normaliser's own
+  `normalise_state` and `store.save` on the copy, and the result's SHA-256 is
+  `7755930768628f15c692f15654b259e3e44fa0d810b0eb49f124a1e478c6de21`, **equal to
+  the logged `after`**, with `changes=20`. So the chain is
+  `710db3ae... -> 7755930768... -> d2d83eed...` (the end store).
+- The apply came 15 s before the launch: `20:08:10Z` against the banner at
+  `20:08:24Z`. `P96`'s dry run had measured the same 20 values and no refusal.
+
+### (c) Natural gaps (`M5l-202`)
+
+| Event, counted over the whole log | BTCUSDT/1m | ETHUSDT/5m |
+|---|---|---|
+| `bars_gap_detected` | 0 | 0 |
+| `buy_refused_bars_gap` | 0 | 0 |
+| `bars_contiguous_again` | 0 | 0 |
+| `missing_bars` (sum) | 0 | 0 |
+
+Instrument: `p97_reads.py`, `sum(1 for ln in lines if pattern in ln)` over the 252
+elements of the log, each pattern 0. **The rate is 0 events per symbol per hour of
+run time (0 in 8.356 h for each symbol).** The detector is armed in this build:
+`_append` in `data/market_data.py` logs `bars_gap_detected` at `WARNING` when a
+bar's `open_time` is more than one timeframe after the last, and every `WARNING`
+in this log is accounted for under (g).
+
+**An absence is argued here from presence, as the doctrine asks.** The bot's own
+log has no per-bar line, so on its own it cannot say bars arrived. The positive
+record is the venue's: `p97_reads.py` read the klines by GET over the run window
+(raw `get_klines`, `startTime=2026-10-03T20:08Z`, `endTime=2026-10-04T04:30Z`):
+
+| Pair | Bars returned | First open | Last open | Expected between | Missing | Bars with zero trades |
+|---|---|---|---|---|---|---|
+| BTCUSDT/1m | 503 | `20:08:00Z` | `04:30:00Z` | 503 | **0** | **0** |
+| ETHUSDT/5m | 101 | `20:10:00Z` | `04:30:00Z` | 101 | **0** | **0** |
+
+(Field 8 of each kline, the trade count, read as the zero-trade test.) So over this
+window the venue omitted no interval on either committed pair, and the detector
+agrees with it.
+
+**What this does NOT measure, and it is `M5l-202`'s own question.** `M5l-202` asks
+whether Binance omits a kline for an interval with NO trades. Neither pair had one,
+so the omission behaviour was **not exercised**, and for an illiquid pair it stays
+UNMEASURED. What is measured is the committed pairs' natural-gap rate over 8.356 h:
+zero.
+
+### (d) The watchdog
+
+Every pattern counted over the whole log, 0: `feed_silent`, `feed_silent_critical`,
+`feed_resumed`, `event_loop_lagging`, `event_loop_recovered`, `handler_chain_slow`,
+`handler_chain_recovered`. **No heartbeat, lag, slow-chain or episode line exists, and
+so no recovery line.** `FeedWatchdog` is armed and started by `live_system` in this
+build (`engine/modes.py`), and its events are `WARNING` or `INFO` or `CRITICAL`; the
+log's only 7 `WARNING`s are accounted for under (g). **This is the watchdog being
+QUIET on a healthy feed, which is a measurement of no false positive over 8.356 h,
+and not a measurement that it fires.** `M5l-198`, the cause of the 229 s stall, is
+unmeasured by this run: nothing stalled.
+
+### (e) The stream
+
+`stream_transient_error`: 0. `disconnect`: 0 and `reconnect`: 0 as substrings of any
+line. In `exchange/websocket_client.py` `_run` a disconnect logs
+`Market-data stream disconnected (...); reconnecting` at `WARNING`, a transient
+library error logs `stream_transient_error` at `WARNING`, and giving up logs at
+`ERROR`, so each would be among the 7 `WARNING`s or the 0 `ERROR`s counted under
+(g). The venue's klines in (c) show the feed delivered every interval it was asked
+for.
+
+### (f) Every booking line
+
+Six `close_booked`, all `BTCUSDT`, all `quote_total_source=venue`, `fee=0E-8
+fee_asset=USDT`, `fills=1`. **No `boot_exit_booked`, no `exit_booked`** (the driver's
+line), no other booking event: counts 0. All six were the strategy's own `CLOSE`
+sequence, a `MARKET` sell after the protective list was cancelled; no protective leg
+filled and ETHUSDT never opened a position (its only two mentions are the seed and
+engine-start lines).
+
+`p97_reads.py` re-read each from the venue by GET: the entry order by its derived
+client id (`client_order_id(symbol, entry_bar_time, WORKING, generation=0)`) with
+`get_order` and `get_my_trades`, the exit by the line's `order_id` with the same two
+calls. Recomputed in `Decimal`: `realised = exit fills quote sum - entry fills quote
+sum - exit fee in USDT`.
+
+| # | Booked (UTC) | Exit order | Entry order | Exit quote total | Entry quote total | `realised` (log) | Exponent | Recomputed | Equal |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | `2026-10-03T23:10:02Z` | 9104494 | 9092733 | 1801.99760000 | 1800.89229260 | 1.10530740 | -8 | 1.10530740 | yes |
+| 2 | `2026-10-03T23:43:02Z` | 9108003 | 9107931 | 1800.97528320 | 1800.97549560 | -0.00021240 | -8 | -0.00021240 | yes |
+| 3 | `2026-10-04T00:02:03Z` | 9110852 | 9108610 | 1800.59976000 | 1800.77690160 | -0.17714160 | -8 | -0.17714160 | yes |
+| 4 | `2026-10-04T00:45:02Z` | 9116405 | 9111083 | 1800.38998150 | 1801.11074000 | -0.72075850 | -8 | -0.72075850 | yes |
+| 5 | `2026-10-04T02:45:03Z` | 9130054 | 9123245 | 1802.00000000 | 1801.46577500 | 0.53422500 | -8 | 0.53422500 | yes |
+| 6 | `2026-10-04T04:11:02Z` | 9138444 | 9133358 | 1800.80651410 | 1800.76235570 | 0.04415840 | -8 | 0.04415840 | yes |
+
+- **`entry_quote_total` present on 6 of 6**, and equal in value AND exponent to the
+  venue's entry fills sum and to the entry order's `cummulativeQuoteQty` (each entry
+  one fill). The exit total equals the exit fills sum and the order's total, 6 of 6.
+- **No mismatch.** The logged `quantity` equals the fills' quantity on every line
+  and each close's `list_client_order_id` matches its placement.
+- **Fees.** Every exit fee is `0E-8 USDT`; every entry fill's commission is
+  `0E-8 BTC`, so the six lines carry no non-zero fee and **the base-quantity
+  netting question is again not exercised** (`M5l-054`'s observation, repeated).
+- Sum of the six logged `realised`: **0.78557830**; sum of the six recomputed: the
+  same.
+- **The account moved by that figure.** The boot's `Composition root ready` line
+  reads `90163.92591520 USDT free` (`20:08:28Z`) and the GET at `04:35:52Z` reads
+  `USDT free=90164.71149350`. The difference is **+0.78557830**, to the last digit.
+  It is exact equality, so it also says no other cash moved on the account in the
+  interval, a one-writer assumption this agreement supports and does not prove.
+
+### (g) Every WARNING, ERROR and CRITICAL not covered above
+
+7 `WARNING`, 0 `ERROR`, 0 `CRITICAL` (`p97_reads.py`, records tagged `pid=24980`).
+Under the cap of 60, all shown, grouped:
+
+- **1 x** `2026-10-03T20:08:28Z | WARNING  | pid=24980 | trading_bot.engine.modes | 499 asset(s) are EXCLUDED FROM EQUITY -- no enabled USDT pair prices them, so equity is UNDERSTATED by their combined value, which cannot be computed here. Set logging.level to DEBUG for the per-asset list. event=boot_assets_excluded excluded_count=499 quote_asset=USDT`
+- **6 x** `Cancelling protection to close BTCUSDT; the position is unprotected from here event=close_window_open symbol=BTCUSDT venue_order_list_id=<id> quantity=<q> candle_time=<t>`, the close sequence's expected warning, one per close: `23:10:00Z` list 435000 `0.02126000`; `23:43:01Z` 436087 `0.02124000`; `00:02:01Z` 436135 `0.02124000`; `00:45:01Z` 436245 `0.02123000`; `02:45:01Z` 437119 `0.02125000`; `04:11:01Z` 437929 `0.02123000`.
+
+The other events, `INFO`, by count (`p97_reads.py`): `reconciliation_pass` 170,
+`intent_dispatched` 12 (6 `BUY`, 6 `CLOSE`), `order_placed` 6, `close_planned` 6,
+`close_booked` 6, `risk_refused` 1 (`2026-10-03T20:46:00Z`, a `CLOSE` signal with
+`nothing_to_close`), `boot_provenance` 1, `engine_stopped` 1. **All 170 passes read
+`positions=1 calls=1 queries=2 states="active=1"`** (`Select-String` count 170 of 170),
+the first `2026-10-03T21:39:00Z`, the last `2026-10-04T04:10:01Z`.
+
+### (h) Ledger reconciliation
+
+`p97_ledger.py`, offline on copies; the end store unchanged after it
+(`Get-FileHash`, `d2d83eed...`).
+
+| Figure | Start (reproduced) | After the six bookings, expected | End store | Equal |
+|---|---|---|---|---|
+| `ledger.pnl_date` | 2026-10-02 | 2026-10-04 | 2026-10-04 | yes |
+| `ledger.realised_pnl` | -112.15184880 | -0.31951670 | -0.31951670 | yes, exponent -8 |
+| `ledger.trades_count` | 6 | 4 | 4 | yes |
+| `lifetime_realised` | -340.20691430 | -451.25366810 | -451.25366810 | yes, exponent -8 |
+| `daily_history` rows | 18 | 20 | 20 | yes |
+| `daily_history[2026-10-02]` | absent | -112.15184880, 6 trades | -112.15184880, 6 trades | yes |
+| `daily_history[2026-10-03]` | absent | 1.10509500, 2 trades | 1.10509500, 2 trades | yes |
+| positions, pending | 0, 0 | 0, 0 | 0, 0 | yes |
+
+**The day rolls, shown.** The ledger rolls LAZILY, at the first booking after
+midnight, not at midnight:
+
+    first booking 2026-10-03T23:10:02Z  rolls 10-02 -> 10-03: history[10-02] = -112.15184880, 6 trades
+      bookings 1.10530740 and -0.00021240 on 10-03: ledger 1.10509500, 2 trades
+    first booking 2026-10-04T00:02:03Z  rolls 10-03 -> 10-04: history[10-03] = 1.10509500, 2 trades
+      bookings -0.17714160, -0.72075850, 0.53422500, 0.04415840 on 10-04: ledger -0.31951670, 4 trades
+
+- **`lifetime_realised` moves at a ROLL, not at a booking, and a first expectation
+  of this section was wrong about it** (`M5l-254`). Adding the six bookings to the
+  start lifetime predicts `-339.42133600`; the store holds `-451.25366810`. The
+  difference, `-111.04675380`, is `-112.15184880 + 1.10509500`: the two days that
+  rolled. `Portfolio.record_realised_pnl` adds the OUTGOING day to the lifetime when
+  it rolls (`lifetime = (self.lifetime_realised or Decimal(0)) +
+  outgoing.realised_pnl`) and the field's own comment says it is *"realised P&L
+  across every day that has rolled"*. The store behaved as documented; the
+  expectation was wrong. The start lifetime is itself the sum of the 18 history rows:
+  `Decimal` sum of the retired store's `daily_history[*].realised` = `-340.206914300000000000000000`,
+  equal to its `lifetime_realised` by value, so the open day is never in it.
+- **Raw JSON, start against end:** exactly eight paths differ, the two new
+  `daily_history` rows (four paths), `ledger.pnl_date`, `ledger.realised_pnl`,
+  `ledger.trades_count` and `lifetime_realised`. Every one of the 18 start history
+  rows is identical in value and exponent in the end store.
+- **Every decimal-looking string in the end file is at exponent -8** (22 of 22:
+  `read_ledger.py` counts 22 and `p97_ledger.py` tests every one at -8). At the start, 20 of the 20 were at -24 (5) or -10 (15).
+- **Difference, to the last digit: none.**
+
+### What was measured of `M5l-229`
+
+The active store DID carry exponent -24, and more. In the store copied at P96
+(`710DB3AE...C93D3F`, schema 2, read by `read_ledger.py`): **5 figures at -24** (the
+`2026-09-10`, `-09-20`, `-09-21` and `-09-23` rows and `lifetime_realised`) and **15
+at -10** (14 history rows and the open day's `realised_pnl`). The normaliser's dry
+run, from the new clone's root without `--apply`, would have changed all 20, refused
+none, exited 0 and left the file's SHA unchanged (P96). The owner's `--apply` changed
+20 values (`values_changed=20`), each equal in value, and the chain above proves the
+file the bot booted from. **Lossless: the end store's history rows and every figure
+the run did not touch are equal to the start's by value and exponent.**
+
+**What stays UNMEASURED: where the 15 figures at -10 come from** (`M5l-255`). `C48`
+and `C49` explain -24, and `P-3h` names -10, -9 and -8 as the other exponents seen,
+without a cause. All six of this run's bookings are at -8, so for these six the
+current code writes -8; why earlier days were at -10 is not read here.
+
+### What this section decides (P97)
+
+**Nothing.** It records a clean run of the committed code at `51a5f27`: 8.356 h, six
+strategy-driven round trips, every booking equal to the venue's fills, the ledger
+chained from the normaliser's `after` to the end store with no difference, and none of
+the feed-health events observed. It does not show that those events fire, and it does
+not exercise a protective-leg fill, a restart, a held position or an ETHUSDT position.

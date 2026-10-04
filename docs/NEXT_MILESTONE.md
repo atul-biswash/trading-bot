@@ -52,6 +52,43 @@ exercises. No such run has started as this is written.
 > pushed commit, and that its start is recorded. That record was committed
 > after the log was first read (`M5l-051`).
 
+> **ANNOTATED AT M5l P97 (C56): THE OBSERVATION RUN AT `51a5f27` IS RECORDED, AND
+> NO OBSERVATION NEEDS A RULING BEFORE THE ROTATION.** From a deployment clone of
+> the pushed commit, `F:\trading bot\deploy\51a5f2711a09`, pid 24980 ran
+> `2026-10-03T20:08:24Z` to `2026-10-04T04:29:50Z` (8.356 h from engine start to
+> `engine_stopped clean_shutdown=True`), after the owner's normaliser apply at
+> `20:08:10Z`. `docs/RUN_LEDGER.md` section 26 holds the record, each figure beside its
+> read, against the log whose SHA-256 is
+> `023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb`. **What it
+> measured:** six strategy-driven BTCUSDT round trips, six `close_booked` lines, each
+> with `entry_quote_total` present, `realised` at exponent -8 and equal in value and
+> exponent to the venue's fills by GET (6 of 6, `M5l-253`); a ledger chained from the
+> normaliser's `after` to the end store with no difference to the last digit
+> (`M5l-254`); the account's USDT up by exactly the six `realised` summed, 0.78557830;
+> 7 `WARNING`s all accounted for and no `ERROR` or `CRITICAL`; and, on the committed
+> pairs, none of `bars_gap_detected`, `buy_refused_bars_gap`, `bars_contiguous_again`,
+> any watchdog line or `stream_transient_error` (`M5l-250`, `M5l-251`, `M5l-252`).
+>
+> **What it did NOT measure, so the quiet is not a pass for those emitters.** Those
+> events are silent because nothing happened to emit them: the venue's own klines by GET
+> show no missing interval and no zero-trade bar in the window on either pair, so
+> `M5l-202`'s question (does Binance omit a kline for an interval with no trades)
+> was not exercised and stays UNMEASURED for an illiquid pair, and `M5l-198`, the cause
+> of the 229 s stall, stays UNMEASURED because nothing stalled. No protective leg
+> filled, ETHUSDT never opened a position, nothing restarted, and the boot resolved no
+> record, so the paths P-3k built ran only in the earlier A1 and A4 arms.
+>
+> **Two process points, neither a defect in the tree.** The start record was written
+> after the log was read, the shape `M5l-051` named, and `arm_notes.txt` holds no
+> `OBS launch` or `OBS stop` line (`M5l-256`). **The owner's choices, none of them
+> blocking the rotation:** whether to measure `M5l-202` deliberately on a thin
+> Testnet pair; whether to chase the origin of the 15 ledger figures that sat at
+> exponent -10 (`M5l-255`); and whether the run sheet's two note lines are worth
+> keeping given they were not written. **What survives:** the rest of this section.
+> `decision=halt` stays unobserved: all 6 of this run's close plans read `decision=sell`.
+> The table below keeps its own denominators against its own captures, and this run's
+> are not summed into them.
+
 ---
 
 Struck and repaired at M5k's rotation, in its first part. Every item below was
@@ -958,6 +995,32 @@ computed from an entry term that is `entry_fill_price x quantity`, and
 > The release tool's condition (above, C34) is REAFFIRMED and not fired: this
 > commit edits none of those symbols.
 
+> **ANNOTATED AT M5l P97 (C56): *"whether it carries exponent -24 is still
+> UNMEASURED, and running this against it is the owner's act"* IS NO LONGER TRUE
+> (`M5l-229` is resolved, `M5l-255`).** The store the owner's active deployment ran
+> from (SHA-256 `710DB3AE0A695F0D65E652D899AFF6CD528DEA4BAD709A1B7FC906EB32C93D3F`,
+> schema 2, read at P96 by `read_ledger.py` from the new clone's copy) carried **5
+> figures at exponent -24** -- the `2026-09-10`, `-09-20`, `-09-21` and `-09-23` rows and
+> `lifetime_realised` -- and **15 at -10**, the other 14 history rows and the open
+> day's `realised_pnl`. P96's dry run of `scripts/normalize_ledger_exponents.py` would
+> have changed all 20, refused none, exited 0 and left the file unchanged; the owner's
+> `--apply` at `2026-10-03T20:08:10Z` changed 20 values, and its own line carries both
+> SHAs. They chain: `before` equals the copied store, and `after`
+> (`7755930768628f15c692f15654b259e3e44fa0d810b0eb49f124a1e478c6de21`) was
+> REPRODUCED at P97 by running the tool's own `normalise_state` and `store.save` on a
+> copy of that store, whose SHA-256 is equal. **Lossless:** every figure is equal in
+> value, and after the run's six bookings and two day rolls every decimal string in the
+> end store is at -8. **What survives:** the item's measurement of the four bookings,
+> C48's cause, C49's tool, and the operator rule. **What stays UNMEASURED:** where the
+> 15 figures at -10 come from; this item names -10 as an exponent seen without a
+> cause, and the run's six bookings are all at -8, which says the current code writes -8
+> and not why earlier days did not. `docs/RUN_LEDGER.md` section 26.
+>
+> *Arming audit at C56 (docs only).* The tool's reuse condition, *"whoever next edits
+> `store.save` or `PersistedState` in `persistence/store.py`, or the instance lock's
+> path handling"*, is not fired: no source file is edited. The tool ran as designed, so
+> the operator rule above is REAFFIRMED.
+
 #### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
 
 `remainder = self._budget.max_calls - len(assessments)` covers the pass and
@@ -1623,6 +1686,27 @@ What the outage also cost, measured at P65 and recorded in
 > under P76**, not repaired. **What stays open:** the cause of the original stall,
 > which is `M5l-198` and UNMEASURED until the lag and slow-chain lines catch an
 > occurrence; and the two deferred items below.
+
+> **ANNOTATED AT M5l P97 (C56): THE FIRST RUN OF C44-C46 ON A HEALTHY FEED WAS QUIET,
+> AND THAT MEASURES NO FALSE POSITIVE AND NOT A FIRING (`M5l-250` to `M5l-252`).** Over
+> 8.356 h, the observation run at `51a5f27` logged 0 each of `bars_gap_detected`,
+> `buy_refused_bars_gap`, `bars_contiguous_again`, `feed_silent`,
+> `feed_silent_critical`, `feed_resumed`, `event_loop_lagging`, `event_loop_recovered`,
+> `handler_chain_slow`, `handler_chain_recovered` and `stream_transient_error`, with 7
+> `WARNING`s and no `ERROR` or `CRITICAL`, all accounted for. The venue's klines by GET
+> over the window show 503 of 503 BTCUSDT/1m bars and 101 of 101 ETHUSDT/5m bars, with
+> no missing interval, so the quiet matches the feed. **The natural-gap rate on the
+> committed pairs is 0 per symbol per hour over this window.** **What survives:** *"the
+> cause of the original stall, which is `M5l-198` and UNMEASURED until the lag and
+> slow-chain lines catch an occurrence"* is TRUE and unchanged: nothing stalled, so no
+> lag or slow-chain line exists. And `M5l-202`, whether Binance omits a kline for an
+> interval with no trades, is still UNMEASURED, because neither pair had a zero-trade
+> bar in the window. The emitters are exercised by tests and not by any run.
+> `docs/RUN_LEDGER.md` section 26.
+>
+> *Arming audit at C56 (docs only).* P-3l's condition, *"whoever next changes what
+> triggers a reconciliation pass ... or the market-data reconnect path, `_run`"*, is not
+> fired: no source file is edited. REAFFIRMED.
 
 #### P-3m. A call-cap deferral logs nothing (`M5l-075`)
 
