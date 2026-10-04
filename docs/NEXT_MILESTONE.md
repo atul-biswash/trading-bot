@@ -2634,117 +2634,15 @@ Unchanged from M5h.
 
 ---
 
-## Standing authorities for commits -- added at M5l P78b (C29)
+## Standing authorities for commits -- MOVED TO `CLAUDE.md` AT M5l P98
 
-**The standing docstring authority, ruled by the project owner at M5l P78b,
-verbatim:**
-
-> "STANDING DOCSTRING AUTHORITY, owner's ruling at M5l P78b, for this and every
-> later commit:
-> - A commit may correct or annotate docstring and comment text that it makes
->   false in any src/ file. It may not change code.
-> - Verify it per such file: ast.dump of the module with every docstring removed
->   is identical before and after, and every changed line outside a docstring is
->   a comment line.
-> - Report each verification.
-> - Record the ruling verbatim in NEXT_MILESTONE beside the annotation
->   authority, in this commit."
-
-**The annotation authority it was to sit beside is recorded nowhere in the
-tree (`M5l-116`).** MEASURED at P78b: no document, and no commit message, has
-ever contained the phrase. It has lived only in the owner's prompts, which is
-the shape this project has recorded several times, of a rule held outside the
-repository. As the prompts state it (P70 and P71, reported here, not quoted),
-it covers `README.md`, `docs/NEXT_MILESTONE.md`, `docs/M5_NUMBERS.md`,
-`docs/RUN_LEDGER.md`, and `CLAUDE.md` except its locked-decision text, with
-per-prompt extensions for named `src/` docstrings and `config.yaml` comment
-lines. The standing docstring authority above widens it for `src/` docstrings
-and comments; it does not touch the documents' half.
-
-**The annotation authority, recorded by the project owner at M5l P79 (C30),
-verbatim:**
-
-> "ANNOTATION AUTHORITY (owner's standing ruling, stated in prompts from M5l
-> P68, recorded at P79): every commit annotates, in place and with no
-> deletions, any text it makes false in README.md, docs/NEXT_MILESTONE.md,
-> docs/M5_NUMBERS.md, docs/RUN_LEDGER.md, and CLAUDE.md except its
-> locked-decision text; it greps for such text before committing and lists
-> each annotation. PRE-EXISTING FALSE TEXT (owner's standing ruling, P68): text
-> a commit did not make false is reported and declared, and does not halt."
-
-> **ANNOTATED AT M5l P79 (C30): *"The annotation authority it was to sit beside
-> is recorded nowhere in the tree"* IS NO LONGER TRUE.** The ruling is quoted
-> immediately above. One detail of the reported paragraph differs from it: the
-> owner dates the ruling to P68, where the paragraph cited it from *"P70 and
-> P71"*. **What survives:**
-> `M5l-116` as a record of what P78b measured, and the last sentence -- the
-> standing docstring authority widens this one for `src/` docstrings and
-> comments and does not touch the documents' half.
-
-**WIDENED BY THE PROJECT OWNER AT M5l P81 (amendment 3), standing:**
-`docs/QB_ESCALATION.md` and `docs/QC_PROTECTIVE_ORDERS.md` join the
-annotation authority's file list, for this and every later commit. First used
-at C32a, which annotates QB site 2 and its summary row and QC §5b
-(`M5l-131`). `CLAUDE.md`'s locked-decision text stays excluded; C32a's one
-annotation there, on pre-existing base holdings, was authorised for that
-sentence alone, because the owner accepted P77 S6's text for it at P78.
-
-**The ruled-overturn authority, ruled by the project owner at M5l P81,
-verbatim:**
-
-> "An existing assertion may change only when it encodes behaviour that a
-> ruling named in the prompt explicitly overturns. The report lists each such
-> change with the old assertion quoted, the new one, and the ruling; the test
-> keeps its subject; and the mutation survey still kills through it. Any other
-> broken assertion halts, as before."
-
-First used at C32a, where the owner named Q3(a) as overturning the
-first-candle resolution of restored placements, and five tests in
-`tests/unit/test_modes.py` changed under it (`M5l-127`).
-
-**The S6 standing rule, ruled by the project owner at M5l P82, verbatim:**
-
-> "Any CLAUDE.md locked-decision sentence listed in P77 S6, accepted at P78 as
-> adjusted for Q5(b), may be annotated with its accepted text in the commit
-> that makes it false. No other locked text is authorised."
-
-First used at C32b-1, on the R2 hold bullet's quoted ruling (`M5l-132`).
-
-**THIS ROW OF P77 S6 IS SUPERSEDED BY THE OWNER AT P82.** The five-bar
-retention bullet's S6 text, *"After a restart the `Position` is restored, so
-Site B resolves a restored close and books it if its settlement reads. The
-count still resets (R2)."*, does not describe the final design: Site B does
-not book a restored close, because boot books or holds a close whose sell
-filled and removes its record. The owner's amendment 2 substituted, and C32b-3
-annotated `CLAUDE.md` with, this text: *"After a restart the boot reads the
-close's sell beside the position's record. A filled sell is booked ledger-only
-at boot, or held (Q5(b)), and the close record is removed, so no restored
-close enters the count. The count is still in memory only and resets at a
-restart. A close with no position record beside it is still released on its
-first candle."* The other S6 rows are unchanged.
-
-**A PROMPT'S FILE LIST DOES NOT NARROW THE STANDING AUTHORITY, ruled by the
-project owner at M5l P88 and recorded in C39, verbatim:**
-
-> "A prompt's list of files to write never narrows the standing authority."
-
-It was needed at P87, whose prompt named three files to write while the
-annotation authority covers README.md as well: the README text P87's ruling
-made false was reported (`M5l-175`) rather than annotated, and C39 annotates
-it.
-
-**A SOURCE EDIT MADE BY SCRIPT IS ASSERTED, LF-SAFE AND REPORTED -- a standing
-rule of the project owner at M5l P94, verbatim:**
-
-> "A source edit made by script must assert exactly one match per site, write
-> with newline='' so LF is preserved, and be reported as a script edit."
-
-Earned by `M5g-046` (a heredoc script wrote CRLF into two LF-pinned fixtures and
-`git diff` hid it). It has since worked once: at P94 a script's second
-replacement asserted a match count of two -- its own first replacement had
-created the second match -- and wrote nothing, so the file was left as it was.
-First reported under the rule at C50, whose commit message carries the report.
-It binds edits to `src/`, `tests/`, `scripts/` and the documents alike.
+The section that stood here from P78b to P98 -- the standing docstring authority, the
+annotation authority with its pre-existing-false-text rule and its QB and QC widening, the
+ruled-overturn authority, the S6 standing rule as superseded at P82, the rule that a prompt's
+list of files never narrows the standing authority, and the script-edit rule -- is now in
+`CLAUDE.md`'s **Standing authorities for commits** section, verbatim, by the project owner's
+ruling at P98 (`M5l-244`). **Read it there.** It was moved because this file is rewritten at
+every rotation, and a rule kept here is lost at the next one.
 
 ## The rotation's own procedure — read `CLAUDE.md`, not this
 
