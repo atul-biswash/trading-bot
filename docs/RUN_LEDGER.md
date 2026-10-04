@@ -2580,6 +2580,22 @@ and `C49` explain -24, and `P-3h` names -10, -9 and -8 as the other exponents se
 without a cause. All six of this run's bookings are at -8, so for these six the
 current code writes -8; why earlier days were at -10 is not read here.
 
+> **ANNOTATED AT M5l P98 (R7): *"What stays UNMEASURED: where the 15 figures at -10
+> come from"* IS NO LONGER TRUE (`M5l-255` IS RESOLVED, BY THE PROJECT OWNER'S RULING).**
+> The ruling, as the P98 prompt named it: *"M5l-255 resolved by M5l-209."* `M5l-209`
+> measured that the entry term was `average_price x quantity` and that 103 of the 106
+> booking lines a replay covered were single-price entries at price exponent -2; with a
+> quantity at exponent -8 the product is at -10, and a day's `realised` that held such a
+> booking carried -10. The replay is MEASURED and the exponent arithmetic is REASONED
+> from it: no store's -10 figure was traced booking by booking. **What survives:** the
+> measurements above, and that all six of this run's bookings are at -8, which is what
+> C48's `exit total - entry total` form gives.
+>
+> **One more figure in this section has moved.** The run sheet's SHA-256 in the tools
+> table is the sheet *as read at P97*, and stays true of that instant. The sheet was edited
+> at P98, the `OBS launch` and `OBS stop` note lines dropped by the owner's ruling, and its
+> SHA-256 is now `9bc79a47f43613a1460e0be1ef7cbc9e9333304a80d7b70862c74c733d681374`.
+
 ### What this section decides (P97)
 
 **Nothing.** It records a clean run of the committed code at `51a5f27`: 8.356 h, six

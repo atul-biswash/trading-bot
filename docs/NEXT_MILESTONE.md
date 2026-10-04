@@ -314,6 +314,9 @@ Each item's full text is in git history at `9fc8b8d` and in `docs/PHASE_HISTORY.
 - **P-3g, a pair quoted outside the base currency** -- resolved at `0c1a802` (C40): the boot refuses it. Findings: `M5k-102`, `M5l-179` to `M5l-181`.
 - **P-3h, four realised figures at exponent -24** -- resolved at `4341c5c` (C48, the cause and the fix) and `f9e606e` (C49, the normaliser). The active store carried 5 figures at -24 and 15 at -10 and was normalised losslessly at the owner's apply on 2026-10-03T20:08:10Z, recorded at `7489581`; the -10 figures are accounted for by `M5l-209`, by the owner's P98 ruling. Findings: `M5k-121`, `M5l-100`, `M5l-209`, `M5l-210`, `M5l-214`, `M5l-222` to `M5l-229`, `M5l-255`.
 - **P-3j, no end-to-end test drives a hold to stale** -- resolved at `e3ff798` (C51). Findings: `M5k-090`, `M5l-235`, `M5l-236`.
+- **P-3k, a restart orphans an ordinary open position** -- CLOSED by the owner's ruling at P87 (`8403673`, C38), its arms A1, A2 and A4 recorded in `docs/RUN_LEDGER.md` section 25. Built in `131f1c9`, `4b57f34`, `989edfc`, `f7ebce9`, `5a2307c`, `fa06d77`, `a14aa6c`, `4f2cc49`, `2081389`, `cde0fb0`, `e4004ab`, `d1074c6`, `244aa6b`, `d95cb5e`, `5e22bc6` and `5709b04`. Residues are carried as K1 and K2, and the deferred items as U11 and U12. Findings: `M5l-044`, `M5l-045`, `M5l-102` to `M5l-175`.
+- **P-3l, a market-data outage stops reconciliation** -- CLOSED as reported, measured and guarded, by `a519d9e` (C44, gap detection), `68ffa47` (C45, the watchdog) and `1046a01` (C46, transient errors), the stopped reconciliation accepted under P76. Carried: K4 (the stall's cause), K5 (the natural-gap rate), U11 and U12. Findings: `M5l-055` to `M5l-063`, `M5l-196` to `M5l-207`.
+- **P-3o, the call cap is the position limit** -- resolved at `31281fa` (C41): the cap is `max(max_open_positions, L + 1)`. Findings: `M5l-086`, `M5l-087`, `M5l-101`, `M5l-183`, `M5l-184`.
 
 ---
 
@@ -408,17 +411,9 @@ omission behaviour was never exercised.
 
 ---
 
-## M5l's PRIORITIES — the owner's three, in the architect's order
+## CARRIED FROM M5l'S PRIORITIES
 
-The owner ruled the three; their order is the architect's. Provenance comes
-first because without it no later run can say which code produced its
-evidence, and the other two are judged by that evidence.
-
-### P-3. The silent and unhedged failure modes catalogued in M5k
-
-*Resolved items are struck and indexed above as this rotation proceeds; P-3i, P-3m and P-3n are carried. This heading goes with the last of them.*
-
-#### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
+### P-3i. Settlement runs outside the driver's call count (`M5k-060`)
 
 `remainder = self._budget.max_calls - len(assessments)` covers the pass and
 the point queries only, so a phase may make up to `max_calls` plus one call
@@ -460,630 +455,7 @@ in `src/` tracks request weight. MEASURED.
 > logged it on passes of both of A4's runs, the failed one and the one that
 > passed (`docs/RUN_LEDGER.md` section 25).
 
-#### P-3k. A restart orphans an ordinary open position (`M5l-045`, `M5l-044`)
-
-**IMPLEMENTED (C28-C34). The live-trading gate stays closed until the
-supervised run's arms A1, A2 and A4 are recorded in RUN_LEDGER.** The
-template for that run is `docs/RUN_LEDGER.md` section 24. What follows is the
-item as it stood before the implementation and the annotations that track it;
-the commits are recorded beneath it.
-
-> **P-3k IS CLOSED, BY THE OWNER'S RULING AT M5l P87 (C38) -- THE FIRST
-> SENTENCE'S GATE, *"stays closed until the supervised run's arms A1, A2 and
-> A4 are recorded"*, IS DISCHARGED.** The ruling, verbatim: *"The P-3k gate is
-> satisfied: A1 (hard kill, restore), A2 (protective fill while down, booked at
-> boot) and A4 (protection cancelled while down, R3 sells once) passed on the
-> supervised Testnet run of 2026-10-01/02, A1 and A2 at d1074c6 and A4 at
-> 5e22bc6. A2's Ctrl+C stop does not change the path it tests. P-3k no longer
-> blocks live trading. The fee-capture and base-asset-netting gates remain, so
-> live trading stays blocked."* The arms are recorded in `docs/RUN_LEDGER.md`
-> section 25 (`M5l-168`, `M5l-169`). **What survives:** the item's history and
-> every annotation beneath it, the *"Live trading additionally stays blocked
-> until an open position survives a restart"* ruling at P76 as the record of
-> what the gate was, and **live trading itself, which stays blocked by N6's two
-> remaining preconditions** -- the non-zero fee capture and base-asset
-> netting. Closing P-3k lifts one of three gates and none of the code block:
-> `refuse_live_trading` is unchanged.
-
-Positions are memory-only, so a clean shutdown or a power cut leaves an open
-position no later process owns. After a restart the symbol is blocked while its
-list rests; a protective fill in that window is never booked, so the daily-loss
-halt undercounts; once the list completes or is cancelled, the base asset
-becomes an unmanaged holding the bot never sells (M5l-045, M5l-044).
-
-> **ANNOTATED AT M5l P79 (C30): *"Positions are memory-only"* IS NO LONGER
-> TRUE OF THE FILE.** From C30 both of the root's writers put one record per
-> open position into `data/state.json`, held positions included. **What
-> survives, and it is the item:** nothing reads those records until C32, and
-> each boot's first save erases them, so a position still does not survive a
-> restart and every consequence above stands.
->
-> **ANNOTATED AT M5l P81 (C32a): "nothing reads those records until C32" IS
-> NO LONGER TRUE.** From C32a the boot restores a record whose list is live,
-> and drops one that expired, never placed or is gone, where each boot's
-> first save used to erase it. A record beside a pending close is still
-> erased, by the owner's interim ruling. A filled exit, and a position whose
-> protection is gone with its base held, refuse the boot until C32b.
-> **What survives:** the gate on live trading, and this item, until C32b
-> books and sells and C33 corrects the P77 S6 texts.
->
-> **ANNOTATED AT M5l P82 (C32b-1): "A filled exit ... refuse[s] the boot" IS
-> NO LONGER TRUE.** A filled exit is booked at boot, or held with its record
-> kept and no position; see the C32b-1 record below. The half about a
-> position whose protection is gone with its base held stands until C32b-2.
->
-> **ANNOTATED AT M5l P82 (C32b-2): that half is no longer true either.** Such
-> a position is restored and sold on its symbol's first candle; see the
-> C32b-2 record below.
->
-> **ANNOTATED AT M5l P82 (C32b-3): "A record beside a pending close is still
-> erased, by the owner's interim ruling" IS NO LONGER TRUE.** The interim
-> exclusion is removed: such a record is classified with its close and
-> restored, booked, held or sold by the final design below, and no boot save
-> erases it. **What survives:** the gate on live trading, and this item, until
-> C33 corrects the P77 S6 texts.
-
-**It is a GATE ON LIVE TRADING**, beside the two N6 names -- the non-zero fee
-capture and base-asset netting. The owner's M5l ruling, quoted at the head of
-this file, keeps *"The architectural live-trading block"* *"strictly active"*
-and names those two as what live execution waits on; this third was added to
-them by the owner at P61. Its place in P-3 is the same ruling's third
-priority, *"eliminating the unhedged/silent failure modes"*.
-
-> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"Live trading
-> additionally stays blocked until an open position survives a restart,
-> clean or by power cut, with its protective fills booked to the ledger."*
-> Until P76 the tree recorded this gate only as the owner's addition at P61,
-> in reported speech (`M5l-099`). The ruling also states what lifting it
-> requires: survival of both a clean restart and a power cut, AND the
-> protective fills booked.
-
-**It is not N1.** N1 reads: *"A position is not persisted, so a restart
-releases a hold, and a close deferred before a restart is released unbooked
-after it (`M5k-065`)."* That covers a held position and a deferred close. This
-is an ordinary protected position with no hold and no close, which no item
-covered until now (`M5l-045`).
-
-**The worked instance is `M5l-044`:** bot entry 6688668, list 317428, left
-protected by a clean shutdown on 2026-09-26; its legs were cancelled
-unexecuted at 2026-09-27T03:50:23.068Z, and the 0.02151 BTC it bought sat as an
-unmanaged holding until the owner sold it with
-`scripts/clear_testnet_holdings.py`. The blocked symbol, the
-unbooked fill and the unmanaged holding are REASONED from `live_system`'s boot
-snapshots; the holding and its exclusion were MEASURED in that instance
-(`M5l-036`). No protective fill in such a window has been observed.
-
-**ADDED AT M5l P79 (C30), the writers.** Three records the project owner
-directed for this commit.
-
-- **Deployment, verbatim:** "No deployment or supervised run may use any
-  commit from 131f1c9 up to C32b's: records are written from C30, and boot
-  reads them only from C32, so each boot's first save erases them (today's
-  behaviour, not a regression)."
-  > ANNOTATED AT M5l P81 (C32a): *"each boot's first save erases them"* is
-  > no longer true of a record not beside a pending close; the boot now
-  > restores or drops it. The restriction itself stands, through C32b.
-- **The accepted residual, verbatim:** "One kill during one ambiguous
-  placement write loses that position's durability (M5l-110); accepted by the
-  owner at P78 (Q2(b))." The ambiguous-placement path, `_persist_dropping`, is
-  unchanged by C30.
-- **Sentences that read "persisted" as "survives a restart" -- the owner's
-  ruling R-A at P79.** Each stays as written for C30, because it stays true
-  until C32: each boot's first save erases the records. C32 and C33 correct
-  them under P77 S6. The owner named the first three; C30's own search found
-  the last two, which read the same way.
-  - `CLAUDE.md`, the R2 hold bullet among the locked decisions: *"positions
-    are not persisted, so a restart forgets the hold"*.
-  - `docs/QB_ESCALATION.md`, site 5: *"Positions are not persisted either, so
-    on restart `positions` is empty"*.
-  - `src/trading_bot/execution/booking_line.py`, the held exit's `CRITICAL`
-    string: *"A restart releases the hold, because the position is not
-    persisted"*.
-  - `CLAUDE.md`, the M5k paragraph under Current state: *"A restart releases
-    the hold, because positions are not persisted."*
-  - `tests/unit/test_modes.py`, the docstring of
-    `TestADeferredSettlementAcrossARestart.test_a_held_close_is_released_unbooked_after_a_restart`:
-    *"positions are not persisted -- so the mark is gone"*.
-
-**ADDED AT M5l P80 (C31), the boot classifier.** `execution/restoration.py`,
-pure: no I/O, no clock, no write. Nothing calls it yet; C32 does.
-
-- `refuse_disabled` is R5, callable before any venue call. `reads_needed`
-  returns the venue order ids to GET (Q10(b)) and the refusals decidable
-  without a read. `classify` returns exactly one decision per position record,
-  then one per pending placement, in input order. Pending close records are
-  not classified (Q13).
-- The decisions: `Restore`, `BookExit`, `RestoreAndClose`, `Gone`,
-  `DropExpired`, `DropNotPlaced` and `RefuseBoot`. Only `RestoreAndClose`
-  implies a venue write, and it is the only one whose `writes_to_venue` is
-  true. The full table is the module's docstring.
-- Several matching lists refuse the boot even when exactly one is live,
-  where `resolve_placement` answers `PLACED_LIVE`: the P80 prompt rules
-  "several match" a refusal.
-- **Three choices the rulings did not make, for the owner to see:**
-  - Every leg of a matched list is read, not only the working leg that the
-    P77 specification's boot table (S3, in the report, not in the tree)
-    listed, because Q11 refuses a partial execution on any leg and a
-    live list's protective leg is seen only by reading it. A live record
-    costs one GET per leg (`M5l-123`).
-  - `Gone` reads the base's total, and `RestoreAndClose` its free balance
-    (`M5l-122`).
-  - `Restore`, `BookExit` and `RestoreAndClose` also carry the matched order
-    list and the entry economics, so C32 need not match or read again.
-- The records are typed by a protocol, `Requested`, which the store's
-  `PositionRecord` and `PendingRecord` and the executor's `PendingPlacement`
-  all satisfy, so `execution/` still imports no store.
-- The gate's file counts move with it: `ruff format` to 135 files and `mypy`
-  to 81 source files.
-
-**ADDED AT M5l P81 (C32a), boot wiring.** `live_system` in `engine/modes.py`
-now resolves the store's records at boot, under P77's S3 and the owner's
-rulings:
-
-- R5 (`refuse_disabled`) runs before the lock and before any venue call.
-- After `_seed_portfolio` and before both snapshots:
-  - one `get_all_order_lists`, which `_snapshot_live_order_lists` now reuses
-    instead of reading again;
-  - one `get_order` per leg orderId, bounded by `risk.reconcile_deadline_s`
-    at one attempt. A failed read refuses the boot (Q6(a)).
-- The decisions are then applied:
-  - `Restore` goes through `restore_position`, with no debit;
-  - `DropExpired`, `DropNotPlaced` and `Gone` drop the record, each with its
-    own line;
-  - every refusal is collected into one `ConfigError`.
-  - Then one save, and a summary line, `boot_positions_resolved`.
-- Both snapshots skip the symbols it restored (I5, `M5l-103`).
-- A boot that completes has settled every restored placement, so the executor
-  receives restored CLOSES only. Its first-candle placement path stays,
-  defensively, for placements made ambiguous during a run.
-
-**THE INTERIM REFUSALS, until C32b.** `BookExit` and `RestoreAndClose` refuse
-the boot with the reason "`<decision>` is handled from C32b", so nothing C32b
-would book or sell is dropped in between.
-
-> **ANNOTATED AT M5l P82 (C32b-1): `BookExit` NO LONGER REFUSES THE BOOT**;
-> it is booked or held. `RestoreAndClose`'s interim refusal stands until
-> C32b-2.
->
-> **ANNOTATED AT M5l P82 (C32b-2): THE INTERIM IS OVER.** `RestoreAndClose`
-> no longer refuses the boot either; it restores and is sold.
-
-**THE OWNER'S R-A EXTENSION, P81.** The five R-A sentences listed under C30
-above stay as written through C32b, because P-3k's deployment restriction
-means no deployable restart runs on these commits. C33 corrects every P77 S6
-text.
-
-> **DISCHARGED AT M5l P83 (C33), the five R-A sentences one by one.**
-> 1. `CLAUDE.md`, the R2 hold bullet's *"positions are not persisted, so a
->    restart forgets the hold"*: annotated at C33 under the S6 rule.
-> 2. `docs/QB_ESCALATION.md`, site 5's *"Positions are not persisted either"*:
->    annotated at C33.
-> 3. `booking_line.py`'s hold `CRITICAL`: the message was replaced, at C32b-1 and
->    C32b-3, and at C34 names the release tool.
-> 4. `CLAUDE.md`, the M5k paragraph: annotated at C32b-3.
-> 5. `test_modes.py`'s docstring *"positions are not persisted -- so the mark is
->    gone"*: gone with the rewrite of that test at C32b-3.
-
-**A POSITION RECORD BESIDE A PENDING CLOSE -- the owner's rulings, P81
-amendment 1.**
-
-- *Interim, C32a, verbatim:* "a position record whose symbol has a pending
-  CLOSE record is neither classified nor restored. It is left out of the
-  classifier's input, and boot's save does not carry it, which is today's
-  behaviour. Site B handles the close as today."
-- *Final design, for C32b, verbatim:* "For a close record beside a position
-  record, read the close's sell by the client id in the close record:"
-  - "FILLED: settle at boot. On success, book ledger-only (I7), satisfying
-    Q13. On FeeUnresolvable, keep a held record with no Position (Q5(b),
-    M5l-112). Remove the close record either way."
-  - "Absent, or terminal and unfilled, with the legs CANCELED and base >=
-    quantity: RestoreAndClose, dropping the close record, so exactly one sell
-    goes out."
-  - "List live: Restore; the close record's fate is decided in P82 after STEP
-    0 reads Site B."
-  - "Anything else: RefuseBoot."
-  - "The two restart tests' assertions change once, in C32b."
-- Why it was needed (`M5l-126`): the bot's own close cancels the protective
-  legs by design, so the classifier reads that list as `Gone` or
-  `RestoreAndClose`, and Q13 collides with Q5(b) on the same disk shape.
-
-> **ANNOTATED AT M5l P82 (C32b-3): THE INTERIM IS OVER AND THE FINAL DESIGN
-> IS BUILT.** The "Interim, C32a" bullet no longer describes the tree: no
-> record is left out of the classifier's input and the boot's save carries
-> what the decisions leave. The *"List live"* row is settled by P82's STEP
-> 0(b): the position is restored and the close record is KEPT, and Site B, on
-> the first candle, finds no sell, keeps the position UNKNOWN and releases the
-> record, selling and booking nothing. *"The two restart tests' assertions
-> change once, in C32b"* is discharged: both changed at C32b-3.
-
-**ADDED AT M5l P82 (C32b-1), a filled exit at boot.** A `BookExit` is
-settled at boot: one `get_my_trades` for the filled leg's order, bounded by
-`risk.reconcile_deadline_s` at one attempt, then `settle_exit` and the
-bookability ladder the runtime booking sites use.
-
-- **Booked** through `Portfolio.book_restored_exit`: ledger only (I7), on the
-  fill's UTC day (R4), in ascending fill time across records (I9), with one
-  `boot_exit_booked` line. The record leaves the store.
-- **Held** when the fee is one this ledger cannot subtract, or a fill is not
-  a sell (R2): the record is KEPT, no `Position` is created (Q5(b),
-  `M5l-112`), the symbol is BLOCKED, and one `exit_settlement_held` CRITICAL
-  carries `site=boot`. Every later save carries the held record, beside the
-  live positions, until an operator releases it -- the tool is C34's.
-- **Refused**, with the record left on disk, when the fills cannot be read,
-  do not yet account for the execution, or the exit has no cost basis: each
-  is a record this boot cannot resolve (Q6(a); the owner accepted this as
-  draft choice 1, `M5l-133`).
-- A pending placement whose list filled and then exited while down, and whose
-  exit is HELD, is kept as the position record it would have become (draft
-  choice 2, accepted, `M5l-134`).
-- When the venue's quote total and the sum of the fills disagree, the boot
-  booking emits `exit_quote_totals_disagree`, `site=boot`, exactly as the
-  runtime sites do, and books the venue's total (draft choice 3, overruled
-  by the owner, `M5l-135`).
-- Boot now DECIDES every record, then REFUSES, then APPLIES, so a refused boot
-  changes neither the portfolio nor the disk; and its save reads the ledger,
-  the history and the lifetime total live from the portfolio, which the
-  bookings wrote.
-
-**ADDED AT M5l P82 (C32b-2), protection gone and base held (R3, Q4(b)).** A
-`RestoreAndClose` is restored UNKNOWN with no debit and named by one
-`boot_position_unprotected` CRITICAL, whose message carries M5l-125's operator
-rule: if you acted on this symbol by hand, release its record before
-restarting.
-
-- The sale is R3's synthetic `CLOSE`, dispatched by `_BootCloser`, a candle
-  subscriber registered after the executor and only when boot restored such a
-  position. On the symbol's first candle it hands the executor a `CLOSE` and
-  an approved exit, and the executor's own path, traced at P82's STEP 0, does
-  the rest: the legs read cancelled, the ALL_DONE list's cancel answers
-  `-2011`, which that path treats as normal, and exactly one MARKET sell goes
-  out and books through `close_position`.
-- Until it books, UNKNOWN keeps every entry refused. The reconciler's first
-  pass on that bar classifies the list `DIVERGED` and escalates once per pass
-  until the position is gone.
-- **One attempt per symbol** (`M5l-137`): if the executor refuses the sale,
-  the position stays restored and UNKNOWN, entries stay refused, and the
-  strategy's own `CLOSE` path is still open.
-
-**ADDED AT M5l P82 (C32b-3a), `-2013` maps to `OrderNotFoundError`
-(`M5l-138`).** C32b-3's draft read the close's sell by its client id and took
-`OrderNotFoundError` for "the sell is absent". The owner's P82 amendment 2
-measured that read on Testnet before the commit: a GET order by a fabricated
-client id in our `-CL` format answered `-2013 "Order does not exist."`, and
-`translate_binance_error` returned a bare `ExchangeAPIError`, because
-`_API_RULES` keyed `OrderNotFoundError` on `-2011 "Unknown order sent."` alone.
-The owner's amendment 3 ruled the fix: one row, `-2013`, anchored on the whole
-measured message as the `-2011` row is.
-
-- **Tests**: the measured payload maps to `OrderNotFoundError`, exact type and
-  ancestry and code kept; two near-miss messages, one with a tail and one with
-  a head, do not, so loosening either anchor is caught; the unmatched `-2013`
-  logs once at ERROR and the measured one does not.
-- **STEP 0(b), what each catcher did on a venue-absent order and does now**
-  (`M5l-139`, REASONED from the code; the type itself is MEASURED):
-  - `reconciliation.py` `resolve_unresolved_legs`, the only site that
-    branches on the type. Before: `-2013` escaped as `ExchangeAPIError`, so the
-    driver's `leg_resolution` phase failed for EVERY position in that pass.
-    Now: that one leg is `DIVERGED` ("the venue has no such order"), and the
-    pass goes on. Nothing is booked, sold, cancelled or dropped; the position
-    keeps untrusted protection, and `_escalate_unbookable_divergence` logs one
-    `CRITICAL` per pass.
-  - `executor.py` `_entry_fill_price`, `_requery_sell_total`,
-    `_read_close_outcome`, `_confirm_protective_legs`, and this tree's boot
-    reads: each catches broadly and does not branch on the type, so the
-    behaviour is unchanged. `_confirm_protective_legs` records
-    `type(exc).__name__` in a log field only.
-  - `executor.py` `_cancel_protection`'s `except OrderNotFoundError` and the
-    `ExchangeError` catches around `get_my_trades`
-    (`_settle` in the executor and the driver) are not reached by `get_order`.
-- **Captures**: `-2013` and "Order does not exist" occur on 0 lines in all 14
-  logs checked (`M5l-140`), so the resolver's `-2013` branch has never run in
-  production. None of the 12 `reconciliation_phase_failed` lines in the M5k
-  close capture is explained by it: all 12 are `ExchangeConnectionError` in
-  phase `reconciliation_pass`.
-- **Not measured, and it bounds C32b-2** (`M5l-141`): R3's sale rests on
-  `cancel_order_list` of an ALL_DONE list answering `OrderNotFoundError`. No
-  capture holds that answer (`docs/RUN_LEDGER.md` reads
-  `close_cancel_already_terminal` NOT OBSERVED), and its message is not known to
-  be `-2011 "Unknown order sent."`. If it differs, the cancel fails at
-  `CRITICAL`, the record is released and nothing is sold: the safe direction,
-  and the position stays restored and UNKNOWN.
-
-> **ANNOTATED AT M5l P85 (C35): `M5l-141` IS RESOLVED BY MEASUREMENT, AND THE
-> SAFE DIRECTION IS WHAT HAPPENED.** The bullet above predicted *"If it
-> differs, the cancel fails at `CRITICAL`, the record is released and nothing
-> is sold"*, and at A4 of the P-3k supervised run it did: on Testnet at
-> `2026-10-01T18:30:03Z`, list 401075 (ETHUSDT, `ALL_DONE`), the venue answered
-> `-2011` with `'Unknown order list sent.'`, not `'Unknown order sent.'`; no
-> row matched, an ERROR `Unclassified message` was logged, `close_cancel_failed`
-> fired at `CRITICAL` and nothing was sold (`M5l-161`). C35 adds the row
-> `^Unknown order list sent\.$` to `OrderNotFoundError`. What survives: the
-> bullet's reasoning that a mismatch fails safe, which the run confirmed. The
-> arming condition below FIRED at C35 and is REAFFIRMED for the next row.
-
-`M5l-138`'s row is the first `_API_RULES` row keyed on a code that is not in
-`_ORDER_REJECT_CODES`, so a near-miss falls through to `ExchangeAPIError`
-rather than `OrderError`.
-
-*Arming condition:* **whoever next adds a row to `_API_RULES` in `exchange/models.py`.**
-
-**ADDED AT M5l P82 (C32b-3), a close beside a position record (P81
-amendment 1's final design).** The interim exclusion is removed. A position
-record whose symbol has a pending close is classified with it: the close's sell
-is read by the client id the close record derives (`close_sell_id`), one GET
-bounded like every boot read, and `OrderNotFoundError` is the answer "absent".
-The decision, per the owner:
-
-- **Legs cancelled and the sell FILLED**: `BookExit` of the sell, with no leg.
-  It is settled and booked ledger-only, or held (Q5(b)), exactly as a leg's
-  exit is, and the close record is removed either way. The booking line carries
-  `close_client_order_id` where a leg's carries `leg`.
-- **Legs cancelled and the sell absent, or terminal with nothing executed,
-  with the base free at least the quantity**: `RestoreAndClose`, and the close
-  record is removed, so `_BootCloser`'s sell is the only one.
-- **List live and no sell**: `Restore`, and the close record is KEPT for Site B
-  (P82's STEP 0(b)).
-- **Anything else** refuses the boot, including a close that does not match
-  its record, a sell that was not read, a sell read that fails with any error
-  but `OrderNotFoundError`, and legs cancelled with the base gone.
-
-Two P82 amendment 2 rulings land with it. This row of P77 S6 is superseded,
-recorded under the standing authorities. And `hold_fields`' resolution text no
-longer says a restart releases the hold: *"A restart keeps the hold: boot
-re-derives it from the venue's fills and keeps the record, with the symbol
-blocked."* Its neighbouring sentence, *"Enter this trade by hand, then
-restart"*, is left as written and is reported (`M5l-143`), and the text
-C32b-1 left false is `M5l-144`.
-
-> **ANNOTATED AT M5l P83 (C34): "left as written and is reported (`M5l-143`)"
-> IS NO LONGER TRUE.** The sentence was replaced by the release command in
-> C34, and `M5l-143` is resolved there.
-
-**The interim refusals are removed and the no-deployment window closes at
-C32b's last commit**, C32b-4. **The supervised run still waits for C34**,
-M5l-125's release tool: a held record has no way out until it exists.
-
-> **ANNOTATED AT M5l P83 (C34): THE TOOL NOW EXISTS**, so a held record has a
-> way out and "has no way out until it exists" is no longer true. The
-> supervised run's other precondition is the documents commit, C33.
-
-**ADDED AT M5l P82 (C32b-4), `M5l-120`'s test, and it changes no `src/`.**
-`M5l-120` said that after C30 a raise from `_open_position` following a
-successful placement leaves the pending record in memory and on disk, and that
-*"No test exercises the raise"*. One does now:
-`test_a_raise_after_a_placed_list_keeps_the_pending_record_and_refuses_the_symbol`
-in `tests/unit/test_executor.py` makes `_open_position` raise after the list is
-placed and its fill read, and asserts that the raise escapes `dispatch`, the
-record is still in `_pending`, no removal write reached disk, no position
-exists, and a second entry for the symbol is refused as `placement_pending`
-without a second list. Its mutation, the pre-C30 order, also fails
-`test_no_save_between_placement_and_position_lacks_both_records` and
-`test_a_delete_failure_logs_and_continues_without_raising` (`M5l-149`).
-
-That the raise escapes is a fact the test measures and the module docstring's
-*"It must never raise"* does not cover: `_open_position` has no `try` of its
-own, and what contains the raise is `TradingEngine._emit`'s isolation
-(`M5l-150`). Nothing changes here; it is recorded.
-
-**ADDED AT M5l P83 (C34), the release tool (M5l-125).**
-`scripts/release_position.py --symbol SYMBOL [--store PATH] [--preview]`, run
-from a deployment clone's root with the bot stopped. It is the only way out of
-a record the boot refuses or holds, short of editing `data/state.json` by hand.
-
-- **It refuses while the bot runs**: it takes the bot's own non-blocking
-  instance lock, holds it for the whole run and releases it on exit.
-- **It loads through `store.load`**, so the schema check applies, finds every
-  record for the symbol -- the position, a pending placement, a pending close
-  -- and prints each in full with the list id our seeds derive. None found, a
-  corrupt store or a missing one exits 1 and writes nothing.
-- **`--preview` is GET-only**: it reads the order lists, the legs, the close's
-  sell, the balances and the symbol's filters, and prints what the boot would
-  decide with `reads_needed` and `classify`. A failed read prints `preview
-  unavailable` and the run goes on. It never calls the venue otherwise.
-- **The operator types the symbol exactly**; anything else aborts, nothing
-  written. Only that symbol's records are removed, through `store.save`, and
-  one line goes to `logs/release.log` with the store's SHA-256 before and after.
-- **The messages name it.** The held-exit message's *"Enter this trade by hand,
-  then restart"*, which told an operator to do what keeps the hold, now reads
-  *"Resolve it at the venue, then release the record: python
-  scripts/release_position.py --symbol <SYMBOL>"*: **`M5l-143` is resolved**,
-  and the `<SYMBOL>` is a literal placeholder (`M5l-153`). So do the boot's
-  four record-related refusals, R3's `CRITICAL`, the held exit's `CRITICAL` and
-  the symbol's block reason.
-
-**The tool's limits, stated.** Its lock is keyed on the working directory's
-`logs/.bot.lock`, so it excludes the bot of the clone it is run FROM and no
-other (`M5l-155`): release a clone's store from that clone. And `--preview` is
-what separates releasing a resolved position from discarding a live one; the
-tool does not require it (`M5l-156`).
-
-*Arming condition:* **whoever next edits `store.save` or `PersistedState` in `persistence/store.py`, or the instance lock's path handling in `utils/instance_lock.py`, which `scripts/release_position.py` reuses.**
-
-**ADDED AT M5l P83 (C33), the documents.** No behaviour changes. Every P77 S6
-row is now annotated or corrected, listed in C33's commit message by content,
-before and after; the two C32a test names that described the old behaviour are
-renamed (the pytest count does not move); `dispatch`'s *"must never raise"* is
-annotated in the executor's module docstring (`M5l-150`); `CLAUDE.md`'s
-deployment procedure gains the active-clone store source, the schema step
-(`M5l-107`) and the release tool's operator rule (`M5l-125`); and
-`docs/RUN_LEDGER.md` section 24 is the supervised run's template, arms A1 to A7
-with the expected lines. **P-3k is IMPLEMENTED (C28-C34)**, and its gate is
-open only to A1, A2 and A4 recorded in section 24.
-
-> **ANNOTATED AT M5l P88 (C39): *"its gate is open only to A1, A2 and A4
-> recorded in section 24"* IS NO LONGER TRUE, AND WAS SUPERSEDED AT P87.** The
-> arms are recorded in section 25, not 24, which stays the template (`M5l-175`,
-> resolved here), and the gate is closed by the owner's ruling, quoted verbatim
-> at P-3k's head. **What survives:** section 24 as the arms' expected lines.
-
-**ADDED AT M5l P85 (C35-C37), the supervised run's first results.** The
-run started at `d1074c6` and is recorded in `docs/RUN_LEDGER.md` section 25.
-**A1 passed** (`M5l-165`: both records restored, `free_quote` reconciled to the
-digit). **A4 FAILED** (`M5l-161`): R3's cancel of an `ALL_DONE` list was
-answered `-2011 'Unknown order list sent.'`, which no row mapped, so the
-close failed at `CRITICAL` and nothing was sold. **C35 (`244aa6b`) maps it**,
-and C36 (`d95cb5e`) corrects the cancel script's stale warning
-(`M5l-163`). **A2's line is already in the log** (`M5l-166`), from a Ctrl+C stop
-rather than the hard kill the arm names; whether it counts is the owner's
-judgement. **THE GATE STAYS CLOSED.** It opens only when **A4 is re-run on the
-commit carrying C35** -- `244aa6b` or a descendant, deployed as its own clone
-per the procedure -- and recorded in section 25. **A1's and A2's evidence from
-`d1074c6` stands**, because neither path cancels an order list: A1 restores
-records and reconciles, A2 books an exit the venue already filled, and the
-answer C35 changed is the answer to a list cancel, made only by the close path.
-
-> **SUPERSEDED AT M5l P87 (C38): *"THE GATE STAYS CLOSED. It opens only when
-> A4 is re-run on the commit carrying C35"* HAS HAPPENED, AND *"A2's line is
-> already in the log ... whether it counts is the owner's judgement"* IS
-> RULED.** A4 was re-run at `5e22bc6` and passed (`M5l-168`), and the owner
-> ruled A2 a pass and the gate satisfied (`M5l-169`, `M5l-166` resolved). See
-> P-3k's head. **What survives:** the reasoning that A1's and A2's `d1074c6`
-> evidence stands because neither path cancels a list.
-
-The operator's release and manual ETHUSDT sale of that run cost
-`-6.91308000` USDT outside the ledger (`M5l-164`, section 25).
-
-**C33's S6 rows that remain by design.** Two S6 sentences are NOT changed, each
-for a stated reason. `modes.py`'s block message *"the position it belongs to
-was lost when the previous process ended"* is a code string, outside C33's
-fence, and is still true of a live list with no record (`M5l-159`). And
-`executor.py`'s *"Only a restart forgets"* comment under U2's Reading A is
-still true: the unconfirmed placement's durable record is dropped on purpose.
-
-*Arming condition:* **whoever next changes what `PersistedState` in `persistence/store.py` persists, or `_snapshot_unmanaged_holdings` or `_snapshot_live_order_lists` in `engine/modes.py`, which are `live_system`'s boot reconciliation.**
-
-#### P-3l. A market-data outage stops reconciliation (`M5l-055`)
-
-A market-data outage stops reconciliation, because passes are driven by candle
-arrival: at M5l's evidence run no pass ran for 300 s against a 180 s staleness
-bound while list 333832 was open, and no line reported it (M5l-055).
-Venue-side protection stayed in force; what is lost is the bot's knowledge of
-the position.
-
-> **ANNOTATED AT M5l (P68, C19): *"against a 180 s staleness bound"*
-> COMPARES THE GAP WITH A BOUND THE GUARD NEVER APPLIED THERE (`M5l-074`,
-> the class of `M5l-068`).** The guard reads the stamp only in `evaluate`, on
-> a candle, after the reconciler. No candle arrived in the window, so nothing
-> was evaluated. When candles resumed, the reconciler ran first and refreshed
-> the stamp before any read. **What survives:** the outage, its 300 s, and
-> that no line reported it. What was lost is still the bot's knowledge of the
-> position, not a refusal.
-
-**Not a gate on live trading**, by the project owner's ruling at P65.
-
-> **THE OWNER'S RULING, VERBATIM, M5l P76 (C27):** *"The market-data outage
-> is not a gate on live trading, because venue-side protection remains in
-> force through it."* Until P76 the tree recorded the P65 ruling above only
-> in reported speech (`M5l-099`).
-
-What the outage also cost, measured at P65 and recorded in
-`docs/RUN_LEDGER.md` §23:
-- The bot's disconnect warning came 229 s after the library's first error,
-  because its consumer read nothing in between (`M5l-060`).
-- A queue overflow discards every message queued behind the first error
-  (`M5l-061`).
-- Three BTCUSDT/1m bars and one ETHUSDT/5m bar were never received and never
-  backfilled (`M5l-062`).
-- The row-count SMA(50) behind the next death cross spanned the gap
-  undetected (`M5l-063`).
-
-*Arming condition:* **whoever next changes what triggers a reconciliation pass -- `ReconciliationDriver.__call__` in `execution/reconciliation_driver.py`, registered by `provider.on_candle` in `live_system` in `engine/modes.py` -- or the market-data reconnect path, `_run` in `exchange/websocket_client.py`.**
-
-> **ANNOTATED AT M5l P91 (C44), P-3l IS BEING CLOSED IN THREE COMMITS: GAP
-> DETECTION AND THE BUY GUARD LAND FIRST.** Under the P90 pins, measured and
-> guarded rather than repaired. **C44:** `BufferedMarketDataProvider._append`
-> records a gap when a bar's `open_time` is more than one timeframe after the
-> last, logs `bars_gap_detected` once per gap (`symbol`, `timeframe`,
-> `missing_bars`, `from`, `to`), and `bars_since_gap` counts the consecutive bars
-> since. `TradingEngine._on_candle` suppresses a **BUY only** while fewer than
-> `strategy.warmup_period` bars have followed the gap, logging
-> `buy_refused_bars_gap`, and logs `bars_contiguous_again` once when the window
-> clears. A CLOSE is never refused: the guard sits AFTER the signal exists and its
-> condition names `SignalAction.BUY`. So the P-3l item's *"The row-count SMA(50)
-> behind the next death cross spanned the gap undetected (M5l-063)"* is
-> historical, true of the capture and no longer of the tree. **What survives:**
-> the bars are still never fetched (backfill is deferred, pin 4), reconciliation
-> still stops with the candles (a timer is deferred, pin 2), and the heartbeat
-> and the transient-error handling are C45 and C46.
->
-> **ARMING AUDIT AT C44.** P-2's and U7's *"whoever next edits
-> `config/models.py`'s coherence block"* fire on a comment C44 adds inside
-> `_check_dispatch_budget_fits_the_bar`, annotating C16's refusal text, and are
-> REAFFIRMED: no term, budget or refusal in the block moved. The conditions
-> naming the reconciliation trigger and `_run` are not fired by C44.
->
-> **ANNOTATED AT M5l P91 (C45): THE HEARTBEAT, THE LAG MONITOR AND THE SLOW-CHAIN
-> LINE ARE BUILT, AND *"no line reported it"* IS NO LONGER TRUE OF THE TREE.**
-> `FeedWatchdog` (`data/watchdog.py`) is armed, started and stopped by the
-> engine and fed by the provider's chain observer, which `live_system` wires.
-> **Per pair:** `feed_silent` at `WARNING` after 1.5 timeframes with no accepted
-> bar, `feed_silent_critical` at `CRITICAL` after 5, once per episode, and
-> `feed_resumed` at `INFO` with the gap when a bar ends it. **Event-loop lag:**
-> `event_loop_lagging` at `WARNING` when a one-second tick wakes more than 5 s
-> late, with `event_loop_recovered`. **Slow chain:** `handler_chain_slow` at
-> `WARNING` when one candle's subscribers take more than half the bar, with
-> `handler_chain_recovered`. It reports and nothing else: no halt, no
-> reconnect, no refusal. **Its purpose in `M5l-198`:** the lag and slow-chain
-> lines are the measurement of the 229 s stall that the capture could not
-> supply, so the next occurrence names what held the consumer. A loop blocked
-> outright cannot run the watchdog and is reported when it resumes. **What
-> survives:** reconciliation still stops with the candles; the line says so at
-> `CRITICAL` and does not restart it.
->
-> **ARMING AUDIT AT C45.** P-3l's *"…`provider.on_candle` in `live_system` in
-> `engine/modes.py` -- or the market-data reconnect path, `_run` in
-> `exchange/websocket_client.py`"* names `live_system`, which C45 edits to wire
-> the observer and the watchdog; it is REAFFIRMED, because what triggers a
-> reconciliation pass is unchanged (the driver is still registered by
-> `provider.on_candle`) and `_run` is untouched until C46. The P-3k boot-
-> reconciliation condition names `live_system` only as where the snapshots run
-> and is not fired.
->
-> **RESOLVED AT M5l P91 (C46), AS REPORTED, MEASURED AND GUARDED: P-3l IS
-> CLOSED UNDER THE P91 RULINGS, and the arming condition above, *"…or the
-> market-data reconnect path, `_run` in `exchange/websocket_client.py`"*, FIRED
-> at C46 and is DISCHARGED.** `_run` now reads past the library's own transient
-> error dicts -- `ConnectionClosedError`, `ConnectionClosedOK`,
-> `IncompleteReadError`, `gaierror` and `BinanceWebsocketClosed`, the five
-> python-binance 1.0.37 catches under *"reports errors and continue loop"* --
-> logging each as `stream_transient_error` at `WARNING` and tearing nothing
-> down, so the klines queued behind them survive (`M5l-061`, `M5l-199`). Anything
-> else, including `BinanceWebsocketUnableToConnect`, a queue overflow, a
-> cancelled loop and any type nobody listed, still rebuilds the socket; the
-> whitelist runs that way deliberately, because a transient error treated as
-> terminal costs one rebuild and the reverse leaves a dead feed. The socket
-> manager is given `max_queue_size=1000` where the library defaults to 100
-> (`binance/ws/streams.py`), so a stalled consumer loses closed bars ten times
-> later. **What the item's lines now are:** the 229 s delay (`M5l-060`) is
-> reported by the watchdog whenever it recurs; the lost bars (`M5l-062`) are
-> detected and logged and guarded (C44); the spanned SMA (`M5l-063`) refuses a
-> BUY; the silent stop of reconciliation is reported at `CRITICAL` and **accepted
-> under P76**, not repaired. **What stays open:** the cause of the original stall,
-> which is `M5l-198` and UNMEASURED until the lag and slow-chain lines catch an
-> occurrence; and the two deferred items below.
-
-> **ANNOTATED AT M5l P97 (C56): THE FIRST RUN OF C44-C46 ON A HEALTHY FEED WAS QUIET,
-> AND THAT MEASURES NO FALSE POSITIVE AND NOT A FIRING (`M5l-250` to `M5l-252`).** Over
-> 8.356 h, the observation run at `51a5f27` logged 0 each of `bars_gap_detected`,
-> `buy_refused_bars_gap`, `bars_contiguous_again`, `feed_silent`,
-> `feed_silent_critical`, `feed_resumed`, `event_loop_lagging`, `event_loop_recovered`,
-> `handler_chain_slow`, `handler_chain_recovered` and `stream_transient_error`, with 7
-> `WARNING`s and no `ERROR` or `CRITICAL`, all accounted for. The venue's klines by GET
-> over the window show 503 of 503 BTCUSDT/1m bars and 101 of 101 ETHUSDT/5m bars, with
-> no missing interval, so the quiet matches the feed. **The natural-gap rate on the
-> committed pairs is 0 per symbol per hour over this window.** **What survives:** *"the
-> cause of the original stall, which is `M5l-198` and UNMEASURED until the lag and
-> slow-chain lines catch an occurrence"* is TRUE and unchanged: nothing stalled, so no
-> lag or slow-chain line exists. And `M5l-202`, whether Binance omits a kline for an
-> interval with no trades, is still UNMEASURED, because neither pair had a zero-trade
-> bar in the window. The emitters are exercised by tests and not by any run.
-> `docs/RUN_LEDGER.md` section 26.
->
-> *Arming audit at C56 (docs only).* P-3l's condition, *"whoever next changes what
-> triggers a reconciliation pass ... or the market-data reconnect path, `_run`"*, is not
-> fired: no source file is edited. REAFFIRMED.
-
-#### P-3m. A call-cap deferral logs nothing (`M5l-075`)
+### P-3m. A call-cap deferral logs nothing (`M5l-075`)
 
 When the per-pass call cap stops before a due position, that position is not
 read and nothing says so. A pass that read one of two due positions logs
@@ -1132,7 +504,7 @@ would be a staleness refusal.
 > survives:** the item, for those two shapes, and the arming condition for
 > `_report`.
 
-#### P-3n. Is the confirm-step question ruled? (`M5l-077`) -- FOR THE OWNER
+### P-3n. Is the confirm-step question ruled? (`M5l-077`) -- FOR THE OWNER
 
 U7 below calls the five-versus-four confirm-step question *"unruled"*.
 `config.yaml`'s comment on `dispatch_deadline_s` says *"RULED at M5h: the
@@ -1158,66 +530,6 @@ calls"*. MEASURED: the two disagree. Which one stands decides whether
 > U7 lacks. P-3n merges into U7 (the P-3 order above).
 
 *Arming condition:* **whoever next edits `_CLOSE_SEQUENCE_CALLS` in `config/models.py`, or rules on U7.**
-
-#### P-3o. The call cap is the position limit (`M5l-086`, `M5l-087`)
-
-The pass cap max_calls equals max_open_positions, so a configuration with
-max_open_positions < L + 1 cannot complete a position with L unresolved legs
-(M5l-086, M5l-087). C20b refuses such configurations at load; decoupling the
-cap from the position limit, and counting it in the budget, is the real fix
-and needs its own Phase 1. C20b therefore refuses max_open_positions = 1 in
-every configuration; decoupling restores single-position operation.
-
-> **ANNOTATED AT M5l (P71, C20b), for precision: "in every configuration"
-> means every configuration with a protective leg enabled.** With both the
-> stop-loss and the take-profit disabled, `L = 0` and a cap of 1 is
-> accepted. Two tests rely on that. **What survives:** every configuration
-> that protects its positions needs a cap of at least `L + 1`.
-
-*Arming condition:* **whoever next changes how `ReconciliationBudget.from_config` in `execution/reconciliation_driver.py` sets `max_calls`.**
-
-> **RESOLVED AT M5l P89 (C41): THE CALL CAP IS NO LONGER THE POSITION LIMIT,
-> AND THE ARMING CONDITION ABOVE IS DISCHARGED.** *"The pass cap max_calls
-> equals max_open_positions"* and *"C20b therefore refuses max_open_positions
-> = 1 in every configuration"* are no longer true. By the owner's P76 sketch
-> (a), `RiskConfig.reconcile_call_cap` is `max(max_open_positions, L + 1)`,
-> `ReconciliationBudget.from_config` sets `max_calls` from it, the coherence
-> validator's reconcile term counts it (`reconcile_call_cap x T_recon`), and
-> C20b's refusal, `AppConfig._check_the_call_cap_can_complete_a_position`, is
-> removed. **Rendered through `AppConfig`:** the committed shape is unchanged
-> (`2 x 9.0 + 3 x 2.3 + 2 x 2.3 = 29.5 s`, ceiling `D = 9.25`), and two 1m
-> pairs with `max_open_positions = 1` and a take-profit load with a cap of 3,
-> `2D + 3 x 2.3 + 1 x 2.3`, so `D = 10.4` is exactly 30.0 s and 10.41 is
-> refused. The settlement term is unchanged, `min(N_max, P_sim) x T_recon`,
-> because it counts positions that can exit on one bar and not calls. **The
-> staleness floor's `k <= n - 1` is unaffected (`M5l-084`, re-derived at P89).**
-> The derivation used only that the pass reads oldest-stamp-first, stops when
-> `len(results) + reserved >= max_calls`, and reserves the first unresolved
-> position's `L` legs, so that with `max_calls >= L + 1` every pass completes
-> and stamps at least one position ahead of a deferred one, and only `n - 1`
-> can sit ahead of it. It never used `max_calls <= max_open_positions`: it was
-> probed at `max_calls = 3` for `n` = 2, 3 and 4, with the cap BELOW `n`. The
-> new cap is at least `L + 1` by construction and at least `max_open_positions`
-> `>= n`, so the premise holds and a larger cap only widens each pass's read
-> prefix. **What survives:** the arithmetic
-> that completing an `L`-leg position costs `1 + L` calls, the livelock
-> argument, and `n = min(max_open_positions, enabled pairs)`, since `n` counts
-> positions and not calls. And the **starvation shape** (`M5l-085`: a
-> neighbour's failing point queries) stays open, logged rather than fixed by
-> P-3m.
->
-> **ARMING AUDIT AT C41.** Fired and REAFFIRMED: P-2's *"whoever next edits
-> `config/models.py`'s coherence block"* and U7's identical condition, both
-> because C41 edits that block's reconcile term; P-2's design question (the
-> default, the floor) is untouched, and U7's `_CLOSE_SEQUENCE_CALLS` is not
-> deleted, the confirm-step question still being unruled. P-3i's
-> *"`ReconciliationBudget`"* condition fires on `from_config` and the class
-> docstring and is REAFFIRMED for C43. P-3m's *"the call cap in
-> `reconcile_open_positions`"* condition is touched by a docstring annotation
-> only and is REAFFIRMED for C42. P-2's annotation above, *"`90355df` (C20b)
-> adds the precondition"*, and the commit list's *"`90355df` (C20b): the
-> `L + 1` call-cap precondition"*, record what C20b did and stay as written;
-> the precondition now holds by construction.
 
 ---
 
@@ -1774,7 +1086,7 @@ never ran or ran and failed**, because the write raises before it commits.
 state to distinguish two booking outcomes.** The state cannot separate them;
 only the label can.
 
-### `M5i-104`. Unguarded unpacks turn kills into crashes — the sweep, now 18 sites
+### `M5i-104`. Unguarded unpacks turn kills into crashes — the sweep, now 17 sites
 
 **The named test is resolved and indexed above.** A single-element tuple
 unpack of log records with no prior length assertion fails at `ValueError`, a
@@ -1923,6 +1235,13 @@ reconciling as `decision=sell` 162 plus `decision=already_closed` 1. **The
 denominator moved from 75 at M5j's close to 163 at M5k's**, which is why it is
 quoted with its capture rather than bare.
 
+> **ANNOTATED AT M5l P98 (R7): `decision=halt` IS STILL ZERO ACROSS THE FOUR M5l-ERA
+> CAPTURES, 16 CLOSE PLANS IN ALL.** By `p98_events.py`, counting `event=close_planned` and
+> `decision=halt` in each: the evidence run `c1471d3c...` 3 and 0, the `d1074c6` clone's log
+> `bcf01bb1...` 3 and 0, the `5e22bc6` clone's log `85e1c643...` 4 and 0, and the observation
+> run `023c72a1...` 6 and 0. They are separate runs and not an extension of the capture above, so
+> the 16 is not added to its 163.
+
 ### X3. `resolve_placement` has never run — STRUCK at `0992fa3`
 
 **Closed by M5j.** Falsified by the event pair `placement_ambiguous` at
@@ -1943,7 +1262,7 @@ unobserved branch.
 | `decision=halt` | **0** | `grep -c 'decision=halt'` |
 | clauses naming a filled leg `TP` | **3** | both classifier forms: `leg TP reports FILLED with`, and `leg TP reports <status> with <qty> executed` at a non-zero quantity |
 | clauses naming a filled leg `SL` | **164** (146 + 18) | the same two forms for `SL` |
-| log events DEFINED in `src/` | **40** (38 `_EVENT_*`, 2 public `EVENT_*`) | module-level string constants, by `ast`; `_WS_EVENT_*` excluded |
+| log events DEFINED in `src/` | **61** (59 `_EVENT_*`, 2 public `EVENT_*`) | module-level string constants, by `ast`; `_WS_EVENT_*` excluded |
 | of those, absent from the capture | **23** | `event=<value>` absent |
 | of those, added at M5k | **6** | the six below, every one absent |
 | `RefusalStage` members defined | **14** | the enum body |
@@ -1976,6 +1295,39 @@ row moves from 22 to 23 by the same instrument and the observed remainder is
 unchanged at 17. No capture was re-read; every other row is the capture's and
 is untouched.
 
+> **ANNOTATED AT M5l P98 (R7): THE DEFINED-EVENTS ROW COUNTS THE TREE AND IS CORRECTED
+> IN PLACE, FROM 40 TO 61. THE CAPTURE-SCOPED ROWS ARE NOT TOUCHED.** The instrument is
+> the one the table states: module-level string constants named `_EVENT_*` or `EVENT_*`,
+> read by `ast` over `src/trading_bot`, `_WS_EVENT_*` excluded. It finds **61, 59
+> `_EVENT_*` and 2 public `EVENT_*`**, which is the 40 of P-1 and 21 added since. **The
+> instrument is blind to an event logged from a string literal**: `bars_gap_detected`, in
+> `data/market_data.py`, is one, so by a literal-aware count the events defined are 62.
+>
+> **What M5l's captures observed**, by `event=<value>` over four of them: the
+> evidence run (SHA-256 `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f`),
+> the P-3k clones' logs at `d1074c6` (`bcf01bb15b54c08e1db6b6049c680b49ba3177406ce7c0bed7191b0d14825cf3`)
+> and at `5e22bc6` (`85e1c64391089b1f425ae0efe3954aa705a271d2369ac4bab85ad425871c71bb`), and the
+> observation run (`023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb`). **Of
+> the 61, 19 occur in at least one of the four and 42 in none.** These are four separate
+> runs and not an extension of the M5k capture this table measures, so the 42 is not
+> comparable with the table's own 23: the denominators differ and so do the captures.
+> The 42 absent from all four: `bars_contiguous_again`, `boot_live_list_unconfigured_symbol`,
+> `boot_position_dropped`, `boot_position_gone`, `boot_symbol_blocked`,
+> `buy_refused_bars_gap`, `close_abandoned_after_cancel`, `close_book_failed`,
+> `close_position_naked`, `close_record_resolved`, `close_sell_unconfirmed`,
+> `close_settlement_deferred`, `close_sold_unbooked`, `close_unbookable_held`,
+> `collaborator_failed`, `debit_from_requested_limit`, `dispatch_missed`,
+> `entry_fill_absent`, `event_loop_lagging`, `event_loop_recovered`, `exit_book_refused`,
+> `exit_booked`, `exit_quote_totals_disagree`, `exit_settlement_deferred`,
+> `exit_settlement_held`, `feed_resumed`, `feed_silent`, `feed_silent_critical`,
+> `handler_chain_recovered`, `handler_chain_slow`, `ledger_unwritable`,
+> `order_list_id_not_numeric`, `placement_ambiguous`, `placement_resolved`,
+> `placement_unresolved`, `position_record_skipped`, `reconciliation_deferred`,
+> `reconciliation_phase_calls`, `reconciliation_phase_failed`, `settlement_timeout_held`,
+> `stream_transient_error` and `venue_quote_total_unavailable`. Two of them,
+> `placement_ambiguous` and `placement_resolved`, were observed on 2026-08-27 (X3 below),
+> in a capture none of the four extends. **`RefusalStage` is not re-censused here.**
+
 **The websocket constants are excluded deliberately.** `_WS_EVENT_TYPE`,
 `_WS_EVENT_KLINE` and `_WS_EVENT_ERROR` in `exchange/websocket_client.py` match
 a pattern looking for `_EVENT_` but are wire-protocol keys of Binance's stream
@@ -1998,19 +1350,21 @@ capture**, which is the tool that produces every figure in this table.
 
 ## THE GATE BASELINE
 
-Measured at M5k's rotation, at `ae8c914`, on this credentialed machine:
+Measured at M5l's rotation, at `9fc8b8d`, on this credentialed machine, by
+`scripts/check.py` run bare to a file:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  129 files already formatted
-mypy                                   Success: no issues found in 79 source files
-pytest                                 1822 passed, 1 skipped
+ruff format --check src tests scripts  142 files already formatted
+mypy                                   Success: no issues found in 84 source files
+pytest                                 2148 passed, 1 skipped
 ```
 
-**`1822 passed, 1 skipped` is MEASURED.** `1819 passed, 4 skipped` is **DERIVED**
-— that run minus the three `skipif(not HAS_CREDENTIALS)` integration tests,
-which move from the passed column to the skipped one. It has not been observed
-on this machine and must not be quoted as though it had.
+**`2148 passed, 1 skipped` is MEASURED.** `2145 passed, 4 skipped` is **DERIVED**
+-- that run minus the three `skipif(not HAS_CREDENTIALS)` integration tests, one in
+each integration module and re-counted at this rotation, which move from the passed
+column to the skipped one. It has not been observed on this machine and must not be
+quoted as though it had.
 
 The lone skip in the credentialed run is **not** an integration test:
 `tests/unit/test_logger.py` skips one case on Windows because `time.tzset` is
