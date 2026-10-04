@@ -1994,7 +1994,8 @@ residue and its condition.
 ### 3. Regularising the arming conditions
 
 Done at M5j's rotation for this file, and widened at M5k's by `CLAUDE.md`'s
-rule g, under which the audit reads every document that carries a condition.
+*"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT THAT CARRIES AN ARMING CONDITION"*,
+under which the audit reads every document that carries a condition.
 **Two conditions are left unparsed deliberately**, one in this file -- Q-C §3's
 leg set -- and one in `docs/QB_ESCALATION.md` -- the halt flag's first writer.
 Closing either needs a ruling rather than an edit. See the note under **Arming
@@ -2006,7 +2007,8 @@ conditions** below, which carries the measured registers.
 
 `scripts/check_arming_conditions.py` keeps a parsed and an unparsed register and
 **exits non-zero while the unparsed register is non-empty**. Under `CLAUDE.md`'s
-rule g it is run on every document that carries a condition. MEASURED at M5k's
+*"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT THAT CARRIES AN ARMING CONDITION"*
+it is run on every document that carries a condition. MEASURED at M5k's
 rotation, on the tree this commit leaves:
 
 | document | candidates | parsed | unparsed |
@@ -2388,7 +2390,8 @@ only the label can.
 **The named test is resolved and indexed above.** A single-element tuple
 unpack of log records with no prior length assertion fails at `ValueError`, a
 crash, where a mutation removing the record should fail an assertion; `CLAUDE.md`'s
-rule i now prescribes the remedy. **The sweep is carried, and it has grown from
+*"READ A LOG FIELD THROUGH `vars(record).get(key)`, AND ASSERT A LENGTH BEFORE INDEXING -- NEVER TUPLE-UNPACK"*
+now prescribes the remedy. **The sweep is carried, and it has grown from
 the 12 sites M5i counted to 18.** MEASURED at `ae8c914`, with the instrument
 stated: lines matching `^\s*\(\s*\w+\s*,\s*\)\s*=` under `tests/` whose
 right-hand side reads log records (`_records(` or `caplog`), with no `assert
@@ -2667,7 +2670,8 @@ the authority. Recorded here only as pointers:
   distinct and maximum ids, and every duplicate, gap, id cited but never
   declared, and commit with no block.
 - **Step 2's count sites:** `scripts/check_gate_counts.py`, run TWICE, outgoing
-  figures first -- `CLAUDE.md`'s rule l, and `M5k-125` is why.
+  figures first -- `CLAUDE.md`'s *"AT M5k's ROTATION: `scripts/check_gate_counts.py` RUNS TWICE, OUTGOING FIGURES FIRST"*,
+  and `M5k-125` is why.
 
 > **DO NOT MOVE A RULE INTO THIS FILE.** Step 3 rewrites it every rotation. At
 > M5i's rotation `CLAUDE.md` was found asserting that the grep-the-digits rule

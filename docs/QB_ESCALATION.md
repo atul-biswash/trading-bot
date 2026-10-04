@@ -256,7 +256,8 @@ line stops being read.
 > no halt flag was written in M5k, and §1's annotation records that the owner
 > ratified `CRITICAL` without one -- so its caller may never be written, which
 > is failure mode 2 in `CLAUDE.md`'s arming-condition rule. Since M5k's
-> rotation the commit-time audit reads this document too (`CLAUDE.md`'s rule g),
+> rotation the commit-time audit reads this document too (`CLAUDE.md`'s
+> *"AMENDED AT M5k's ROTATION, BY ANNOTATION: THE AUDIT READS EVERY DOCUMENT THAT CARRIES AN ARMING CONDITION"*),
 > and `scripts/check_arming_conditions.py` now finds the condition and reports
 > it UNPARSED, because its bold span names no backticked site -- accepted as
 > such by ruling, as Q-C §3's is -- while whether it is stranded is carried to
