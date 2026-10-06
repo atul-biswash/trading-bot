@@ -153,6 +153,14 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > fee capture is unmet, base-quantity netting is unbuilt, and live trading stays refused at every
 > entry point by exactly those two gates. M5m's scope is not decided; see
 > `docs/NEXT_MILESTONE.md`.
+>
+> **ANNOTATED WHEN M5m's SCOPE WAS DECIDED: *"M5m's scope is not decided"* IS NO LONGER
+> TRUE.** The owner decided it: M5m validates a strategy before anything else — a census
+> script, historical klines, a backtester on the live decision path, calibration against
+> Testnet trades, then research under a fixed protocol, ending in a PASS or FAIL decision
+> gate. The live-blocking items are deferred to the milestone after a PASS. **What
+> survives:** everything else in this paragraph, the live block included. See
+> `docs/NEXT_MILESTONE.md`.
 
 Eleven files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
