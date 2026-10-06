@@ -5,7 +5,213 @@ not live here: they are in `CLAUDE.md`, including its **Standing authorities for
 commits**. Every item below is either carried from M5l with its arming condition and
 its annotations, or indexed as resolved with the commits that resolved it.*
 
+> **ANNOTATED WHEN M5m's SCOPE WAS DECIDED: *"Every item below is either carried from
+> M5l … or indexed as resolved"* IS NO LONGER TRUE.** The section immediately below,
+> *M5m — VALIDATE A STRATEGY BEFORE ANYTHING ELSE*, is new and carries M5m's own items,
+> S0 to S7. **What survives:** every item after it is carried or indexed exactly as the
+> sentence says, and none of them is edited by the commit that wrote that section.
+
+## M5m — VALIDATE A STRATEGY BEFORE ANYTHING ELSE
+
+**DECIDED BY THE PROJECT OWNER, in a review session after M5l's close.** The owner's
+instruction, verbatim: *"rewrite the next milestone based on your suggestion"*. The
+suggestion it adopts was the reviewer's, given in that session, and it is restated here
+rather than quoted so that every figure in it carries its instrument:
+
+1. stop engine work, except a defect found by a run;
+2. build the minimal backtester next, with fees, and prove it against Testnet trades;
+3. test slower strategies on it over two or more years of data;
+4. treat live readiness — N6, U9, U10 — as conditional on step 3 passing.
+
+**THIS OVERTURNS ONE RULING AND NO OTHER.** P98's order, *"the items that block live
+trading come first"*, is superseded for M5m: those items are **deferred, not dropped**,
+and each keeps its text and its arming condition below. The live-trading block is
+untouched — `refuse_live_trading` does not change in M5m, and N6's two preconditions
+still stand exactly as written. Nothing here rules U10's own discrepancy either; it is
+deferred with the item.
+
+### Why the order changed — the evidence, each figure with its capture
+
+**The engine is no longer the binding constraint; the strategy is.** M5l's observation
+run booked six round trips equal to the venue's fills to the last digit (section 26 of
+`docs/RUN_LEDGER.md`, capture SHA-256
+`023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb`). In the same
+section, the end store (SHA-256
+`d2d83eed081bb14ae00469d39bd136b58d989bee80f601f0aed9d9dbe9f1c2d4`) holds
+`lifetime_realised = -451.25366810` USDT over the days rolled since 2026-09-10, gross of
+entry fees, with every commission in every capture at `0.00000000`.
+
+**A per-trade census of an owner-supplied capture**, `trading_bot.log`, SHA-256
+`641778e50a42ca44101b28b9ce342431352544bca9855711d3164bba24fc32b4`, last record
+`2026-09-24T03:58:40Z`. Its figures are **MEASURED by an untracked reviewer script**, so
+they are not reproducible from this tree until S0 lands:
+
+- 157 bookings from 2026-09-04 to 2026-09-24, each matched to its `order_placed` line:
+  147 by the strategy's `CLOSE`, 10 by a protective leg. Realised **-157.7217** USDT
+  gross; win rate 35.0%; profit factor 0.78.
+- Per-trade return on the entry quote total: mean **-0.0553%**, standard deviation
+  1.0475%, 95% interval **[-0.2192%, +0.1085%]**. The 147 strategy closes alone: mean
+  **+0.0049%**.
+- At an assumed 0.1% commission per side, the net mean is -0.2553% per trade, t = -3.05
+  under an independence assumption. **The upper end of the gross interval does not cover
+  a 0.15% round trip.**
+- Seven `SL` legs filled 0.03% to 4.21% beyond their triggers; the worst moved a 2% stop
+  to a -6.13% exit.
+
+**REASONED from those figures, and it is the whole argument:** the execution path books
+what the venue does, and what the venue does with this strategy's orders is lose money
+once fees exist. Lifting the live block on this strategy would make that loss real.
+Engine work cannot change it, and N6, U9 and U10 matter only once there is a strategy
+worth taking live.
+
+### Exit criterion — the milestone ends in a DECISION, not in code
+
+M5m closes when S7 records one of two outcomes:
+
+- **PASS** — a strategy meets every S7 threshold out of sample. N6, U9 and U10 become
+  the next milestone's scope, in the P98 order.
+- **FAIL** — none does. The live block stays, and the owner rules the project's
+  direction. **A FAIL is a legitimate outcome, not a defect to engineer around.**
+
+### The items, in order
+
+**S0. Reproduce the census with a tracked script.** A read-only tool under `scripts/`
+that takes a log path and prints, per booking and in total, the figures above, matching
+each `close_booked`, `exit_booked` and `boot_exit_booked` line to its `order_placed` line.
+It refuses a path under `logs/`, as `scripts/run_census.py` does. **Acceptance: on the
+capture `641778e5…` it reproduces every figure in the census to the digit.** Until then
+those figures stay an untracked script's output and must be quoted as such. Two facts
+the reviewer's script had to handle: lines before 2026-09-09 carry local time with no
+zone, so durations are taken from `entry_bar_time` and `candle_time`; and booking days
+are attributed by booking time, as `Portfolio` attributes them, never by candle time.
+
+*Arming condition:* **whoever next renames `_EVENT_CLOSE_BOOKED` or `_EVENT_PLACED` in `execution/executor.py`, `_EVENT_BOOKED` in `execution/reconciliation_driver.py`, or `_EVENT_EXIT_BOOKED` in `engine/modes.py` — the four lines S0 parses.**
+
+**S1. Historical klines, downloaded and stored.** Fill `scripts/download_data.py` and
+`data/historical.py` — both docstring-only today. MEASURED: `ExchangeClient.get_klines`
+in `core/interfaces.py` takes `limit` and no start time, so a date-ranged download needs
+either a widened port or a script-side client; **that choice is S1's design question,
+and U12 names the same port change**, so whichever lands first settles both. Store per
+symbol and timeframe under `backtesting.data_dir`, idempotent on re-run, with gaps
+reported rather than filled. At least two years of BTCUSDT and ETHUSDT at 1m, 5m, 1h,
+4h and 1d. Data comes from **mainnet** public klines, which need no key; Testnet's book
+is not mainnet's, and only mainnet history is long enough.
+
+*Arming condition:* **whoever next edits `main` in `scripts/download_data.py` or adds a start time to `ExchangeClient.get_klines` in `core/interfaces.py`.**
+
+**S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
+**It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
+the manager taking an injected `Clock` and a provider over historical bars — the M4
+seams exist for exactly this, and *"a signal leaves the strategy complete, so backtest
+and live share one code path"*. Fill model, each item a parameter with the stated
+default:
+
+- **Entry:** fills at the intent's `entry_limit` only if the next bar trades through it,
+  else the `FOK` is refused, as live.
+- **Protection:** triggered **intrabar** from the bar's high and low, which Q-C names as
+  this design's largest cost (`docs/QC_PROTECTIVE_ORDERS.md`). When one bar touches both,
+  **the stop wins**, as `should_exit` already decides. Stop slippage beyond the trigger is
+  a parameter, defaulting to the census's median of **0.66%** (the fourth of the seven
+  measured legs; same untracked script, so S0 confirms it), and never zero.
+- **`CLOSE`:** a `MARKET` sell at the next bar's open plus slippage.
+- **Fees:** charged on both legs at `backtesting.fee_percent`, quote-denominated in the
+  ledger, per the denomination invariant.
+
+**The money rule binds here.** `BacktestConfig.fee_percent` and `slippage_percent` are
+`float` today and are multiplied by money for the first time in S2, so S2 is where they
+become `Decimal`, at config load, per *"a config field becomes `Decimal` at the milestone
+that first multiplies it by money"*.
+
+*Arming condition:* **whoever next edits `_cmd_backtest` in `main.py` or `BacktestConfig` in `config/models.py`.**
+
+**S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
+win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
+daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
+where it is money and states its denominator.
+
+*Arming condition:* **whoever next edits `backtesting/metrics.py`.**
+
+**S4. Calibration against the venue — the backtester's own acceptance test.** Replay
+the strategy over the windows the bot actually traded on Testnet, from S1's data, and
+compare trade by trade with S0's census. **The backtester is trusted only if its
+per-trade gross mean falls inside the census's 95% interval and its trade count is within
+10% of the census's.** Divergence is diagnosed, never tuned away: an entry the backtester
+takes and the bot did not is a finding about one of them.
+
+*Arming condition:* **whoever next edits the fill model in `backtesting/engine.py`.**
+
+**S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
+1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
+number the census predicts to be negative; S5 confirms or refutes it on two years rather
+than twenty days.
+
+*Arming condition:* **whoever next edits `strategy` in `config.yaml`.**
+
+**S6. Research, under a protocol fixed before the first result is seen.**
+
+- **Split:** the oldest 70% of the history is in-sample, the newest 30% is out-of-sample
+  and **is read once per candidate**; walk-forward over the in-sample window for any
+  parameter that is fitted.
+- **Candidates:** the two shipped strategies at 1h, 4h and 1d; each with a trend filter
+  (for example, long only above a 200-period average); and any new strategy, each one a
+  registry entry under `strategies/` with its own tests, as today.
+- **Every variant tried is recorded**, with its parameters and its in-sample result, in a
+  research log under `docs/`. That list is the denominator a multiple-testing judgement
+  needs, and a variant tried and not recorded is the one that makes an out-of-sample pass
+  meaningless.
+
+*Arming condition:* **whoever next registers a strategy with `register_strategy` in `strategies/registry.py`.**
+
+**S7. The decision gate.** A candidate PASSES only if, **out of sample and net of fees and
+S2's stop slippage**, all of these hold:
+
+- profit factor ≥ **1.3**;
+- at least **100** trades;
+- maximum drawdown no worse than **20%** of the capital it was sized against;
+- a positive net result in at least two of the three regimes the owner labels in the
+  history — rising, falling, sideways.
+
+The thresholds are the reviewer's proposal and **the owner may rule them before S6
+starts, never after a result is seen.** S7's outcome, the candidate, its figures and the
+research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's close.
+
+*Arming condition:* **whoever next edits `refuse_live_trading` in `config/settings.py`.**
+
+### What M5m does NOT do
+
+- **No engine work beyond defects.** A defect a run surfaces is fixed under the usual
+  rules; nothing else in `execution/`, `exchange/` or `engine/` moves. The carried items
+  below are carried, not worked.
+- **N6, U9 and U10 are deferred to the milestone after a PASS.** Their text and arming
+  conditions are unchanged.
+- **No paper simulator.** `paper/simulator.py` stays a stub: Testnet already plays that
+  part, and S4 is what ties the backtester to it.
+- **The Testnet bot may keep running as a soak.** Its runs are recorded in
+  `docs/RUN_LEDGER.md` as before. They are evidence about the engine and no longer about
+  the strategy; S5 is that.
+
+### Questions for the owner, before S2
+
+- **Q1.** S1's port question: widen `ExchangeClient.get_klines` with a start time, or
+  download through a client in the script?
+- **Q2.** Whether `backtesting/` and S6's research scripts carry the full two-phase and
+  mutation-survey discipline, or a lighter one. **Not ruled here** — `CLAUDE.md` holds the
+  rules and this file may not move one. Research code changes no money and can be
+  rewritten; the reviewer's recommendation is the gate plus unit tests, with mutation
+  surveys reserved for S2's fill model, the one component whose error is silent.
+- **Q3.** S7's thresholds, if they are to differ from the proposal above.
+
+---
+
 ## M5m's SCOPE — NOT DECIDED; reserved to the project owner
+
+> **ANNOTATED WHEN M5m's SCOPE WAS DECIDED: THIS SECTION'S HEADING AND ITS FIRST TWO
+> PARAGRAPHS ARE NO LONGER TRUE.** The scope is decided, by the owner, in the section
+> above, and P98's order — *"the items that block live trading come first"* — is
+> superseded for M5m: N6, U9 and U10 are deferred to the milestone after S7 passes.
+> **What survives:** the list below as an inventory of the carried candidates, each
+> with its condition; the U10 discrepancy, unruled and deferred with its item; and the
+> closing sentence, that M5m's scope is not a fix for anything M5l's run found.
 
 **The rotation does not choose M5m's scope.** It lists the candidates, each carried
 below with its condition, and orders them only where the owner has already ruled an

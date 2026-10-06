@@ -4960,3 +4960,9 @@ the last digit, and no feed-health event. **What it did not show is the thing to
 every commission any capture records is zero, so the fee capture is unmet, and base-quantity
 netting is unbuilt. **Live trading stays blocked by exactly those two**, and
 `refuse_live_trading` is unchanged. M5m's scope is not decided; see `docs/NEXT_MILESTONE.md`.
+
+> **ANNOTATED WHEN M5m's SCOPE WAS DECIDED: *"M5m's scope is not decided"* IS NO LONGER
+> TRUE.** The owner decided it: validate a strategy before anything else, ending in a
+> PASS or FAIL decision gate, with N6, U9 and U10 deferred to the milestone after a PASS.
+> **What survives:** the rest of this paragraph, the live block included. The scope and
+> its items, S0 to S7, are in `docs/NEXT_MILESTONE.md`, which is their single home.
