@@ -4068,6 +4068,12 @@ the body of that section **verbatim, bar its heading**: the owner's rulings, eac
 quoted, and the records of how each came to be written down. Nothing in it is
 reworded.
 
+> **ANNOTATED AT M5m P99: THE TABLE'S LAST ROW AND THE LAST PARAGRAPH OF THIS
+> SECTION ARE NOT PART OF THE MOVED BODY.** *"What follows is the body of that
+> section verbatim"* is true of what P98 moved and of nothing added since. The
+> venue-outage row and its paragraph were added by the owner's ruling at M5m P99,
+> amendment 2, and each later authority takes its row the same way.
+
 | Authority | Ruled by the owner at | Recorded in (committer date, UTC) |
 |---|---|---|
 | The standing docstring authority, with its `ast.dump` check | M5l P78b | `4b57f34`, 2026-09-28T19:06:45Z |
@@ -4077,6 +4083,7 @@ reworded.
 | The S6 standing rule, and the row P82 superseded | M5l P82 | `fa06d77`, 2026-09-30T20:51:04Z |
 | A prompt's list of files to write never narrows the standing authority | M5l P88 | `5709b04`, 2026-10-02T12:25:33Z (C39) |
 | The script-edit rule | M5l P94 | `b430ea4`, 2026-10-03T18:17:22Z |
+| The venue-outage clause | M5m P99, amendment 2 | the commit whose subject begins `docs(claude): the venue-outage clause`, 2026-10-07 |
 
 The date of a ruling is not the date of its recording: the owner states each in a
 prompt, and the commit that quotes it follows. The right-hand column is what the
@@ -4195,6 +4202,28 @@ replacement asserted a match count of two -- its own first replacement had
 created the second match -- and wrote nothing, so the file was left as it was.
 First reported under the rule at C50, whose commit message carries the report.
 It binds edits to `src/`, `tests/`, `scripts/` and the documents alike.
+
+**A VENUE OUTAGE THAT FAILS ONLY THE CREDENTIAL-GATED INTEGRATION TESTS IS WAITED
+OUT, NOT WORKED AROUND -- a standing rule of the project owner at M5m P99
+(amendment 2), verbatim:**
+
+> "When the gate's only failures are credential-gated integration tests, and a
+> keyless ping to the venue returns a non-2xx status, the gate is re-run once the
+> ping answers 200. If the outage outlasts the session, a commit that touches no
+> venue code may proceed when every other figure matches its prediction, with the
+> failures, the ping's status and its timestamp recorded verbatim in the commit
+> message."
+
+Earned by M5m's P99, whose first halt was this state. MEASURED on 2026-10-07: the
+credentialed gate read `3 failed, 2145 passed, 1 skipped`, the three failures being
+the three `skipif(not HAS_CREDENTIALS)` integration tests, each on
+`GET https://testnet.binance.vision/api/v3/ping` answering `502 Bad Gateway` from
+CloudFront (the response dated `Wed, 07 Oct 2026 05:32:11 GMT`); a keyless GET of the
+same URL answered `502` at `2026-10-07T05:46:38Z`. The gate section above already
+says a lone failure in a full run is suspect-integration and that its output varies
+with network state; this rule says what to do about it, and **it permits no other
+failure**: a unit test that fails alongside the three is not covered, and neither is
+a commit that touches venue code.
 
 ---
 
