@@ -2603,3 +2603,383 @@ strategy-driven round trips, every booking equal to the venue's fills, the ledge
 chained from the normaliser's `after` to the end store with no difference, and none of
 the feed-health events observed. It does not show that those events fire, and it does
 not exercise a protective-leg fill, a restart, a held position or an ETHUSDT position.
+
+## 27. M5m S0: the trade census of record, and how it differs from the untracked census
+
+Recorded at M5m P99 (C4), after the commit that landed `scripts/trade_census.py`
+(`cf64d90`). An observation log, so this section only adds. **Every figure states its
+instrument**, and every figure of the census of record comes from the one command below,
+run on the one capture.
+
+### Why this census, and not the one `docs/NEXT_MILESTONE.md` quotes
+
+That file's per-trade census was taken by an untracked reviewer script over an
+owner-supplied capture, `trading_bot.log`, SHA-256
+`641778e50a42ca44101b28b9ce342431352544bca9855711d3164bba24fc32b4`, last record
+`2026-09-24T03:58:40Z`. **That capture is not on disk** (the search is recorded under S0's
+annotation there, `M5m-006`), so S0's acceptance, *"on the capture `641778e5…` it
+reproduces every figure in the census to the digit"*, could not be run. The owner ruled
+at P99, amendment 2, (b), that S0's acceptance becomes reproducing the tool's figures on
+the M5k capture and that its output is the census of record; the ruling is quoted
+verbatim under S0 in `docs/NEXT_MILESTONE.md`.
+
+### The instrument and the capture
+
+| Item | Value |
+|---|---|
+| Tool | `scripts/trade_census.py` at `cf64d90`, SHA-256 `926bdd4674d7fe9fa418fb5e8b67f3d089012255ba8f478492a043fbbe35d9bb` |
+| Command, from the repository root | `.venv\Scripts\python.exe scripts\trade_census.py "F:\trading bot\files\binance-trading-bot\m5j-evidence\trading_bot.m5k-close-20260925T182818Z.log"` |
+| Capture | `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256 `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528` (the digest section 19 records), 5,074,996 bytes, 26,126 lines |
+| Instrument for the figures | the tool's own output, redirected to a file by git-bash `>`; exit status 0; 260 lines. Python on this machine writes a redirected stdout with CRLF line endings; the output below is embedded with LF, and with nothing else changed |
+| Reads | the tool opens the capture read-only and writes nothing; the capture's SHA-256 was recomputed with `sha256sum` at P99 after the runs and equals the digest above |
+
+### The census of record: the tool's output, verbatim
+
+```
+==========================================================================
+CAPTURE
+==========================================================================
+  path   : F:\trading bot\files\binance-trading-bot\m5j-evidence\trading_bot.m5k-close-20260925T182818Z.log
+  bytes  : 5074996
+  lines  : 26126
+  sha256 : 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528
+  naive-stamp offset : 6:00:00 from 20 naive lines, 20 agreeing
+  placements : 185
+  bookings   : 165
+  anomalies  : 0
+  bookings matched to a placement : 165 of 165
+  placements never booked          : 20
+  quantity differs from its placement : 0
+
+==========================================================================
+PER BOOKING  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+     1 line 16963  2026-09-04T09:23:02Z ETHUSDT  LEG/SL  held    n/a qty 0.72200000 realised     -46.3007 return   -2.5541% placement line 16704
+     2 line 17109  2026-09-04T12:47:02Z BTCUSDT  LEG/SL  held    n/a qty 0.02240000 realised     -34.9848 return   -1.9305% placement line 16639
+     3 line 17215  2026-09-04T21:46:02Z BTCUSDT  LEG/SL  held    n/a qty 0.02268000 realised     -54.5552 return   -3.0131% placement line 17143
+     4 line 17798  2026-09-06T00:15:03Z ETHUSDT  CLOSE   held   150m qty 0.72670000 realised      -6.9909 return   -0.3862% placement line 17694
+     5 line 17830  2026-09-06T00:51:03Z BTCUSDT  CLOSE   held    81m qty 0.02268000 realised       1.4531 return    0.0803% placement line 17764
+     6 line 17897  2026-09-06T02:14:03Z BTCUSDT  CLOSE   held    68m qty 0.02265000 realised       0.9817 return    0.0542% placement line 17845
+     7 line 17985  2026-09-06T04:16:03Z BTCUSDT  CLOSE   held    61m qty 0.02265000 realised       1.1078 return    0.0612% placement line 17941
+     8 line 18156  2026-09-06T19:10:01Z BTCUSDT  CLOSE   held    99m qty 0.02271000 realised       4.3848 return    0.2423% placement line 18076
+     9 line 18242  2026-09-06T21:09:03Z BTCUSDT  CLOSE   held    46m qty 0.02265000 realised       0.8122 return    0.0449% placement line 18207
+    10 line 18268  2026-09-06T21:37:02Z BTCUSDT  CLOSE   held    25m qty 0.02263000 realised      -1.9077 return   -0.1054% placement line 18248
+    11 line 18387  2026-09-07T00:17:03Z BTCUSDT  CLOSE   held    97m qty 0.02264000 realised       7.0974 return    0.3921% placement line 18316
+    12 line 18457  2026-09-07T02:00:03Z ETHUSDT  CLOSE   held   500m qty 0.72600000 realised       7.8118 return    0.4316% placement line 18086
+    13 line 18488  2026-09-07T03:06:03Z BTCUSDT  CLOSE   held    38m qty 0.02263000 realised      -1.2648 return   -0.0699% placement line 18461
+    14 line 18510  2026-09-07T04:15:03Z ETHUSDT  CLOSE   held    20m qty 0.72420000 realised      -1.7960 return   -0.0992% placement line 18492
+    15 line 18530  2026-09-07T04:41:04Z BTCUSDT  CLOSE   held    17m qty 0.02271000 realised      -1.3524 return   -0.0747% placement line 18514
+    16 line 18583  2026-09-07T06:00:02Z BTCUSDT  CLOSE   held    68m qty 0.02271000 realised       1.6735 return    0.0925% placement line 18534
+    17 line 18628  2026-09-07T19:26:02Z BTCUSDT  CLOSE   held    30m qty 0.02285000 realised      -0.0500 return   -0.0028% placement line 18603
+    18 line 18663  2026-09-07T20:13:03Z BTCUSDT  CLOSE   held    41m qty 0.02284000 realised      -0.7768 return   -0.0429% placement line 18632
+    19 line 18710  2026-09-08T20:48:02Z BTCUSDT  CLOSE   held    37m qty 0.02305000 realised       0.1381 return    0.0076% placement line 18683
+    20 line 18742  2026-09-08T21:38:02Z BTCUSDT  CLOSE   held    35m qty 0.02304000 realised      -2.0280 return   -0.1120% placement line 18714
+    21 line 18853  2026-09-08T22:43:02Z BTCUSDT  CLOSE   held    29m qty 0.02306000 realised       0.4815 return    0.0266% placement line 18746
+    22 line 18885  2026-09-08T23:20:02Z BTCUSDT  CLOSE   held    25m qty 0.02305000 realised      -1.3994 return   -0.0773% placement line 18857
+    23 line 18976  2026-09-09T01:26:03Z BTCUSDT  CLOSE   held    80m qty 0.02304000 realised       2.2782 return    0.1259% placement line 18919
+    24 line 19027  2026-09-09T23:08:03Z BTCUSDT  CLOSE   held    28m qty 0.02324000 realised       1.8178 return    0.1002% placement line 19003
+    25 line 19091  2026-09-10T00:30:04Z BTCUSDT  CLOSE   held    81m qty 0.02321000 realised       3.7821 return    0.2085% placement line 19031
+    26 line 19139  2026-09-10T01:33:03Z BTCUSDT  CLOSE   held    23m qty 0.02313000 realised      -6.4877 return   -0.3577% placement line 19120
+    27 line 19198  2026-09-10T02:50:05Z ETHUSDT  CLOSE   held   145m qty 0.73480000 realised       3.8136 return    0.2102% placement line 19082
+    28 line 19235  2026-09-10T03:34:04Z BTCUSDT  CLOSE   held    55m qty 0.02319000 realised       5.2020 return    0.2868% placement line 19186
+    29 line 19338  2026-09-10T21:16:04Z BTCUSDT  CLOSE   held     4m qty 0.02343000 realised      -1.3123 return   -0.0725% placement line 19330
+    30 line 19355  2026-09-10T22:32:04Z BTCUSDT  CLOSE   held     8m qty 0.02347000 realised      -2.1125 return   -0.1167% placement line 19344
+    31 line 19401  2026-09-14T09:22:03Z BTCUSDT  CLOSE   held     4m qty 0.02332000 realised      -0.6066 return   -0.0335% placement line 19393
+    32 line 19444  2026-09-14T10:26:03Z BTCUSDT  CLOSE   held    50m qty 0.02328000 realised       3.9855 return    0.2200% placement line 19405
+    33 line 19456  2026-09-14T11:48:03Z BTCUSDT  CLOSE   held     4m qty 0.02327000 realised      -0.7235 return   -0.0399% placement line 19448
+    34 line 19488  2026-09-14T12:52:03Z BTCUSDT  CLOSE   held    36m qty 0.02326000 realised      -3.1966 return   -0.1765% placement line 19460
+    35 line 19582  2026-09-15T19:46:03Z BTCUSDT  CLOSE   held    20m qty 0.02378000 realised      -5.2865 return   -0.2919% placement line 19564
+    36 line 19603  2026-09-15T20:23:02Z BTCUSDT  CLOSE   held    19m qty 0.02379000 realised      -5.5347 return   -0.3057% placement line 19586
+    37 line 19611  2026-09-15T20:59:02Z BTCUSDT  LEG/SL  held    n/a qty 0.02383000 realised     -38.9497 return   -2.1517% placement line 19607
+    38 line 19661  2026-09-15T23:39:02Z BTCUSDT  LEG/SL  held    n/a qty 0.02393000 realised    -109.1912 return   -6.0340% placement line 19617
+    39 line 19712  2026-09-16T01:01:04Z BTCUSDT  CLOSE   held    48m qty 0.02386000 realised       1.2419 return    0.0687% placement line 19675
+    40 line 19746  2026-09-16T01:41:03Z BTCUSDT  CLOSE   held    14m qty 0.02382000 realised      -8.0652 return   -0.4461% placement line 19731
+    41 line 19770  2026-09-16T02:10:03Z ETHUSDT  CLOSE   held   125m qty 0.75220000 realised      -7.8229 return   -0.4328% placement line 19665
+    42 line 19813  2026-09-16T03:10:02Z BTCUSDT  CLOSE   held    51m qty 0.02385000 realised       1.1472 return    0.0635% placement line 19774
+    43 line 19824  2026-09-16T03:21:02Z BTCUSDT  CLOSE   held     1m qty 0.02377000 realised       0.5900 return    0.0326% placement line 19817
+    44 line 19847  2026-09-16T03:40:01Z BTCUSDT  CLOSE   held    15m qty 0.02377000 realised      -5.4773 return   -0.3031% placement line 19828
+    45 line 19931  2026-09-16T18:40:02Z BTCUSDT  CLOSE   held    33m qty 0.02369000 realised     -10.6299 return   -0.5886% placement line 19900
+    46 line 19968  2026-09-16T19:26:02Z BTCUSDT  CLOSE   held    17m qty 0.02377000 realised     -14.8553 return   -0.8224% placement line 19952
+    47 line 20027  2026-09-16T20:43:01Z BTCUSDT  CLOSE   held    54m qty 0.02373000 realised      -1.3768 return   -0.0762% placement line 19987
+    48 line 20063  2026-09-16T21:24:02Z BTCUSDT  CLOSE   held    10m qty 0.02373000 realised      -0.3987 return   -0.0221% placement line 20051
+    49 line 20097  2026-09-16T22:15:02Z ETHUSDT  CLOSE   held   225m qty 0.74940000 realised      -7.3366 return   -0.4063% placement line 19919
+    50 line 20173  2026-09-17T00:59:03Z BTCUSDT  CLOSE   held   104m qty 0.02381000 realised      12.0991 return    0.6700% placement line 20101
+    51 line 20223  2026-09-17T02:01:02Z BTCUSDT  CLOSE   held    32m qty 0.02356000 realised      -6.6394 return   -0.3677% placement line 20197
+    52 line 20305  2026-09-17T03:58:03Z BTCUSDT  CLOSE   held    74m qty 0.02362000 realised      -0.3782 return   -0.0209% placement line 20253
+    53 line 20347  2026-09-17T08:49:02Z BTCUSDT  CLOSE   held    15m qty 0.02313000 realised      -0.0444 return   -0.0025% placement line 20332
+    54 line 20394  2026-09-17T09:48:03Z BTCUSDT  CLOSE   held    58m qty 0.02314000 realised       2.1219 return    0.1199% placement line 20351
+    55 line 20439  2026-09-17T11:36:03Z BTCUSDT  CLOSE   held    32m qty 0.02363000 realised      -2.9868 return   -0.1654% placement line 20414
+    56 line 20464  2026-09-17T12:33:01Z BTCUSDT  LEG/SL  held    n/a qty 0.02360000 realised     -45.3231 return   -2.5095% placement line 20443
+    57 line 20496  2026-09-17T13:05:02Z BTCUSDT  CLOSE   held    13m qty 0.02348000 realised      -0.3928 return   -0.0218% placement line 20482
+    58 line 21037  2026-09-17T14:51:03Z BTCUSDT  CLOSE   held    47m qty 0.02358000 realised       1.9168 return    0.1062% placement line 20536
+    59 line 21104  2026-09-17T16:26:02Z BTCUSDT  CLOSE   held    47m qty 0.02355000 realised       2.3790 return    0.1318% placement line 21070
+    60 line 21160  2026-09-17T17:49:02Z BTCUSDT  CLOSE   held    46m qty 0.02349000 realised      -5.6728 return   -0.3143% placement line 21129
+    61 line 21200  2026-09-17T18:42:03Z BTCUSDT  CLOSE   held    16m qty 0.02351000 realised      -4.1373 return   -0.2293% placement line 21186
+    62 line 21207  2026-09-17T18:45:02Z ETHUSDT  CLOSE   held   375m qty 0.73070000 realised     -11.5670 return   -0.6404% placement line 20460
+    63 line 21422  2026-09-18T09:37:04Z BTCUSDT  CLOSE   held   149m qty 0.02322000 realised       8.0994 return    0.4489% placement line 21227
+    64 line 21471  2026-09-18T11:12:03Z BTCUSDT  CLOSE   held    65m qty 0.02309000 realised      -1.6315 return   -0.0903% placement line 21426
+    65 line 21498  2026-09-18T13:05:03Z BTCUSDT  CLOSE   held    25m qty 0.02309000 realised      -3.0673 return   -0.1699% placement line 21477
+    66 line 21673  2026-09-18T15:21:02Z BTCUSDT  LEG/TP  held    n/a qty 0.02308000 realised      63.0301 return    3.4934% placement line 21502
+    67 line 21744  2026-09-18T16:55:02Z BTCUSDT  CLOSE   held    40m qty 0.02232000 realised      -0.6265 return   -0.0347% placement line 21713
+    68 line 21874  2026-09-18T20:09:02Z BTCUSDT  CLOSE   held   133m qty 0.02234000 realised       3.6235 return    0.2006% placement line 21786
+    69 line 21974  2026-09-18T22:38:04Z BTCUSDT  CLOSE   held   104m qty 0.02228000 realised      -0.1707 return   -0.0094% placement line 21905
+    70 line 21987  2026-09-18T22:50:02Z ETHUSDT  CLOSE   held   535m qty 0.70570000 realised      42.6172 return    2.3599% placement line 21523
+    71 line 21998  2026-09-18T23:22:02Z BTCUSDT  CLOSE   held     3m qty 0.02227000 realised      -0.5127 return   -0.0284% placement line 21991
+    72 line 22047  2026-09-19T01:22:03Z BTCUSDT  CLOSE   held    62m qty 0.02229000 realised       2.3404 return    0.1295% placement line 22002
+    73 line 22086  2026-09-19T02:50:02Z BTCUSDT  CLOSE   held    51m qty 0.02223000 realised       0.9114 return    0.0504% placement line 22051
+    74 line 22157  2026-09-19T04:32:02Z BTCUSDT  CLOSE   held    20m qty 0.02225000 realised      -2.8927 return   -0.1601% placement line 22138
+    75 line 22214  2026-09-19T05:48:02Z BTCUSDT  CLOSE   held    37m qty 0.02228000 realised      -1.4444 return   -0.0800% placement line 22186
+    76 line 22276  2026-09-19T07:15:01Z ETHUSDT  LEG/TP  held    n/a qty 0.68870000 realised     100.8739 return    5.5825% placement line 22090
+    77 line 22297  2026-09-19T07:41:03Z BTCUSDT  CLOSE   held    57m qty 0.02228000 realised      -0.4882 return   -0.0270% placement line 22254
+    78 line 22362  2026-09-19T09:42:02Z BTCUSDT  CLOSE   held    93m qty 0.02228000 realised       2.1837 return    0.1207% placement line 22301
+    79 line 22468  2026-09-19T16:05:03Z BTCUSDT  CLOSE   held   130m qty 0.02224000 realised       4.1364 return    0.2286% placement line 22380
+    80 line 22514  2026-09-19T17:04:03Z BTCUSDT  CLOSE   held    40m qty 0.02211000 realised      -1.0122 return   -0.0559% placement line 22484
+    81 line 22588  2026-09-19T18:55:03Z ETHUSDT  CLOSE   held   215m qty 0.68500000 realised      -2.6030 return   -0.1439% placement line 22437
+    82 line 22599  2026-09-19T19:04:05Z BTCUSDT  CLOSE   held    24m qty 0.02219000 realised      -1.3316 return   -0.0736% placement line 22574
+    83 line 22618  2026-09-19T20:29:04Z BTCUSDT  CLOSE   held    18m qty 0.02222000 realised      -2.8093 return   -0.1553% placement line 22603
+    84 line 22641  2026-09-19T22:16:02Z BTCUSDT  CLOSE   held    22m qty 0.02230000 realised      -1.0392 return   -0.0575% placement line 22622
+    85 line 22689  2026-09-20T01:08:02Z BTCUSDT  CLOSE   held    38m qty 0.02224000 realised      -1.3560 return   -0.0750% placement line 22661
+    86 line 22709  2026-09-20T02:27:02Z BTCUSDT  CLOSE   held    14m qty 0.02229000 realised      -3.1652 return   -0.1750% placement line 22695
+    87 line 22721  2026-09-20T03:43:02Z BTCUSDT  CLOSE   held     4m qty 0.02251000 realised      -0.7660 return   -0.0424% placement line 22713
+    88 line 22747  2026-09-20T04:25:02Z BTCUSDT  CLOSE   held    28m qty 0.02247000 realised      -1.4055 return   -0.0777% placement line 22725
+    89 line 22757  2026-09-20T04:46:02Z BTCUSDT  CLOSE   held     2m qty 0.02249000 realised      -0.1961 return   -0.0108% placement line 22751
+    90 line 22794  2026-09-20T05:52:02Z BTCUSDT  CLOSE   held    46m qty 0.02247000 realised       0.6017 return    0.0333% placement line 22761
+    91 line 22808  2026-09-20T06:36:02Z BTCUSDT  CLOSE   held     8m qty 0.02247000 realised      -1.4399 return   -0.0796% placement line 22798
+    92 line 22832  2026-09-20T07:51:02Z BTCUSDT  CLOSE   held    21m qty 0.02249000 realised      -1.4299 return   -0.0791% placement line 22812
+    93 line 22863  2026-09-20T08:39:02Z BTCUSDT  CLOSE   held    35m qty 0.02249000 realised      -1.7095 return   -0.0945% placement line 22836
+    94 line 22909  2026-09-20T10:11:03Z BTCUSDT  CLOSE   held    48m qty 0.02250000 realised      -0.0898 return   -0.0050% placement line 22867
+    95 line 22951  2026-09-20T11:15:02Z ETHUSDT  CLOSE   held   110m qty 0.70090000 realised      -6.0558 return   -0.3348% placement line 22872
+    96 line 22998  2026-09-20T12:23:03Z BTCUSDT  CLOSE   held    60m qty 0.02250000 realised       1.4317 return    0.0792% placement line 22955
+    97 line 23035  2026-09-20T13:38:03Z BTCUSDT  CLOSE   held    37m qty 0.02246000 realised      -1.1852 return   -0.0655% placement line 23007
+    98 line 23075  2026-09-20T14:27:03Z BTCUSDT  CLOSE   held    29m qty 0.02245000 realised      -0.1100 return   -0.0061% placement line 23052
+    99 line 23122  2026-09-20T15:30:01Z BTCUSDT  LEG/SL  held    n/a qty 0.02243000 realised     -80.3912 return   -4.4459% placement line 23092
+   100 line 23200  2026-09-20T17:17:02Z BTCUSDT  CLOSE   held    87m qty 0.02234000 realised       8.0268 return    0.4441% placement line 23140
+   101 line 23238  2026-09-20T18:02:02Z BTCUSDT  CLOSE   held    17m qty 0.02221000 realised      -5.2351 return   -0.2897% placement line 23221
+   102 line 23283  2026-09-20T18:54:02Z BTCUSDT  CLOSE   held    21m qty 0.02224000 realised      -4.0564 return   -0.2245% placement line 23262
+   103 line 23340  2026-09-20T20:13:02Z BTCUSDT  CLOSE   held    38m qty 0.02224000 realised      -2.3650 return   -0.1309% placement line 23313
+   104 line 23349  2026-09-20T20:20:02Z ETHUSDT  CLOSE   held   440m qty 0.70100000 realised      36.1015 return    1.9960% placement line 23002
+   105 line 23393  2026-09-20T21:35:02Z ETHUSDT  CLOSE   held    55m qty 0.68590000 realised      -6.5641 return   -0.3631% placement line 23353
+   106 line 23470  2026-09-20T23:18:03Z BTCUSDT  CLOSE   held    92m qty 0.02235000 realised       7.2380 return    0.4004% placement line 23397
+   107 line 23540  2026-09-21T00:59:02Z BTCUSDT  CLOSE   held    97m qty 0.02225000 realised       8.2621 return    0.4570% placement line 23477
+   108 line 23572  2026-09-21T01:35:02Z BTCUSDT  CLOSE   held    17m qty 0.02212000 realised      -8.8982 return   -0.4921% placement line 23556
+   109 line 23624  2026-09-21T02:48:02Z BTCUSDT  CLOSE   held    27m qty 0.02219000 realised      -4.9708 return   -0.2749% placement line 23603
+   110 line 23639  2026-09-21T03:05:01Z ETHUSDT  CLOSE   held   255m qty 0.68480000 realised      19.8318 return    1.0972% placement line 23443
+   111 line 23683  2026-09-21T04:04:01Z BTCUSDT  CLOSE   held    54m qty 0.02223000 realised       1.2378 return    0.0685% placement line 23643
+   112 line 23709  2026-09-21T05:15:02Z BTCUSDT  CLOSE   held    28m qty 0.02220000 realised      -2.0730 return   -0.1147% placement line 23687
+   113 line 23745  2026-09-21T06:06:02Z BTCUSDT  CLOSE   held    37m qty 0.02215000 realised       0.7690 return    0.0425% placement line 23713
+   114 line 23783  2026-09-21T06:49:03Z BTCUSDT  CLOSE   held    30m qty 0.02210000 realised      -1.5141 return   -0.0838% placement line 23758
+   115 line 23817  2026-09-21T07:35:01Z ETHUSDT  CLOSE   held   110m qty 0.67740000 realised     -13.1890 return   -0.7295% placement line 23727
+   116 line 23888  2026-09-21T09:40:01Z BTCUSDT  LEG/TP  held    n/a qty 0.02212000 realised      75.1640 return    4.1585% placement line 23821
+   117 line 24035  2026-09-21T13:20:01Z BTCUSDT  CLOSE   held   131m qty 0.02140000 realised      13.6078 return    0.7521% placement line 23950
+   118 line 24132  2026-09-21T15:34:02Z BTCUSDT  CLOSE   held   102m qty 0.02111000 realised       3.6628 return    0.2024% placement line 24060
+   119 line 24163  2026-09-21T16:08:02Z BTCUSDT  CLOSE   held    10m qty 0.02106000 realised      -4.2162 return   -0.2330% placement line 24151
+   120 line 24222  2026-09-21T17:28:03Z BTCUSDT  CLOSE   held    39m qty 0.02105000 realised      -1.7655 return   -0.0976% placement line 24192
+   121 line 24275  2026-09-21T18:40:02Z ETHUSDT  CLOSE   held   595m qty 0.66950000 realised      33.4616 return    1.8506% placement line 23852
+   122 line 24282  2026-09-21T18:43:02Z BTCUSDT  CLOSE   held    31m qty 0.02104000 realised      -0.7015 return   -0.0388% placement line 24253
+   123 line 24370  2026-09-21T20:57:02Z BTCUSDT  CLOSE   held   119m qty 0.02103000 realised      19.8721 return    1.0982% placement line 24286
+   124 line 24416  2026-09-21T22:01:02Z BTCUSDT  CLOSE   held    17m qty 0.02085000 realised      -4.4475 return   -0.2457% placement line 24401
+   125 line 24487  2026-09-21T23:38:03Z BTCUSDT  CLOSE   held    27m qty 0.02090000 realised      -3.6241 return   -0.2002% placement line 24463
+   126 line 24505  2026-09-22T00:00:01Z ETHUSDT  CLOSE   held   275m qty 0.65480000 realised       7.8576 return    0.4341% placement line 24307
+   127 line 24522  2026-09-22T00:13:02Z BTCUSDT  CLOSE   held    12m qty 0.02091000 realised      -3.1158 return   -0.1721% placement line 24509
+   128 line 24557  2026-09-22T03:08:02Z BTCUSDT  CLOSE   held    37m qty 0.02112000 realised      -2.4022 return   -0.1327% placement line 24530
+   129 line 24587  2026-09-22T04:31:01Z BTCUSDT  CLOSE   held    32m qty 0.02114000 realised      -1.7390 return   -0.0961% placement line 24561
+   130 line 24763  2026-09-22T19:38:01Z BTCUSDT  CLOSE   held    41m qty 0.02092000 realised      -4.4970 return   -0.2485% placement line 24733
+   131 line 24822  2026-09-22T21:00:03Z BTCUSDT  CLOSE   held    28m qty 0.02099000 realised       0.3959 return    0.0219% placement line 24799
+   132 line 24835  2026-09-22T21:15:03Z ETHUSDT  CLOSE   held   200m qty 0.65730000 realised      -3.8189 return   -0.2110% placement line 24607
+   133 line 24847  2026-09-22T21:57:02Z BTCUSDT  CLOSE   held     6m qty 0.02097000 realised      -0.5607 return   -0.0310% placement line 24839
+   134 line 24857  2026-09-22T22:03:03Z BTCUSDT  CLOSE   held     1m qty 0.02098000 realised      -2.2470 return   -0.1242% placement line 24851
+   135 line 24883  2026-09-22T23:05:02Z BTCUSDT  CLOSE   held    28m qty 0.02099000 realised      -0.4880 return   -0.0270% placement line 24861
+   136 line 24913  2026-09-22T23:37:03Z BTCUSDT  CLOSE   held    28m qty 0.02094000 realised      -5.1894 return   -0.2867% placement line 24887
+   137 line 24973  2026-09-23T01:02:03Z BTCUSDT  CLOSE   held    51m qty 0.02098000 realised       5.0350 return    0.2783% placement line 24938
+   138 line 25008  2026-09-23T01:40:03Z BTCUSDT  CLOSE   held    36m qty 0.02089000 realised      -4.1648 return   -0.2302% placement line 24978
+   139 line 25061  2026-09-23T02:50:03Z ETHUSDT  CLOSE   held   205m qty 0.65540000 realised      -1.2715 return   -0.0703% placement line 24901
+   140 line 25071  2026-09-23T02:59:03Z BTCUSDT  CLOSE   held    40m qty 0.02093000 realised       1.4521 return    0.0803% placement line 25037
+   141 line 25110  2026-09-23T04:06:03Z BTCUSDT  CLOSE   held    43m qty 0.02088000 realised      -0.5095 return   -0.0282% placement line 25075
+   142 line 25155  2026-09-23T05:07:02Z BTCUSDT  CLOSE   held    49m qty 0.02085000 realised       1.7908 return    0.0989% placement line 25121
+   143 line 25202  2026-09-23T06:20:02Z ETHUSDT  CLOSE   held   165m qty 0.65410000 realised      -4.9908 return   -0.2758% placement line 25087
+   144 line 25238  2026-09-23T09:40:03Z BTCUSDT  CLOSE   held    13m qty 0.02105000 realised      -3.4215 return   -0.1891% placement line 25224
+   145 line 25254  2026-09-23T10:24:04Z BTCUSDT  CLOSE   held    10m qty 0.02108000 realised      -3.1569 return   -0.1745% placement line 25242
+   146 line 25283  2026-09-23T11:17:02Z BTCUSDT  CLOSE   held    30m qty 0.02107000 realised      -3.1660 return   -0.1749% placement line 25258
+   147 line 25303  2026-09-23T12:17:03Z BTCUSDT  CLOSE   held    17m qty 0.02113000 realised      -3.6758 return   -0.2031% placement line 25287
+   148 line 25321  2026-09-23T12:58:04Z BTCUSDT  CLOSE   held    11m qty 0.02116000 realised      -1.7231 return   -0.0952% placement line 25307
+   149 line 25355  2026-09-23T14:12:02Z BTCUSDT  CLOSE   held    42m qty 0.02115000 realised     -12.7936 return   -0.7071% placement line 25325
+   150 line 25391  2026-09-23T15:38:02Z BTCUSDT  CLOSE   held    41m qty 0.02143000 realised      -1.9278 return   -0.1066% placement line 25359
+   151 line 25473  2026-09-23T20:11:02Z BTCUSDT  CLOSE   held    77m qty 0.02145000 realised       0.4575 return    0.0253% placement line 25413
+   152 line 25514  2026-09-23T20:59:03Z BTCUSDT  CLOSE   held     9m qty 0.02146000 realised      -1.8374 return   -0.1016% placement line 25502
+   153 line 25587  2026-09-23T22:37:03Z BTCUSDT  CLOSE   held    75m qty 0.02144000 realised       1.6734 return    0.0925% placement line 25534
+   154 line 25623  2026-09-23T23:20:03Z BTCUSDT  CLOSE   held    24m qty 0.02139000 realised      -2.6487 return   -0.1464% placement line 25602
+   155 line 25721  2026-09-24T01:40:04Z ETHUSDT  CLOSE   held   395m qty 0.67860000 realised      12.5812 return    0.6954% placement line 25425
+   156 line 25727  2026-09-24T01:42:03Z BTCUSDT  CLOSE   held     4m qty 0.02145000 realised      -2.8127 return   -0.1554% placement line 25714
+   157 line 25771  2026-09-24T03:22:02Z BTCUSDT  CLOSE   held    51m qty 0.02149000 realised       0.2529 return    0.0140% placement line 25731
+   158 line 25815  2026-09-24T10:38:02Z BTCUSDT  CLOSE   held    28m qty 0.02172000 realised      -0.9668 return   -0.0534% placement line 25791
+   159 line 25857  2026-09-24T11:38:03Z BTCUSDT  CLOSE   held    55m qty 0.02169000 realised       1.3866 return    0.0766% placement line 25819
+   160 line 25885  2026-09-24T12:43:03Z BTCUSDT  CLOSE   held    26m qty 0.02165000 realised      -0.7365 return   -0.0407% placement line 25861
+   161 line 25957  2026-09-24T18:30:04Z ETHUSDT  CLOSE   held   315m qty 0.68110000 realised      18.6758 return    1.0321% placement line 25905
+   162 line 26036  2026-09-25T02:50:03Z ETHUSDT  CLOSE   held   160m qty 0.67090000 realised     -11.5663 return   -0.6392% placement line 26009
+   163 line 26065  2026-09-25T05:45:02Z BTCUSDT  CLOSE   held   825m qty 0.02144000 realised      -3.4688 return   -0.1917% placement line 25931
+   164 line 26076  2026-09-25T06:45:03Z ETHUSDT  CLOSE   held    15m qty 0.67590000 realised      -2.3994 return   -0.1326% placement line 26069
+   165 line 26122  2026-09-25T14:05:02Z BTCUSDT  LEG/SL  held   168m qty 0.02124000 realised     -35.2299 return   -1.9476% placement line 26096
+
+==========================================================================
+TOTALS  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+  closes by CLOSE: 154   by a protective leg: 11 (SL 8, TP 3, unclassified 0)
+  ALL BOOKINGS
+    bookings            : 165
+    realised gross      : -192.0271 USDT
+    win rate            : 34.5% (57 of 165)
+    profit factor       : 0.75
+    per-trade return n  : 165
+    mean                : -0.0641%
+    std dev (n - 1)     : 1.0368%
+    95% interval        : [-0.2223%, 0.0941%]
+    net mean at 0.1% a side : -0.2641%
+    t of the net mean   : -3.27
+  STRATEGY CLOSES ONLY
+    bookings            : 154
+    realised gross      : 13.8306 USDT
+    win rate            : 35.1% (54 of 154)
+    profit factor       : 1.04
+    per-trade return n  : 154
+    mean                : 0.0050%
+    std dev (n - 1)     : 0.4129%
+    95% interval        : [-0.0602%, 0.0702%]
+    net mean at 0.1% a side : -0.1950%
+    t of the net mean   : -5.86
+  PROTECTIVE LEGS ONLY
+    bookings            : 11
+    realised gross      : -205.8577 USDT
+    win rate            : 27.3% (3 of 11)
+    profit factor       : 0.54
+    per-trade return n  : 11
+    mean                : -1.0320%
+    std dev (n - 1)     : 3.7306%
+    95% interval        : [-3.2366%, 1.1726%]
+    net mean at 0.1% a side : -1.2320%
+    t of the net mean   : -1.10
+
+==========================================================================
+STOP-LOSS SLIPPAGE  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+  stop-loss legs      : 8 (8 with a matched placement)
+  filled beyond trigger: 8
+  beyond-trigger slippage: min 0.0291%, median 0.6419%, max 4.2121%
+  worst stop-loss exit: line 19661, exit -6.1279% from the placement's entry limit against a stop 2.0000% below it; realised return -6.0340% of the booked entry total
+  per leg (slippage is beyond the trigger, positive = worse than the stop):
+    line 16963  ETHUSDT  stop 2463.01000000 exit 2446.64156094 slippage 0.6646% stop distance 1.9998% exit move -2.6511%
+    line 17109  BTCUSDT  stop 79363.71000000 exit 79340.64000000 slippage 0.0291% stop distance 2.0000% exit move -2.0285%
+    line 17215  BTCUSDT  stop 78329.27000000 exit 77428.20826720 slippage 1.1504% stop distance 2.0000% exit move -3.1273%
+    line 19611  BTCUSDT  stop 74516.09000000 exit 74326.37819136 slippage 0.2546% stop distance 2.0000% exit move -2.2495%
+    line 19661  BTCUSDT  stop 74182.22000000 exit 71057.58000000 slippage 4.2121% stop distance 2.0000% exit move -6.1279%
+    line 20464  BTCUSDT  stop 75071.23000000 exit 74606.30035593 slippage 0.6193% stop distance 2.0000% exit move -2.6069%
+    line 23122  BTCUSDT  stop 79098.39000000 exit 77031.90876505 slippage 2.6125% stop distance 2.0000% exit move -4.5603%
+    line 26122  BTCUSDT  stop 83545.95000000 exit 83507.14000000 slippage 0.0465% stop distance 2.0000% exit move -2.0455%
+
+==========================================================================
+PER BOOKING DAY (UTC, by booking time)  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+  2026-09-04   bookings   3  realised    -135.8407
+  2026-09-06   bookings   7  realised      -0.1589
+  2026-09-07   bookings   8  realised      11.3427
+  2026-09-08   bookings   4  realised      -2.8078
+  2026-09-09   bookings   2  realised       4.0960
+  2026-09-10   bookings   6  realised       2.8851
+  2026-09-14   bookings   4  realised      -0.5411
+  2026-09-15   bookings   4  realised    -158.9621
+  2026-09-16   bookings  11  realised     -52.9837
+  2026-09-17   bookings  13  realised     -58.6250
+  2026-09-18   bookings   9  realised     111.3616
+  2026-09-19   bookings  13  realised      96.8253
+  2026-09-20   bookings  22  realised     -64.1208
+  2026-09-21   bookings  19  realised     130.4692
+  2026-09-22   bookings  11  realised     -15.8044
+  2026-09-23   bookings  18  realised     -34.8785
+  2026-09-24   bookings   7  realised      28.3806
+  2026-09-25   bookings   4  realised     -52.6645
+```
+
+### The same tool over the untracked census's window
+
+`--until 2026-09-24T03:58:40Z` is the untracked census's last record. Exit status 0.
+The header, the totals and the stop-loss section, verbatim; the per-booking and per-day
+sections are omitted here and are the first 157 rows of the table above:
+
+```
+==========================================================================
+CAPTURE
+==========================================================================
+  path   : F:\trading bot\files\binance-trading-bot\m5j-evidence\trading_bot.m5k-close-20260925T182818Z.log
+  bytes  : 5074996
+  lines  : 26126
+  sha256 : 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528
+  naive-stamp offset : 6:00:00 from 20 naive lines, 20 agreeing
+  placements : 185
+  bookings   : 165
+  anomalies  : 0
+  restricted to bookings at or before 2026-09-24T03:58:40Z : kept 157, excluded 8
+  bookings matched to a placement : 157 of 157
+  placements never booked          : 20
+  quantity differs from its placement : 0
+
+==========================================================================
+TOTALS  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+  closes by CLOSE: 147   by a protective leg: 10 (SL 7, TP 3, unclassified 0)
+  ALL BOOKINGS
+    bookings            : 157
+    realised gross      : -157.7217 USDT
+    win rate            : 35.0% (55 of 157)
+    profit factor       : 0.78
+    per-trade return n  : 157
+    mean                : -0.0553%
+    std dev (n - 1)     : 1.0475%
+    95% interval        : [-0.2192%, 0.1085%]
+    net mean at 0.1% a side : -0.2553%
+    t of the net mean   : -3.05
+  STRATEGY CLOSES ONLY
+    bookings            : 147
+    realised gross      : 12.9060 USDT
+    win rate            : 35.4% (52 of 147)
+    profit factor       : 1.04
+    per-trade return n  : 147
+    mean                : 0.0049%
+    std dev (n - 1)     : 0.4100%
+    95% interval        : [-0.0614%, 0.0712%]
+    net mean at 0.1% a side : -0.1951%
+    t of the net mean   : -5.77
+  PROTECTIVE LEGS ONLY
+    bookings            : 10
+    realised gross      : -170.6278 USDT
+    win rate            : 30.0% (3 of 10)
+    profit factor       : 0.58
+    per-trade return n  : 10
+    mean                : -0.9404%
+    std dev (n - 1)     : 3.9193%
+    95% interval        : [-3.3697%, 1.4888%]
+    net mean at 0.1% a side : -1.1404%
+    t of the net mean   : -0.92
+
+==========================================================================
+STOP-LOSS SLIPPAGE  [sha256 3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528]
+==========================================================================
+  stop-loss legs      : 7 (7 with a matched placement)
+  filled beyond trigger: 7
+  beyond-trigger slippage: min 0.0291%, median 0.6646%, max 4.2121%
+  worst stop-loss exit: line 19661, exit -6.1279% from the placement's entry limit against a stop 2.0000% below it; realised return -6.0340% of the booked entry total
+  per leg (slippage is beyond the trigger, positive = worse than the stop):
+    line 16963  ETHUSDT  stop 2463.01000000 exit 2446.64156094 slippage 0.6646% stop distance 1.9998% exit move -2.6511%
+    line 17109  BTCUSDT  stop 79363.71000000 exit 79340.64000000 slippage 0.0291% stop distance 2.0000% exit move -2.0285%
+    line 17215  BTCUSDT  stop 78329.27000000 exit 77428.20826720 slippage 1.1504% stop distance 2.0000% exit move -3.1273%
+    line 19611  BTCUSDT  stop 74516.09000000 exit 74326.37819136 slippage 0.2546% stop distance 2.0000% exit move -2.2495%
+    line 19661  BTCUSDT  stop 74182.22000000 exit 71057.58000000 slippage 4.2121% stop distance 2.0000% exit move -6.1279%
+    line 20464  BTCUSDT  stop 75071.23000000 exit 74606.30035593 slippage 0.6193% stop distance 2.0000% exit move -2.6069%
+    line 23122  BTCUSDT  stop 79098.39000000 exit 77031.90876505 slippage 2.6125% stop distance 2.0000% exit move -4.5603%
+```
+
+### What this section decides
+
+**Nothing.** It records one tool's output on one capture and the comparison with a census
+whose capture cannot be read. The differences are tabulated and diagnosed in
+`docs/NEXT_MILESTONE.md` beside S0, where the untracked figures are annotated; the stop
+slippage median that S2's default rests on is flagged for the owner there and is not
+adopted.

@@ -58,6 +58,57 @@ they are not reproducible from this tree until S0 lands:
 - Seven `SL` legs filled 0.03% to 4.21% beyond their triggers; the worst moved a 2% stop
   to a -6.13% exit.
 
+> **ANNOTATED AT M5m P99 (C4): THE FIGURES ABOVE ARE SUPERSEDED AND UNREPRODUCIBLE, AND
+> THE CENSUS OF RECORD IS THE TOOL'S OUTPUT ON THE M5k CAPTURE.** They were taken by an
+> untracked script over the capture `trading_bot.log`, SHA-256
+> `641778e50a42ca44101b28b9ce342431352544bca9855711d3164bba24fc32b4`, which is not on
+> disk (S0's annotation above), so nothing here can be recomputed from the tree. By the
+> owner's ruling (b), the census of record is `scripts/trade_census.py` (`cf64d90`) run on
+> `trading_bot.m5k-close-20260925T182818Z.log`, SHA-256
+> `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`; its output is
+> section 27 of `docs/RUN_LEDGER.md`, verbatim. **Every figure that differs between the
+> two**, and the cause, in the owner's words *"the difference is itself a finding"*:
+>
+> | Figure | Untracked census | Census of record (165 bookings, to `2026-09-25T14:05:02Z`) | Tool, `--until 2026-09-24T03:58:40Z` |
+> |---|---|---|---|
+> | Bookings | 157 | **165** | 157 |
+> | By `CLOSE` / by a protective leg | 147 / 10 | **154 / 11** | 147 / 10 |
+> | Protective legs, `SL` / `TP` | 7 `SL` named; `TP` not stated | **8 / 3** | 7 / 3 |
+> | Realised, gross | -157.7217 | **-192.0271** | -157.7217 |
+> | Win rate | 35.0% | **34.5%** (57 of 165) | 35.0% (55 of 157) |
+> | Profit factor | 0.78 | **0.75** | 0.78 |
+> | Per-trade return, mean | -0.0553% | **-0.0641%** | -0.0553% |
+> | Per-trade return, standard deviation | 1.0475% | **1.0368%** | 1.0475% |
+> | 95% interval | [-0.2192%, +0.1085%] | **[-0.2223%, +0.0941%]** | [-0.2192%, +0.1085%] |
+> | The strategy's closes alone, mean | +0.0049% | **+0.0050%** (154 closes) | +0.0049% (147) |
+> | Net mean at 0.1% a side | -0.2553% | **-0.2641%** | -0.2553% |
+> | t of the net mean | -3.05 | **-3.27** | -3.05 |
+> | Stop-loss slippage beyond the trigger | seven legs, 0.03% to 4.21% | **eight legs, 0.0291% to 4.2121%** | seven, 0.0291% to 4.2121% |
+> | Its median | *0.66%, as S2 states it* | **0.6419%** | 0.6646% |
+> | Worst stop-loss exit | *"a 2% stop to a -6.13% exit"* | **-6.1279% from the entry limit, a 2.0000% stop** | the same |
+>
+> **The cause, MEASURED by the right-hand column.** Every untracked figure is reproduced to
+> the digit by the tool over the untracked census's own window, so the two instruments
+> agree and the method is the same. **Every difference in the middle column is the eight
+> bookings after the window**: lines 25815 to 26122 of the capture, `2026-09-24T10:38:02Z`
+> to `2026-09-25T14:05:02Z`, seven `CLOSE` and one `SL` leg, realised -34.3054 in all,
+> which is the whole of -192.0271 less -157.7217. The two captures are not the same file;
+> the M5k capture is longer. **That the untracked census's capture is a prefix of this one
+> is REASONED**, from the tool's reproducing every figure the untracked census states over
+> the prefix window; nothing could be compared line by line.
+>
+> **One figure is worded differently from what it measured.** The untracked *"-6.13%
+> exit"* is the exit PRICE's move from the placement's entry limit, `-6.1279%`, which a 2%
+> stop and a 4.2121% slip give: `(1 - 0.02) x (1 - 0.042121) - 1`. The REALISED return of
+> that booking on its booked entry total is `-6.0340%`, and the tool prints both.
+>
+> **FLAGGED FOR THE OWNER, NOT ADOPTED: S2's 0.66% default and S7's 0.66% pass level rest
+> on a median that is 0.6646% over the window's seven legs and 0.6419% over the census of
+> record's eight.** The one added leg slipped 0.0465% and moved the median by 0.0227
+> points, which is how sensitive a median of eight values is to a ninth: the range across
+> the eight is 0.0291% to 4.2121%. Per the owner's ruling, the default is not changed by
+> this commit, and S7's levels (0.05% and 0.66%) stand as ruled.
+
 **REASONED from those figures, and it is the whole argument:** the execution path books
 what the venue does, and what the venue does with this strategy's orders is lose money
 once fees exist. Lifting the live block on this strategy would make that loss real.
@@ -109,6 +160,20 @@ are attributed by booking time, as `Portfolio` attributes them, never by candle 
 > S0, including the two facts its tool had to handle and its arming condition. The
 > untracked figures above stay quoted as an untracked script's output until the commit
 > that lands S0's output annotates them.
+
+> **ANNOTATED AT M5m P99 (C4): S0 IS DONE, AND ITS REPLACED ACCEPTANCE IS MET.**
+> `scripts/trade_census.py` landed at `cf64d90` and its tests at `27b8724`: 96 cases, and a
+> mutation survey of 24 mutations on the final bytes in a disposable worktree, each killing
+> exactly the tests predicted (`M5m-016`). The ruling (b) acceptance, the tool's figures
+> on `trading_bot.m5k-close-20260925T182818Z.log`, is section 27 of `docs/RUN_LEDGER.md`,
+> verbatim, and the untracked figures are annotated beside the census above. Beyond
+> (b): over the capture's first 157 bookings, `--until 2026-09-24T03:58:40Z`, the tool
+> prints every figure the untracked census states (`M5m-010`).
+>
+> **What S4 reads against, REASONED by substituting the census of record for "the
+> census" and not a new ruling:** a per-trade gross mean inside [-0.2223%, +0.0941%]
+> and a trade count within 10% of 165, which is 149 to 181 (10% of 165 is 16.5).
+> **What survives:** S0's text and its arming condition, unchanged.
 
 **S1. Historical klines, downloaded and stored.** Fill `scripts/download_data.py` and
 `data/historical.py` — both docstring-only today. MEASURED: `ExchangeClient.get_klines`
@@ -190,6 +255,14 @@ that first multiplies it by money"*.
 > Fees bullets, and the money-rule paragraph. **The default of 0.66% rests on a figure
 > that is unreproducible** (S0's annotation above), and S7's annotation below says how
 > it is used: every candidate is reported at 0.05% and at 0.66%.
+>
+> **ANNOTATED AT M5m P99 (C4): *"the fourth of the seven measured legs; same untracked
+> script, so S0 confirms it"* IS NOT WHAT S0 MEASURED ON THE CENSUS OF RECORD, AND IS
+> FLAGGED FOR THE OWNER.** Over the window's seven legs the tool's median is `0.6646%`,
+> which is the fourth of seven and rounds to `0.66%`. Over the census of record's eight
+> legs it is `0.6419%`, the mean of the fourth and fifth (`docs/RUN_LEDGER.md` section 27).
+> Nothing is adopted: the default and S7's pass level stay at `0.66%` as ruled, and the
+> flag with its reading is under the census paragraph above.
 
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
