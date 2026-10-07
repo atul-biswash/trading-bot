@@ -455,9 +455,35 @@ class TestFetchUrl:
         assert seen[0].full_url == self.GOOD
         assert seen[0].get_header("User-agent") == "trading-bot-historical/1"
 
+    def test_the_listing_url_list_months_builds_passes_the_host_check(self) -> None:
+        """The URL the script really asks for, not a hand-written one (M5m-060)."""
+        asked: list[str] = []
+
+        def opener(request: urllib.request.Request, timeout: float) -> _Body:
+            asked.append(request.full_url)
+            return _Body(listing([]))
+
+        fetcher = dl.with_retries(lambda url: dl.fetch_url(url, opener=opener))
+        assert dl.list_months(fetcher, SYMBOL, INTERVAL) == ()
+        assert asked == [f"{dl.LISTING_BASE}?delimiter=/&prefix={PREFIX}"]
+
+    def test_the_zip_and_checksum_urls_month_url_builds_pass_the_host_check(self) -> None:
+        asked: list[str] = []
+
+        def opener(request: urllib.request.Request, timeout: float) -> _Body:
+            asked.append(request.full_url)
+            return _Body(b"")
+
+        for suffix in ("zip", "CHECKSUM"):
+            dl.fetch_url(dl.month_url(SYMBOL, INTERVAL, "2024-12", suffix=suffix), opener=opener)
+        assert len(asked) == 2
+
     @pytest.mark.parametrize(
         "url",
         [
+            f"{dl.LISTING_BASE}x?delimiter=/",
+            f"{dl.LISTING_BASE}",
+            f"{dl.LISTING_BASE}.evil.invalid/?delimiter=/",
             "http://data.binance.vision/data/x.zip",
             "https://example.invalid/data.zip",
             "https://data.binance.vision.evil.invalid/x.zip",

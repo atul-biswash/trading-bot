@@ -50,6 +50,9 @@ Fetcher = Callable[[str], bytes]
 
 LISTING_BASE: Final = "https://s3-ap-northeast-1.amazonaws.com/data.binance.vision"
 DATA_BASE: Final = "https://data.binance.vision"
+# The listing is asked as ``<LISTING_BASE>?delimiter=...`` and a file as ``<DATA_BASE>/...``.
+# Each prefix ends at the character that closes the host, so a lookalike host fails.
+_ALLOWED_PREFIXES: Final = (LISTING_BASE + "?", DATA_BASE + "/")
 DEFAULT_DATA_DIR: Final = "data/historical"
 DEFAULT_SYMBOLS: Final = ("BTCUSDT", "ETHUSDT")
 DEFAULT_INTERVALS: Final = ("1m", "5m", "1h", "4h", "1d")
@@ -88,7 +91,7 @@ def _urlopen(request: urllib.request.Request, timeout: float) -> _Response:
 
 def fetch_url(url: str, *, opener: Opener = _urlopen) -> bytes:
     """GET ``url`` and return its body. Only this script's two hosts are allowed."""
-    if not (url.startswith(LISTING_BASE + "/") or url.startswith(DATA_BASE + "/")):
+    if not url.startswith(_ALLOWED_PREFIXES):
         raise DownloadError(f"refusing a URL outside the archive's hosts: {url}", retryable=False)
     request = urllib.request.Request(url, headers={"User-Agent": "trading-bot-historical/1"})
     try:
