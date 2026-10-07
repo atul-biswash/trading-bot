@@ -162,9 +162,9 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > survives:** everything else in this paragraph, the live block included. See
 > `docs/NEXT_MILESTONE.md`.
 
-Eleven files are docstring-only placeholders: `execution/order_manager`,
+Ten files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
-`notifications/`, `backtesting/`, `data/historical`, `data/repository`. Note
+`notifications/`, `backtesting/`, `data/repository`. Note
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` exits with "not implemented yet".
@@ -381,7 +381,7 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical† · repository†
+  data/          market_data · historical · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)

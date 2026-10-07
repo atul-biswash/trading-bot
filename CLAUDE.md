@@ -240,7 +240,7 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical† · repository†
+  data/          market_data · historical · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)
