@@ -2307,6 +2307,14 @@ three — because the subtraction is only as good as that number.
 > with the venue up; that run confirms or corrects the `2244`, and a count that
 > disagrees is a finding.
 
+> **ANNOTATED AT M5m P101 (C0): THE `2244` IS NOW MEASURED, AND THE ANNOTATION ABOVE
+> IS CLOSED.** With Testnet answering `200` (at `2026-10-07T17:38:54Z`, and again at
+> `17:42:21Z` after the run), the credentialed gate on the tree at `228a3a4` read
+> `2244 passed, 1 skipped` in 178.44 s, with 144 files formatted and mypy over 85
+> source files (`M5m-041`). So the derived figure was right, and *"Only the `2244` is
+> measured here"* is true again. **What survives:** the annotation above as the record
+> of what C3 could and could not observe.
+
 **The lone skip in the credentialed run is NOT an integration test**, and that is
 worth stating because the arithmetic reads oddly otherwise:
 `tests/unit/test_logger.py` skips one case on Windows because `time.tzset` is

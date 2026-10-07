@@ -175,6 +175,26 @@ are attributed by booking time, as `Portfolio` attributes them, never by candle 
 > and a trade count within 10% of 165, which is 149 to 181 (10% of 165 is 16.5).
 > **What survives:** S0's text and its arming condition, unchanged.
 
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULINGS R-A AND R-E OF P100:** S0 is
+> accepted on the window reproduction, and the README's scripts list may be corrected.
+> The rulings, verbatim:
+>
+> R-A: "S0 is accepted on the window reproduction over capture 3f7f551c... to
+> 2026-09-24T03:58:40Z. The prefix relation to 641778e5... is REASONED unless P100
+> measures it."
+>
+> R-E: "README.md's scripts list may be corrected for release_position.py and
+> normalize_ledger_exponents.py (M5m-013) in the next docs commit."
+>
+> **What stops being true:** nothing in S0's text. The annotation above that made the
+> M5k capture's output the replacement acceptance is met by exactly this reading: the
+> window reproduction is the acceptance, and R-A's own condition, *"unless P100
+> measures it"*, did not come true, because P100 had no path to `641778e5...` and
+> measured nothing about the prefix relation (`M5m-027`), so it stays REASONED.
+> R-E is carried out in this commit: `README.md`'s architecture tree now names
+> `release_position.py` and `normalize_ledger_exponents.py`. **What survives:** S0's
+> text, its arming condition and every annotation above.
+
 **S1. Historical klines, downloaded and stored.** Fill `scripts/download_data.py` and
 `data/historical.py` — both docstring-only today. MEASURED: `ExchangeClient.get_klines`
 in `core/interfaces.py` takes `limit` and no start time, so a date-ranged download needs
@@ -209,6 +229,27 @@ is not mainnet's, and only mainnet history is long enough.
 > still takes `limit` and no start time and U12 stays open exactly as written.
 > **What survives:** the per-symbol, per-timeframe store, idempotence on re-run, gaps
 > reported rather than filled, and the timeframes listed.
+
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULINGS R-G AND R-H:** S1 stores monthly
+> archive files only, and the Testnet path leaves S1. The rulings, verbatim:
+>
+> R-G: "S1 stores monthly archive files only, from each series' first month through
+> 2026-09, the last complete month. No daily files. The Testnet REST path is not built
+> in S1; it belongs to S4, after B2 is measured."
+>
+> R-H: "The download of the monthly zips and their CHECKSUM files from
+> data.binance.vision for BTCUSDT and ETHUSDT at 1m, 5m, 1h, 4h and 1d is authorised,
+> once, in commit C4."
+>
+> **What stops being true:** the first ruling quoted in the annotation above, *"S1 also
+> downloads Testnet klines for every window the census covers"*, and that annotation's
+> *"since Testnet klines are now downloaded as well, for S4 alone"*: S1 downloads no
+> Testnet klines, and the unmeasured question of what Testnet retains (`M5m-032`) is
+> S4's to answer first. The source is the venue's bulk archive, which P100 measured
+> (`M5m-028` to `M5m-031`); the keyless REST path stays available to S4. **What
+> survives:** the script-side keyless client in `Q1` for whatever S4 builds, the port
+> and U12 untouched, the per-symbol and per-timeframe store under
+> `backtesting.data_dir`, idempotence on re-run, and gaps reported rather than filled.
 
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
@@ -264,6 +305,33 @@ that first multiplies it by money"*.
 > Nothing is adopted: the default and S7's pass level stay at `0.66%` as ruled, and the
 > flag with its reading is under the census paragraph above.
 
+>
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULINGS R-B (P100) AND R-B2 (P101):
+> THE DEFAULT IS 1.20%, AND R-B'S WORD "CONSERVATIVE" IS ANNOTATED, NOT DELETED.** The
+> rulings, verbatim:
+>
+> R-B: "S2's stop-slippage default stays 0.66%, which is conservative against the census
+> of record's 0.6419%. S2 also reports, for information and not as a gate, one arm at
+> the mean of the census of record's SL-leg slippages."
+>
+> R-B2: "R-B's word 'conservative' holds against the median only (M5m-034). S7 passes
+> only at a stop slippage of 1.20%, the mean of the census of record's eight SL legs
+> rounded up. Results at 0.05% and 0.66% are reported for information. S2's default
+> parameter is 1.20%. The slippage parameter applies to both protective legs, as P99
+> ruled."
+>
+> **What stops being true:** this item's *"defaulting to the census's median of
+> **0.66%**"*; the first S2 annotation's *"it is used: every candidate is reported at
+> 0.05% and at 0.66%"*; the C4 annotation's *"the default and S7's pass level stay at
+> `0.66%` as ruled"*; and R-B's own *"stays 0.66%"* and its information arm. The
+> default is **1.20%**, and the arm at the mean is now the gate, not an extra.
+> **R-B's "conservative"** stays standing as the owner's word and is annotated by
+> `M5m-034`, MEASURED: the mean of the census of record's eight SL slippages is
+> 1.1986% (the tool, `docs/RUN_LEDGER.md` section 27), 4 of the 8 legs exceed 0.66%,
+> and the median 0.6419% is the only figure it holds against. **What survives:** the
+> intrabar trigger, *"the stop wins"*, the `CLOSE` and Fees bullets, the money-rule
+> paragraph and P99's entry ruling.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
@@ -287,6 +355,30 @@ takes and the bot did not is a finding about one of them.
 > count within 10% of the census's, and *"Divergence is diagnosed, never tuned away"*.
 > **Which census:** the one S0's annotation above makes the census of record, and not
 > the untracked figures it supersedes.
+
+>
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULINGS R-C (P100) AND R-C2 (P101): S4
+> READS AGAINST THE CENSUS OF RECORD, AND HAS A SECOND TEST.** The rulings, verbatim:
+>
+> R-C: "S4 reads against the census of record (M5m-021 adopted). S4 additionally
+> requires that at least 80% of the census's entries are reproduced on the same symbol
+> and entry bar, and that every unmatched entry on either side is listed and
+> diagnosed."
+>
+> R-C2: "S4's denominator is the 165 booked entries of the census of record. The 20
+> placements the venue did not fill are a second test: S4 reports how many the
+> backtester also refuses, and lists and diagnoses every disagreement."
+>
+> **What stops being true:** the S0 annotation's *"What S4 reads against, REASONED by
+> substituting the census of record for 'the census' and not a new ruling"*: it is now
+> the owner's ruling (`M5m-021` adopted). **What S4 therefore requires, in full:** the
+> per-trade gross mean inside [-0.2223%, +0.0941%]; a trade count within 10% of 165,
+> which is 149 to 181; at least 80% of the 165 booked entries (132 of them)
+> reproduced on the same symbol and entry bar; every unmatched entry on either side
+> listed and diagnosed; and, as the second test, how many of the 20 unfilled
+> placements (`M5m-035`) the backtester also refuses. **What survives:** *"Divergence
+> is diagnosed, never tuned away"* and the arming condition. S4 depends on Testnet
+> klines, whose retention is UNMEASURED (`M5m-032`).
 
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
@@ -351,6 +443,25 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 > out-of-sample and net-of-fees conditions, and the recording of S7's outcome in
 > `docs/PHASE_HISTORY.md` at M5m's close.
 
+>
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULINGS R-D (P100) AND R-B2 (P101): THE
+> PASS LEVEL IS 1.20%.** The rulings, verbatim:
+>
+> R-D: "S7's thresholds are adopted as proposed: PF >= 1.3, >= 100 trades, drawdown <=
+> 20%, positive net in at least two of the three regimes."
+>
+> R-B2, in part: "S7 passes only at a stop slippage of 1.20%, the mean of the census of
+> record's eight SL legs rounded up. Results at 0.05% and 0.66% are reported for
+> information."
+>
+> **What stops being true:** the first S7 annotation's *"Every candidate is reported at
+> 0.05% and 0.66% stop slippage; it passes only at 0.66%"* (a P99 ruling, verbatim
+> above): a candidate is reported at 0.05%, 0.66% and 1.20%, and **passes only at
+> 1.20%**, the first two being for information. **What survives:** every threshold's
+> figure, which R-D adopts as proposed; the regime labels as date ranges fixed in the
+> research log before S6's first run; the pooling of both pairs; and the recording of
+> S7's outcome in `docs/PHASE_HISTORY.md`.
+
 ### What M5m does NOT do
 
 - **No engine work beyond defects.** A defect a run surfaces is fixed under the usual
@@ -390,6 +501,20 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 > reviewer's recommendation as the owner adopted it; `CLAUDE.md` is not amended by it,
 > and the survey discipline it names is the one `CLAUDE.md` already holds. **What
 > survives:** the questions as the record of what was asked.
+
+>
+> **ANNOTATED AT M5m P101 (C0), BY THE OWNER'S RULING R-F: Q2's SURVEY SCOPE IS
+> EXTENDED BY TWO FUNCTIONS.** The ruling, verbatim:
+>
+> R-F: "The time-unit normaliser and the gap detector in data/historical.py get a
+> targeted mutation survey under CLAUDE.md's procedure. Nothing else in S1 is surveyed
+> (Q2)."
+>
+> **What stops being true:** Q2's *"Mutation surveys for S2's fill model and S3's
+> metrics"* as the whole of the surveyed set. It is now those two and, from S1, the
+> time-unit normaliser and the gap detector, the two silent-failure sites `M5m-038`
+> named. **What survives:** the gate and unit tests for all M5m code, and no other S1
+> code surveyed.
 
 ---
 
@@ -824,6 +949,30 @@ and the detector logged 0 gaps (`M5l-251`, `docs/RUN_LEDGER.md` section 26), so 
 omission behaviour was never exercised.
 
 *Arming condition:* **whoever next enables a pair other than BTCUSDT or ETHUSDT in `enabled_pairs` in `config.yaml` measures its natural-gap rate before trading it.**
+
+
+> **ANNOTATED AT M5m P101 (C0): *"Whether Binance omits a kline for an interval with no
+> trades is UNMEASURED"* IS NOW MEASURED FOR ONE PAIR, ON THE ARCHIVE.** `M5m-031`:
+> `BTCUSDT-1m-2017-08` holds 21,360 bars over 21,360 minutes, of which 6,974 carry zero
+> volume and zero trades, so the archive does NOT omit an interval with no trades, and a
+> gap on the grid there means absence rather than a quiet market. **What survives:**
+> everything else here. It is one pair, one month and the bulk archive, not the live
+> REST feed or any other pair, so the condition and its demand that a new pair's
+> natural-gap rate be measured before it is traded stand unchanged.
+
+### K6. `scripts/trade_census.py` infers the protective leg from the price, though a label is present (`M5m-025`)
+
+**Carried as an item, not done now, by the project owner's ruling R-I at M5m P101,
+verbatim:** *"M5m-025's leg-label reading in scripts/trade_census.py is carried as an
+item, not done now."* MEASURED over the census of record: none of the 11 protective
+bookings carries a `leg=` label, so the tool infers SL or TP from whether the exit's
+average price is below or above the entry's; the reconciler's preceding line, `leg SL|TP
+reports FILLED with <quantity> executed`, names the leg for all 11 and agrees with the
+inference on all 11 (8 SL and 3 TP). Reading that line as the label would make the
+classification a fact and not a rule; it would also make a mismatch between the two a
+finding. The tool does not read it.
+
+*Arming condition:* **whoever next edits `_leg` in `scripts/trade_census.py`.**
 
 ---
 
