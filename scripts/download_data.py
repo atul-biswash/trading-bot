@@ -11,13 +11,26 @@ key, and there is no Testnet path and no REST path here. ``trading_bot.data.hist
 decides what is acceptable: this script lists, fetches and hands each zip to
 ``ingest_zip``, which verifies the zip against its ``.CHECKSUM`` before parsing a byte.
 
+**EVERY ZIP IS KEPT, AND INGEST ALWAYS READS IT FROM DISK** (owner's ruling R-O). A zip is
+written to ``<data-dir>/_zips/<SYMBOL>/<interval>/`` with its ``.CHECKSUM`` file once it has
+been verified against that checksum, and it is read back from there to be ingested, so a
+change to the importer's rules costs no second download. A zip already on disk whose bytes
+equal its ``.CHECKSUM`` is not fetched again; one that does not is fetched and replaced;
+one that fails verification is never written. ``_zips`` is not a series directory, so the
+store's checks do not see it, and ``data/*`` is ignored by git.
+
 **IDEMPOTENT.** A month whose manifest line and file verify is skipped without a request,
 so a re-run after an interruption fetches only what is missing, and a stored file that no
-longer matches its manifest is fetched again. **A FAILURE IS REPORTED, NEVER HIDDEN OR
-FILLED**: a checksum mismatch, an archive that fails validation, a month the archive does
-not list and a transport failure each name the month, the rest of the series continues,
-and the exit status is non-zero if any month failed. Gaps are not this script's concern;
+longer matches its manifest is stored again from its kept zip. **A FAILURE IS REPORTED,
+NEVER HIDDEN OR FILLED**: a checksum mismatch, an archive that fails validation, a month the
+archive does not list and a transport failure each name the month, the rest of the series
+continues, and the exit status is non-zero if any month failed. A failed month's zip stays
+on disk for diagnosis if it passed its checksum. Gaps are not this script's concern;
 ``HistoricalStore.coverage`` reports them.
+
+**``--offline`` MAKES A REQUEST IMPOSSIBLE.** The months are those whose zips are on disk,
+the fetcher is replaced by one that refuses, and a month whose zip or ``.CHECKSUM`` is
+missing or does not match fails instead of being fetched.
 
 **THE NETWORK IS INJECTED.** Every request goes through a ``Fetcher``, ``url -> bytes``,
 and the only fetcher that opens a socket is ``fetch_url``, which refuses a URL outside the
@@ -27,6 +40,8 @@ two hosts this script talks to and caps a response's size.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import os
 import re
 import sys
 import time
@@ -44,6 +59,7 @@ from trading_bot.data.historical import (
     ingest_zip,
     parse_checksum,
     series_dir,
+    verify_zip,
 )
 
 Fetcher = Callable[[str], bytes]
@@ -54,6 +70,7 @@ DATA_BASE: Final = "https://data.binance.vision"
 # Each prefix ends at the character that closes the host, so a lookalike host fails.
 _ALLOWED_PREFIXES: Final = (LISTING_BASE + "?", DATA_BASE + "/")
 DEFAULT_DATA_DIR: Final = "data/historical"
+ZIP_DIR_NAME: Final = "_zips"
 DEFAULT_SYMBOLS: Final = ("BTCUSDT", "ETHUSDT")
 DEFAULT_INTERVALS: Final = ("1m", "5m", "1h", "4h", "1d")
 
@@ -160,6 +177,42 @@ def list_months(fetcher: Fetcher, symbol: str, interval: str) -> tuple[str, ...]
             )
 
 
+def zip_file(root: Path, symbol: str, interval: str, month: str) -> Path:
+    """Where a month's zip is kept: ``<root>/_zips/<SYMBOL>/<interval>/<name>.zip``."""
+    series_dir(root, symbol, interval)
+    return root / ZIP_DIR_NAME / symbol / interval / f"{symbol}-{interval}-{month}.zip"
+
+
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` through a temporary file and a rename, so a kill leaves
+    either the old file or the new one and never half of it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    try:
+        with temporary.open("wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def months_on_disk(root: Path, symbol: str, interval: str) -> tuple[str, ...]:
+    """The months whose zips are kept on disk for a series, oldest first."""
+    series_dir(root, symbol, interval)
+    directory = root / ZIP_DIR_NAME / symbol / interval
+    if not directory.is_dir():
+        return ()
+    wanted = re.compile(re.escape(f"{symbol}-{interval}-") + r"(\d{4}-(?:0[1-9]|1[0-2]))\.zip")
+    found = (wanted.fullmatch(path.name) for path in directory.glob("*.zip"))
+    return tuple(sorted(match.group(1) for match in found if match is not None))
+
+
+def _refuse_request(url: str) -> bytes:
+    raise DownloadError(f"no request is allowed with --offline: {url}", retryable=False)
+
+
 @dataclass
 class SeriesResult:
     symbol: str
@@ -168,11 +221,52 @@ class SeriesResult:
     downloaded: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
     failed: dict[str, str] = field(default_factory=dict)
+    fetched: list[str] = field(default_factory=list)
+    reused: list[str] = field(default_factory=list)
+    registered: int = 0
+    quarantined: int = 0
     note: str = ""
 
     @property
     def ok(self) -> bool:
         return not self.failed and not self.note
+
+
+def obtain(
+    fetcher: Fetcher, root: Path, symbol: str, interval: str, month: str, *, offline: bool = False
+) -> tuple[bytes, str, bool]:
+    """The month's zip bytes read from disk, its digest, and whether the zip was fetched.
+
+    The digest is the on-disk ``.CHECKSUM``'s, or is fetched when there is none. A zip on
+    disk that hashes to it is used as it is. Otherwise the zip is fetched, verified against
+    the digest BEFORE anything is written, then written (and its checksum file after it, so
+    a kill between the two leaves a zip the next run can still use), and read back. With
+    ``offline`` a missing or mismatching file is an error and ``fetcher`` is never called.
+    """
+    name = f"{symbol}-{interval}-{month}.zip"
+    path = zip_file(root, symbol, interval, month)
+    sum_path = path.with_name(name + ".CHECKSUM")
+    sum_text: str | None = None
+    if sum_path.is_file():
+        digest = parse_checksum(sum_path.read_text(encoding="utf-8"), name)
+    else:
+        sum_url = month_url(symbol, interval, month, suffix="CHECKSUM")
+        sum_text = fetcher(sum_url).decode("utf-8")
+        digest = parse_checksum(sum_text, name)
+    if path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest:
+        if sum_text is not None:
+            write_atomic(sum_path, sum_text.encode("utf-8"))
+        return path.read_bytes(), digest, False
+    if offline:
+        raise DownloadError(
+            f"{path} is missing or does not match its CHECKSUM, and --offline fetches nothing",
+            retryable=False,
+        )
+    verify_zip(data := fetcher(month_url(symbol, interval, month, suffix="zip")), digest)
+    write_atomic(path, data)
+    if sum_text is not None:
+        write_atomic(sum_path, sum_text.encode("utf-8"))
+    return path.read_bytes(), digest, True
 
 
 def download_series(
@@ -183,19 +277,33 @@ def download_series(
     through: str,
     *,
     dry_run: bool = False,
+    offline: bool = False,
     out: TextIO = sys.stdout,
 ) -> SeriesResult:
-    """Store every listed month up to ``through`` that is not already stored and verified."""
+    """Store every listed month up to ``through`` that is not already stored and verified.
+
+    With ``offline`` the months are those whose zips are on disk and ``fetcher`` is never
+    called.
+    """
     series_dir(root, symbol, interval)
     result = SeriesResult(symbol, interval)
     try:
-        listed = [month for month in list_months(fetcher, symbol, interval) if month <= through]
+        everything = (
+            months_on_disk(root, symbol, interval)
+            if offline
+            else list_months(fetcher, symbol, interval)
+        )
     except DownloadError as exc:
         result.note = f"listing failed: {exc}"
         return result
+    listed = [month for month in everything if month <= through]
     result.listed = len(listed)
     if not listed:
-        result.note = f"the archive lists no month of {symbol} {interval} through {through}"
+        result.note = (
+            f"no zip of {symbol} {interval} through {through} is on disk"
+            if offline
+            else f"the archive lists no month of {symbol} {interval} through {through}"
+        )
         return result
     stored = check_stored(root, symbol, interval).entries
     for month in listed:
@@ -206,25 +314,24 @@ def download_series(
             result.downloaded.append(month)
             continue
         try:
-            checksum_url = month_url(symbol, interval, month, suffix="CHECKSUM")
-            zip_url = month_url(symbol, interval, month, suffix="zip")
-            digest = parse_checksum(
-                fetcher(checksum_url).decode("utf-8"), f"{symbol}-{interval}-{month}.zip"
-            )
-            ingest_zip(
-                fetcher(zip_url),
+            data, digest, fetched = obtain(fetcher, root, symbol, interval, month, offline=offline)
+            ingested = ingest_zip(
+                data,
                 expected_sha256=digest,
                 root=root,
                 symbol=symbol,
                 interval=interval,
                 month=month,
-                source_url=zip_url,
+                source_url=month_url(symbol, interval, month, suffix="zip"),
             )
         except (DownloadError, HistoricalDataError, UnicodeDecodeError, OSError) as exc:
             result.failed[month] = f"{type(exc).__name__}: {exc}"
             print(f"FAILED {symbol} {interval} {month}: {result.failed[month]}", file=out)
             continue
         result.downloaded.append(month)
+        (result.fetched if fetched else result.reused).append(month)
+        result.registered += len(ingested.registered)
+        result.quarantined += len(ingested.quarantined)
         print(f"stored {symbol} {interval} {month}", file=out)
     return result
 
@@ -236,6 +343,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--intervals", nargs="+", default=list(DEFAULT_INTERVALS))
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR, help="backtesting.data_dir")
     parser.add_argument("--dry-run", action="store_true", help="list and plan; fetch no zip")
+    parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="plan from the zips on disk and make no request at all",
+    )
     return parser
 
 
@@ -262,13 +374,23 @@ def run(
     except HistoricalDataError as exc:
         print(f"refused: {exc}", file=out)
         return 2
-    fetch = fetcher if fetcher is not None else with_retries(fetch_url)
+    if args.offline:
+        fetch: Fetcher = _refuse_request
+    else:
+        fetch = fetcher if fetcher is not None else with_retries(fetch_url)
     results: list[SeriesResult] = []
     for symbol in args.symbols:
         for interval in args.intervals:
             results.append(
                 download_series(
-                    fetch, root, symbol, interval, args.through, dry_run=args.dry_run, out=out
+                    fetch,
+                    root,
+                    symbol,
+                    interval,
+                    args.through,
+                    dry_run=args.dry_run,
+                    offline=args.offline,
+                    out=out,
                 )
             )
     verb = "would store" if args.dry_run else "stored"
@@ -276,6 +398,8 @@ def run(
         print(
             f"{result.symbol} {result.interval}: listed {result.listed}, {verb} "
             f"{len(result.downloaded)}, skipped {len(result.skipped)}, failed {len(result.failed)}"
+            f", registered {result.registered}, quarantined {result.quarantined}"
+            f", fetched {len(result.fetched)}, reused {len(result.reused)}"
             + (f", {result.note}" if result.note else ""),
             file=out,
         )

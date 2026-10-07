@@ -280,6 +280,20 @@ is not mainnet's, and only mainnet history is long enough.
 > store's layout, idempotence (a re-run fetches only the 120 absent months), gaps reported
 > and never filled, and the arming condition's discharge above.
 
+> **ANNOTATED AT M5m P103 (C3), BY THE OWNER'S RULING R-O: THE OPTION LIST ABOVE IS NO
+> LONGER COMPLETE, AND THE DOWNLOADER NO LONGER DISCARDS WHAT IT FETCHES.** *"`run` takes
+> `--through` (required), `--symbols`, `--intervals`, `--data-dir` and `--dry-run`"* gains
+> `--offline`: the months are those whose zips are on disk and every request is refused.
+> The downloader keeps each zip and its `.CHECKSUM` under `<data-dir>/_zips/<SYMBOL>/<interval>/`
+> once verified against that checksum, reads it back from there to ingest it, and does not
+> fetch a zip already on disk that equals its checksum. The 980 zips C4 downloaded were not
+> kept, since this ruling came after, so they are not on disk and are not fetched again
+> (R-O). **S1's arming condition is AUDITED, not fired a second time:** C3 edits
+> `scripts/download_data.py` but not its `main`, and the first half stays discharged as
+> annotated above. The second half, a start time on `ExchangeClient.get_klines`, has NOT
+> fired: the port is unchanged, and `U12` is REAFFIRMED open exactly as written. **What
+> survives:** everything in the two annotations above except the option list.
+
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
 the manager taking an injected `Clock` and a provider over historical bars — the M4

@@ -238,7 +238,7 @@ class TestIdempotence:
         assert "stored 1, skipped 1" in text
         assert archive.zip_requests() == [dl.month_url(SYMBOL, INTERVAL, "2024-12", suffix="zip")]
 
-    def test_a_stored_file_that_no_longer_matches_its_manifest_is_fetched_again(
+    def test_a_stored_file_that_no_longer_matches_its_manifest_is_stored_again_from_its_kept_zip(
         self, tmp_path: Path
     ) -> None:
         run(FakeArchive(["2024-12"]), tmp_path)
@@ -248,6 +248,7 @@ class TestIdempotence:
         code, text = run(archive, tmp_path)
         assert code == 0
         assert "stored 1, skipped 0" in text
+        assert archive.zip_requests() == []
         assert check_stored(tmp_path, SYMBOL, INTERVAL).problems == ()
 
     def test_the_manifest_after_a_second_run_is_byte_identical(self, tmp_path: Path) -> None:
