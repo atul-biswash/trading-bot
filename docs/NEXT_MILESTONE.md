@@ -87,6 +87,29 @@ are attributed by booking time, as `Portfolio` attributes them, never by candle 
 
 *Arming condition:* **whoever next renames `_EVENT_CLOSE_BOOKED` or `_EVENT_PLACED` in `execution/executor.py`, `_EVENT_BOOKED` in `execution/reconciliation_driver.py`, or `_EVENT_EXIT_BOOKED` in `engine/modes.py` — the four lines S0 parses.**
 
+> **ANNOTATED AT M5m P99 (AMENDMENT 2), BY THE OWNER'S RULING (b): S0's ACCEPTANCE
+> CLAUSE IS REPLACED, BECAUSE THE CAPTURE IT NAMES IS NOT ON DISK.** *"Acceptance: on
+> the capture `641778e5…` it reproduces every figure in the census to the digit"*
+> cannot be met. MEASURED at P99: the SHA-256 of every `*.log` over 1 MB under
+> `F:\trading bot\files\binance-trading-bot` (ten files, `m5j-evidence\` and `logs\`
+> among them) and of every `.log` or `.txt` over 1 MB under the user's Downloads,
+> Desktop and Documents to depth 3 was computed, and none begins `641778e5`. The
+> owner's ruling, verbatim:
+>
+> "(b) not found: S0's acceptance becomes reproducing the tool's figures on the M5k
+> capture trading_bot.m5k-close-20260925T182818Z.log (SHA-256 3f7f551c…). Record its
+> output as the census of record. Annotate the untracked figures in NEXT_MILESTONE as
+> superseded and unreproducible, citing their SHA. List every figure that differs
+> between the two, as the difference is itself a finding. A figure that moves S2's
+> defaults (the 0.66% median stop slippage) is flagged for the owner, not adopted."
+>
+> The capture is on disk with its full digest verified at P99,
+> `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, the digest
+> section 19 of `docs/RUN_LEDGER.md` records for it. **What survives:** the rest of
+> S0, including the two facts its tool had to handle and its arming condition. The
+> untracked figures above stay quoted as an untracked script's output until the commit
+> that lands S0's output annotates them.
+
 **S1. Historical klines, downloaded and stored.** Fill `scripts/download_data.py` and
 `data/historical.py` — both docstring-only today. MEASURED: `ExchangeClient.get_klines`
 in `core/interfaces.py` takes `limit` and no start time, so a date-ranged download needs
@@ -98,6 +121,29 @@ reported rather than filled. At least two years of BTCUSDT and ETHUSDT at 1m, 5m
 is not mainnet's, and only mainnet history is long enough.
 
 *Arming condition:* **whoever next edits `main` in `scripts/download_data.py` or adds a start time to `ExchangeClient.get_klines` in `core/interfaces.py`.**
+
+> **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: THREE SENTENCES OF S1 NO LONGER
+> DESCRIBE ITS SCOPE.** The rulings, verbatim:
+>
+> "S1 also downloads Testnet klines for every window the census covers. S4 calibrates
+> on Testnet klines; S5 to S7 run on mainnet klines."
+>
+> "The history is all available mainnet history for BTCUSDT and ETHUSDT, not two
+> years. S7's trade count is over the whole out-of-sample window and may pool both
+> pairs for one candidate."
+>
+> "A script-side public client, GET only and keyless. ExchangeClient.get_klines is
+> unchanged in M5m."
+>
+> **What stops being true:** *"At least two years of BTCUSDT and ETHUSDT"*, which
+> becomes all the history the venue's public klines hold; *"Data comes from
+> **mainnet** public klines"* as S1's only source, since Testnet klines are now
+> downloaded as well, for S4 alone; and the sentence naming *"a widened port or a
+> script-side client"* as an open choice, which the third ruling closes in favour of
+> the script. **U12 is NOT settled by it**: the port is unchanged, so `get_klines`
+> still takes `limit` and no start time and U12 stays open exactly as written.
+> **What survives:** the per-symbol, per-timeframe store, idempotence on re-run, gaps
+> reported rather than filled, and the timeframes listed.
 
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
@@ -124,6 +170,27 @@ that first multiplies it by money"*.
 
 *Arming condition:* **whoever next edits `_cmd_backtest` in `main.py` or `BacktestConfig` in `config/models.py`.**
 
+> **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S2's ENTRY AND PROTECTION BULLETS
+> ARE SHARPENED, AND ONE SENTENCE IN EACH IS REPLACED.** The rulings, verbatim:
+>
+> "The entry fills at the next bar's open plus slippage, only if that price is at or
+> below entry_limit; otherwise it is refused, as the live FOK is. It never fills later
+> in the bar."
+>
+> "Slippage is charged on both protective legs, the take-profit included, because
+> both are market orders once triggered."
+>
+> **What stops being true:** the Entry bullet's *"fills at the intent's `entry_limit`
+> only if the next bar trades through it"*, which is replaced by the first ruling: the
+> fill price is the next bar's open plus slippage, never `entry_limit` itself and
+> never a later price inside the bar. And the Protection bullet's *"Stop slippage
+> beyond the trigger is a parameter"*, which read as a stop-only charge: it is charged
+> on the take-profit leg as well. **What survives:** the intrabar trigger from the
+> bar's high and low, *"the stop wins"* when one bar touches both, the `CLOSE` and
+> Fees bullets, and the money-rule paragraph. **The default of 0.66% rests on a figure
+> that is unreproducible** (S0's annotation above), and S7's annotation below says how
+> it is used: every candidate is reported at 0.05% and at 0.66%.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
@@ -140,12 +207,25 @@ takes and the bot did not is a finding about one of them.
 
 *Arming condition:* **whoever next edits the fill model in `backtesting/engine.py`.**
 
+> **ANNOTATED AT M5m P99: *"from S1's data"* NOW NAMES TESTNET KLINES.** By the owner's
+> ruling quoted under S1, *"S4 calibrates on Testnet klines"*, for the windows the
+> census covers; S5 to S7 run on mainnet klines. **What survives:** the acceptance test
+> as written, the per-trade gross mean inside the census's 95% interval and a trade
+> count within 10% of the census's, and *"Divergence is diagnosed, never tuned away"*.
+> **Which census:** the one S0's annotation above makes the census of record, and not
+> the untracked figures it supersedes.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
 than twenty days.
 
 *Arming condition:* **whoever next edits `strategy` in `config.yaml`.**
+
+> **ANNOTATED AT M5m P99: *"on two years rather than twenty days"* IS NO LONGER THE
+> SPAN.** The owner ruled the history to be all available mainnet history for BTCUSDT
+> and ETHUSDT (S1's annotation above). **What survives:** the item, and the
+> prediction it states, which S5 confirms or refutes.
 
 **S6. Research, under a protocol fixed before the first result is seen.**
 
@@ -177,6 +257,27 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 
 *Arming condition:* **whoever next edits `refuse_live_trading` in `config/settings.py`.**
 
+> **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S7's THRESHOLDS ARE RULED, WITH TWO
+> ADDITIONS.** The rulings, verbatim:
+>
+> "Every candidate is reported at 0.05% and 0.66% stop slippage; it passes only at
+> 0.66%. The regime labels are date ranges fixed in the research log before S6's first
+> run."
+>
+> "The history is all available mainnet history for BTCUSDT and ETHUSDT, not two
+> years. S7's trade count is over the whole out-of-sample window and may pool both
+> pairs for one candidate."
+>
+> Q3, in the owner's words and unquoted: the thresholds as amended above.
+>
+> **What stops being true:** *"The thresholds are the reviewer's proposal and the
+> owner may rule them before S6 starts"*, since the owner has ruled them: the four
+> thresholds above stand as amended here. And *"the three regimes the owner labels in
+> the history"* is made exact: the labels are date ranges, written into the research
+> log before S6's first run. **What survives:** every threshold's figure, the
+> out-of-sample and net-of-fees conditions, and the recording of S7's outcome in
+> `docs/PHASE_HISTORY.md` at M5m's close.
+
 ### What M5m does NOT do
 
 - **No engine work beyond defects.** A defect a run surfaces is fixed under the usual
@@ -200,6 +301,22 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
   rewritten; the reviewer's recommendation is the gate plus unit tests, with mutation
   surveys reserved for S2's fill model, the one component whose error is silent.
 - **Q3.** S7's thresholds, if they are to differ from the proposal above.
+
+> **ANNOTATED AT M5m P99: Q1, Q2 AND Q3 ARE RULED BY THE OWNER, AND THE HEADING'S
+> *"before S2"* IS MET.** The rulings, verbatim:
+>
+> Q1: "A script-side public client, GET only and keyless. ExchangeClient.get_klines is
+> unchanged in M5m."
+>
+> Q2: "The gate and unit tests for all M5m code. Mutation surveys for S2's fill model
+> and S3's metrics."
+>
+> Q3, in the owner's words and unquoted: the thresholds as amended above.
+>
+> **What stops being true:** Q2's *"Not ruled here"*. It is ruled, and it is the
+> reviewer's recommendation as the owner adopted it; `CLAUDE.md` is not amended by it,
+> and the survey discipline it names is the one `CLAUDE.md` already holds. **What
+> survives:** the questions as the record of what was asked.
 
 ---
 
@@ -290,6 +407,26 @@ does not carry it**: the owner pushes `milestone/M5l` as its own act.
 > block; pushed, so it cannot be amended. **It belongs to M5l's range and not to M5m's**:
 > a run over `milestone/M5l..HEAD` will not list it. That is deliberate to leave
 > standing; it is not a defect to be closed by rewriting history or by inventing a block.
+
+> **ANNOTATED AT M5m P99: THE NAMESPACE WAS NOT EMPTY, AND ONE MORE KNOWN COMMIT HAS NO
+> BLOCK.** *"The M5m namespace is to be confirmed empty by the same tool, over
+> `milestone/M5l..HEAD`, before `M5m-001` is written"* was run at P99 and read
+> `declared : 3`, `max : 3`, no gap, no duplicate and nothing cited and undeclared:
+> `70690c1` (*"docs(next): M5m decided -- validate a strategy before anything else"*)
+> declares `M5m-001` to `M5m-003`. **The owner ruled that numbering continues at
+> `M5m-004`**, and the first commit after it, `c0d0948`, declares `M5m-004`.
+>
+> **`934eb45` IS BLOCKLESS, KNOWN AND DECLARED.** MEASURED at P99:
+> `scripts/check_findings.py milestone/M5l..HEAD M5m` reports
+> `blockless commits : [934eb45]`, and no other. It is the merge of the owner's PR
+> #2 (*"Merge pull request #2 from atul-biswash/claude/keen-sagan-ehal28"*), carries
+> no `Findings:` block, and is pushed, so it cannot be amended. **`70690c1` is NOT
+> blockless**, though the owner's P99 amendment allowed for it: it carries a block, and
+> its git author is `Claude`, the owner having merged it. Like `9f364dd` above,
+> `934eb45` is to be left standing; the extractor exits non-zero over any range that
+> contains it, and that is not a defect to be closed by rewriting history or by
+> inventing a block. Unlike `9f364dd`, it **belongs to M5m's range**, so every M5m
+> run will list it.
 
 ---
 
