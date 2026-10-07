@@ -3,8 +3,14 @@
 This module never touches the network. It turns the bytes of one monthly archive
 file from ``data.binance.vision`` into a verified CSV under ``backtesting.data_dir``
 and a manifest line, and it checks what is already stored. ``scripts/download_data.py``
-fetches; this module decides what is acceptable. The read side, which serves stored
-bars to the backtester, is added beside it and is also network-free.
+fetches; this module decides what is acceptable. Its read side, ``HistoricalStore``,
+serves stored bars to the backtester and is also network-free.
+
+**Serving a bar and verifying its file are one act.** ``HistoricalStore.candles`` hashes
+each month file as it reads it and raises ``StoredFileError`` on a mismatch with the
+manifest, so a corrupt or edited file is never served quietly. A month absent from the
+manifest yields no bars: that is a gap, and ``coverage`` reports it. Nothing here
+fabricates a bar to hide one.
 
 **Money stays a string here.** A price or volume is kept exactly as the venue wrote
 it, ``"96407.99000000"`` with its trailing zeros, and is validated by shape rather than
@@ -37,23 +43,30 @@ import json
 import os
 import re
 import zipfile
-from collections.abc import Sequence
+from array import array
+from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from itertools import pairwise
 from pathlib import Path
 from typing import Final
+
+from trading_bot.core.models import Candle
 
 __all__ = [
     "INTERVAL_MS",
     "ArchiveFormatError",
     "ChecksumMismatchError",
+    "Coverage",
     "Gap",
     "HistoricalDataError",
+    "HistoricalStore",
     "ManifestEntry",
     "ManifestError",
     "Problem",
     "Row",
+    "StoredFileError",
     "StoredReport",
     "check_stored",
     "find_gaps",
@@ -102,6 +115,10 @@ class ChecksumMismatchError(HistoricalDataError):
 
 class ArchiveFormatError(HistoricalDataError):
     """A row, a name or a shape that is not what the archive is documented to hold."""
+
+
+class StoredFileError(HistoricalDataError):
+    """A stored file or manifest that no longer is what the manifest says it is."""
 
 
 class ManifestError(HistoricalDataError):
@@ -580,3 +597,152 @@ def check_stored(root: Path, symbol: str, interval: str) -> StoredReport:
             if path.name not in listed:
                 problems.append(Problem("unlisted_file", None, path.name))
     return StoredReport(verified, tuple(problems))
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """What is stored for one series and what is missing from it.
+
+    ``gaps`` are the runs of missing bars between the first stored bar and the last, plus,
+    when ``until`` was given, the run missing after the last. With ``until``,
+    ``bars + missing == grid_bars`` exactly, the grid being the bars from the first stored
+    one up to ``until``. A month that fails verification is not counted in ``bars`` and
+    shows up as a gap and in ``problems``.
+    """
+
+    symbol: str
+    interval: str
+    months: tuple[str, ...]
+    bars: int
+    first_open_time_ms: int | None
+    last_open_time_ms: int | None
+    gaps: tuple[Gap, ...]
+    missing: int
+    grid_bars: int | None
+    problems: tuple[Problem, ...]
+
+
+def _aware_ms(moment: datetime, name: str) -> int:
+    if moment.tzinfo is None:
+        raise ValueError(f"{name} must be timezone-aware, not naive: {moment!r}")
+    return _to_ms(moment)
+
+
+def _utc(value_ms: int) -> datetime:
+    return _EPOCH + timedelta(milliseconds=value_ms)
+
+
+def _candle(symbol: str, interval: str, line: str) -> Candle:
+    fields = line.split(",")
+    return Candle(
+        symbol=symbol,
+        timeframe=interval,
+        open_time=_utc(int(fields[0])),
+        close_time=_utc(int(fields[6])),
+        open=Decimal(fields[1]),
+        high=Decimal(fields[2]),
+        low=Decimal(fields[3]),
+        close=Decimal(fields[4]),
+        volume=Decimal(fields[5]),
+        is_closed=True,
+    )
+
+
+class HistoricalStore:
+    """Serve and describe the bars stored under one data directory. It only reads.
+
+    The directory is ``backtesting.data_dir``. Nothing here writes, fetches or fills.
+    """
+
+    def __init__(self, root: Path) -> None:
+        self._root = root
+
+    @property
+    def root(self) -> Path:
+        return self._root
+
+    def verify(self, symbol: str, interval: str) -> tuple[Problem, ...]:
+        """Every problem with what is stored for one series; empty when it is clean."""
+        return check_stored(self._root, symbol, interval).problems
+
+    def candles(
+        self, symbol: str, interval: str, start: datetime, end: datetime
+    ) -> Iterator[Candle]:
+        """Closed candles with ``start <= open_time < end``, streamed month by month.
+
+        ``start`` and ``end`` must be timezone-aware. Arguments are checked now, when this
+        is called, and files are read as the iterator is consumed. Each month file is
+        hashed as it is read, and a file that is missing or no longer matches the manifest
+        raises ``StoredFileError`` when the iterator reaches it, so a corrupt month cannot
+        be served. A month absent from the manifest yields nothing; ``coverage`` reports
+        it as a gap. Money comes from the stored strings, exactly.
+        """
+        _require_interval(interval)
+        start_ms = _aware_ms(start, "start")
+        end_ms = _aware_ms(end, "end")
+        entries = self._listed(symbol, interval)
+        return self._stream(symbol, interval, entries, start_ms, end_ms)
+
+    def coverage(self, symbol: str, interval: str, *, until: datetime | None = None) -> Coverage:
+        """Describe one series: its months, its bars and its gaps, without filling any.
+
+        ``until`` (exclusive, timezone-aware, on the grid and after the last bar) extends
+        the expected grid so a missing last month is a gap and ``bars + missing`` equals
+        ``grid_bars``. A series with no verified month has no bars and no gaps.
+        """
+        interval_ms = _require_interval(interval)
+        end_ms = None if until is None else _aware_ms(until, "until")
+        report = check_stored(self._root, symbol, interval)
+        opens = array("q")
+        for month in sorted(report.entries):
+            data = (self._root / report.entries[month].file).read_bytes().decode("ascii")
+            opens.extend(int(line.split(",", 1)[0]) for line in data.split("\n")[1:-1])
+        gaps = find_gaps(opens, interval_ms, end_ms=end_ms)
+        grid = grid_size(opens[0], end_ms, interval_ms) if opens and end_ms is not None else None
+        return Coverage(
+            symbol=symbol,
+            interval=interval,
+            months=tuple(sorted(report.entries)),
+            bars=len(opens),
+            first_open_time_ms=opens[0] if opens else None,
+            last_open_time_ms=opens[-1] if opens else None,
+            gaps=gaps,
+            missing=sum(gap.missing for gap in gaps),
+            grid_bars=grid,
+            problems=report.problems,
+        )
+
+    def _listed(self, symbol: str, interval: str) -> dict[str, ManifestEntry]:
+        entries, problems = _read_manifest(series_dir(self._root, symbol, interval) / MANIFEST_NAME)
+        if problems:
+            raise StoredFileError(
+                f"{symbol} {interval}: the manifest has {len(problems)} bad lines"
+            )
+        return entries
+
+    def _stream(
+        self,
+        symbol: str,
+        interval: str,
+        entries: dict[str, ManifestEntry],
+        start_ms: int,
+        end_ms: int,
+    ) -> Iterator[Candle]:
+        for month in sorted(entries):
+            first_ms, after_ms = month_bounds_ms(month)
+            if after_ms <= start_ms or first_ms >= end_ms:
+                continue
+            entry = entries[month]
+            try:
+                data = (self._root / entry.file).read_bytes()
+            except OSError as exc:
+                raise StoredFileError(f"{entry.file} cannot be read: {exc}") from exc
+            if hashlib.sha256(data).hexdigest() != entry.csv_sha256:
+                raise StoredFileError(f"{entry.file} no longer matches its manifest hash")
+            for line in data.decode("ascii").split("\n")[1:-1]:
+                opened = int(line.split(",", 1)[0])
+                if opened < start_ms:
+                    continue
+                if opened >= end_ms:
+                    return
+                yield _candle(symbol, interval, line)
