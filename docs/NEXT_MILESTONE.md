@@ -251,6 +251,20 @@ is not mainnet's, and only mainnet history is long enough.
 > and U12 untouched, the per-symbol and per-timeframe store under
 > `backtesting.data_dir`, idempotence on re-run, and gaps reported rather than filled.
 
+> **ANNOTATED AT M5m P101 (C3): S1'S ARMING CONDITION'S FIRST HALF HAS FIRED AND THIS
+> COMMIT DISCHARGES IT.** The condition reads *"whoever next edits `main` in
+> `scripts/download_data.py`"*, and C3 replaces that file's stub with the downloader
+> (`scripts/download_data.py`, tests in `tests/unit/test_download_data.py`), over
+> `trading_bot.data.historical` from C1 and C2. Its `main` is now `sys.exit(run(...))`;
+> `run` takes `--through` (required), `--symbols`, `--intervals`, `--data-dir` and
+> `--dry-run`, stores monthly files only and is idempotent, with no Testnet and no
+> REST path (R-G). **The second half, *"adds a start time to
+> `ExchangeClient.get_klines`"*, has NOT fired and is REAFFIRMED:** the port is
+> unchanged, and `U12` stays open exactly as written. **What survives:** the item's
+> store, idempotence and gaps-reported rules, which the downloader and
+> `HistoricalStore.coverage` now implement. **What is still to come:** the download
+> itself, authorised once in C4 (R-H), whose record is `docs/RUN_LEDGER.md` section 28.
+
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
 the manager taking an injected `Clock` and a provider over historical bars — the M4
