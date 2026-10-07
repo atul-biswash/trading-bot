@@ -259,7 +259,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · mutation_survey.py · abc_double_census.py
                  · cancel_testnet_order_list.py · clear_testnet_holdings.py
                  · probe_x1.py · release_position.py
-                 · normalize_ledger_exponents.py
+                 · normalize_ledger_exponents.py · trade_census.py
 ```
 
 ### `__all__` declares importability, not authorship
@@ -2270,8 +2270,8 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  142 files already formatted
-mypy                                   Success: no issues found in 84 source files
+ruff format --check src tests scripts  143 files already formatted
+mypy                                   Success: no issues found in 85 source files
 pytest                                 2145 passed, 4 skipped
                                        (2148 passed, 1 skipped with Testnet credentials)
 ```
@@ -2380,8 +2380,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 142 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 84 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 143 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 85 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
@@ -4215,8 +4215,8 @@ OUT, NOT WORKED AROUND -- a standing rule of the project owner at M5m P99
 > message."
 
 Earned by M5m's P99, whose first halt was this state. MEASURED on 2026-10-07: the
-credentialed gate read `3 failed, 2145 passed, 1 skipped`, the three failures being
-the three `skipif(not HAS_CREDENTIALS)` integration tests, each on
+credentialed gate read three failures with 2145 tests passed and one skipped, the
+three failures being the three `skipif(not HAS_CREDENTIALS)` integration tests, each on
 `GET https://testnet.binance.vision/api/v3/ping` answering `502 Bad Gateway` from
 CloudFront (the response dated `Wed, 07 Oct 2026 05:32:11 GMT`); a keyless GET of the
 same URL answered `502` at `2026-10-07T05:46:38Z`. The gate section above already

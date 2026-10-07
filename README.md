@@ -276,8 +276,8 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  142 files already formatted
-mypy                                   Success: no issues found in 84 source files
+ruff format --check src tests scripts  143 files already formatted
+mypy                                   Success: no issues found in 85 source files
 pytest                                 2145 passed, 4 skipped
                                        (2148 passed, 1 skipped with Testnet credentials)
 ```
@@ -399,7 +399,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · check_arming_conditions.py · run_census.py
                  · mutation_survey.py · abc_double_census.py
                  · cancel_testnet_order_list.py · clear_testnet_holdings.py
-                 · probe_x1.py
+                 · probe_x1.py · trade_census.py
 tests/           unit/ · integration/
 ```
 
