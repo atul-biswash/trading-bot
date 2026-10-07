@@ -265,6 +265,21 @@ is not mainnet's, and only mainnet history is long enough.
 > `HistoricalStore.coverage` now implement. **What is still to come:** the download
 > itself, authorised once in C4 (R-H), whose record is `docs/RUN_LEDGER.md` section 28.
 
+> **ANNOTATED AT M5m P101 (C4): THE DOWNLOAD WAS MADE AND IS INCOMPLETE, SO *"What is
+> still to come: the download itself"* IS PAST AND ITS GOAL IS NOT MET.** The 1,100
+> monthly zips were listed and 980 were stored, each verified against its venue
+> checksum; **120 were refused** by the importer's close-time rule (a row's close time
+> must equal its open time plus the interval less one millisecond), none for a checksum or
+> a transport fault. The two daily series are complete; 1m, 5m and 1h lack 14 months each
+> and 4h lacks 18, for both symbols, and `rows + missing == grid` holds exactly on all ten
+> series. The refused shapes are in `docs/RUN_LEDGER.md` section 28. **AN OWNER DECISION
+> IS NEEDED BEFORE S2 CAN RELY ON THIS DATA:** relax the rule, normalise the close time,
+> quarantine the irregular rows as gaps, or keep refusing; the first three change code R-F
+> surveyed and need the zips fetched again, which R-H's *"once"* does not cover. Until it
+> is made, 14 of 110 months of the minute-scale series are absent. **What survives:** the
+> store's layout, idempotence (a re-run fetches only the 120 absent months), gaps reported
+> and never filled, and the arming condition's discharge above.
+
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
 the manager taking an injected `Clock` and a provider over historical bars — the M4

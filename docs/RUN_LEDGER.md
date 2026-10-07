@@ -2983,3 +2983,125 @@ whose capture cannot be read. The differences are tabulated and diagnosed in
 `docs/NEXT_MILESTONE.md` beside S0, where the untracked figures are annotated; the stop
 slippage median that S2's default rests on is flagged for the owner there and is not
 adopted.
+
+## 28. M5m S1: the monthly archive download (C4), 980 of 1,100 months stored, 120 refused
+
+Recorded at M5m P101 (C4). An observation log, so this section only adds. **The download
+that R-H authorised once was made, and it did not finish the job it was authorised to do:
+the importer refused 120 of the 1,100 months on its close-time rule.** Nothing was
+fetched twice and nothing was altered after the run. The ruling that is needed is stated at
+the end, and this section does not make it.
+
+### What was run
+
+- **Code:** `scripts/download_data.py` and `trading_bot.data.historical` at `8aa1514`
+  (`HEAD` when the run started), launched from the development tree: this run fetches
+  public archive files and touches no venue account, store or lock, so the deployment-clone
+  doctrine, which governs `run`, is not engaged.
+- **Command, from the repository root:** `python scripts/download_data.py --through 2026-09`
+  with the defaults, `--symbols BTCUSDT ETHUSDT`, `--intervals 1m 5m 1h 4h 1d` and
+  `--data-dir data/historical`. Its stdout went to a scratchpad file, not under `logs/`.
+- **Window (UTC):** started `2026-10-07T19:20:24Z`, exit recorded at `2026-10-07T19:45:05Z`,
+  24 min 41 s. Exit status **1**.
+- **Dry-run before it (`2026-10-07T19:17:27Z`, exit 0, nothing written):** the archive
+  listed **110 months for each of the ten series, 1,100 zips**, as predicted. It was also
+  what exposed the host-check defect fixed at `8aa1514` (`M5m-060`).
+- **Hosts:** `s3-ap-northeast-1.amazonaws.com/data.binance.vision` for the listing and
+  `data.binance.vision` for each `.CHECKSUM` and zip. No other host was asked.
+
+### Result, by instrument
+
+Counts of the run's own output lines (`stored ...` and `FAILED ...`): **980 stored, 120
+failed**. Every one of the 120 is an `ArchiveFormatError`; the count of
+`ChecksumMismatchError`, `DownloadError` and `OSError` lines is **0**. So every one of
+the 980 stored months was verified against its venue `.CHECKSUM` before a byte was
+parsed (that is `ingest_zip`'s first act), and no download failed in transport.
+
+| series | listed | stored | refused | rows stored | gaps | missing | grid | rows + missing |
+|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1m | 110 | 96 | 14 | 4,185,052 | 26 | 612,788 | 4,797,840 | 4,797,840 |
+| BTCUSDT 5m | 110 | 96 | 14 | 837,011 | 25 | 122,557 | 959,568 | 959,568 |
+| BTCUSDT 1h | 110 | 96 | 14 | 69,754 | 25 | 10,210 | 79,964 | 79,964 |
+| BTCUSDT 4h | 110 | 92 | 18 | 16,714 | 16 | 3,277 | 19,991 | 19,991 |
+| BTCUSDT 1d | 110 | 110 | 0 | 3,332 | 0 | 0 | 3,332 | 3,332 |
+| ETHUSDT 1m | 110 | 96 | 14 | 4,185,052 | 26 | 612,788 | 4,797,840 | 4,797,840 |
+| ETHUSDT 5m | 110 | 96 | 14 | 837,011 | 25 | 122,557 | 959,568 | 959,568 |
+| ETHUSDT 1h | 110 | 96 | 14 | 69,754 | 25 | 10,210 | 79,964 | 79,964 |
+| ETHUSDT 4h | 110 | 92 | 18 | 16,714 | 16 | 3,277 | 19,991 | 19,991 |
+| ETHUSDT 1d | 110 | 110 | 0 | 3,332 | 0 | 0 | 3,332 | 3,332 |
+
+Instrument for rows, gaps, missing and grid: `HistoricalStore.coverage(..., until=
+2026-10-01T00:00Z)` run by a scratchpad script over the stored directory, **and the grid recomputed independently** as whole bars from the first stored open time to
+`2026-10-01T00:00Z` by `datetime` arithmetic, not by `grid_size`. The two agree on all ten
+series, and **`rows + missing == grid` holds exactly on all ten**; `BTCUSDT 1m`'s grid is
+4,797,840, as predicted before the run. `check_stored` reports **0 problems** on every
+series. Totals: **980 files, 995,246,501 CSV bytes, 10,223,726 rows, 184 gaps, 1,497,664
+missing bars.** The two daily series are complete from their first bar
+(`2017-08-17T00:00Z`) to `2026-09-30T00:00Z` with no gap. The first bar of every other
+series is `2017-08-17T04:00Z`, the last `2026-09-30T23:59Z` (1m), `23:55Z` (5m),
+`23:00Z` (1h) and `20:00Z` (4h).
+
+Manifest SHA-256, per series (`MANIFEST.jsonl`, the instrument being `hashlib.sha256` of
+its bytes): BTCUSDT 1m `8ec0675429d54b2b2dcf2ae132e636f7db52f0681e39a9d4afe281df52e57944`,
+5m `1b915796e89768b46592d56f7ad4d3a52abcd4ed59197649c28389d9a07c968c`, 1h
+`489f19ff3925aab3b32bb7d9c692f6ffdb6f3fa65682ed6986cc9e80c2653760`, 4h
+`0250de6ffed7e1ef9c19011b87964949aade645cf51d5432f5c48d80fb0d6281`, 1d
+`39247bf6d4a3281a1de88f367f316bdf6fd94de276a9f8ba03ca830930a1ce04`; ETHUSDT 1m
+`07c3f5725ae7ed394053d7cd88157922bf007a8f2a2e98b91481bdc818f5b835`, 5m
+`2615cc985e37095a6db3b11103606c8dd7ceeb9c0a76f8315ed6fc308fa0327f`, 1h
+`dcb442d7d1b4c6daa3b7515bdab232eccf6fd36c802c92c0b45bcdb22165f24c`, 4h
+`7c003d460e8b2c917d53cdfe4d9d8b02a64b93c90acf2005ec500beedbebbdbb`, 1d
+`e456846220ef3ffb47107769a391082ab4404d7fc884f657a00f367616d54645`.
+
+### The 120 refusals
+
+**Refused months, by series.** 1m, 5m and 1h, for BTCUSDT and ETHUSDT alike (the lists are
+identical): `2017-09 2017-12 2018-01 2018-02 2018-07 2019-06 2020-02 2020-03 2020-12 2021-02
+2021-04 2021-08 2021-12 2023-03`. 4h, for both: `2017-09 2018-01 2018-06 2018-07 2018-10
+2018-11 2019-03 2019-05 2019-08 2019-11 2020-02 2020-04 2020-06 2020-12 2021-02 2021-04
+2021-08 2021-09`. 1d: none.
+
+**What the rule refused.** `normalise_archive` requires every row's close time to equal
+its open time plus the interval less one millisecond. Each refusal names the first row
+that broke it, and the 120 first-breaking rows fall in four shapes (instrument: the
+difference `close - (open + interval - 1)` of each refusal message):
+
+| shape | refusals | months | difference |
+|---|---|---|---|
+| close inside the bar: a short bar | 100 | 23 months from 2017-12 to 2023-03 | -13,054,448 ms to a few ms short |
+| close one millisecond late, equal to the next open | 8 | 2017-09 | +1 ms |
+| close before the bar's own open | 6 | 2020-12 | -4,359,478 ms to -1,299,471 ms |
+| close at whole-second precision, ms part `000` | 6 | 2021-08 | -999 ms |
+
+**REASONED, not measured: the short bars belong to the venue's maintenance windows.** The
+stored series also hold intra-month gaps of hours (for example `2018-06-26T02:00Z` to
+`12:00Z`, 600 missing 1-minute bars, in a month that was stored), so the archive does omit
+bars around such events, and a bar that was open when one began could plausibly have been
+closed early. Nothing here checked a venue notice, and the 4h series refuses
+`2018-06`, `2018-10` and `2018-11`, months the 1m series stored. The counts above are the
+classification of all 120 refusal lines by a scratchpad script, with 0 unparsed; no row
+of the archive is reproduced here.
+
+**What is NOT known (`M5m-066`).** A refusal reports the first bad row only, so how many
+rows of each refused file break the rule, and whether any of them also break the open-time
+grid, is **unmeasured**. The zips were not kept after parsing, so answering it needs the
+files again.
+
+### The stored series are not complete, and the gap list does not say why
+
+`HistoricalStore.coverage` reports a refused month as a gap, because its bars are absent.
+So the 184 gaps mix two different facts: **months the archive holds and the importer
+refused** (the whole-month and multi-month runs), and **bars the archive itself omits
+inside a stored month** (the short runs of hours). The report cannot tell them apart and
+was not built to (`M5m-067`). Nothing was filled.
+
+### What this section decides
+
+**Nothing.** The rule that refused these months is the importer's own design, which the
+owner approved in P100 and which R-F surveyed (mutations U5 to U7); it did its job, which
+is to refuse what it cannot vouch for and say so. Whether to **relax it** (accept a close
+time that falls inside the bar), **normalise** (derive `open + interval - 1` and record
+that the archive said otherwise), **quarantine** the irregular rows as gaps, or **keep
+refusing** and treat those months as missing is the owner's. Any of the first three
+changes surveyed code and needs the zips again, which is a second download that R-H, in
+its word *"once"*, does not cover. See `docs/NEXT_MILESTONE.md` under S1.
