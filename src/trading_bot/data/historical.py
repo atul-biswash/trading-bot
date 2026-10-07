@@ -25,10 +25,19 @@ neither case does anything raise by itself. So the unit is decided per row from 
 digit count, any other count is an error, and a microsecond ``open_time`` must be a
 multiple of 1000. The stored file is milliseconds throughout.
 
-**A bar's close time is checked, not trusted.** ``close_time_ms`` is the archive's
-close time floored to milliseconds, and it must equal ``open_time_ms + interval_ms - 1``
-for both units. A file whose close times disagree with its interval is not the file it
-claims to be.
+**Every row is classified, and only a shape nobody has seen refuses a month.**
+``close_time_ms`` is the archive's close time floored to milliseconds. A regular bar
+opens on the interval grid and closes at ``open_time_ms + interval_ms - 1``, and a row
+that does not is put in a class by :func:`classify_times` (owner's rulings R-L and R-M,
+after the P102 census of all 1,100 months). A row that opens on the grid and closes
+after its open is **stored verbatim** whatever its close time is, and a close that
+differs from the regular one is registered with its shape: ``short_bar`` (the bar
+closed early), ``one_ms_late`` or ``whole_second``. A row that opens off the grid, or
+closes at or before its own open, is **quarantined**: not stored, its raw line returned
+with its shape. No stored value is altered. A month is refused only for what no class
+covers: a close past the bar's end, a price that is not positive or does not enclose
+the bar's open and close, an open time that does not increase or lies outside the month,
+a unit or field-count fault, a bad checksum.
 
 **A gap is reported and never filled.** The venue stores an empty minute as a bar with
 zero volume and zero trades (``M5m-031``), so a break in the grid means the archive has
@@ -48,6 +57,7 @@ from collections.abc import Iterator, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from enum import Enum
 from itertools import pairwise
 from pathlib import Path
 from typing import Final
@@ -56,19 +66,25 @@ from trading_bot.core.models import Candle
 
 __all__ = [
     "INTERVAL_MS",
+    "QUARANTINED_SHAPES",
     "ArchiveFormatError",
     "ChecksumMismatchError",
+    "ClassifiedMonth",
     "Coverage",
     "Gap",
     "HistoricalDataError",
     "HistoricalStore",
+    "IngestResult",
+    "IrregularRow",
     "ManifestEntry",
     "ManifestError",
     "Problem",
     "Row",
+    "RowShape",
     "StoredFileError",
     "StoredReport",
     "check_stored",
+    "classify_times",
     "find_gaps",
     "grid_size",
     "ingest_zip",
@@ -180,6 +196,61 @@ class StoredReport:
     problems: tuple[Problem, ...]
 
 
+class RowShape(str, Enum):
+    """How a row differs from a regular bar. Every member is written by :func:`classify_times`."""
+
+    SHORT_BAR = "short_bar"
+    ONE_MS_LATE = "one_ms_late"
+    WHOLE_SECOND = "whole_second"
+    OFF_GRID = "off_grid"
+    CLOSE_NOT_AFTER_OPEN = "close_not_after_open"
+
+
+#: The shapes whose rows are not stored. Every other shape is stored and registered.
+QUARANTINED_SHAPES: Final = frozenset({RowShape.OFF_GRID, RowShape.CLOSE_NOT_AFTER_OPEN})
+
+#: A close this many milliseconds before the regular one is on a whole second.
+_WHOLE_SECOND_SHORTFALL: Final = 999
+
+
+@dataclass(frozen=True)
+class IrregularRow:
+    """A row that is not a regular bar: where it was, what shape, and the archive's own line.
+
+    ``line`` is 1-based in the archive file. ``raw`` is the line as the archive wrote it,
+    with every field, so nothing about a quarantined row is lost by not storing it.
+    """
+
+    line: int
+    shape: RowShape
+    open_time_ms: int
+    raw: str
+
+
+@dataclass(frozen=True)
+class ClassifiedMonth:
+    """One archive month after classification.
+
+    ``rows`` are the bars to store, verbatim and ascending. ``registered`` are the stored
+    rows whose close differs from the regular one, and ``quarantined`` are the rows that
+    were not stored. A row is in at most one of ``registered`` and ``quarantined``, and a
+    registered row is also in ``rows``.
+    """
+
+    rows: tuple[Row, ...]
+    registered: tuple[IrregularRow, ...]
+    quarantined: tuple[IrregularRow, ...]
+
+
+@dataclass(frozen=True)
+class IngestResult:
+    """What ``ingest_zip`` stored and what it set aside."""
+
+    entry: ManifestEntry
+    registered: tuple[IrregularRow, ...]
+    quarantined: tuple[IrregularRow, ...]
+
+
 def _require_symbol(symbol: str) -> None:
     if _SYMBOL.fullmatch(symbol) is None:
         raise ArchiveFormatError(f"not a symbol: {symbol!r}")
@@ -277,52 +348,100 @@ def _money(raw: str, field: str) -> str:
     return raw
 
 
-def _normalise_row(fields: Sequence[str], interval_ms: int) -> Row:
+def _check_prices(row: Row) -> None:
+    """I3: every price is positive and the low and high enclose the open and close."""
+    open_, high, low, close = (Decimal(x) for x in (row.open, row.high, row.low, row.close))
+    if min(open_, high, low, close) <= 0:
+        raise ArchiveFormatError("a price is not positive")
+    if not low <= min(open_, close) <= max(open_, close) <= high:
+        raise ArchiveFormatError("the low and high do not enclose the open and close")
+
+
+def classify_times(open_ms: int, close_ms: int, interval_ms: int) -> RowShape | None:
+    """The shape of a bar's times: ``None`` for a regular bar, else its :class:`RowShape`.
+
+    The order is the ruling's. A bar that opens off the interval grid is ``OFF_GRID``
+    whatever its close is, and one that closes at or before its own open is
+    ``CLOSE_NOT_AFTER_OPEN``; both are quarantined. Otherwise the offset of the close from
+    the regular ``open + interval - 1`` decides: 0 is regular, +1 is ``ONE_MS_LATE``, -999
+    is ``WHOLE_SECOND`` (the close is on a whole second), and any other earlier close is a
+    ``SHORT_BAR``. A close later than one millisecond past the regular one is a shape no
+    ruling covers, and it raises ``ArchiveFormatError`` so that its month is refused.
+    """
+    if open_ms % interval_ms:
+        return RowShape.OFF_GRID
+    if close_ms <= open_ms:
+        return RowShape.CLOSE_NOT_AFTER_OPEN
+    offset = close_ms - (open_ms + interval_ms - 1)
+    if offset == 0:
+        return None
+    if offset == 1:
+        return RowShape.ONE_MS_LATE
+    if offset == -_WHOLE_SECOND_SHORTFALL:
+        return RowShape.WHOLE_SECOND
+    if offset < 0:
+        return RowShape.SHORT_BAR
+    raise ArchiveFormatError(
+        f"close_time {close_ms} is not open_time {open_ms} + {interval_ms} - 1: it is {offset} ms "
+        "past the bar's end, a shape this importer has no class for"
+    )
+
+
+def _normalise_row(fields: Sequence[str]) -> Row:
     if len(fields) != _ARCHIVE_FIELDS:
         raise ArchiveFormatError(f"a row has {len(fields)} fields, not {_ARCHIVE_FIELDS}")
     if len(fields[0]) != len(fields[6]):
         raise ArchiveFormatError("open_time and close_time are in different units")
-    open_ms = _open_time_ms(fields[0])
-    close_ms = _close_time_ms(fields[6])
-    if close_ms != open_ms + interval_ms - 1:
-        raise ArchiveFormatError(
-            f"close_time {close_ms} is not open_time {open_ms} + {interval_ms} - 1"
-        )
-    return Row(
-        open_time_ms=open_ms,
+    row = Row(
+        open_time_ms=_open_time_ms(fields[0]),
         open=_money(fields[1], "open"),
         high=_money(fields[2], "high"),
         low=_money(fields[3], "low"),
         close=_money(fields[4], "close"),
         volume=_money(fields[5], "volume"),
-        close_time_ms=close_ms,
+        close_time_ms=_close_time_ms(fields[6]),
     )
+    _check_prices(row)
+    return row
 
 
-def normalise_archive(csv_text: str, *, interval: str, month: str) -> tuple[Row, ...]:
-    """Parse one monthly archive CSV into rows, refusing anything the archive does not hold.
+def normalise_archive(csv_text: str, *, interval: str, month: str) -> ClassifiedMonth:
+    """Parse and classify one monthly archive CSV; refuse what no class covers.
 
-    No header is expected (the archive has none), every row has exactly twelve fields,
-    ``open_time`` strictly increases, and every bar opens inside ``month``.
+    No header is expected (the archive has none), every row has exactly twelve fields in
+    one unit, every price is positive and encloses its bar, ``open_time`` strictly
+    increases over EVERY row (a quarantined one included) and lies inside ``month``. A row
+    of a known shape never refuses the month: see :func:`classify_times`.
     """
     interval_ms = _require_interval(interval)
     start_ms, end_ms = month_bounds_ms(month)
     rows: list[Row] = []
+    registered: list[IrregularRow] = []
+    quarantined: list[IrregularRow] = []
+    previous: int | None = None
     for number, line in enumerate(csv_text.splitlines(), start=1):
         try:
-            row = _normalise_row(line.split(","), interval_ms)
+            row = _normalise_row(line.split(","))
+            shape = classify_times(row.open_time_ms, row.close_time_ms, interval_ms)
         except ArchiveFormatError as exc:
             raise ArchiveFormatError(f"line {number}: {exc}") from exc
         if not start_ms <= row.open_time_ms < end_ms:
             raise ArchiveFormatError(
                 f"line {number}: open_time {row.open_time_ms} is outside {month}"
             )
-        if rows and row.open_time_ms <= rows[-1].open_time_ms:
+        if previous is not None and row.open_time_ms <= previous:
             raise ArchiveFormatError(f"line {number}: open_time does not increase")
-        rows.append(row)
-    if not rows:
+        previous = row.open_time_ms
+        if shape is None:
+            rows.append(row)
+        elif shape in QUARANTINED_SHAPES:
+            quarantined.append(IrregularRow(number, shape, row.open_time_ms, line))
+        else:
+            rows.append(row)
+            registered.append(IrregularRow(number, shape, row.open_time_ms, line))
+    if not rows and not quarantined:
         raise ArchiveFormatError("the archive holds no rows")
-    return tuple(rows)
+    return ClassifiedMonth(tuple(rows), tuple(registered), tuple(quarantined))
 
 
 def grid_size(start_ms: int, end_ms: int, interval_ms: int) -> int:
@@ -524,13 +643,15 @@ def ingest_zip(
     interval: str,
     month: str,
     source_url: str,
-) -> ManifestEntry:
-    """Verify, unzip, normalise and store one monthly archive file.
+) -> IngestResult:
+    """Verify, unzip, classify and store one monthly archive file.
 
     The checksum is verified first, so a corrupt download is rejected before a byte of
     it is parsed and nothing is stored. The zip must hold exactly the one member the
     name implies, and that member's size is capped, because a decompression bomb is the
-    cheapest way a download can hurt this machine.
+    cheapest way a download can hurt this machine. The rows that are stored are the
+    month's verbatim bars; the result also returns the registered and quarantined rows.
+    A month in which every row is quarantined has nothing to store and is refused.
     """
     verify_zip(data, expected_sha256)
     member = f"{symbol}-{interval}-{month}.csv"
@@ -548,10 +669,19 @@ def ingest_zip(
         raise ArchiveFormatError(f"{member} is not UTF-8: {exc}") from exc
     if len(payload) > _MAX_MEMBER_BYTES:
         raise ArchiveFormatError(f"{member} unpacks past {_MAX_MEMBER_BYTES} bytes")
-    rows = normalise_archive(text, interval=interval, month=month)
-    return write_month(
-        root, symbol, interval, month, rows, source_url=source_url, zip_sha256=expected_sha256
+    classified = normalise_archive(text, interval=interval, month=month)
+    if not classified.rows:
+        raise ArchiveFormatError("every row of the month was quarantined; nothing to store")
+    entry = write_month(
+        root,
+        symbol,
+        interval,
+        month,
+        classified.rows,
+        source_url=source_url,
+        zip_sha256=expected_sha256,
     )
+    return IngestResult(entry, classified.registered, classified.quarantined)
 
 
 def _check_entry(root: Path, entry: ManifestEntry) -> list[Problem]:

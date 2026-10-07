@@ -85,7 +85,7 @@ MINUTE = 60_000
 
 def accepted(text: str, *, interval: str, month: str) -> tuple[Row, ...]:
     try:
-        return normalise_archive(text, interval=interval, month=month)
+        return normalise_archive(text, interval=interval, month=month).rows
     except ArchiveFormatError as exc:
         pytest.fail(f"a good archive was refused: {exc}")
 
@@ -311,16 +311,14 @@ class TestTimeUnit:
         with pytest.raises(ArchiveFormatError, match="different units"):
             normalise_archive(text_of(line), interval="1d", month="2024-12")
 
-    @pytest.mark.parametrize("offset", [-1, 1, 1000, -86_400_000])
-    def test_a_millisecond_close_time_off_by_anything_is_refused(self, offset: int) -> None:
+    @pytest.mark.parametrize("offset", [2, 1000, 86_400_000])
+    def test_a_millisecond_close_time_past_the_bars_end_is_refused(self, offset: int) -> None:
         line = self.row("1733011200000", str(1733097599999 + offset))
         with pytest.raises(ArchiveFormatError, match="is not open_time"):
             normalise_archive(text_of(line), interval="1d", month="2024-12")
 
-    @pytest.mark.parametrize("offset", [-1000, 1000, 2000])
-    def test_a_microsecond_close_time_off_by_a_millisecond_or_more_is_refused(
-        self, offset: int
-    ) -> None:
+    @pytest.mark.parametrize("offset", [2000, 3000])
+    def test_a_microsecond_close_time_past_the_bars_end_is_refused(self, offset: int) -> None:
         line = self.row("1735689600000000", str(1735775999999999 + offset))
         with pytest.raises(ArchiveFormatError, match="is not open_time"):
             normalise_archive(text_of(line), interval="1d", month="2025-01")
@@ -368,9 +366,9 @@ class TestArchiveShape:
 
     @pytest.mark.parametrize("value", ["5", "0", "0.00000000", "1234567.12345678"])
     def test_plain_numbers_pass_unchanged(self, value: str) -> None:
-        line = DEC_FIRST.replace("96407.99000000", value, 1)
+        line = DEC_FIRST.replace("16938.60452000", value, 1)
         (row,) = accepted(text_of(line), interval="1d", month="2024-12")
-        assert row.open == value
+        assert row.volume == value
 
     def test_a_repeated_open_time_is_refused(self) -> None:
         with pytest.raises(ArchiveFormatError, match="does not increase"):
@@ -813,7 +811,7 @@ class TestIngestZip:
             interval="1d",
             month=month,
             source_url="https://data.binance.vision/x.zip",
-        )
+        ).entry
 
     def accepted_ingest(
         self, root: Path, data: bytes, expected: str, month: str = "2025-01"
