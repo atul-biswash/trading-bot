@@ -125,6 +125,9 @@ def test_refused_provenance_does_not_gate_other_subcommands(
     """
     facts = _facts(accepted=False)
     monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: facts)
+    # This test is about the gate, not the replay: the command itself needs a stored history, so
+    # it is stubbed here and its own tests are tests/unit/test_main_backtest.py.
+    monkeypatch.setattr(cli, "_cmd_backtest", lambda *_a, **_k: 0)
 
     with caplog.at_level(logging.INFO):
         assert cli.main(["--config", str(config_path), "strategies"]) == 0

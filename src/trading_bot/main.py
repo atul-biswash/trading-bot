@@ -11,7 +11,8 @@ Examples
 --------
     python -m trading_bot run                 # uses mode from config.yaml
     python -m trading_bot run --mode paper
-    python -m trading_bot backtest
+    python -m trading_bot backtest            # the configured window, every enabled pair
+    python -m trading_bot backtest --start 2024-03-01 --end 2024-04-01 --symbols BTCUSDT
     python -m trading_bot strategies          # list registered strategies
 """
 
@@ -22,8 +23,13 @@ import asyncio
 import logging
 import signal
 import sys
+from datetime import date
+from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import ValidationError
+
+from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import (
     LIVE_TRADING_BLOCKED_MESSAGE,
     Settings,
@@ -31,7 +37,8 @@ from trading_bot.config.settings import (
     refuse_live_trading,
 )
 from trading_bot.core.enums import TradingMode
-from trading_bot.core.exceptions import LiveTradingBlockedError, TradingBotError
+from trading_bot.core.exceptions import ConfigError, LiveTradingBlockedError, TradingBotError
+from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger, setup_logging
 from trading_bot.utils.provenance import Provenance, collect_provenance, refusal_message
 
@@ -71,9 +78,38 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Override the mode from config.yaml.",
     )
 
-    sub.add_parser("backtest", help="Run the backtesting engine over historical data.")
+    backtest_cmd = sub.add_parser(
+        "backtest", help="Replay stored historical bars through the live decision path."
+    )
+    backtest_cmd.add_argument(
+        "--start",
+        type=_iso_date,
+        default=None,
+        help="First day replayed, YYYY-MM-DD, UTC (default: backtesting.start_date).",
+    )
+    backtest_cmd.add_argument(
+        "--end",
+        type=_iso_date,
+        default=None,
+        help="Day the replay stops BEFORE, YYYY-MM-DD, UTC (default: backtesting.end_date).",
+    )
+    backtest_cmd.add_argument(
+        "--symbols",
+        nargs="+",
+        default=None,
+        metavar="SYMBOL",
+        help="Enabled pairs to replay (default: every enabled pair).",
+    )
     sub.add_parser("strategies", help="List available (registered) strategies.")
     return parser
+
+
+def _iso_date(text: str) -> date:
+    """``YYYY-MM-DD`` as a date, for argparse; a malformed one is a usage error."""
+    try:
+        return date.fromisoformat(text)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not a YYYY-MM-DD date: {text!r}") from None
 
 
 def _install_shutdown_handlers(engine: TradingEngine) -> None:
@@ -157,15 +193,62 @@ def _cmd_run(settings: Settings, mode_override: TradingMode | None) -> int:
     return asyncio.run(_run_engine(settings))
 
 
-def _cmd_backtest(settings: Settings) -> int:
+def _resolve_window(
+    configured: BacktestConfig, start: date | None, end: date | None
+) -> BacktestConfig:
+    """The configured window and costs, with the flags laid over the two dates.
+
+    Rebuilt through validation rather than copied, so a reversed or empty window from the
+    flags is refused here as it would be at load.
+    """
+    update: dict[str, object] = {}
+    if start is not None:
+        update["start_date"] = start
+    if end is not None:
+        update["end_date"] = end
+    try:
+        return BacktestConfig.model_validate({**configured.model_dump(), **update})
+    except ValidationError as exc:
+        raise ConfigError(f"Invalid backtest window: {exc}") from exc
+
+
+def _cmd_backtest(
+    settings: Settings, start: date | None, end: date | None, symbols: list[str] | None
+) -> int:
+    """Replay the window, write the run record, and say whether it is a result.
+
+    The window the run used is the RESOLVED one -- the flags laid over the config -- and it is
+    what the record names. Returns 1 for a run that is not a result: a handler failure, an
+    ERROR logged, a pair that served nothing, or a cash identity that does not close.
+    """
+    from trading_bot.backtesting.engine import run_backtest, write_run
+
     log = get_logger(__name__)
+    window = _resolve_window(settings.config.backtesting, start, end)
     log.info(
-        "Backtest window: %s -> %s",
-        settings.config.backtesting.start_date,
-        settings.config.backtesting.end_date,
+        "Backtest window: %s -> %s, symbols %s",
+        window.start_date,
+        window.end_date,
+        "all enabled" if symbols is None else ",".join(symbols),
     )
-    log.error("Backtesting engine is not implemented yet (scaffolding phase).")
-    return 0
+    result = asyncio.run(run_backtest(settings, window=window, symbols=symbols))
+    # Microseconds, so two runs of one history started within a second do not name one directory.
+    stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
+    directory = (
+        Path(window.data_dir).parent / "backtests" / f"{stamp}-{result.trade_log_sha256[:12]}"
+    )
+    run_path, trades_path = write_run(result, directory)
+    log.info(
+        "Backtest %s: %d trade(s), trade log %s; record %s, trades %s",
+        "complete" if result.complete else "INCOMPLETE",
+        len(result.trades),
+        result.trade_log_sha256,
+        run_path,
+        trades_path,
+    )
+    for problem in result.problems:
+        log.error("Backtest problem: %s", problem)
+    return 0 if result.complete else 1
 
 
 def _cmd_strategies() -> int:
@@ -220,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             return _cmd_run(settings, args.mode)
         if args.command == "backtest":
-            return _cmd_backtest(settings)
+            return _cmd_backtest(settings, args.start, args.end, args.symbols)
         if args.command == "strategies":
             return _cmd_strategies()
     except LiveTradingBlockedError:

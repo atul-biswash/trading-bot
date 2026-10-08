@@ -718,6 +718,41 @@ that first multiplies it by money"*.
 > `paper/simulator.py` and `backtesting/engine.py`"* (annotated there). **What survives:**
 > `_cmd_backtest` still exits "not implemented yet" until C5, and the smoke run is C6.
 
+> **ANNOTATED AT M5m P106 (C5): THE `backtest` COMMAND IS WIRED, AND S2'S ARMING CONDITION
+> FIRED.** `_cmd_backtest` in `main.py` resolves the window (the flags laid over the
+> configured one and re-validated, so a reversed or empty window is refused as it would be at
+> load), runs `run_backtest`, writes the run record into a new directory
+> `<data_dir>/../backtests/<UTC microseconds>-<trade-log digest>` and returns 0 for a result
+> and 1 for a run that is not one. The flags are `--start`, `--end` (`YYYY-MM-DD`, UTC,
+> half-open as the config's) and `--symbols`; the record names the RESOLVED window and the
+> pairs actually replayed, not the configured ones. The stamp carries microseconds because
+> the first draft's did not: two runs of one history inside a second named one directory and
+> `write_run` raised `FileExistsError`, which `main` does not catch (`M5m-176`). 15 tests in
+> `tests/unit/test_main_backtest.py` and a Q2 survey of 8 mutations (the commit message
+> carries the table). `data/backtests/` falls under the existing `data/*` ignore, so a run
+> leaves the checkout clean.
+>
+> **Arming audit.** S2's condition, *"whoever next edits `_cmd_backtest` in `main.py` or
+> `BacktestConfig` in `config/models.py`"*, fires on `_cmd_backtest`. **REAFFIRMED, to be
+> retired by C6:** the item's content (the engine on the live decision path with the stated
+> fill model, the money-rule conversion, the command) is built, and what remains is the
+> smoke run, which is C6 and is what closes S2. `BacktestConfig` is not edited here.
+>
+> **One existing test's SETUP changed, and no assertion did.**
+> `test_refused_provenance_does_not_gate_other_subcommands` in `tests/unit/test_main.py`
+> asserted `main([..., "backtest"]) == 0`, which encoded the stub's exit. MEASURED against a
+> copy of the HEAD test: it fails with `assert 1 == 0` once the command is real, because the
+> test's config has no stored history. Its subject is that a refused provenance does not gate
+> the subcommand, not the replay, so the test now stubs `cli._cmd_backtest` to return 0 and
+> every assertion is as it was. No named ruling overturns that assertion, so this is reported
+> for the owner and not taken under the ruled-overturn authority (`M5m-177`).
+>
+> **What stops being true:** `README.md`'s *"Not a backtester yet"*, its `# not implemented
+> yet` command comment, its *"`backtest` exits with 'not implemented yet'"* and its roadmap
+> row *"Backtesting, paper simulator, notifications | stubs"*, each corrected in place; and
+> this annotation's own predecessor above, *"`_cmd_backtest` still exits 'not implemented
+> yet' until C5"*, true when written. **What survives:** the smoke run (C6) and S3's metrics.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`

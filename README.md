@@ -35,7 +35,8 @@ Reading this list first will save you time if it is not the tool you want.
 - **No portfolio optimiser, no ML, no signal blending.** One strategy per pair,
   selected from config.
 - **No hosted UI or web dashboard.** CLI and structured logs.
-- **Not a backtester yet** — see build state below.
+- **Not a validated backtester yet** — `backtest` replays and records trades, but it has no
+  metrics and has not been run over a real window; see build state below.
 
 ## Build state — read this before running it
 
@@ -90,7 +91,8 @@ only venue it will connect to.
 | Order execution — entry, protection, and the discretionary close | ✅ built |
 | Realised P&L reaching the ledger, and surviving a restart | ✅ built |
 | Crash-survivable store for pending records and the ledger | ✅ built |
-| Backtesting, paper simulator, notifications | ⛔ stubs |
+| Backtesting: replay, fill model, simulated executor, run record (metrics are not built) | ✅ built, **not yet run over a real window** |
+| Paper simulator, notifications | ⛔ stubs |
 
 `python -m trading_bot run` connects to Testnet and runs
 data → strategy → risk → execution end to end. It seeds a portfolio from your
@@ -167,7 +169,8 @@ Nine files are docstring-only placeholders: `execution/order_manager`,
 `notifications/`, `backtesting/portfolio`, `backtesting/metrics`, `data/repository`. Note
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
-`backtest` exits with "not implemented yet".
+`backtest` replays stored bars through the live decision path and writes a run record
+under `data/backtests/`, and has not yet been run over a real window.
 
 **At M5-0's close, where protective orders would rest had been decided and
 written down** — `docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That
@@ -250,7 +253,7 @@ python scripts/check_testnet.py     # read-only connectivity check; places no or
 python -m trading_bot strategies    # list registered strategies
 python -m trading_bot run           # mode from config.yaml (testnet)
 python -m trading_bot run --mode paper
-python -m trading_bot backtest      # not implemented yet
+python -m trading_bot backtest      # replay stored bars; --start, --end (YYYY-MM-DD) and --symbols
 ```
 
 `check_testnet.py` takes its mode **only** from `--mode` (default `testnet`),
@@ -276,10 +279,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  164 files already formatted
+ruff format --check src tests scripts  165 files already formatted
 mypy                                   Success: no issues found in 90 source files
-pytest                                 2959 passed, 4 skipped
-                                       (2962 passed, 1 skipped with Testnet credentials)
+pytest                                 2974 passed, 4 skipped
+                                       (2977 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -288,9 +291,9 @@ pytest                                 2959 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `2959 passed, 4 skipped` on a machine without
-  them and `2962 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 2959 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `2974 passed, 4 skipped` on a machine without
+  them and `2977 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 2974 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
