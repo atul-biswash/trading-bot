@@ -418,6 +418,22 @@ that first multiplies it by money"*.
 > submission and the fill model does not model it, but the band is part of what a snapshot
 > records.
 
+> **ANNOTATED AT M5m P105 (C4): THE REPLAY HARNESS IS BUILT, AND R-P1'S GAP RULE IS PINNED
+> ON THE UNCHANGED LIVE PATH.** `trading_bot.backtesting.replay` adds `ReplayClient`, which
+> answers the provider's one REST call, `get_klines`, from the store and refuses every other
+> venue method, and `ReplayStream`, which delivers stored bars to the handler the provider
+> subscribed, merged across pairs by nominal close time (ties to the pair subscribed first) with
+> the simulated instant, `now()`, set to a bar's open time plus its timeframe before its
+> handlers run. `BufferedMarketDataProvider`, `TradingEngine` and `HistoricalStore` are not
+> edited. Forty-seven tests in `tests/unit/test_replay.py`, over stores built through the real
+> `ingest_zip`, show that the engine's gap guard refuses the same `BUY`s across an omitted gap
+> and across a quarantined span (the guard cannot tell them apart, which the store can), that a
+> registered short bar causes no gap and gets its signal, and that a subscriber finds the
+> candle already in the buffer. **What this leaves open:** the simulated executor, the fill
+> model and the root, which are the second half of S2. **The arming condition naming
+> `_record_gap_if_any` in `data/market_data.py` is AUDITED, not fired:** the provider is
+> untouched and no start time is added to `ExchangeClient.get_klines`.
+
 > **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S2's ENTRY AND PROTECTION BULLETS
 > ARE SHARPENED, AND ONE SENTENCE IN EACH IS REPLACED.** The rulings, verbatim:
 >
