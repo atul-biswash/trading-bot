@@ -276,10 +276,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  160 files already formatted
-mypy                                   Success: no issues found in 89 source files
-pytest                                 2877 passed, 4 skipped
-                                       (2880 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  162 files already formatted
+mypy                                   Success: no issues found in 90 source files
+pytest                                 2927 passed, 4 skipped
+                                       (2930 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -288,9 +288,9 @@ pytest                                 2877 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `2877 passed, 4 skipped` on a machine without
-  them and `2880 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 2877 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `2927 passed, 4 skipped` on a machine without
+  them and `2930 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 2927 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -390,6 +390,7 @@ src/trading_bot/
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine† · portfolio† · metrics† · exchange_info · replay · fill_model
+                 · simulated_executor
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†

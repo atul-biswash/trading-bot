@@ -642,6 +642,37 @@ that first multiplies it by money"*.
 > cooldown item's name as K7** (annotated there), and the architect's account of how the
 > collision arose is `M5m-161`.
 
+> **ANNOTATED AT M5m P106 (C2): THE SIMULATED EXECUTOR IS BUILT, AND EACH SENTENCE OF R-AA IS
+> PROVED BY A TEST.** `trading_bot.backtesting.simulated_executor.SimulatedExecutor` satisfies
+> `Dispatcher` and sequences `fill_model.py` against the unchanged `Portfolio`. `dispatch` records an
+> approved entry or `CLOSE` and fills nothing; `__call__` runs first on every bar of every pair and,
+> in order, observes the bar (a jump in open time is a gap, a close earlier than the slot a
+> registered short bar), settles a pending entry against the bar one interval after the signal bar
+> (or expires it, R-W(d)), settles the pair's position against the bar, and stamps every open
+> position of every pair `ACTIVE` or `ABSENT_BY_DESIGN` with the simulated instant. Protection is
+> active from the entry bar's open, so a stop or target acts on the entry bar's own high and low;
+> an exit is booked at the bar's nominal end; `Position.opened_at` is the entry bar's open time;
+> `intent.quantity` is filled as sized and never re-sized. The booking identity is the live one:
+> `realised = exit total - entry quote total - exit fee`, the entry fee inside the quote total
+> (R-W(c)). 50 hand-computed tests in `tests/unit/test_simulated_executor.py`, and a Q2 mutation
+> survey of 33 mutations (the commit message carries the table).
+>
+> **Two readings of R-AA that the owner may wish to overrule, stated so a result is not read as
+> free of them.** (1) A `CLOSE` queued on bar `t` sells at the open of bar `t + 1` with NO
+> protective test first, because live cancels the protective legs before it sells; R-AA's
+> gap-through check before the `CLOSE` is run only on a bar that FOLLOWED A GAP, as its text says.
+> (2) On that bar only the STOP's gap-through check runs first, as R-AA names it; a take-profit the
+> open gapped over is not tested, so the `CLOSE` sells at that open less 0.05%, which is better for
+> the strategy than the target's own fill at its trigger less 1.20%. A bias in the strategy's
+> favour, pinned by a test.
+>
+> **What stops being true:** the P106 C1 annotation's *"What R-AA leaves to be proved by tests, not
+> assumed: that a stop can fire on the entry bar itself ... and that parity with the live booking
+> identity holds through the unchanged `Portfolio`"*: both are proved. `M5m-158`'s *"whether a stop
+> may fire on the entry bar's own low is the simulated executor's sequencing and not decided here"*
+> is decided by R-AA. **What survives:** the wiring and the root, which are C4 and C5, and the smoke
+> run, C6.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
