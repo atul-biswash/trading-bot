@@ -294,6 +294,47 @@ is not mainnet's, and only mainnet history is long enough.
 > fired: the port is unchanged, and `U12` is REAFFIRMED open exactly as written. **What
 > survives:** everything in the two annotations above except the option list.
 
+> **ANNOTATED AT M5m P103 (C4), BY THE OWNER'S RULINGS R-L TO R-O: S1'S STORE IS COMPLETE,
+> AND THE P101 C4 ANNOTATION'S OPEN DECISION IS ANSWERED.** The rulings, verbatim:
+>
+> R-L: "A row whose open_time is on the interval grid and whose close_time is after its
+> open_time is stored verbatim. Its close irregularity, if it has one, is registered with
+> its shape: short bar, one millisecond late, or whole-second. Zero-trade short bars are
+> kept. The 8 one-millisecond-late rows are not repaired. A row whose open_time is off the
+> grid, or whose close_time is not after its open_time, is quarantined: it is not stored,
+> and its raw line, shape and source are recorded. No stored value is altered."
+>
+> R-M: "Every row is checked against I1 to I4 at ingest and classified. A month is never
+> refused for a row of a known class. A row that breaks an invariant in a way no known
+> class covers refuses its month and is reported. Checksum, transport and structural
+> failures refuse the month, as before."
+>
+> R-N: "Quarantined spans are not backfilled from REST. They remain gaps, reported with
+> kind 'quarantined', and archive omissions are reported with kind 'omitted'."
+>
+> R-O: "The 120 zips under F:\trading bot\scratch\p102 are copied into
+> data/historical/_zips/ and SHA-verified against their CHECKSUM files there. From now on
+> the downloader keeps every zip under that path and ingests from disk. The 980 stored
+> months are not downloaded again; they are re-verified under the new rule from their
+> stored CSVs and manifest rows."
+>
+> **What stops being true:** the P101 C4 annotation's *"AN OWNER DECISION IS NEEDED BEFORE
+> S2 CAN RELY ON THIS DATA"* and its option list, which R-L chose among (store the
+> on-grid rows verbatim and register the irregularity, quarantine the rest); its *"Until it
+> is made, 14 of 110 months of the minute-scale series are absent"*, since all 110 months of
+> every series are now present; and its *"a re-run fetches only the 120 absent months"*,
+> since none is absent. **The store is complete
+> under R-L to R-O**: all 1,100 months stored, 124 rows registered (110 short bars, 8
+> one-millisecond-late, 6 whole-second), 21,603, 242 and 44 rows quarantined per symbol at
+> 1m, 5m and 1h, `rows + missing == grid` exactly on all ten series, and 0 problems from the
+> deep re-check of every stored row. The per-series table, the registry and quarantine totals,
+> every quarantined span and the manifest and registry digests are in `docs/RUN_LEDGER.md`
+> section 29. **S1's arming condition is AUDITED, not fired:** C4 edits no `main` and no
+> start time is added to `ExchangeClient.get_klines`, and `U12` is REAFFIRMED open exactly
+> as written. **What survives:** the store's layout, idempotence, gaps reported and never
+> filled, and the C3 annotation's kept zips and `--offline`. The 980 zips C4 of P101
+> downloaded are still not on disk (`M5m-106`), which R-O accepts.
+
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
 the manager taking an injected `Clock` and a provider over historical bars — the M4
@@ -374,6 +415,24 @@ that first multiplies it by money"*.
 > and the median 0.6419% is the only figure it holds against. **What survives:** the
 > intrabar trigger, *"the stop wins"*, the `CLOSE` and Fees bullets, the money-rule
 > paragraph and P99's entry ruling.
+
+> **ANNOTATED AT M5m P103 (C4), BY THE OWNER'S RULING R-P: A QUESTION S2 INHERITS FROM
+> S1'S STORE, RECORDED AND NOT RULED.** The ruling, verbatim:
+>
+> R-P: "Recorded as an S2 question, not ruled: what a backtest does with a window
+> containing a gap, a quarantined span or a registered short bar."
+>
+> **The question, with what the store now lets S2 ask.** `HistoricalStore.coverage` reports
+> every gap with its kind (`omitted`: the archive holds no row for the bar; `quarantined`:
+> the archive held a row for it that failed R-L's grid or close-after-open test and was not
+> stored), and `HistoricalStore.registry` lists the 124 stored rows whose close time is
+> irregular, each with its shape. So S2 can tell a window apart by what it contains. What is
+> NOT decided, and is the owner's: whether a backtest window that contains a gap or a
+> quarantined span is refused, split at it, or run across it with the missing bars simply
+> absent; whether a registered short bar is treated as a normal bar or as one whose close is
+> earlier than its slot, which matters to a fill model that triggers intrabar; and whether
+> the answer differs by kind. The store carries the facts and takes no position. **Nothing in
+> S2's items above is changed by this.**
 
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,

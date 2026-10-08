@@ -3105,3 +3105,138 @@ that the archive said otherwise), **quarantine** the irregular rows as gaps, or 
 refusing** and treat those months as missing is the owner's. Any of the first three
 changes surveyed code and needs the zips again, which is a second download that R-H, in
 its word *"once"*, does not cover. See `docs/NEXT_MILESTONE.md` under S1.
+
+## 29. M5m S1: the 120 refused months ingested from disk under the row-classification rule (P103 C4)
+
+Recorded at M5m P103 (C4). An observation log, so this section only adds; section 28 still
+describes what the run of `2026-10-07` found, and nothing in it is altered. **The store is
+now complete under the owner's rulings R-L to R-O: all 110 months of every one of the ten
+series are present.** No request was made to any host: the 120 zips were the ones P102
+fetched into scratch (R-J) and C4 copied (R-O), and the ingest ran with `--offline`.
+
+### What was run
+
+- **Code:** `scripts/download_data.py` and `trading_bot.data.historical` at `e236162`
+  (`HEAD` when the run started, C1 to C3 of P103 committed, the tree clean), launched from
+  the development tree for the reason section 28 gives: public archive files only, no venue
+  account, store or lock.
+- **Zips:** the 120 zips and 120 `.CHECKSUM` files of `F:\trading bot\scratch\p102\zips` were
+  copied, refusing to overwrite, into `data/historical/_zips/<SYMBOL>/<interval>/`, and each
+  zip was verified against its CHECKSUM at the destination by a separate script: **120 zips,
+  71,708,741 bytes, 120 verified**. The directory holds 71,719,301 bytes with the checksum
+  files. `data/*` is ignored by git (`.gitignore:37`), which covers `_zips`.
+- **Command, from the repository root:** `python scripts/download_data.py --through 2026-09
+  --offline --intervals 1m 5m 1h 4h` (the daily series had no refused month, so it is not
+  named; offline mode reports a note and exits 1 for a series with nothing on disk to plan
+  from). Stdout went to a scratchpad file.
+- **Window (UTC):** `2026-10-08T03:11:41Z` to `03:12:29Z`, **48 s**, exit status **0**.
+- **Result, per symbol and interval:** listed, stored, skipped 0, failed **0**, fetched **0**,
+  reused all. BTCUSDT and ETHUSDT alike: 1m 14 stored, 5m 14, 1h 14, 4h 18; **120 months
+  stored, none failed.**
+- **The 980 stored months were not downloaded again.** Before the ingest they were
+  re-verified under the new rule from their stored CSVs and manifest rows
+  (`HistoricalStore.verify`, every row re-checked): **0 problems on all 980, 76.4 s.** After
+  the ingest the same call over the whole store (`2026-10-08T03:12:41Z` to `03:14:03Z`, 81.1 s
+  in the script's own clock) reports **0 problems on all 1,100 months**, and
+  `check_stored` without the row re-check reports 0 as well. **The 980 old manifest lines are
+  byte-identical** before and after, in the same order, on every series (96, 96, 96, 92 and
+  110 lines per symbol; the new lines were appended). Instrument: `state_before.json` and
+  `state_after.json` written by a scratchpad script, compared line by line.
+
+### Result, by series
+
+Instrument: `HistoricalStore.coverage(..., until=2026-10-01T00:00Z)`, as in section 28.
+`rows + missing == grid` holds exactly on all ten series.
+
+| series | months | rows stored | missing bars | of which omitted | of which quarantined | grid | registered rows | quarantined rows |
+|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1m | 110 | 4,767,676 | 30,164 | 8,562 | 21,602 | 4,797,840 | 15 | 21,603 |
+| BTCUSDT 5m | 110 | 957,623 | 1,945 | 1,703 | 242 | 959,568 | 15 | 242 |
+| BTCUSDT 1h | 110 | 79,793 | 171 | 127 | 44 | 79,964 | 13 | 44 |
+| BTCUSDT 4h | 110 | 19,974 | 17 | 17 | 0 | 19,991 | 19 | 0 |
+| BTCUSDT 1d | 110 | 3,332 | 0 | 0 | 0 | 3,332 | 0 | 0 |
+| ETHUSDT 1m | 110 | 4,767,675 | 30,165 | 8,563 | 21,602 | 4,797,840 | 15 | 21,603 |
+| ETHUSDT 5m | 110 | 957,623 | 1,945 | 1,703 | 242 | 959,568 | 15 | 242 |
+| ETHUSDT 1h | 110 | 79,793 | 171 | 127 | 44 | 79,964 | 13 | 44 |
+| ETHUSDT 4h | 110 | 19,974 | 17 | 17 | 0 | 19,991 | 19 | 0 |
+| ETHUSDT 1d | 110 | 3,332 | 0 | 0 | 0 | 3,332 | 0 | 0 |
+
+**Every figure above was predicted before the run and matched**, including the one-row
+difference between the two symbols' 1m series (4,767,676 and 4,767,675), which is the
+omitted bar at one minute of `2020-12-21`: BTCUSDT's missing bar is `14:09Z` and ETHUSDT's
+is `14:08Z`, each beside a quarantined row (below). `omitted + quarantined == missing` on
+every series. The gap count of `find_gaps` was **184** at section 28 and is **204** now
+(33, 32, 28, 9 and 0 per symbol for 1m, 5m, 1h, 4h and 1d): the 4h series fell from 16
+gaps to 9 as its 18 absent months arrived, and the minute-scale series gained the
+irregularities inside the months that arrived. With the kinds split, `kinded_gaps` is
+37, 35, 30, 9 and 0 per symbol.
+
+### The registry: rows stored with their close irregularity registered
+
+**124 registered rows in all, 62 per symbol:** 110 short bars, 8 one-millisecond-late rows
+and 6 whole-second rows. Per symbol and interval (short / one ms late / whole second): 1m
+13 / 1 / 1, 5m 13 / 1 / 1, 1h 11 / 1 / 1, 4h 18 / 1 / 0. **Nothing was altered:** every
+registered row is stored verbatim, the zero-trade short bars included, and the 8
+one-millisecond-late rows (4 per symbol, the month `2017-09`) are not repaired (R-L). Each
+registry line carries the month, the line number in the archive file, the shape, the open
+time, the raw line and the source URL. Instrument: the registry sidecars read by a
+scratchpad script.
+
+### The quarantine: rows not stored
+
+**Quarantined per symbol:** 1m 21,603 rows (21,602 off the interval grid, 1 whose close is
+not after its open), 5m 242 (241 and 1), 1h 44 (43 and 1), 4h 0, 1d 0. The single
+close-not-after-open row of each series is the flat bar of `2020-12-21` in the month
+`2020-12` (BTCUSDT 1m at `1608559740000`, line 29650; ETHUSDT 1m at `1608559680000`, line
+29649; the 5m and 1h rows at `14:05Z` and `14:00Z` for both). Each quarantined row's raw
+line, shape and source is in the registry, and none is stored.
+
+**Every quarantined span, as a run of missing bars of kind `quarantined` (R-N: not backfilled
+from REST). A span is `[start, end)`, `end` being the open of the next bar present.**
+
+| series | start (UTC) | end (UTC) | bars |
+|---|---|---|---|
+| BTCUSDT and ETHUSDT 1m | 2017-12-04T06:01:00Z | 2017-12-18T10:01:00Z | 20,400 |
+| BTCUSDT and ETHUSDT 1m | 2018-02-09T09:59:00Z | 2018-02-10T06:00:00Z | 1,201 |
+| BTCUSDT 1m | 2020-12-21T14:09:00Z | 2020-12-21T14:10:00Z | 1 |
+| ETHUSDT 1m | 2020-12-21T14:08:00Z | 2020-12-21T14:09:00Z | 1 |
+| BTCUSDT and ETHUSDT 5m | 2018-02-09T09:55:00Z | 2018-02-10T06:00:00Z | 241 |
+| BTCUSDT and ETHUSDT 5m | 2020-12-21T14:05:00Z | 2020-12-21T14:10:00Z | 1 |
+| BTCUSDT and ETHUSDT 1h | 2018-02-09T09:00:00Z | 2018-02-11T04:00:00Z | 43 |
+| BTCUSDT and ETHUSDT 1h | 2020-12-21T14:00:00Z | 2020-12-21T15:00:00Z | 1 |
+
+The 4h and 1d series have none. The 1m spans total 20,400 + 1,201 + 1 = 21,602 bars. The
+two long spans are the months `2017-12` and `2018-02`, in which the archive's minute file
+carries rows whose open times are not on the minute grid; the 5m and 1h series show the same
+`2018-02` window. **REASONED, not measured here:** P102 gave these shapes in its census;
+this section records only what the store now holds. Instrument: the `kinded_gaps` of
+`coverage`, read by `c4_state.py`.
+
+### The hashes of the store after the ingest
+
+`MANIFEST.jsonl` and `IRREGULAR.jsonl` per series, SHA-256 of the file's bytes
+(`hashlib.sha256`); the 1d series has no registry.
+
+| series | manifest | registry |
+|---|---|---|
+| BTCUSDT 1m | `16e1919645f100937f2894d5467954b9c4d2ad38d2b9732d1d552745364de1f8` | `496b2fd52dbac04af2b7b79e1358965389063b78ac2c75f67d0800e26919d8f7` |
+| BTCUSDT 5m | `6e748f83f6378121a07b5dba0ff8d71f4821626bceb2242b6ef2b4691acff4f5` | `0cb2068f6e53ea73e645a1729a76f6e00be6c681a51c7f948cbe79cff3f2b1d1` |
+| BTCUSDT 1h | `4f549ffedaf7ed55596a389b028fc71db620d3c687d53a8a56a351ab3e34887d` | `db69e0ba89c12c9dc2e4d9a071ca6413c9016cd71d6ed8cd2c12a6a16f8ae4d3` |
+| BTCUSDT 4h | `5351a4ce959a9b81a490af2f674fc05e44e549241596eed977159a5f244383ce` | `7c4ee9c601d1188f0dc9ec5436233e9391bd0c266156313d87c916d5656f7b9f` |
+| BTCUSDT 1d | `39247bf6d4a3281a1de88f367f316bdf6fd94de276a9f8ba03ca830930a1ce04` | none |
+| ETHUSDT 1m | `1cdca7c3f0d28fa7688146f632aed6aad787364e7a37f911f67a46933bbba5d9` | `13b340b18a72b143cbc344ea22042f87602192e539c702e78b2d1b2f395e62de` |
+| ETHUSDT 5m | `e9b879dffe0932ccf7f717c81276656f1fe21fd398a6a5164f72b6451dbaf1e6` | `76e237f0c3d23ff3ff08ef581cfe007f595add2c8ee5536d4e00fe8fa7b51f8d` |
+| ETHUSDT 1h | `71d0f1e99ef2bcc68a042e4866e5df7345e36034adb047c0a90789e67dc907b2` | `ffeb425a48ab489a5de14ecb74bafe56023c7c48fe222492952d85a519dcd8a5` |
+| ETHUSDT 4h | `f650f94bdf4c4bb5545efe1ff62d525f3d70584ccb9aba3e4182874b05aedb82` | `e81691cbb703c68c0c6fb43c73447ba91a945f056512130230386f0b7b8ebf6c` |
+| ETHUSDT 1d | `e456846220ef3ffb47107769a391082ab4404d7fc884f657a00f367616d54645` | none |
+
+The two 1d manifest digests equal section 28's, as they must: no 1d line was added.
+
+### What this section decides, and what it leaves open
+
+**Nothing is decided here.** It records that the store the rulings R-L to R-O describe now
+exists and verifies clean. **Open, and recorded as a question for S2 (R-P) and not ruled:**
+what a backtest does with a window containing a gap, a quarantined span or a registered
+short bar. Two shapes are not ruled by R-L to R-O and are noted for the owner: a month whose
+every row is quarantined is refused by the importer (`M5m-089`), and none of the 120 months
+was such a month.
