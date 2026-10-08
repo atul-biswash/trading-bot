@@ -1844,6 +1844,20 @@ Carried, unfired.
 `backtesting/engine.py`** — the two substitutes for the executor, neither of
 which exists beyond a docstring stub.
 
+> **RESOLVED AT M5m P105 (C2), AND STRUCK.** The abstract `OrderExecutor` is removed from
+> `core/interfaces.py` and a `Dispatcher` Protocol declaring `dispatch(signal, assessment,
+> candle)` and `__call__(candle)` stands in its place; `_build_signal_handler` in
+> `engine/modes.py` takes a `Dispatcher | None`; the live `OrderExecutor` satisfies it
+> structurally and a simulated executor can. Twelve tests in `tests/unit/test_dispatcher.py`
+> pin it (the ABC is gone, both members are coroutines with the live parameter names, the live
+> class satisfies the Protocol without subclassing it, a class with either member missing or
+> with only the dead `execute` does not, and the signal handler passes the exact objects to any
+> dispatcher). No existing assertion changed. **The answer to the item's question was no, as
+> the annotation below records, and the arming condition is retired:** *"whoever writes
+> `paper/simulator.py` or `backtesting/engine.py`"* no longer arms a question, since the
+> question is resolved. `_BootCloser` in `engine/modes.py` still types its executor as the
+> live class; it calls only `dispatch`, and R-U names `_build_signal_handler` alone.
+>
 > **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULING R-U: THE QUESTION IS ANSWERED AND
 > THE ITEM IS RESOLVED AT C2.** P104 measured the answer (`M5m-124`): the live
 > `OrderExecutor` in `execution/executor.py` does not subclass the abstract

@@ -14,7 +14,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from trading_bot.core.assessment import RiskAssessment
 from trading_bot.core.models import (
@@ -498,11 +498,42 @@ class RiskManager(ABC):
         """
 
 
-class OrderExecutor(ABC):
-    """Places orders derived from approved signals."""
+@runtime_checkable
+class Dispatcher(Protocol):
+    """What the signal chain and the candle feed need from whatever places orders.
 
-    @abstractmethod
-    async def execute(self, request: OrderRequest) -> Order: ...
+    **Two members, one per seam, and nothing else.** ``dispatch`` is the signal side:
+    the one signal handler calls it after ``RiskManager.evaluate`` has answered, with
+    the signal, the assessment and the candle the signal was decided on. ``__call__``
+    is the candle side: the executor registers on ``MarketDataProvider.on_candle``
+    ahead of the engine's own hook, so it runs first on every bar. These are the two
+    entry points the live :class:`~trading_bot.execution.executor.OrderExecutor` has,
+    and a simulated executor needs the same two.
+
+    **It is a Protocol, and satisfied structurally.** The live executor does not
+    subclass it and nothing has to. That is what lets a simulated executor stand in
+    for the live one on the same signal chain without importing the live class, which
+    pulls in the whole venue layer.
+
+    **It replaces an abstract ``OrderExecutor`` declaring ``execute(request: OrderRequest)
+    -> Order``** (the project owner's R-U, resolving U6). That class had no implementer
+    and no user in ``src/`` (``M5m-124``): the live executor never subclassed it, and
+    its real entry points are the two above, which take a signal and a candle and not
+    an order request. A port nothing implements and nothing calls describes a seam that
+    does not exist.
+
+    ``runtime_checkable`` makes ``isinstance`` check that both members are present. It
+    does NOT check their signatures; ``mypy`` does, at the call sites that pass a
+    ``Dispatcher``.
+    """
+
+    async def dispatch(self, signal: Signal, assessment: RiskAssessment, candle: Candle) -> None:
+        """Act on ``assessment``, which ``signal`` produced on ``candle``'s bar."""
+        ...
+
+    async def __call__(self, candle: Candle) -> None:
+        """Handle a newly closed bar, before the engine decides anything on it."""
+        ...
 
 
 class Notifier(ABC):

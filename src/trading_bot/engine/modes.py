@@ -153,6 +153,7 @@ from trading_bot.core.exceptions import (
     TradingBotError,
 )
 from trading_bot.core.interfaces import (
+    Dispatcher,
     ExchangeClient,
     MarketDataProvider,
     MarketDataStream,
@@ -445,7 +446,7 @@ def _build_signal_handler(
     intent_logger: IntentLogger,
     portfolio: Portfolio,
     pairs: Mapping[str, PairContext],
-    executor: OrderExecutor | None = None,
+    executor: Dispatcher | None = None,
 ) -> SignalHandler:
     """The one handler registered on the engine: the adapter, and the chain.
 
@@ -457,7 +458,10 @@ def _build_signal_handler(
     the risk layer decided, and what execution did about it. ``executor`` is
     optional so a caller that wants the decision path without dispatch -- every
     test of this chain that predates the executor -- gets exactly the old
-    behaviour.
+    behaviour. It is typed as a
+    :class:`~trading_bot.core.interfaces.Dispatcher`, which the live
+    :class:`~trading_bot.execution.executor.OrderExecutor` satisfies structurally
+    and a simulated executor can too (the owner's R-U).
 
     ``SignalHandler`` is a coroutine taking only a signal, while
     ``RiskManager.evaluate`` is synchronous and needs a portfolio. This closure
