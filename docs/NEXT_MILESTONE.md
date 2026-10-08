@@ -753,6 +753,41 @@ that first multiplies it by money"*.
 > this annotation's own predecessor above, *"`_cmd_backtest` still exits 'not implemented
 > yet' until C5"*, true when written. **What survives:** the smoke run (C6) and S3's metrics.
 
+> **ANNOTATED AT M5m P106 (C6): THE SMOKE RUN IS MADE, AND S2 IS BUILT.** R-AE's run was made
+> twice, from `d5bff58` with a clean tree, and is recorded in `docs/RUN_LEDGER.md` section 32:
+> both runs complete with no problem and no ERROR record; 53,568 bars served; 628 entries
+> queued, 628 filled, none refused by `FOK`, none expired; 626 trades booked and two positions
+> open at the end; the two trade-log digests equal
+> (`5350070f7a9eeea27f8f8e63ddc765110a9b66bd3e06881e9dfdd657c313ba36`), the two `trades.csv`
+> byte-equal and the two records equal outside `wall_clock`; every one of the 626 rows
+> satisfies `realised = exit total - entry total - exit fee`; no gap and no short bar. An
+> independent pandas derivation over the stored files agreed on the bar counts and on the 628
+> up-crosses. **118.8 s and 118.3 s a run, 2,218 and 2,209 us a bar**, inside `M5m-121`'s
+> 1,987 to 2,279, so the projection for S5's joint baseline stands. This is a test of the
+> machine and not a result: 113 of the 626 trades won and realised was -384.31 USDT with 244.85
+> USDT of fees, and nothing here is a statement about the strategy.
+>
+> **S2's arming condition is RESOLVED and retired here.** C5 REAFFIRMED it until the smoke
+> run: both of its sites have been edited (`BacktestConfig` at P105 C1, `_cmd_backtest` at C5),
+> the money-rule conversion is discharged, and the item's content is built and has run. **S2
+> is closed.** Nothing in the register changes: the condition was parsed in S2's own text,
+> which stands as the record.
+>
+> **Three things for the owner, none of them changed here.** (1) **The backtest writes into
+> the bot's own log** (`M5m-179`): 6,308 lines in two runs, including `intent_dispatched` and
+> `engine_stopped clean_shutdown=False`, which a census over `logs/trading_bot.log` would count
+> as the bot's; whether it should log to its own file is a ruling. (2) The runs were made from
+> the development tree on an EDITABLE install, so the record cannot name the running code
+> beyond a clean checkout at `d5bff58` (`M5m-182`); S5 to S7 are the runs whose provenance
+> matters, and a deployment clone with its own non-editable venv would need the stored history
+> copied in, since `data/*` is not in git. (3) One of the 17 `nothing_to_close` refusals per
+> run is unexplained (`M5m-183`).
+>
+> **What stops being true:** the C5 annotation's *"REAFFIRMED, to be retired by C6"*, and
+> `README.md`'s *"has not yet been run over a real window"* and *"not yet run over a real
+> window"* (corrected in place). **What survives:** S3 (metrics) is next and unbuilt, S4's
+> calibration, and every earlier S2 ruling.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`

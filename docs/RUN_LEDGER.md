@@ -3476,3 +3476,114 @@ true of 2026-08-08.
 | `get_times.txt` | `d52271cff770e3db0fce37baeb2e76a629f7c323a5d2f7725133df7c1d39069d` |
 | `observe_c3.py` | `7d45205cf2955698eb2f0fda11d52e366f480e059f1d32cc78c8dcba07899211` |
 | `observe_c3.txt` | `b096ba98d33ef07873f2e54bdd95464030b511cceca0d2d0635282f2a5675300` |
+
+## 32. M5m S2: the smoke backtest, March 2024, run twice (P106 C6)
+
+Recorded at M5m P106 (C6). An observation log, so this section only adds. **One backtest
+smoke run was made, twice, as the owner's R-AE authorised: the committed config, BTCUSDT 1m
+and ETHUSDT 5m, 2024-03-01 to 2024-04-01.** It is a test of the machine and not a result about
+the strategy: no metric exists yet (S3), the sample is one month, and the parameters are the
+config's.
+
+### What was run
+
+- **Authority:** R-AE, quoted in `docs/NEXT_MILESTONE.md` under S2: *"One backtest smoke
+  run is authorised: the committed config, BTCUSDT 1m and ETHUSDT 5m, 2024-03-01 to
+  2024-04-01, run twice."*
+- **Code:** the repository root at `d5bff58eb52ec081ae76b9406bee7dbc80d5f33d`, tree clean,
+  `config.yaml` clean with SHA-256
+  `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0` (equal to the committed
+  blob). **The install is EDITABLE**, so the record names `install_kind=editable`,
+  `code_commit=unknown`, `commits_agree=unknown`, and the only identification of the running
+  code is `checkout_commit` and `checkout_dirty=false`. `trading_bot.__file__` was shown to
+  resolve to this checkout's `src` before the first run. The deployment-clone doctrine in
+  `CLAUDE.md` governs `run`, which a backtest is not (no venue, no credential, no store or
+  lock); it is noted here and not worked around (`M5m-182`).
+- **Command, twice in sequence, from the repository root:** `python -m trading_bot backtest
+  --start 2024-03-01 --end 2024-04-01`, stdout to scratch files. **Exit status 0 both times.**
+- **Windows (UTC):** run 1 `2026-10-08T20:18:42Z` to `20:20:42Z`; run 2 `20:20:42Z` to
+  `20:22:42Z`. The record's own clock: `wall_seconds` **118.797** and **118.328**.
+- **Records:** `data/backtests/20261008T202042586929Z-5350070f7a9e/` and
+  `data/backtests/20261008T202242653936Z-5350070f7a9e/`, each `run.json` (3,860 bytes) and
+  `trades.csv` (239,657 bytes). `data/*` is ignored by git, so the digests below are the record.
+
+### Result
+
+| fact | run 1 | run 2 |
+|---|---|---|
+| exit status | 0 | 0 |
+| `problems` / ERROR records / stream handler failures | none / 0 / 0 | none / 0 / 0 |
+| bars served, BTCUSDT 1m / ETHUSDT 5m | 44,640 / 8,928 | 44,640 / 8,928 |
+| first / last open, BTCUSDT | 2024-03-01T00:00 / 2024-03-31T23:59 | same |
+| last open, ETHUSDT | 2024-03-31T23:55 | same |
+| gaps seen / short bars seen | 0 / 0 | 0 / 0 |
+| BUY entries queued / filled / refused by FOK / expired / unaffordable | 628 / 628 / 0 / 0 / 0 | same |
+| CLOSE queued / refused `nothing_to_close` | 610 / 17 | same |
+| trades booked | 626 (BTCUSDT 522, ETHUSDT 104) | 626 |
+| exits by reason | close 610, stop_loss 8, take_profit 8 | same |
+| open at the end | BTCUSDT, ETHUSDT | same |
+| entry fees / exit fees (USDT) | 122.494434554672850 / 122.354975506698450 | same |
+| realised total (USDT) | -384.308458035771300 | same |
+| final free quote (USDT) | 9231.414198714929200 | same |
+| cash identity residual | `0E-21` (zero) | `0E-21` |
+| trades spanning a gap / a short bar | 0 / 0 | 0 / 0 |
+| trade-log SHA-256 | `5350070f7a9eeea27f8f8e63ddc765110a9b66bd3e06881e9dfdd657c313ba36` | identical |
+| `trades.csv` SHA-256 | `bd1d6991e9b11a63fa5e980f8724dd19b89603a37a24b540ea3f208d1ac630a3` | identical |
+| `run.json` SHA-256 | `a5fced2beaad0c7b7d3dfa184d4af4fa794891240e195cc4e533a16c71cd4e37` | `e360eb2a4455d52ebd9862a027f7332d34e83c202c8756265e550af866b11a83` |
+
+**Determinism, three ways:** the two trade-log digests are equal; the two `trades.csv` files
+are byte-equal; and the two records are equal in every key but `wall_clock` (the two `run.json`
+digests differ only there). **The booking identity, recomputed from `trades.csv`:** for all
+626 rows, `realised = exit_gross - entry_quote_total - exit_fee` holds exactly, and the sum of
+`realised` equals the record's `realised_total`. **Reconciled with the signals:** 628 queued
+entries, 626 trades and 2 positions open at the end; 1,255 dispatches are 628 BUYs and 627
+CLOSEs, of which 610 queued and 17 were refused `nothing_to_close`. **Sixteen of the 17 are
+explained** by the 16 stop-loss and take-profit exits, each followed by the down-cross `CLOSE`
+that found nothing to close. **The 17th is not**: the refusals run from `2024-03-05T08:04` to
+`2024-03-27T14:49`, none before a pair's first BUY (`2024-03-01T00:24` and `00:39`), and the
+log line carries no more than the reason (`M5m-183`). 113 of 626 trades won.
+
+**The independent derivation agreed.** `derive_c6.py` read the stored CSVs with pandas and
+nothing else: 44,640 and 8,928 bars in the window, no irregular step in either, and SMA(20/50)
+up-crosses of **523** and **105**, which sum to the **628** queued entries. Its down-crosses
+sum to 626, the trade count.
+
+**Runtime against P104.** `M5m-121` measured 1,987 us per bar through the real provider,
+engine and strategy, and 2,279 with `risk.evaluate`, projecting 106 to 122 s for 53,568 bars.
+Measured: **118.8 s and 118.3 s, 2,218 and 2,209 us per bar**, inside the projection and
+within 0.4% of each other. The projected 3.2 to 3.7 h for S5's joint baseline stands; R-V's
+incremental frame is not triggered by this run.
+
+### Against the predictions (`F:\trading bot\scratch\p106\predictions_c6.txt`)
+
+SHA-256 `4f1845f8e5b397a74e18706b8dbfe3936d311187e042607e5d0f1ab27bf4447d`, written before the
+first run. **Nine of its ten items held** (completion, equal digests, the bar counts and
+bounds, the signal and entry ranges, the exit mix, the booking identity, the flags, the
+runtime, the provenance, the clean checkout). **Item 3 was half wrong** (`M5m-180`): it
+predicted that no series has a registry, and both do (`registry_sha256` is
+`496b2fd52dbac04af2b7b79e1358965389063b78ac2c75f67d0800e26919d8f7` for BTCUSDT 1m and
+`76e237f0c3d23ff3ff08ef581cfe007f595add2c8ee5536d4e00fe8fa7b51f8d` for ETHUSDT 5m); what held
+is that none of its lines falls in the window, with 0 registered and 0 quarantined there.
+
+### A side effect the owner should know about (`M5m-179`)
+
+`main` calls `setup_logging`, so **the backtest wrote into `logs/trading_bot.log`, the file the
+live bot writes and the census tools read.** MEASURED: 6,308 lines were appended between
+`2026-10-08T20:18:42Z` and `20:22:42Z`, from pids 17472 and 21884: 2,476 `intent_dispatched`
+and 34 `risk_refused` lines (the simulated signals, whose `signal_ts` is in March 2024), two
+`engine_stopped` lines with `clean_shutdown=False`, and two `ERROR` `boot_provenance` lines
+reading `verdict=refused` (that verdict gates `run` only, and the run's own ERROR tally was not
+yet counting when they were written). Nothing in those lines says they are not the bot's.
+`scripts/run_census.py` and any future log census would count them. **Nothing was changed
+here;** whether a backtest should log to its own file is the owner's, and until then a
+census over `logs/trading_bot.log` after 2026-10-08T20:18:42Z must exclude these two pids.
+
+### Digests of the C6 instruments and outputs (SHA-256)
+
+| file | sha256 |
+|---|---|
+| `predictions_c6.txt` (under `F:\trading bot\scratch\p106\`) | `4f1845f8e5b397a74e18706b8dbfe3936d311187e042607e5d0f1ab27bf4447d` |
+| `derive_c6.py` (the scratchpad) | `58642cb36303d9dd7fa6859aed35ed33f7349ba85e73df9ed69fe1a552203895` |
+| `analyse_c6.py` (the scratchpad) | `e211bcd72fafe07e073050835f9d1e01880b2f755799e8d81a8b93ea91119529` |
+| `smoke_run1.out` (1,114,155 bytes) | `f96b2ccb7a4ae7e0c61042cf95dbf7026b5518531508c8dbfa8f2416c6dbae66` |
+| `smoke_run2.out` (1,114,155 bytes) | `81d2e5c695e76de198f8f2e1fadcfb17d99ef323df3073dae401cd7e94dc32f9` |

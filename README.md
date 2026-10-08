@@ -36,7 +36,7 @@ Reading this list first will save you time if it is not the tool you want.
   selected from config.
 - **No hosted UI or web dashboard.** CLI and structured logs.
 - **Not a validated backtester yet** — `backtest` replays and records trades, but it has no
-  metrics and has not been run over a real window; see build state below.
+  metrics and has been run only once, as a smoke test over March 2024; see build state below.
 
 ## Build state — read this before running it
 
@@ -91,7 +91,7 @@ only venue it will connect to.
 | Order execution — entry, protection, and the discretionary close | ✅ built |
 | Realised P&L reaching the ledger, and surviving a restart | ✅ built |
 | Crash-survivable store for pending records and the ledger | ✅ built |
-| Backtesting: replay, fill model, simulated executor, run record (metrics are not built) | ✅ built, **not yet run over a real window** |
+| Backtesting: replay, fill model, simulated executor, run record (metrics are not built) | ✅ built, **smoke-run once (March 2024); no result yet** |
 | Paper simulator, notifications | ⛔ stubs |
 
 `python -m trading_bot run` connects to Testnet and runs
@@ -170,7 +170,8 @@ Nine files are docstring-only placeholders: `execution/order_manager`,
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` replays stored bars through the live decision path and writes a run record
-under `data/backtests/`, and has not yet been run over a real window.
+under `data/backtests/`, and has been smoke-run once, over March 2024: a test of the machine
+and not a result (`docs/RUN_LEDGER.md` section 32).
 
 **At M5-0's close, where protective orders would rest had been decided and
 written down** — `docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That
