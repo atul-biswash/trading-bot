@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -57,10 +58,18 @@ def irregular_text(month: str) -> str:
     return "\n".join(rows) + "\n"
 
 
+#: The member's timestamp is pinned. ``writestr`` given a ``str`` name reads the wall clock, so the
+#: same month built in a different 2-second tick is a different archive with a different digest.
+_PINNED_STAMP = (2024, 1, 1, 0, 0, 0)
+
+
 def zip_of(month: str, text: str) -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
-        archive.writestr(f"{SYMBOL}-{INTERVAL}-{month}.csv", text)
+        member = zipfile.ZipInfo(f"{SYMBOL}-{INTERVAL}-{month}.csv", date_time=_PINNED_STAMP)
+        member.compress_type = archive.compression
+        member.external_attr = 0o600 << 16  # what writestr gives a member named by a str
+        archive.writestr(member, text)
     return buffer.getvalue()
 
 
@@ -119,6 +128,52 @@ def zips_dir(root: Path) -> Path:
 def kept(root: Path) -> list[str]:
     directory = zips_dir(root)
     return sorted(p.name for p in directory.iterdir()) if directory.is_dir() else []
+
+
+class _TickingClock:
+    """Stands in for the ``time`` module as ``zipfile`` reads it, moving 4 s on every read."""
+
+    def __init__(self) -> None:
+        self.now = 1_700_000_000.0
+
+    def time(self) -> float:
+        self.now += 4.0
+        return self.now
+
+    def localtime(self, seconds: float) -> time.struct_time:
+        return time.localtime(seconds)
+
+
+class TestTheFixtureDoesNotReadTheClock:
+    """``zip_of`` must return the same bytes for the same month at any instant.
+
+    ``ZipFile.writestr`` given a ``str`` name stamps ``time.localtime(time.time())`` into the
+    member header, at two-second resolution. Two archives built in different ticks then differ,
+    and a test that builds a second ``FakeArchive`` after a first run, with its zip or its
+    checksum on disk from the first, fails when the build straddles a tick (``M5m-155``).
+    """
+
+    def test_the_same_month_built_across_a_clock_tick_is_byte_identical(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(zipfile, "time", _TickingClock())
+        first = zip_of("2024-12", regular_text("2024-12"))
+        second = zip_of("2024-12", regular_text("2024-12"))
+        assert first == second
+
+    def test_the_instrument_does_move_a_stamp_that_is_left_to_the_clock(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The control arm: with the clock moving, an unpinned archive differs. Without this
+        the test above could pass because ``zipfile`` stopped reading ``zipfile.time``."""
+        monkeypatch.setattr(zipfile, "time", _TickingClock())
+        stamps = []
+        for _ in range(2):
+            buffer = io.BytesIO()
+            with zipfile.ZipFile(buffer, "w") as archive:
+                archive.writestr("x.csv", "a\n")
+            stamps.append(buffer.getvalue())
+        assert stamps[0] != stamps[1]
 
 
 class TestEveryZipIsKept:
