@@ -3240,3 +3240,166 @@ what a backtest does with a window containing a gap, a quarantined span or a reg
 short bar. Two shapes are not ruled by R-L to R-O and are noted for the owner: a month whose
 every row is quarantined is refused by the importer (`M5m-089`), and none of the 120 months
 was such a month.
+
+## 30. M5m S1: the P104 evidence -- the census against the store (A1), the 980 zips fetched and re-ingested (A2), the registry against the raw zips (A3)
+
+Recorded at M5m P105 (C0), from P104's Phase 1, which changed nothing in the tree. An
+observation log, so this section only adds; section 29 stands as the record of what P103's
+C4 found. Everything below was run from the development tree at `92b493a`, which touched no
+venue account, store or lock; the instruments are scratch scripts under
+`F:\trading bot\scratch\p104\`, each named with its SHA-256 at the end of the section.
+
+### A1. Why the store's omitted counts exceed the census's
+
+**The prediction record.** There was no prediction file. P103's C4 figures were written in
+the session's context summary at `2026-10-08T03:11:15Z`, 26 s before the ingest began
+(`03:11:41Z`), and the omitted counts in them were derived by subtraction from the row and
+quarantine predictions, so they could not disagree with the grid identity (`M5m-116`). The
+figures, as predicted and as observed in section 29: omitted 8,562 (BTCUSDT 1m) and 8,563
+(ETHUSDT 1m), 1,703 at 5m, 127 at 1h, 17 at 4h, 0 at 1d; quarantined 21,602, 242, 44, 0, 0.
+All matched.
+
+**The rule** (`classify_gaps`, `trading_bot/data/historical.py`): a missing bar's slot
+`[slot, slot + interval)` is `QUARANTINED` if a row that was set aside opened inside it,
+and `OMITTED` otherwise; a set-aside row that opened in a slot a stored bar already holds
+is in no gap. Equivalently, a slot is omitted exactly when no row of the archive, stored or
+not, has an open time that floors into it.
+
+**The census's figure differs by construction** (`M5m-117`). P102's census counted, between
+consecutive open times of the full population, `spacing // step - 1` bars. Where a run of
+off-grid rows ends with an open fractionally inside its slot, that division floors, and the
+run loses the bar it ends in. Recomputed from the stored CSVs plus the registry's quarantined
+opens (`a1_edges.py`), the census's method gives its published figures exactly and the slot
+rule gives the store's:
+
+| series | census method | slot rule (the store) | pairs where they differ |
+|---|---|---|---|
+| BTCUSDT 1m | 8,560 | 8,562 | `2017-12-18T10:00:20.799Z` to `10:14:00.000Z` (census 12, slots 13); `2018-02-10T05:59:14.789Z` to `06:15:00.000Z` (14, 15) |
+| ETHUSDT 1m | 8,561 | 8,563 | `2017-12-18T10:00:20.810Z` to `10:14:00.000Z` (12, 13); `2018-02-10T05:59:14.800Z` to `06:15:00.000Z` (14, 15) |
+| 5m, each | 1,702 | 1,703 | `2018-02-10T05:58:14.789Z` (BTCUSDT) and `.800Z` (ETHUSDT) to `06:15:00.000Z` (2, 3) |
+| 1h, each | 127 | 127 | none |
+| 4h, each | 17 | 17 | none |
+
+The explanation given before the run, that a shifted row sat in an already-held slot, was
+wrong, and so was the statement that the 5m figure matched the census exactly; the table
+is what was measured. Instrument: `a1_edges.py`, output `a1_edges.txt`.
+
+### A2. The 980 zips fetched, verified, re-ingested and compared (R-R)
+
+- **Authority:** the owner's R-R, quoted in `docs/NEXT_MILESTONE.md` under S1.
+- **What was run:** `a2_fetch.py`, which calls the downloader's own `obtain` for the 110
+  months of each series' manifest. The `.CHECKSUM` is fetched first, the zip is fetched and
+  verified against it before anything is written, and a zip already on disk that equals
+  its checksum is reused. Hosts: `data.binance.vision` only; no listing was requested.
+  Window (UTC): `2026-10-08T03:30:10Z` to `03:54:52Z`, 1,481.8 s by the script's own clock.
+  Result: **fetched 980, reused 120, failed 0, 491,890,641 bytes fetched.**
+- **What is on disk now:** 1,100 zips of 563,599,382 bytes and 1,100 `.CHECKSUM` files of
+  96,800 bytes under `data/historical/_zips/<SYMBOL>/<interval>/`, 563,696,182 bytes in
+  all (the 120 from P102 were 71,708,741 of the zip bytes).
+- **The comparison:** `a2_compare.py` re-ingested every month, from its kept zip and its
+  kept `.CHECKSUM`, with `ingest_zip` into a scratch store at
+  `F:\trading bot\scratch\p104\store_scratch`, outside the repository (asserted by the
+  script), then compared the scratch CSV bytes with the stored CSV and the scratch manifest
+  entry with the stored one field by field. 327.3 s.
+
+| group | months | CSV bytes identical | manifest entry equal | failed |
+|---|---|---|---|---|
+| stored before P103's C4 | 980 | 980 | 980 | 0 |
+| ingested by P103's C4 | 120 | 120 | 120 | 0 |
+
+  Every manifest entry carries `zip_sha256`, so the archive's zips are byte-identical to
+  those of P101's download and P103's; the venue changed nothing in the interval
+  (`M5m-118`).
+- **The stored store was not written.** Its digest, taken by `store_digest.py` before the
+  fetch (`2026-10-08T03:29:58Z`) and after the comparison (`04:01:57Z`), is identical, and
+  the scratch store's digest, taken at P105 by `store_digest_path.py`, equals it too, in
+  every series (the manifests are written sorted by month, so the scratch manifests are
+  byte-identical to the real ones). Per series, the instrument being the SHA-256 over each
+  file's name and SHA-256 in name order:
+
+| series | files | bytes | sha256 |
+|---|---|---|---|
+| BTCUSDT 1m | 112 | 479,729,886 | `d38f6cc530b46e7fbb2761bcbb842c6e6cb191b70a351fd147ff03086344eeb5` |
+| BTCUSDT 5m | 112 | 95,572,842 | `54b66f30b6d51b4f014a7d16927a73b364fe323d83e7bfeb158cc399534a41f2` |
+| BTCUSDT 1h | 112 | 8,118,959 | `41ebb7082e439b9c5fe4d69390a36d7f1163ed2c78aff440dfb257894e1502c8` |
+| BTCUSDT 4h | 112 | 2,088,014 | `cb78c47c43e571b02308acf42ca4705c5d0a687159bf89ced5a94f47b389cbe7` |
+| BTCUSDT 1d | 111 | 394,722 | `0a1ef88bfb685b99f0a91840b62e179cc128cf3de316a4333ca22669b39c39b8` |
+| ETHUSDT 1m | 112 | 461,957,138 | `ef349037ecf4b1620aa0fc9819cd234700eec96a75f4da4f5c998573db93c8ea` |
+| ETHUSDT 5m | 112 | 92,067,004 | `dc87cd85ab2976b4847782b25488acdf03dad807950eb15c42de4fcb20f5112b` |
+| ETHUSDT 1h | 112 | 7,827,621 | `100e018dddbcddddfaed17e7b1c5118cef35c004e21731a7eafcad27dc890a4d` |
+| ETHUSDT 4h | 112 | 2,015,470 | `2d9cc3fa08cb5b522f5b5823fd2232542a361953b676ffab17f122b8b77f0c05` |
+| ETHUSDT 1d | 111 | 382,543 | `7657ceb2eb8388c2b374e571f87453d9d0114e079ed88776b927c0bd13a0823e` |
+| **store** | **1,118** | **1,150,154,199** | `2ff390f2039e780b156492c14648570cdd6f493268a56b54510bdb30cf6cab5e` |
+
+  The 112 files of a minute-scale series are 110 CSVs, `MANIFEST.jsonl` and `IRREGULAR.jsonl`;
+  a daily series has no registry.
+- **The kept zips, per series**, the instrument being `sha256sum *.zip` over the series'
+  directory, piped to `sha256sum`: BTCUSDT 1m `398bfff0c9fd963e032af7432062a90483d907f8c54fff191a0b524ffc69317a`,
+  5m `89472ad2016f585119d1c1109f2a6494a827cccc24d896b9e954967d7e2f4dd3`, 1h
+  `a1f0d602e60df6378025e0598bfef99076d3f44d026bc41512837f0b88c59b73`, 4h
+  `c70fc3198b9b28d34ecd01591ddf246a4a1637f44d2b0ab716590a9135e0a36e`, 1d
+  `1d794e3f652f723578818ef41ee415b814aac68456da161ebca7d5fbe2f5921b`; ETHUSDT 1m
+  `18437a35a5f75f0adc7509a89dd0b1c635ce4d1fbefc07be88918e8655ea5281`, 5m
+  `c8f196bf0c999db5675e96dd6b407f6c45ddd82cb3c05d04fea56692003a0908`, 1h
+  `624536b97e794ffd31cd62c80a0dc1f57b68d4fa3b0f9002ca56aa476c212672`, 4h
+  `0765ed54c35b690bcef9f923d099ab4c33ee5213c829c37ec783adf5e6e03d23`, 1d
+  `ce7c9a69919d75cd639a04796eca53897dd5d9d5b01e7c690cd10be60a916c30`.
+
+### A3. The registry against the raw zips, row by row
+
+`a3_registry.py` does not import the importer's classifier. For each of the 1,100 zips it
+checks the zip against its kept checksum, then re-derives every row's shape from its raw
+line (open and close as 13-digit milliseconds or 16-digit microseconds divided by 1,000; off
+the grid, then close not after open, then the offset of the close from `open + interval - 1`).
+
+- **Registered rows:** 124 of 124 registry lines are found verbatim in their source zips at
+  the line the registry names, with `raw` equal to the archive line, the shape re-derived to
+  the same value, the `source_url` equal to the manifest's, and a stored row with that open
+  time whose prices, volume and normalised close equal the raw line's. By shape: 110 short
+  bars, 8 one-millisecond-late rows, 6 whole-second rows. Every quarantined line has no stored
+  row with its open time.
+- **Completeness, in both directions:** 1,100 zips and 11,700,573 rows read; **43,902
+  irregular rows found independently, 43,902 registry lines, 0 found and not registered, 0
+  registered and not found.** The registry holds 124 registered lines and 43,778 quarantined
+  (43,772 off the grid and 6 whose close is not after their open). No row has a close more
+  than one millisecond after its slot's end, and no short bar at an offset of -999 ms lacks a
+  whole-second close, so the re-derived rules and the importer's agree on every row.
+- **0 problems.** 22.1 s. (`M5m-119`.) The re-derivation shares the importer's rule order, so
+  this checks the code against the data and not the rule against the venue.
+
+### The other P104 measurements, for their digests
+
+P104's B-part measurements are design evidence and are declared as findings
+(`M5m-121`, `M5m-122`, `M5m-127`, `M5m-128`); their instruments and outputs are listed below
+so that each figure can be traced to the bytes that produced it. The timings were taken on
+`BTCUSDT` 1m for March 2024 (44,640 bars) while the A2 fetch was running.
+
+### Digests of the instruments and outputs (SHA-256)
+
+| file (under `F:\trading bot\scratch\p104\`) | sha256 |
+|---|---|
+| `a1_edges.py` | `e38db5c1f525ee927f17014107eb81069d8200425981c6dddb153ec945e46d56` |
+| `a1_edges.txt` | `cfbafb04fb41665b619b432d8bea07ba6eed8ba709d27ebfcb85afa7715b11d7` |
+| `a2_fetch.py` | `e614ddc00ffa6809aec64f0c0272c530fd63025a509d58c4f48afe7803281781` |
+| `a2_fetch.txt` | `67109fab1ee69de7fd8c4a58652a6e3c69a9f378ecfb606dbf9eea5734ec9670` |
+| `a2_fetch_times.txt` | `f98d57b12f19677a7cb14a9b8ee6ac2a11e3be6bf5922ccda40ec1c89d005e99` |
+| `a2_compare.py` | `bcd19b3bc181b1f5d11532d9610a543174743c570d331bec8f5bb60cb5b2e065` |
+| `a2_compare.txt` | `5d6f6969a0700c8a414c093cf06bf1f0b6da91b21ea078c91c68c78cc50ca42b` |
+| `a3_registry.py` | `16eb7ab8809fd260f44cdff37a797d4e31e2bd44b623b307f8a04ad12bd607c5` |
+| `a3_out.txt` | `7097d351df4fc6aadbc2bca277bb4010fdc119febf206b02e2e355a4a5f1587e` |
+| `store_digest.py` | `a1fab169aa2bac581aef531e632158ff9185e5a35ab5200a940c7d288f3ef29b` |
+| `digest_before.txt` | `91d8fbdb0210b1d428b193610b0859c065a1cc3af2d49b22e9783924fb4619b5` |
+| `digest_after.txt` | `aea9431f04ec65c008c6290c29b51c08684f30c632ec69b25b76d07d5c1a39aa` |
+| `find_pred.py` | `ae1f6522b6e1f6460cc37778edf2241e5a81dfa4ad8dcc223b16cbe8d46fd906` |
+| `b5_timing.py` | `056204172e7207f6aefe975c34bfce8c2487fd1cdb96bb6c84211f23175fa9ec` |
+| `b5_fast.py` | `bf218a6f138e465daf56fc322f4a557fe9f777d446e0136abfdbe4b89a7d70be` |
+| `b5_parts_btc1m.txt` | `22240055f959aefe7e552c17a9b27442b13974b5357980bb32188daf3f08af68` |
+| `b6_intrabar.py` | `8dcdd77b1069f443445083c00f51926356b802d5d9046265c68f4f04c3fa0897` |
+| `b6_out.txt` | `3168e54bec2d3805b5e75cab14b881e167876e12a51404c1ef24005eb61dac6b` |
+| `b4_sensitivity.py` | `c3e433b07b286d35c0e54671a89a8441dea30f0a97406fd9e1c8f720f128b785` |
+| `b4_out.txt` | `9815c73b8e1ff871c0f08a011f9eb3dc22215fe8c0f9a7c0bf9a60569f9ef3fd` |
+
+P105's own prediction files, under `F:\trading bot\scratch\p105\` (R-T):
+`predictions_halts.txt` `a6f15afff91c81bf3c2d05b69f0f7a9f0fe36963672d8b4dfb14884286d7a8ae`
+and `predictions_c0.txt` `d59bacc38ad414df6885750e2666517327e9c0f839b941d533f79bfd5a6c12b0`.
+Their observations are `gate_h5.txt` and `digest_scratch_store.txt` in the same directory.

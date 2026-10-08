@@ -335,6 +335,34 @@ is not mainnet's, and only mainnet history is long enough.
 > filled, and the C3 annotation's kept zips and `--offline`. The 980 zips C4 of P101
 > downloaded are still not on disk (`M5m-106`), which R-O accepts.
 
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULINGS R-Q, R-R AND R-S (P104): THE 980
+> ZIPS ARE NOW ON DISK, `M5m-089` IS AFFIRMED, AND `M5m-107` STAYS UNSURVEYED.** The
+> rulings, verbatim:
+>
+> R-Q: "M5m-089 is affirmed: a month whose rows are all quarantined is refused."
+>
+> R-R: "The 980 monthly zips not on disk may be fetched once into data/historical/_zips/
+> and verified against their CHECKSUM files. Each is re-ingested into a scratch store
+> outside the tree, and its CSV bytes are compared with the stored CSV. The stored store
+> is not written."
+>
+> R-S: "M5m-107 stays unsurveyed: a wrong reuse skip leaves a month absent, which verify
+> reports."
+>
+> **What stops being true:** the annotation above's last sentence, *"The 980 zips C4 of
+> P101 downloaded are still not on disk (`M5m-106`), which R-O accepts"*, and the C3
+> annotation's *"so they are not on disk and are not fetched again (R-O)"*. R-R authorised
+> one fetch and P104 made it: all 1,100 zips and 1,100 `.CHECKSUM` files are under
+> `data/historical/_zips/` (563,599,382 bytes of zips and 96,800 of checksums), and the
+> 980 were re-ingested into a scratch store outside the tree with every CSV and every
+> manifest entry equal to the stored one. The record is `docs/RUN_LEDGER.md` section 30.
+> **What survives:** `M5m-106` as what was observed when it was written; R-O, which the
+> fetch used; the rule that a month whose every row is quarantined is refused, now
+> affirmed by R-Q and so no longer a question for the owner; and `M5m-107`, whose reuse
+> and offline logic stays outside R-F's survey scope. **S1's arming condition is AUDITED,
+> not fired:** P104 edited no `main` in `scripts/download_data.py` and added no start
+> time to `ExchangeClient.get_klines`, and `U12` is REAFFIRMED open as written.
+
 **S2. The backtest engine, on the live decision path.** Fill `backtesting/engine.py`.
 **It drives the same `Strategy.generate_signal` and the same `RiskManager.evaluate`**,
 the manager taking an injected `Clock` and a provider over historical bars — the M4
@@ -434,6 +462,71 @@ that first multiplies it by money"*.
 > the answer differs by kind. The store carries the facts and takes no position. **Nothing in
 > S2's items above is changed by this.**
 
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULINGS R-P1 (P104) AND R-T TO R-Z (P105):
+> R-P IS RULED, AND S2'S GAP HANDLING, EXECUTOR SEAM, FILL READINGS, COOLDOWN, RUN SHAPE
+> AND FILTERS ARE SETTLED.** The rulings, verbatim:
+>
+> R-P1: "A backtest refuses a BUY whose strategy warm-up window contains a gap of either
+> kind, as the live gap guard does. A position open across a gap is not closed by it. On
+> the first bar after the gap, a stop the open has gapped through fills at the open less
+> the stop slippage, and a take-profit the open has gapped through fills at its trigger.
+> Registered short bars are ordinary bars. Every trade that touches a gap or a registered
+> short bar is reported."
+>
+> R-T: "Every prediction whose observation is reported is written to a file in the
+> scratch directory before the command runs. The report quotes it from that file, with
+> the file's path and SHA-256."
+>
+> R-U: "U6 is resolved. The unused ABC OrderExecutor in core/interfaces.py is replaced by
+> a Dispatcher Protocol declaring dispatch(signal, assessment, candle) and
+> __call__(candle). _build_signal_handler takes a Dispatcher."
+>
+> R-V: "The incremental frame (M5m-122) is not built in M5m. If S5's measured runtime
+> makes it necessary, it returns as its own Phase 1 with a survey."
+>
+> R-W: "(a) A take-profit fills at its trigger less the stop slippage. (b) The gap-through
+> rule applies on every bar. (c) The entry fee is charged in quote and folded into the
+> entry quote total for booking; it is also recorded separately in the trade log, and S3
+> sums it. The base-asset reality is N6's and is deferred. (d) An entry expires when its
+> next slot is missing; a CLOSE queues to the first bar after the gap. The double count
+> of stop slippage at a gapped-through open is accepted as a bias against the strategy
+> and is documented."
+>
+> R-X: "The backtest applies no cooldown, at parity with live (M5m-125). The dead
+> cooldown_minutes is carried as item K6 for the milestone after a PASS, with an arming
+> condition naming Portfolio.start_cooldown."
+>
+> R-Y: "S5 is one joint run of the committed config. S6 and S7 runs are joint per
+> candidate, with per-pair breakdowns reported."
+>
+> R-Z: "One keyless exchangeInfo GET per symbol, on mainnet and on Testnet, is
+> authorised. The raw response is stored with its SHA-256, and backtests load filters
+> only from the stored file."
+>
+> **What stops being true:** the annotation above's heading, *"RECORDED AND NOT RULED"*,
+> and its *"What is NOT decided, and is the owner's"* paragraph, which R-P1 rules; its
+> last sentence, *"Nothing in S2's items above is changed by this"*, since R-P1 adds the
+> gap rules to the Entry, Protection and `CLOSE` bullets (a BUY is refused over a gap, a
+> position is not closed by one, a stop or take-profit gapped through fills as above);
+> the `CLOSE` bullet's *"a `MARKET` sell at the next bar's open plus slippage"*, which
+> R-W(d) qualifies, since a `CLOSE` queues to the first bar after a gap; the Entry
+> bullet's *"else the `FOK` is refused"*, which R-W(d) extends to an entry whose next slot
+> is missing; and the Fees bullet's *"charged on both legs ... quote-denominated in the
+> ledger"*, which R-W(c) makes exact: the entry fee is folded into the entry quote total
+> and recorded separately in the trade log. **The double count at a gapped-through open
+> is documented, not removed:** a stop that the open has gapped through fills at the open
+> less the stop slippage, and that slippage is itself the stop's, so the gap and the
+> slippage both count against the strategy (R-W, last sentence). **What U6 now says:** it
+> is resolved by R-U, and `core/interfaces.py` is edited at C2 of P105; the item below
+> is annotated there. **What R-V leaves:** the P104 measurement (`M5m-121`) that a full
+> run costs about 2.0 ms a bar stands, and the incremental frame is not built; S5's
+> measured runtime decides whether it returns as its own Phase 1. **What survives:** the
+> intrabar trigger, *"the stop wins"*, the stop-slippage default of 1.20% on both
+> protective legs (R-B2), the entry rule of P99, the money-rule paragraph, and the
+> arming condition. **K7** (below, under the K items) carries the dead cooldown: the
+> owner named it K6 in R-X, but K6 is `scripts/trade_census.py`'s item (`M5m-025`), so it
+> is K7 here and the collision is `M5m-134`.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
@@ -482,6 +575,17 @@ takes and the bot did not is a finding about one of them.
 > is diagnosed, never tuned away"* and the arming condition. S4 depends on Testnet
 > klines, whose retention is UNMEASURED (`M5m-032`).
 
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULING R-Z: S4 LOADS ITS FILTERS FROM A
+> STORED TESTNET SNAPSHOT.** R-Z, verbatim and quoted under S2 above: *"One keyless
+> exchangeInfo GET per symbol, on mainnet and on Testnet, is authorised. The raw response
+> is stored with its SHA-256, and backtests load filters only from the stored file."* So
+> S4's replay of the windows the bot traded on Testnet reads the Testnet snapshot of
+> `BTCUSDT` and `ETHUSDT`, and S5 to S7 read the mainnet one; a backtest never asks the
+> venue for filters. **What stops being true:** nothing in S4's text. **What it adds:**
+> the arming condition's named site, *"the fill model in `backtesting/engine.py`"*, is
+> moved by P105's C5 to `backtesting/fill_model.py` and the simulated executor's
+> sequencing, and C5 annotates the condition there (`M5m-131`).
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
@@ -493,6 +597,17 @@ than twenty days.
 > SPAN.** The owner ruled the history to be all available mainnet history for BTCUSDT
 > and ETHUSDT (S1's annotation above). **What survives:** the item, and the
 > prediction it states, which S5 confirms or refutes.
+
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULING R-Y: S5 IS ONE JOINT RUN.** R-Y,
+> verbatim and quoted under S2 above: *"S5 is one joint run of the committed config. S6
+> and S7 runs are joint per candidate, with per-pair breakdowns reported."* So S5 is a
+> single run of `BTCUSDT` at 1m and `ETHUSDT` at 5m through one portfolio, with the
+> committed `max_open_positions`, one equity and one daily-loss limit, and not two runs
+> added. **What stops being true:** nothing in S5's text, which already says *"on
+> BTCUSDT 1m and ETHUSDT 5m, the committed config"*; the annotation settles that this is
+> one portfolio. **What it implies, measured by P104 (`M5m-121`):** about 5.7 million bars
+> in one process, 3.2 to 3.7 h at the current per-bar cost and once per stop-slippage
+> level reported.
 
 **S6. Research, under a protocol fixed before the first result is seen.**
 
@@ -563,6 +678,15 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 > figure, which R-D adopts as proposed; the regime labels as date ranges fixed in the
 > research log before S6's first run; the pooling of both pairs; and the recording of
 > S7's outcome in `docs/PHASE_HISTORY.md`.
+
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULING R-Y: S7'S POOLING IS A JOINT RUN
+> WITH PER-PAIR BREAKDOWNS.** The S7 annotation above says the trade count *"may pool both
+> pairs for one candidate"*. R-Y (quoted under S2) rules the run shape: *"S6 and S7 runs
+> are joint per candidate, with per-pair breakdowns reported."* **What stops being
+> true:** the word *"may"* in that sentence, since a candidate is run jointly and its
+> trade count is over the joint run. **What survives:** every threshold, the pass level
+> of 1.20%, the regime labels and the recording of the outcome; and the per-pair
+> breakdowns are reported beside the joint figure, not instead of it.
 
 ### What M5m does NOT do
 
@@ -1075,6 +1199,25 @@ classification a fact and not a rule; it would also make a mismatch between the 
 finding. The tool does not read it.
 
 *Arming condition:* **whoever next edits `_leg` in `scripts/trade_census.py`.**
+
+### K7. `cooldown_minutes` is dead: `Portfolio.start_cooldown` has no caller (`M5m-125`)
+
+**Carried as an item, not done now, by the project owner's ruling R-X at M5m P105,
+verbatim:** *"The backtest applies no cooldown, at parity with live (M5m-125). The dead
+cooldown_minutes is carried as item K6 for the milestone after a PASS, with an arming
+condition naming Portfolio.start_cooldown."* **The owner called it K6, and K6 is taken:**
+it is `scripts/trade_census.py`'s item above (`M5m-025`), so this one is K7 and the
+collision is `M5m-134`; cite either by its content. MEASURED at P104 (`M5m-125`):
+`Portfolio.start_cooldown` is defined in `core/portfolio.py`, and a grep of every `.py`
+file in the repository for `start_cooldown` and `cooldown_until` finds the definition and
+the field in `core/portfolio.py`, one mention in `persistence/store.py`, and calls only in
+`tests/unit/test_risk_manager.py`. `src/` never calls it, so `risk.limits.cooldown_minutes`
+(15 in the committed config, commented as a *"per-symbol pause after a stop-out"*) is never
+applied live, while `in_cooldown` is read on every entry by `_approve`. The backtest is at
+parity: it applies no cooldown either (R-X), and a backtest result is therefore a result
+for a bot that re-enters at once after a stop-out. Deferred to the milestone after a PASS.
+
+*Arming condition:* **whoever next edits `Portfolio.start_cooldown` in `core/portfolio.py`, or gives it a caller.**
 
 ---
 
@@ -1685,6 +1828,18 @@ Carried, unfired.
 *Arming condition:* **whoever writes `paper/simulator.py` or
 `backtesting/engine.py`** — the two substitutes for the executor, neither of
 which exists beyond a docstring stub.
+
+> **ANNOTATED AT M5m P105 (C0), BY THE OWNER'S RULING R-U: THE QUESTION IS ANSWERED AND
+> THE ITEM IS RESOLVED AT C2.** P104 measured the answer (`M5m-124`): the live
+> `OrderExecutor` in `execution/executor.py` does not subclass the abstract
+> `OrderExecutor` in `core/interfaces.py`, which declares `execute(request: OrderRequest)
+> -> Order` and has no implementer and no user in `src/`; the live seam is `dispatch(signal,
+> assessment, candle)` with `__call__(candle)`. R-U, verbatim: *"U6 is resolved. The unused
+> ABC OrderExecutor in core/interfaces.py is replaced by a Dispatcher Protocol declaring
+> dispatch(signal, assessment, candle) and __call__(candle). _build_signal_handler takes a
+> Dispatcher."* **What stops being true:** *"Carried, unfired"*, once C2 lands; C2 strikes
+> this item. **The arming condition is AUDITED, not fired, by C0:** no file under
+> `backtesting/` is written by this commit.
 
 ### U7. Deleting `_CLOSE_SEQUENCE_CALLS` — `M5f-010`, `M5f-018`
 
