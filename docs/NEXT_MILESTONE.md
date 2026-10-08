@@ -434,6 +434,30 @@ that first multiplies it by money"*.
 > `_record_gap_if_any` in `data/market_data.py` is AUDITED, not fired:** the provider is
 > untouched and no start time is added to `ExchangeClient.get_klines`.
 
+> **ANNOTATED AT M5m P105 (C5): THE FILL MODEL IS BUILT, AS PURE FUNCTIONS, AND IT LIVES IN
+> `backtesting/fill_model.py` AND NOT IN `backtesting/engine.py`.** `FillParameters` carries the
+> three percents (fee 0.1, entry and `CLOSE` slippage 0.05, stop slippage 1.20), `Decimal` and
+> checked, with `from_config` reading a `BacktestConfig`. `fill_entry` fills at the next bar's open
+> plus slippage iff that is at or below the entry limit, refuses it otherwise, and expires it when
+> the next slot is missing (R-W(d)); `book_entry` folds the entry fee into the quote total and
+> returns it separately (R-W(c)); `fill_protective` triggers the stop on the low and the
+> take-profit on the high, lets the stop win on one bar, fills a stop at its trigger or at an open
+> already through it (R-P1, R-W(b)) and a take-profit at its trigger, both less the stop slippage
+> (R-W(a)), never at a better open; `fill_close` sells at the open less the entry slippage; and
+> `book_exit` returns the gross, the fee on the gross and the net. 85 hand-computed tests in
+> `tests/unit/test_fill_model.py`, including one that holds the stop-wins rule to the live
+> `risk.rules.should_exit` on seven bars and one that books a round trip through the real
+> `Portfolio` to -1.711437. The module has no clock, no float and no I/O, and tests assert each.
+> **What this leaves open:** the simulated executor, which sequences these functions (which bar
+> `fill_entry` is handed, when a `CLOSE` queues, what a refused or expired entry leaves in the
+> portfolio) and wires them to `Portfolio`, and the root. **What stops being true:** two
+> sentences of earlier annotations, each true when written. The C1 annotation's *"the replay, the
+> fill model, the simulated executor and the root are unbuilt"* (the replay since C4, the fill
+> model now), and the C4 annotation's *"What this leaves open: the simulated executor, the fill
+> model and the root"*, which is now the simulated executor and the root. Nothing in S2's own
+> text. `engine.py` stays a stub, and S4's arming condition is annotated below where the model
+> actually lives (`M5m-131`).
+
 > **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S2's ENTRY AND PROTECTION BULLETS
 > ARE SHARPENED, AND ONE SENTENCE IN EACH IS REPLACED.** The rulings, verbatim:
 >
@@ -631,6 +655,22 @@ takes and the bot did not is a finding about one of them.
 > the arming condition's named site, *"the fill model in `backtesting/engine.py`"*, is
 > moved by P105's C5 to `backtesting/fill_model.py` and the simulated executor's
 > sequencing, and C5 annotates the condition there (`M5m-131`).
+
+> **ANNOTATED AT M5m P105 (C5), AS C0 PROMISED: S4's ARMING CONDITION NOW NAMES THE FILL MODEL
+> WHERE IT LIVES.** The condition above, *"whoever next edits the fill model in
+> `backtesting/engine.py`"*, names a file that holds no fill model: C5 wrote the model in
+> `backtesting/fill_model.py`, and `backtesting/engine.py` is still a docstring-only stub. The line
+> above stays standing, and the condition for S4 is also this one, which the arming register reads
+> as its own:
+>
+> *Arming condition:* **whoever next edits `backtesting/fill_model.py`, or the simulated executor's sequencing of an entry, a protective fill or a `CLOSE` in `backtesting/`.**
+>
+> **Why the executor is named.** The model is price-only. Which bar an entry is handed, whether
+> a `CLOSE` queues to the first bar after a gap, what an expired entry leaves in the portfolio
+> and what a stop that fires on the entry bar does are decided by the caller, and a wrong
+> sequence books a plausible trade at a wrong figure exactly as a wrong price does
+> (`M5m-131`). **What survives:** S4's acceptance test as written, *"Divergence is diagnosed,
+> never tuned away"*, and the census of record.
 
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
