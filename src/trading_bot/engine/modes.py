@@ -923,6 +923,11 @@ def _seed_portfolio(
     ``Balance.free`` is already ``Money``, parsed from the wire string with
     ``Decimal(str(...))``, so this opens no new float boundary.
 
+    (ANNOTATED AT M5m P105, C1: *"both ``initial_balance`` fields are ``float``"* is
+    no longer true of ``BacktestConfig.initial_balance``, which is ``Decimal`` from
+    load. What survives: the route is still dead, since neither field belongs to a
+    live account, and ``PaperTradingConfig.initial_balance`` is still ``float``.)
+
     Both sides are upper-cased before matching, here rather than upstream.
     ``base_currency`` does carry a validator -- ``TradingConfig._upper`` in
     ``config/models.py``, a ``field_validator`` that upper-cases it at parse --

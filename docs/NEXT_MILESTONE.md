@@ -388,6 +388,21 @@ that first multiplies it by money"*.
 
 *Arming condition:* **whoever next edits `_cmd_backtest` in `main.py` or `BacktestConfig` in `config/models.py`.**
 
+> **ANNOTATED AT M5m P105 (C1): S2'S ARMING CONDITION FIRED, AND THE MONEY-RULE PARAGRAPH
+> ABOVE IS DISCHARGED.** C1 edits `BacktestConfig` in `config/models.py`, the first half of
+> the condition's two sites. *"`BacktestConfig.fee_percent` and `slippage_percent` are
+> `float` today"* is false from this commit: `fee_percent`, `slippage_percent`,
+> `initial_balance` and a new `stop_slippage_percent` (default `1.20`, R-B2) are `Decimal`
+> from load, and the window dates are `date`s read as UTC, half-open `[start_date,
+> end_date)`, refused when empty or reversed, with `window_start` and `window_end` as
+> timezone-aware datetimes for the store (38 tests in `tests/unit/test_backtest_config.py`).
+> **S2 stays open and the condition's other site is not yet touched:** `_cmd_backtest` in
+> `main.py` is unedited, so the condition fires again at the commit that wires it; the
+> replay, the fill model, the simulated executor and the root are unbuilt. **What
+> survives:** the Fees bullet as qualified by R-W(c), and `M5m-036`: the tracked
+> `config.yaml` window, 2024-01-01 to 2024-06-30, still loads (181 days) and is not edited,
+> because it is the owner's file; S2 sets the real window per run.
+
 > **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S2's ENTRY AND PROTECTION BULLETS
 > ARE SHARPENED, AND ONE SENTENCE IN EACH IS REPLACED.** The rulings, verbatim:
 >

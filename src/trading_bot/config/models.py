@@ -32,6 +32,7 @@ representer or ``model_dump(mode="json")``.
 
 from __future__ import annotations
 
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
@@ -534,12 +535,68 @@ class RiskConfig(_Model):
 
 
 class BacktestConfig(_Model):
-    start_date: str
-    end_date: str
-    initial_balance: float = Field(10_000.0, gt=0)
-    fee_percent: float = Field(0.1, ge=0)
-    slippage_percent: float = Field(0.05, ge=0)
+    """The window a backtest replays and the costs it charges.
+
+    **The four money-shaped fields are ``Decimal`` from load**, by the rule in this
+    module's docstring: a field becomes ``Decimal`` at the milestone that first
+    multiplies it by money, and the backtest's fill model (M5m S2) multiplies every
+    one of them by a price or a notional. ``initial_balance`` seeds the simulated
+    quote balance, so it is money itself. ``0.1`` in ``config.yaml`` arrives as
+    ``Decimal("0.1")`` by shortest repr, never as ``0.1000000000000000055...``.
+
+    **The ``*_percent`` fields are whole percents, not fractions** -- ``0.1`` is 0.1%,
+    ten basis points -- unlike ``RiskConfig.max_entry_slippage``, which is a fraction.
+    They keep the unit the file already used, and ``fee_percent: 0.1`` is Binance
+    Spot's standard rate per leg.
+
+    * ``fee_percent``: charged on each leg's notional, in the quote asset.
+    * ``slippage_percent``: the adverse move on a market-like fill, which is the
+      entry and a ``CLOSE`` (P99).
+    * ``stop_slippage_percent``: the adverse move on a protective leg, the
+      take-profit included, because both are market orders once triggered. Its
+      default is 1.20%, the owner's R-B2: the mean of the census of record's eight
+      stop-loss legs, rounded up.
+
+    **The window is half-open, in UTC dates**: ``[start_date, end_date)``, midnight to
+    midnight, so ``end_date`` itself is not replayed. A date, not a string, so a
+    mistyped day fails at load rather than as an empty replay, and an empty or
+    reversed window is refused for the same reason. :attr:`window_start` and
+    :attr:`window_end` are the same two instants as timezone-aware datetimes, which is
+    what the historical store takes.
+    """
+
+    start_date: date
+    end_date: date
+    initial_balance: Decimal = Field(Decimal("10000"), gt=0)
+    fee_percent: Decimal = Field(Decimal("0.1"), ge=0)
+    slippage_percent: Decimal = Field(Decimal("0.05"), ge=0)
+    stop_slippage_percent: Decimal = Field(Decimal("1.20"), ge=0)
     data_dir: str = "data/historical"
+
+    @model_validator(mode="after")
+    def _check_window(self) -> BacktestConfig:
+        """Refuse a window with no day in it: ``end_date`` must come after ``start_date``."""
+        if self.end_date <= self.start_date:
+            raise ValueError(
+                f"backtesting.end_date {self.end_date} must be after start_date "
+                f"{self.start_date}: the window is half-open, [start_date, end_date), so "
+                "an end on or before the start replays nothing"
+            )
+        return self
+
+    @property
+    def window_start(self) -> datetime:
+        """The first instant replayed: ``start_date`` at 00:00 UTC, timezone-aware."""
+        return datetime(
+            self.start_date.year, self.start_date.month, self.start_date.day, tzinfo=timezone.utc
+        )
+
+    @property
+    def window_end(self) -> datetime:
+        """The first instant NOT replayed: ``end_date`` at 00:00 UTC, timezone-aware."""
+        return datetime(
+            self.end_date.year, self.end_date.month, self.end_date.day, tzinfo=timezone.utc
+        )
 
 
 class PaperTradingConfig(_Model):
