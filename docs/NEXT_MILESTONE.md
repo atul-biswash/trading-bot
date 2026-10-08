@@ -597,6 +597,51 @@ that first multiplies it by money"*.
 > owner named it K6 in R-X, but K6 is `scripts/trade_census.py`'s item (`M5m-025`), so it
 > is K7 here and the collision is `M5m-134`.
 
+> **ANNOTATED AT M5m P106 (C1), BY THE OWNER'S RULINGS R-AA TO R-AE: THE SECOND HALF OF S2
+> IS RULED.** The rulings, verbatim:
+>
+> R-AA: "The simulated executor fills intent.quantity and never re-sizes. An entry is
+> handed the bar whose open_time is the signal bar's open_time plus one interval; if that
+> slot is missing the entry expires. Protection is active from the entry bar's open, so
+> the stop and the take-profit act on the entry bar's high and low. A CLOSE queued over a
+> gap leaves protection in force; on the first bar after the gap the stop's gap-through
+> check runs before the CLOSE. After every pass, each open position's protection is ACTIVE
+> when protective legs were requested and ABSENT_BY_DESIGN when none were, and every open
+> position is stamped on every pair's candle. Position.opened_at is the entry bar's
+> open_time; exits are booked at the bar's nominal end."
+>
+> R-AB: "Simulated fill prices are not rounded to the tick. No slippage cap is applied; the
+> double count at a gapped-through open remains the documented bias."
+>
+> R-AC: "R-X's cooldown item is K7, because K6 was already allocated (R-I). R-X otherwise
+> stands."
+>
+> R-AD: "Before any other commit, the cause of the M18 extra kill in
+> test_download_zips.py is measured. If it is the wall-clock zip timestamp, the test
+> fixture pins ZipInfo.date_time. No production code changes for it."
+>
+> R-AE: "One backtest smoke run is authorised: the committed config, BTCUSDT 1m and
+> ETHUSDT 5m, 2024-03-01 to 2024-04-01, run twice."
+>
+> **What stops being true:** the P105 C5 annotation's *"What this leaves open: the simulated
+> executor, which sequences these functions (which bar `fill_entry` is handed, when a `CLOSE`
+> queues, what a refused or expired entry leaves in the portfolio)"*, since R-AA rules the
+> bar (the signal bar's open plus one interval), the queue (over a gap, with protection in
+> force and the post-gap stop check before the `CLOSE`) and what a pass leaves behind (an
+> `ACTIVE` or `ABSENT_BY_DESIGN` protection and a fresh stamp on every open position). Only
+> the wiring and the root remain open from that sentence. `fill_model.py`'s module
+> docstring said *"Rounding to the tick is a refinement nobody has ruled"*, which R-AB
+> rules; C1 corrects that sentence, under the standing docstring authority, with the
+> module's AST unchanged once its docstrings are removed. **R-AD is carried out** at
+> `41a621a`: the cause was the wall-clock zip timestamp (`M5m-162`), and
+> `tests/unit/test_download_zips.py` now pins it. **What R-AA leaves to be proved by tests,
+> not assumed:** that a stop can fire on the entry bar itself, which `M5m-158` had left
+> undecided, and that parity with the live booking identity holds through the unchanged
+> `Portfolio`. **What survives:** every earlier S2 ruling, the intrabar trigger, *"the stop
+> wins"*, the stop-slippage default of 1.20%, and the arming conditions. **R-AC settles the
+> cooldown item's name as K7** (annotated there), and the architect's account of how the
+> collision arose is `M5m-161`.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
@@ -1304,6 +1349,16 @@ parity: it applies no cooldown either (R-X), and a backtest result is therefore 
 for a bot that re-enters at once after a stop-out. Deferred to the milestone after a PASS.
 
 *Arming condition:* **whoever next edits `Portfolio.start_cooldown` in `core/portfolio.py`, or gives it a caller.**
+
+> **ANNOTATED AT M5m P106 (C1), BY THE OWNER'S RULING R-AC: THE NAME K7 IS RATIFIED.** R-AC,
+> verbatim: *"R-X's cooldown item is K7, because K6 was already allocated (R-I). R-X
+> otherwise stands."* **What stops being true:** the paragraph above reads as the
+> implementer's departure from R-X's text (*"The owner called it K6, and K6 is taken"*); from
+> R-AC it is the owner's own naming, and R-X's *"item K6"* is read as K7. **What survives:**
+> everything else in R-X, which R-AC says stands: the backtest applies no cooldown, at
+> parity with live (`M5m-125`), and the item waits for the milestone after a PASS, with the
+> arming condition above. The collision stays recorded as `M5m-134`, and the architect's
+> account of its class is `M5m-161`.
 
 ---
 

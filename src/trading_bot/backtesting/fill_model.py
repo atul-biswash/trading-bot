@@ -40,8 +40,9 @@ sentence). And a take-profit is credited its trigger, never a better open, while
 charged a worse one.
 
 **Prices are not rounded to the tick.** Slippage is a modelled move and not an order price,
-and an exact ``Decimal`` product keeps the arithmetic reproducible to the last digit. Rounding
-to the tick is a refinement nobody has ruled.
+and an exact ``Decimal`` product keeps the arithmetic reproducible to the last digit. That is
+the owner's ruling R-AB (M5m P106), which also applies no slippage cap: the double count at a
+gapped-through open remains the documented bias.
 
 **No wall clock.** Nothing here reads a time except to compare two instants it is handed.
 """
