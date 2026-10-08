@@ -673,6 +673,51 @@ that first multiplies it by money"*.
 > is decided by R-AA. **What survives:** the wiring and the root, which are C4 and C5, and the smoke
 > run, C6.
 
+> **ANNOTATED AT M5m P106 (C4): THE BACKTEST ROOT IS BUILT.** `backtest_system` in
+> `backtesting/engine.py` assembles the collaborators `live_system` assembles (the buffered
+> provider, the trading engine, the risk manager, the intent logger and the one signal handler)
+> and swaps three: a `ReplayClient` for the REST seed, a `ReplayStream` for the feed and the
+> `SimulatedExecutor` for the order placer. The risk manager reads the replay's simulated instant.
+> No venue call is possible and no credential is read. It follows `CLAUDE.md`'s root rule: the
+> client is closed unconditionally by the outermost scope, the provider is built with
+> `owns_client=False`, and the scopes nest. **The executor registers on the provider before the
+> engine does**, so it meets each bar first; that order is also what hands an entry the bar after
+> its signal bar (R-AA), and `test_the_executor_is_registered_ahead_of_the_engine` pins it
+> (`M5m-171` is answered).
+>
+> **A run that raised is not a result.** The provider, the engine and the signal handler each
+> isolate a failing subscriber, so a run could finish with fills silently skipped. The system
+> counts every record logged at ERROR or above while it runs and the stream's own handler
+> failures, and `BacktestResult.complete` is true only if neither occurred, every pair served at
+> least one bar, and the cash identity holds exactly: `initial + realised - the quote total of
+> every open position = free quote`.
+>
+> **The run record (P104 B7)** is JSON plus `trades.csv`, written by `write_run` into a new
+> directory that is never overwritten. It names the code that ran, the config's digest, the
+> digests of every series' manifest and registry and of the `exchangeInfo` files, the resolved
+> window, every fill parameter, the strategy, the library versions, what each pair served, the
+> executor's counts, the entries by result, the results (trades, flagged trades, realised, fees,
+> the cash residual, the trade-log digest) and the problems. `record_digest` is the SHA-256 of
+> the record without its `wall_clock` block: two runs of one history return the same one.
+> 32 tests in `tests/unit/test_backtest_engine.py` over a real store built through `ingest_zip`
+> (`tests/unit/backtest_world.py`), the determinism test among them, and a Q2 survey of 17
+> mutations (the commit message carries the table).
+>
+> **Arming audit.** U6 was resolved and struck at P105 C2, so its condition, *"whoever writes
+> `paper/simulator.py` or `backtesting/engine.py`"*, arms nothing; this commit writes
+> `engine.py` and fires nothing. S4's condition, *"whoever next edits the fill model in
+> `backtesting/engine.py`"*, names a file that now exists and still holds no fill model, which
+> is in `fill_model.py`; **REAFFIRMED**, with the line-742 condition, because the calibration
+> run has not happened. S2's own condition, `_cmd_backtest` or `BacktestConfig`, is not
+> touched here and fires at C5.
+>
+> **What stops being true:** the P105 C5 annotation's *"`engine.py` stays a stub"* and its S4
+> note that `backtesting/engine.py` *"is still a docstring-only stub"*, each true when written;
+> `CLAUDE.md`'s and `README.md`'s `engine†` and `README.md`'s count of ten docstring-only files,
+> now nine (corrected in place); and `CLAUDE.md`'s *"The two not yet written are
+> `paper/simulator.py` and `backtesting/engine.py`"* (annotated there). **What survives:**
+> `_cmd_backtest` still exits "not implemented yet" until C5, and the smoke run is C6.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`

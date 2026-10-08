@@ -248,7 +248,7 @@ src/trading_bot/
   execution/     executor · placement · dispatch_budget · resolution
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
-  backtesting/   engine† · portfolio† · metrics† · exchange_info · replay · fill_model
+  backtesting/   engine · portfolio† · metrics† · exchange_info · replay · fill_model
                  · simulated_executor
   paper/         simulator†
   persistence/   store · database† · models†
@@ -314,6 +314,17 @@ nobody — on the success path *and* on the path where the stream fails to build
 `owns_client`, conclude that injected means not-ours, and leak a live aiohttp
 session on every boot — silently, because a leaked session fails no test. Read
 the rule here, not the convention one layer down.
+
+> **ANNOTATED AT M5m P106 (C4): *"The two not yet written are `paper/simulator.py` and
+> `backtesting/engine.py`"* IS NO LONGER TRUE OF THE SECOND.** `backtest_system` in
+> `backtesting/engine.py` is a third root and follows the rule: the replay client is closed
+> unconditionally by the root's outermost scope, the provider is built with
+> `owns_client=False` so that its `stop` closes nothing, and the engine's and the provider's
+> scopes nest inside it. Pinned by `test_the_client_is_closed_when_the_run_completes`,
+> `..._when_a_later_boot_step_fails` and `..._when_the_body_raises` in
+> `tests/unit/test_backtest_engine.py`, each reading the close count as exactly one.
+> **What survives:** `paper/simulator.py` is still unwritten and its author is still bound by
+> the paragraph above; the rule entire.
 
 Two mechanics make the inversion safe, and both are load-bearing rather than
 incidental. Teardown is **nested, not one `finally`** — one scope per object,
@@ -2272,10 +2283,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  162 files already formatted
+ruff format --check src tests scripts  164 files already formatted
 mypy                                   Success: no issues found in 90 source files
-pytest                                 2927 passed, 4 skipped
-                                       (2930 passed, 1 skipped with Testnet credentials)
+pytest                                 2959 passed, 4 skipped
+                                       (2962 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2284,14 +2295,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `2930 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `2927 passed, 4 skipped` on a machine without them
+- `2962 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `2959 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 2927 and must not read it as a regression against a documented
-2930. Quote the count with its condition, never bare.
+runner will see 2959 and must not read it as a regression against a documented
+2962. Quote the count with its condition, never bare.
 
-Only the `2930` is measured here; `2927 passed, 4 skipped` is that run minus the
+Only the `2962` is measured here; `2959 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -2402,7 +2413,7 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 162 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 164 |
 | `mypy` | `files = ["src/trading_bot", "scripts"]` | 90 |
 | `pytest` | `tests/` (`testpaths`) | — |
 

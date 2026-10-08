@@ -162,9 +162,9 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > survives:** everything else in this paragraph, the live block included. See
 > `docs/NEXT_MILESTONE.md`.
 
-Ten files are docstring-only placeholders: `execution/order_manager`,
+Nine files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
-`notifications/`, `backtesting/`, `data/repository`. Note
+`notifications/`, `backtesting/portfolio`, `backtesting/metrics`, `data/repository`. Note
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` exits with "not implemented yet".
@@ -276,10 +276,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  162 files already formatted
+ruff format --check src tests scripts  164 files already formatted
 mypy                                   Success: no issues found in 90 source files
-pytest                                 2927 passed, 4 skipped
-                                       (2930 passed, 1 skipped with Testnet credentials)
+pytest                                 2959 passed, 4 skipped
+                                       (2962 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -288,9 +288,9 @@ pytest                                 2927 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `2927 passed, 4 skipped` on a machine without
-  them and `2930 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 2927 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `2959 passed, 4 skipped` on a machine without
+  them and `2962 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 2959 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -389,7 +389,7 @@ src/trading_bot/
   execution/     executor · placement · dispatch_budget · resolution
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
-  backtesting/   engine† · portfolio† · metrics† · exchange_info · replay · fill_model
+  backtesting/   engine · portfolio† · metrics† · exchange_info · replay · fill_model
                  · simulated_executor
   paper/         simulator†
   persistence/   store · database† · models†
