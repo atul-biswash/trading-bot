@@ -403,6 +403,21 @@ that first multiplies it by money"*.
 > `config.yaml` window, 2024-01-01 to 2024-06-30, still loads (181 days) and is not edited,
 > because it is the owner's file; S2 sets the real window per run.
 
+> **ANNOTATED AT M5m P105 (C3): R-Z IS CARRIED OUT, AND THE FILTERS A BACKTEST SIZES WITH
+> NOW COME FROM FOUR STORED FILES.** `scripts/download_exchange_info.py` made the four
+> authorised GETs once (BTCUSDT and ETHUSDT, mainnet and Testnet) and
+> `trading_bot.backtesting.exchange_info` stores each response raw with its SHA-256 under
+> `data/historical/_exchange_info/<environment>/`, refuses to overwrite one, and loads one by
+> verifying the digest and then handing the symbol's entry to the live `to_symbol_info`. The
+> digests are in `docs/RUN_LEDGER.md` section 31, because `data/*` is not in git. **What
+> stops being true:** nothing in S2's text; `M5m-128` (the cost of applying today's filters
+> to history is UNMEASURED) is unchanged, since a snapshot is today's filters and nothing in
+> it dates a past day. **What it shows:** the venue's `PERCENT_PRICE_BY_SIDE` band is no
+> longer the symmetric 2 / 0.5 the repository recorded on 2026-08-08, on either environment
+> (`M5m-142`); a backtest is not affected, since the band filters an order list's prices at
+> submission and the fill model does not model it, but the band is part of what a snapshot
+> records.
+
 > **ANNOTATED AT M5m P99, BY THE OWNER'S RULINGS: S2's ENTRY AND PROTECTION BULLETS
 > ARE SHARPENED, AND ONE SENTENCE IN EACH IS REPLACED.** The rulings, verbatim:
 >

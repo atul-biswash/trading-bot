@@ -276,10 +276,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  152 files already formatted
-mypy                                   Success: no issues found in 85 source files
-pytest                                 2692 passed, 4 skipped
-                                       (2695 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  156 files already formatted
+mypy                                   Success: no issues found in 87 source files
+pytest                                 2743 passed, 4 skipped
+                                       (2746 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -288,9 +288,9 @@ pytest                                 2692 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `2692 passed, 4 skipped` on a machine without
-  them and `2695 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 2692 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `2743 passed, 4 skipped` on a machine without
+  them and `2746 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 2743 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -389,12 +389,13 @@ src/trading_bot/
   execution/     executor · placement · dispatch_budget · resolution
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
-  backtesting/   engine† · portfolio† · metrics†
+  backtesting/   engine† · portfolio† · metrics† · exchange_info
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
   utils/         logger · helpers · instance_lock · provenance
 scripts/         check.py (the gate) · check_testnet.py · download_data.py
+                 · download_exchange_info.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py
                  · mutation_survey.py · abc_double_census.py

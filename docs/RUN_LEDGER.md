@@ -3403,3 +3403,76 @@ P105's own prediction files, under `F:\trading bot\scratch\p105\` (R-T):
 `predictions_halts.txt` `a6f15afff91c81bf3c2d05b69f0f7a9f0fe36963672d8b4dfb14884286d7a8ae`
 and `predictions_c0.txt` `d59bacc38ad414df6885750e2666517327e9c0f839b941d533f79bfd5a6c12b0`.
 Their observations are `gate_h5.txt` and `digest_scratch_store.txt` in the same directory.
+
+## 31. M5m S2: the four `exchangeInfo` snapshots, mainnet and Testnet (P105 C3)
+
+Recorded at M5m P105 (C3). An observation log, so this section only adds. **The four GETs
+the owner's R-Z authorised were made, once each, by `scripts/download_exchange_info.py`,
+and stored raw with their SHA-256.** The record of what was stored is this section's digests:
+`data/*` is ignored by git, so the files themselves are not in any commit.
+
+### What was run
+
+- **Authority:** R-Z, quoted in `docs/NEXT_MILESTONE.md` under S2: *"One keyless
+  exchangeInfo GET per symbol, on mainnet and on Testnet, is authorised. The raw response is
+  stored with its SHA-256, and backtests load filters only from the stored file."*
+- **Code:** `scripts/download_exchange_info.py` and `trading_bot.backtesting.exchange_info`
+  as committed by P105's C3, launched from the development tree with `HEAD` at `b1ffaa7` and
+  the C3 files not yet committed. It touches no venue account, store or lock.
+- **Command, from the repository root:** `python scripts/download_exchange_info.py`, with the
+  defaults: `--symbols BTCUSDT ETHUSDT`, `--environments mainnet testnet`, `--data-dir
+  data/historical`. Stdout went to a scratch file.
+- **Window (UTC):** `2026-10-08T04:37:31Z` to `04:37:33Z`. Exit status **0**.
+- **Requests:** four, in the order below, each a GET with no key and no header but a
+  user agent, to `<host>/api/v3/exchangeInfo?symbol=<SYMBOL>` on `api.binance.com` (mainnet)
+  and `testnet.binance.vision`. No retry: the script has none.
+
+### Result
+
+| environment | symbol | bytes | `serverTime` (UTC) | sha256 of the stored response |
+|---|---|---|---|---|
+| mainnet | BTCUSDT | 5,349 | 04:37:32.647 | `9cf9d5446e7f83508b445a825d2cf776276a8f528ca9313c04e92eeb3d5c0591` |
+| mainnet | ETHUSDT | 5,336 | 04:37:32.871 | `55c2038ade11928a9e7d27f776bebe37c563ce346682daaf251ea1881090db75` |
+| testnet | BTCUSDT | 2,239 | 04:37:33.175 | `40e24c66110ba645ef49ca595618321fdbe2a36f9eab9638eea564dd8b797dc7` |
+| testnet | ETHUSDT | 2,240 | 04:37:33.439 | `87e5095e0e177267d7fe039b8ce1925c8e07903a0f64211c2b948f82705777cc` |
+
+Each digest was re-derived with `sha256sum` over the stored file and equals the sidecar
+`<SYMBOL>.json.sha256` beside it and the figure the script printed. Stored under
+`data/historical/_exchange_info/<environment>/<SYMBOL>.json`.
+
+**What the live mapper reads from them** (`load_snapshot`, which hands the symbol's entry to
+`to_symbol_info`), the same on both environments except where marked:
+
+| symbol | tick | step | min qty | min notional | market lot max qty (mainnet / testnet) |
+|---|---|---|---|---|---|
+| BTCUSDT | 0.01 | 0.00001 | 0.00001 | 5 | 147.44396091 / 133.97193096 |
+| ETHUSDT | 0.01 | 0.0001 | 0.0001 | 5 | 2766.56983598 / 2823.18581380 |
+
+`MAX_NUM_ALGO_ORDERS` is 5 and `MAX_NUM_ORDER_LISTS` 20 on all four. `PERCENT_PRICE_BY_SIDE`
+is the same on all four: **bid up 1.2, bid down 0.5, ask up 2, ask down 0.8**, over 5
+minutes. Both quote assets are USDT and every status is `TRADING`. The filter types present
+are the eleven the repository's recorded fixture lists.
+
+### Against the predictions (`F:\trading bot\scratch\p105\predictions_c3.txt`)
+
+SHA-256 `2cca55db5ca989bc97234d7a466eb510642e616a00028de240598d70bfdaebae`, written before the
+first request of any kind to either endpoint. **G1, G2, G3, G4, G6 and G7 held.** **G5 was
+wrong on two counts** (`M5m-142`): it predicted Testnet's band to be the recorded 2 / 0.5 /
+2 / 0.5, and mainnet's to differ (5 / 0.2). Testnet's is 1.2 / 0.5 / 2 / 0.8, and mainnet's is
+identical to it. Against the repository's recorded Testnet BTCUSDT fixture
+(`tests/unit/test_exchange_mappers.py`, `SYMBOL_FULL_TESTNET`), nine of its eleven filters are
+identical; the two that differ are `MARKET_LOT_SIZE.maxQty` (141.67845966 then, 133.97193096
+now, which moves with the market) and `PERCENT_PRICE_BY_SIDE`. The band the fixture and
+`docs/M5_NUMBERS.md` (section 2, *"Provenance: ... TESTNET, BTCUSDT and ETHUSDT, 2026-08-08"*)
+record as symmetric has since changed to an asymmetric one; the dated provenance there stays
+true of 2026-08-08.
+
+### Digests of the C3 instruments and outputs (SHA-256)
+
+| file (under `F:\trading bot\scratch\p105\`) | sha256 |
+|---|---|
+| `predictions_c3.txt` | `2cca55db5ca989bc97234d7a466eb510642e616a00028de240598d70bfdaebae` |
+| `get_out.txt` | `d44d1e85ecb5c5be8f996567dc2a9164672eea3ee926af4d7048096b02c14aaa` |
+| `get_times.txt` | `d52271cff770e3db0fce37baeb2e76a629f7c323a5d2f7725133df7c1d39069d` |
+| `observe_c3.py` | `7d45205cf2955698eb2f0fda11d52e366f480e059f1d32cc78c8dcba07899211` |
+| `observe_c3.txt` | `b096ba98d33ef07873f2e54bdd95464030b511cceca0d2d0635282f2a5675300` |
