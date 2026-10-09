@@ -3775,3 +3775,119 @@ out falling, falling, sideways, rising.
 | `predictions_c4_labels.txt` (under `F:\trading bot\scratch\p107\`) | `c000d278df4f834b92889d1cb560d2d9b15e97e9516a3074e094be89157f9c1e` |
 | `predictions_c4_gate.txt` | `0eba899057b4a7b69892a8ce2a8bdaff9c36b459e11093d538d1cde6b87e704d` |
 | `regime_run1.txt` | `01b73765efd48b74c2e445abd90d430a49e0370948069238722675272a3084f6` |
+
+## 35. M5m S3: the smoke backtest on the C6 code, its metrics recomputed and hand-checked (P107 C7)
+
+Recorded at M5m P107 (C7). An observation log, so this section only adds. **One backtest was
+run: the committed config, BTCUSDT 1m and ETHUSDT 5m, 2024-03-01 to 2024-04-01, from the
+repository root on the editable development install, as R-AE authorised for S2 and P107's C7
+extends to a fresh run on the C6 code.** It is a check of the machine and is **not evidence for
+S4 to S7** (R-AH): the record's own verdict is `refused`. The P106 runs of section 32 predate the
+equity loop, which is why this run was needed.
+
+### What was run
+
+- **Code:** `HEAD` `c5e11f1589dea0f9239eca584915ce0c87c8e956`, `git status --porcelain` empty
+  before and after, `config.yaml` SHA-256
+  `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0` (equal to the committed blob).
+  `trading_bot.__file__` resolved to this checkout's `src` before the run. The record's
+  `provenance` names `install_kind=editable`, `code_commit=unknown`, `verdict=refused`.
+- **Command:** `python -m trading_bot backtest --start 2024-03-01 --end 2024-04-01`, stdout to
+  `smoke_c7.out`. **Exit status 0.** pid 2020; Windows `2026-10-09T17:53:31Z` to `17:55:58Z`; the
+  record's clock `17:53:32.675Z` to `17:55:58.097Z`, **`wall_seconds` 145.421**.
+- **Record:** `data/backtests/20261009T175332605801Z-5350070f7a9e/` with `run.json` (schema 3,
+  14,978 bytes), `trades.csv` (239,657 bytes) and **`backtest.log` (751,361 bytes), the run's own
+  log (R-AG)**. `data/*` is ignored by git, so the digests below are the record.
+
+### Result
+
+| fact | this run | section 32 (P106) |
+|---|---|---|
+| exit status / `problems` / `error_log_records.count` / handler failures | 0 / none / 0 / 0 | 0 / none / 0 / 0 |
+| bars served, BTCUSDT 1m / ETHUSDT 5m | 44,640 / 8,928 | same |
+| BUY entries queued / filled / refused / expired / unaffordable | 628 / 628 / 0 / 0 / 0 | same |
+| CLOSE queued / refused by risk | 610 / 17 | same |
+| trades (BTCUSDT / ETHUSDT); exits close / stop_loss / take_profit | 626 (522 / 104); 610 / 8 / 8 | same |
+| entry fees / exit fees (USDT) | 122.494434554672850 / 122.354975506698450 | same |
+| realised total / final free quote (USDT) | -384.308458035771300 / 9231.414198714929200 | same |
+| cash identity residual; fee residual | `0E-21`; `0E-21` | `0E-21`; (none) |
+| trade-log SHA-256 | `5350070f7a9eeea27f8f8e63ddc765110a9b66bd3e06881e9dfdd657c313ba36` | identical |
+| `trades.csv` SHA-256 | `bd1d6991e9b11a63fa5e980f8724dd19b89603a37a24b540ea3f208d1ac630a3` | identical |
+| `run.json` SHA-256 | `7c98ee33dbb75335c317b99f394e8b6c39d7bb9d455f635c08b707c1a06d7ad1` | differs (schema 3) |
+| `wall_seconds` | **145.421** (2,715 us a bar) | 118.8 / 118.3 (2,218 / 2,209) |
+
+**The equity loop moved no decision.** The trade log and `trades.csv` are byte-equal to P106's,
+so the probe that samples the portfolio after every bar changed no fill, no entry and no exit.
+
+**The new blocks.** `equity.samples` 53,568, one per bar of either pair; `initial` 10000.0 and
+`final` 9615.612479714929200 (the free quote 9231.414198714929200 plus the two open positions at
+their last closes, 384.198281, both open since 2024-03-31T22:07 and 23:40); `regime_labels` is
+`6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72`, equal to the committed file's
+digest. The metrics, **a check of the machine and not a statement about the strategy**: 113 wins
+and 513 losses, win rate 0.18051, net P&L -384.308458035771300 (equal to the results block's
+`realised_total`), gross P&L -139.459048, fees paid 244.849410, profit factor 0.28540 net and
+0.60117 gross, per-trade return mean -0.31330% with a 95% interval of [-0.36804%, -0.25855%] on
+n = 626, mean holding 4,405.8 s and median 2,640 s, exposure 0.75712, **maximum drawdown 0.038566
+(385.684 from 10000.678 at 2024-03-01T00:30 to 9614.994 at 2024-03-31T22:19)**, 31 daily returns,
+Sharpe -28.968 and Sortino -16.150. All 626 trades are in `rising` (2024Q1), none in the other
+buckets. The Sharpe's magnitude is an artefact of 31 near-identical negative days.
+
+### The recomputation, exactly (the C7 requirement)
+
+`analyse_c7.py` (a scratchpad script) read `trades.csv` with `load_trades_csv`, the record's
+`equity` block with `EquitySummary.from_record`, and the committed `docs/REGIME_LABELS.json` with
+`RegimeTable.from_file`, ran `compute_metrics`, and compared the whole `to_record()` with the
+record's `metrics` block: **equal, key for key, every string.** The label digest the table read
+equals the one the record names.
+
+### The hand check of three figures (arithmetic that does not call `metrics.py`)
+
+| figure | by hand, from `trades.csv` and the `equity` block | the record |
+|---|---|---|
+| net P&L | the sum of the 626 `realised` column values: **-384.308458035771300** | `-384.308458035771300000000` |
+| win rate and net profit factor | 113 rows above zero, 513 below, none at zero; 113 / 626 = **0.18051118...**; sum of wins over the absolute sum of losses = **0.28539630...** | `0.1805111821086261980830670927`, `0.2853963036967771668025737949` |
+| maximum drawdown | (10000.677902199 - 9614.994026143412200) / 10000.677902199 = **0.0385657732...**, the amount 385.683876055587800 | `0.03856577322331135819122204939` and `385.683876055587800000000` |
+
+A fourth, the daily Sharpe, was also recomputed by hand from the 31 daily closes (carried
+forward, sample sd, times the square root of 365) and agrees to every digit: **-28.96786294...**.
+The drawdown check reads its pair from the record's own `equity` block, so it verifies the
+arithmetic and not the pair's identity; what bounds the pair from outside is that the drawdown
+0.038566 is not below the closed-trade loss on the initial balance, 384.308 / 10000 = 0.038431,
+which it must not be when final equity is below the initial.
+
+### Against the predictions (`F:\trading bot\scratch\p107\predictions_c7.txt`)
+
+SHA-256 `0b0a417d0f4a2adfeb346fe4b3e0539c643053a00586e5adfbe9ced4f24a56a0`, **amended before the
+run** (the file before the amendment had SHA-256
+`fe239e9ff8c2e440ec7850a0dff4a35d896f8efd7317a22e18ec6e9c9912e9b8`). The amendment corrected item 1:
+`main` logs the boot line at ERROR when the verdict is refused, so `backtest.log` was predicted to
+hold exactly one ERROR record, the `boot_provenance` line, and it does (1 ERROR record, that line;
+`error_log_records.count` 0, as the tally starts after it). **Eleven of thirteen items held**, among
+them the digests, every count, the label bucket, the recomputation, the hand check and the
+unchanged bot log (`logs/trading_bot.log` 6,604,109 bytes with SHA-256
+`8b460ba1223f1f4e6a80a72a5f861e36eb3d4dc2de609e404e716d9de69e5e41`, equal before and after).
+**Two missed, and both are recorded rather than adjusted:** item 5 predicted 118.8 s to 137 s and
+the run took **145.4 s** (+22.4%); item 10 predicted a maximum drawdown of 0.04 to 0.06 and it is
+**0.038566**, just under the band (the prediction's own floor, 0.0384, held).
+
+### The runtime, diagnosed as far as it can be without another run (`M5m-216`)
+
+The equity probe cannot account for it. A microbenchmark (`bench_probe_c7.py`, no run) of one
+`_EquityProbe` call with two positions open took 9.0 us, 53,568 calls in 0.48 s, 0.3% of the
+run. The remaining 26 s a run over P106's is **not explained**: the candidates are the file
+handler C0 added (751,361 bytes written), the rest of C1 to C6, and the machine, and one run
+cannot separate them. The console sink still carries the whole log (1,114,317 bytes on stdout, as
+P106's 1,114,155).
+
+### Digests of the C7 instruments and outputs (SHA-256)
+
+| file | sha256 |
+|---|---|
+| `predictions_c7.txt` (under `F:\trading bot\scratch\p107\`), after the amendment | `0b0a417d0f4a2adfeb346fe4b3e0539c643053a00586e5adfbe9ced4f24a56a0` |
+| `smoke_c7.out` (1,114,317 bytes) | `3300af12b0700746433de6db0c98f61741da67c7f85dbe964ec4755b834048ae` |
+| `analyse_c7.out` (5,604 bytes) | `4ed8d8575a27c8f657e17d442722fd8e0931ecb4823c888811fca2c24271c14e` |
+| `analyse_c7.py` (the scratchpad) | `231b7a5b16d72cf3086b9730fb0e8fc47ec02d98c30fb1d20ac2d8b1388fc22c` |
+| `bench_probe_c7.out` | `ce843e4b2d5e89a12088e72b85cd79ab09f1459a02a3af319c1db0be950f4302` |
+| `bench_probe_c7.py` (the scratchpad) | `f47e0826d29b8197ea22e9e20b6d5ea24aae3944471f56aa0f38724cbd140bb1` |
+| `run.json` of the run | `7c98ee33dbb75335c317b99f394e8b6c39d7bb9d455f635c08b707c1a06d7ad1` |
+| `backtest.log` of the run (751,361 bytes) | `639f2a82d2f9bcc6f2322d1f362efc172febf193bd2f3b5c32745910f1f35a94` |

@@ -966,6 +966,21 @@ where it is money and states its denominator.
 > run"*. **What survives:** C7's recomputation of the smoke run, and Q2's survey of S2's fill
 > model, which ran at P106.
 
+> **ANNOTATED AT M5m P107 (C7): THE SMOKE RUN ON THE C6 CODE HAS BEEN MADE AND ITS METRICS
+> RECOMPUTED EXACTLY, SO P107's S3 WORK IS COMPLETE.** One run, the committed config over March
+> 2024, from `c5e11f1` on the editable install: exit 0, trade log and `trades.csv` byte-equal to
+> P106's, the metrics block equal to `compute_metrics` over `trades.csv` and the record's `equity`
+> block with the committed labels, and three figures (net P&L, win rate with the profit factor,
+> maximum drawdown) plus the daily Sharpe confirmed by hand; `docs/RUN_LEDGER.md` section 35.
+> The run is a check of the machine and not evidence for S4 to S7 (R-AH: its verdict is
+> `refused`). Two predictions missed and are recorded: the runtime, 145.4 s against a ceiling of
+> 137 s, which the equity probe (0.48 s) does not explain and nothing yet does (`M5m-216`), and
+> the drawdown band (`M5m-217`). **What stops being true:** the C6b annotation's *"What survives:
+> C7's recomputation of the smoke run"* (done), and README's *"smoke-run once"* and *"run only
+> once"* (corrected in place). **What survives:** S4's calibration, the single remaining S item
+> before S5, and the runtime question, which matters to S5's joint baseline estimate of 3.2 to
+> 3.7 hours: at 2,715 us a bar the same 53,568 bars cost 145 s, not 119 s.
+
 **S4. Calibration against the venue — the backtester's own acceptance test.** Replay
 the strategy over the windows the bot actually traded on Testnet, from S1's data, and
 compare trade by trade with S0's census. **The backtester is trusted only if its

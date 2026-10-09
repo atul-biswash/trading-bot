@@ -36,8 +36,8 @@ Reading this list first will save you time if it is not the tool you want.
   selected from config.
 - **No hosted UI or web dashboard.** CLI and structured logs.
 - **Not a validated backtester yet** — `backtest` replays, records trades and computes the S3
-  metrics, but it is not calibrated against the venue (S4) and has been run only once, as a
-  smoke test over March 2024; see build state below.
+  metrics, but it is not calibrated against the venue (S4) and has been run only as smoke
+  tests over March 2024 (three runs, none of them evidence); see build state below.
 
 ## Build state — read this before running it
 
@@ -92,7 +92,7 @@ only venue it will connect to.
 | Order execution — entry, protection, and the discretionary close | ✅ built |
 | Realised P&L reaching the ledger, and surviving a restart | ✅ built |
 | Crash-survivable store for pending records and the ledger | ✅ built |
-| Backtesting: replay, fill model, simulated executor, run record, S3 metrics | ✅ built, **smoke-run once (March 2024); not calibrated against the venue** |
+| Backtesting: replay, fill model, simulated executor, run record, S3 metrics | ✅ built, **smoke-run (March 2024, three runs); not calibrated against the venue** |
 | Paper simulator, notifications | ⛔ stubs |
 
 `python -m trading_bot run` connects to Testnet and runs
@@ -171,8 +171,8 @@ Eight files are docstring-only placeholders: `execution/order_manager`,
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` replays stored bars through the live decision path and writes a run record
-under `data/backtests/`, and has been smoke-run once, over March 2024: a test of the machine
-and not a result (`docs/RUN_LEDGER.md` section 32).
+under `data/backtests/`, and has been smoke-run over March 2024, twice before the metrics existed and once
+after: tests of the machine and not results (`docs/RUN_LEDGER.md` sections 32 and 35).
 
 **At M5-0's close, where protective orders would rest had been decided and
 written down** — `docs/QC_PROTECTIVE_ORDERS.md` — but not implemented. That
