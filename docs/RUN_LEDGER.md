@@ -3587,3 +3587,136 @@ census over `logs/trading_bot.log` after 2026-10-08T20:18:42Z must exclude these
 | `analyse_c6.py` (the scratchpad) | `e211bcd72fafe07e073050835f9d1e01880b2f755799e8d81a8b93ea91119529` |
 | `smoke_run1.out` (1,114,155 bytes) | `f96b2ccb7a4ae7e0c61042cf95dbf7026b5518531508c8dbfa8f2416c6dbae66` |
 | `smoke_run2.out` (1,114,155 bytes) | `81d2e5c695e76de198f8f2e1fadcfb17d99ef323df3073dae401cd7e94dc32f9` |
+
+## 33. M5m S2/S3: P107's Step 0 -- the spun-off task, the band, the refusal, the flake rate and the Testnet klines
+
+Recorded at M5m P107 (C0). An observation log, so this section only adds. Six read-only
+checks, S0a to S0f, made on `2026-10-09` with `HEAD` at `778e9b3`. Predictions:
+`F:\trading bot\scratch\p107\predictions_step0.txt`, SHA-256
+`b96560fc354952d9a90d59357c918a29bb239a862ff6e7ebe61d02752d102382`, written before any of
+them ran. **The halts H1 to H6 all held**: `HEAD` `778e9b3d0373dbcf290ab4e8e216ffb854d3842e`;
+`origin/main` `dbbffadd375ee2257fd231ae32f4fec5f20c3ffd` with 6 commits ahead (the owner has
+pushed through `dbbffad` and not since); `git status --porcelain` empty; the Testnet ping `200`
+at `2026-10-09T04:13:29Z`; the gate 165 files, mypy 90, `2977 passed, 1 skipped` in 146.45 s
+(`gate_h5.txt`, SHA-256 `90805274f37316780a15a1ceca2f94b510b7280cc0fad740f1ca8491e8892e2e`);
+`check_findings.py` `max 183`, no duplicate, no gap, nothing cited and not declared, blockless
+`[934eb45]`.
+
+### S0a, S0b and C0's cause -- P106's own results, quoted
+
+These three were made at P106 and are quoted from that session's tool results (the transcript
+`883c8675-3e61-486c-93c1-fb48f9743422.jsonl`) and from `41a621a`'s message.
+
+- **S0a, the *"spun-off task"* of `M5m-155`.** `git worktree list` showed the main worktree
+  alone, `F:/trading bot/files/binance-trading-bot/binance-trading-bot  dbbffad [main]`. Branches:
+  `claude/zen-mclean-9d3c40`, `main`, `phase5-m3-risk-manager`. The first of those is an
+  ancestor of `main` (*"ancestor of main"*), tip `d1074c6`, dated 2026-10-01. `.claude/worktrees`
+  holds one directory, `codebase-orientation-b2e0ca`, dated Jul 24. The session list answered
+  *"No reachable agents -- no other Claude session is running on this machine right now"*.
+  So **no spun-off task was running or could write to the tree**, and none had.
+- **S0b, the `PERCENT_PRICE_BY_SIDE` band.** A grep of `src/`, `config.yaml` and the config
+  coherence checks found **no hard-coded band multiplier**. The band is read from the venue
+  only, at `to_symbol_info` in `src/trading_bot/exchange/models.py` lines 418 to 425
+  (`bidMultiplierUp`, `bidMultiplierDown`, `askMultiplierUp`, `askMultiplierDown`,
+  `avgPriceMins`); `price_band_margin` is a `Decimal` config field defaulting to `0.02`. **The
+  pre-existing false text P106 listed:** `docs/M5_NUMBERS.md` section 2 (*"The band is 0.5x-2x of
+  the 5-minute average"*, *"four fields rather than the two '0.5x-2x' implies"*);
+  `docs/QC_PROTECTIVE_ORDERS.md` line 42 (*"pending price to 0.5x-2x of the 5-minute
+  average"*); the comment at `src/trading_bot/config/models.py` line 270 (*"measured
+  `PERCENT_PRICE_BY_SIDE` band is 0.5x-2x of a 5-minute average"*); and the fixtures
+  `SYMBOL_FULL_TESTNET` in `tests/unit/test_exchange_mappers.py` and the 2 / 0.5 assertions at
+  `tests/unit/test_exchange_info.py` lines 90 and 91. The measured band is **1.2 / 0.5 / 2 / 0.8**
+  (section 31).
+- **C0's measured cause (R-AD, `41a621a`).** *"It is the wall-clock timestamp"*: *"ZipFile.writestr
+  given a str name stamps time.localtime(time.time()) into the member header at 2-second
+  resolution, so zip_of() returned different bytes for the same month in different ticks."* With
+  zipfile's clock four seconds apart the body of
+  `test_one_that_does_not_match_its_checksum_is_fetched_and_replaced` returned code 1 naming
+  `ChecksumMismatchError`; the unit suite under a clock-moving plugin read *"2 failed, 2873
+  passed, 1 skipped"* before the fix and *"2877 passed, 1 skipped, none failed"* after.
+  Evidence at `F:\trading bot\scratch\p106\`: `repro_c0_before.txt`, `repro_c0_after.txt`,
+  `shim_c0_before.txt`, `shim_c0_after.txt`.
+
+### S0c -- the heredoc after C5 ran BEFORE the commit, and nothing was amended
+
+Predicted before. The shell command that fixed one count in `msg_c5.txt` ("Four sites unpacked"
+to "Five sites unpacked") was the first statement of the SAME command that ran `git commit -F`,
+so it ran to completion first: the message file's mtime is `2026-10-09 02:15:57.730 +0600` and the
+commit is stamped `02:15:58 +0600`. **`d5bff58eb52ec081ae76b9406bee7dbc80d5f33d` was not
+amended**: the reflog holds one `commit:` entry for it and none reads `(amend)` among the
+twelve newest, and the committed message equals `msg_c5.txt` byte for byte once git's trailing
+newline is set aside (7,437 bytes in the file, 7,438 in git), with `Five sites unpacked` present
+and `Four sites unpacked` absent. (The whole reflog holds ten `amend` entries, all older.)
+
+### S0d -- `M5m-183`, the 17th refusal, found by bar and explained
+
+Predicted: the owner's hypothesis, a down-cross with no position before any up-cross, **false**,
+and a 60 / 40 split between a visible-in-the-trade-log cause and a signal-count difference. **The
+cause was neither as stated, and the mechanism is not in the trade log.**
+
+- **Pairing, from the run's own log (pid 21884) and its `trades.csv`:** 628 BUYs dispatched,
+  610 CLOSEs queued, 17 CLOSEs refused `nothing_to_close`; 16 stop-loss and take-profit exits.
+  **Sixteen refusals follow a stop or target. One does not**, ETHUSDT `2024-03-05T08:04:59.999`,
+  whose previous exit is a plain `close` at `03:40`.
+- **The log holds one more CLOSE than the strategy's rules give.** `s0d_diff.py` derives every
+  signal with the repository's own `sma`, `crossed_above` and `crossed_below` over the stored
+  closes and compares: BUY 105 / 105 and 523 / 523; CLOSE BTCUSDT 522 / 522; **CLOSE ETHUSDT 104
+  derived against 105 logged**, the one extra at **`2024-03-05T03:34:59.999`**, a bar that rose
+  (closes 3643.50 then 3653.08). That `CLOSE` was executed: the position opened by the BUY of
+  `2024-03-04T23:09:59.999` was sold at the next open and booked at `03:40`. The `08:04` signal
+  is therefore the **legitimate** death cross, refused because nothing was left to close.
+- **The mechanism, by probing the real replay at three window starts** (`s0d_probe.py`, the
+  committed config, ETHUSDT only, wrapping `generate_signal` without changing it). At the `03:30`
+  bar the two averages are the same number: SMA(20) = SMA(50) = 3627.774. With the window
+  starting `2024-03-01` (a 1,000-row buffer) the pairs are fast `(3627.5645000000004,
+  3627.774)` and slow `(3627.2309999999998, 3627.7740000000003)`, so `fast < slow` by 4.5e-13,
+  `crossed_below` fires and the reason reads *"death cross: SMA(20)=3627.774 crossed below
+  SMA(50)=3627.774"*. Started `2024-03-04` (831 rows) the same bar reads fast `3627.7740000000003`
+  against slow `3627.7739999999994`, and started `2024-03-05` (543 rows) the same: **no signal**.
+  An exact tie of the two averages is decided by floating-point noise, and the noise depends on
+  how many rows precede the bar. My earlier count of bars with `fast == slow` exactly (0) missed
+  it for the same reason: the tie is mathematical and the floats differ in the last digit.
+- **What this says beyond the one trade.** The strategy's *"stateless recomputation ... identical
+  after a restart"* does not hold at a tie, and this is a property of the live path too: the buffer
+  after a restart is seeded to a different length. Nothing was changed (the strategy and the
+  indicator are not this prompt's), and the question is the owner's. `M5m-184`, `M5m-185`.
+
+### S0e -- the survey test file, 50 bare runs
+
+Predicted 0 failures. **Observed 0 failures in 50**, every run `14 passed` in 3.71 s to 4.30 s,
+each to its own file under `F:\trading bot\scratch\p107\s0e\` (the exit codes are in
+`codes.txt`, SHA-256 `d9fb2c38cc12a5791c3cb3a3b86d1a63a255a0a18087c9b52b1af51f49f6050a`). The two
+failures `M5m-168` recorded at P106 happened while heavy pytest work ran beside them and were not
+reproduced alone (6 of 6, then 2 of 2); 50 more clean runs do not establish the cause, and they
+were not made under load. **The cause stays UNMEASURED, and there is no flake to fix** (`M5m-186`).
+
+### S0f -- R-AL: Testnet kline availability, read-only
+
+Predicted, wrongly: earliest on or before `2026-08-01` and the window retrievable in full. **13
+GETs** (`/api/v3/time` and `/api/v3/klines`, keyless, no header but a user agent) between
+`2026-10-09T04:23:16Z` and `04:23:22Z`, by `s0f_testnet_klines.py`, SHA-256
+`31cd1c18ba61c714669605be0c6e709a783fcbb53c32e9ef4c26b92fcb2fe9b2`; result
+`s0f_result.json`, SHA-256 `a8119bdc65996ae62e7619296331ecf7e50b6dc017920ff330a45d83d9466283`.
+
+| series | earliest open Testnet returns | latest open | bars returned for `[2026-09-04, 2026-09-25)` | expected |
+|---|---|---|---|---|
+| BTCUSDT 1m | `2026-10-07T10:32:00Z` | `2026-10-09T04:23:00Z` | 0 | 30,240 |
+| BTCUSDT 5m | `2026-10-07T10:30:00Z` | `2026-10-09T04:20:00Z` | 0 | 6,048 |
+| ETHUSDT 1m | `2026-10-07T10:32:00Z` | `2026-10-09T04:23:00Z` | 0 | 30,240 |
+| ETHUSDT 5m | `2026-10-07T10:30:00Z` | `2026-10-09T04:20:00Z` | 0 | 6,048 |
+
+**The window is not retrievable in any part.** Testnet holds about two days of history, from
+`2026-10-07T10:30Z`; REASONED that the venue reset its Testnet then, since the bot's own orders
+ran there from August and September and nothing before the 7th survives. The `M5m-032`
+question, *what Testnet retains*, is answered, and the Testnet trades of 2026-09-04 to
+2026-09-25 that S0's census holds have no Testnet klines to be replayed over (`M5m-187`).
+
+### Digests of the Step 0 instruments and outputs (SHA-256)
+
+| file | sha256 |
+|---|---|
+| `predictions_step0.txt` (under `F:\trading bot\scratch\p107\`) | `b96560fc354952d9a90d59357c918a29bb239a862ff6e7ebe61d02752d102382` |
+| `s0d_refusals.py` (the scratchpad) | `88c47d81e55d2defeaad817a8961cc4181393239b8fa1d5ca5e40b419a3c6f94` |
+| `s0d_tie.py` | `0d92587a573ac4fe8aab84b501e9a0ffd8a4182b4cf2ed17f2f0eafadaf1e09f` |
+| `s0d_diff.py` | `58a167a1b16958fd95d466392f563beb7f750d77697d5855c88cca82b57caa03` |
+| `s0d_probe.py` | `c0f85e83aefc0cc994b88a74d9a1cc4268648026713bfba97198162d94daafde` |

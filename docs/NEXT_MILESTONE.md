@@ -788,6 +788,57 @@ that first multiplies it by money"*.
 > window"* (corrected in place). **What survives:** S3 (metrics) is next and unbuilt, S4's
 > calibration, and every earlier S2 ruling.
 
+> **ANNOTATED AT M5m P107 (C0), BY THE OWNER'S RULINGS R-AF TO R-AL: THE BACKTEST'S LOG, ITS
+> PROVENANCE, S3'S DEFINITIONS AND THE TESTNET KLINE QUESTION ARE RULED.** The rulings,
+> verbatim:
+>
+> R-AF: "M5m-177's setup change is ratified; its test keeps its subject and no assertion
+> moved. S2's retirement at C6 is ratified."
+>
+> R-AG: "A backtest logs only to a file in its own run directory, never to
+> logs/trading_bot.log."
+>
+> R-AH: "Every run record carries the boot_provenance verdict and its fields. A run used as
+> evidence for S4 to S7 comes from a deployment clone, with the verdict accepted."
+>
+> R-AI: "Regimes are labelled per calendar quarter by BTCUSDT's quarterly return: above +15%
+> rising, below -15% falling, otherwise sideways. The labels are computed once from the
+> store, committed in a file with its digest, and fixed before S6."
+>
+> R-AJ: "Maximum drawdown is the largest peak-to-trough decline of mark-to-market equity,
+> sampled at every bar of any pair, as a fraction of the running peak. It is computed in the
+> loop, exactly. Daily closing equity is recorded for Sharpe and Sortino, annualised over 365
+> days."
+>
+> R-AK: "The per-trade return and its 95% interval are computed exactly as
+> scripts/trade_census.py computes them (z = 1.96, sample sd, return on the entry quote
+> total), and parity is proven by test on a shared set of trades."
+>
+> R-AL: "Testnet kline availability for S4 is measured now, read-only: the earliest BTCUSDT
+> and ETHUSDT 1m and 5m kline Testnet returns, and whether 2026-09-04 to 2026-09-25 is
+> retrievable in full."
+>
+> **R-AL is carried out in this commit, and the answer is NO** (`docs/RUN_LEDGER.md` section
+> 33, `M5m-187`): Testnet returns klines only from `2026-10-07T10:30Z`, for all four series,
+> and none of the 30,240 one-minute or 6,048 five-minute bars of the window exists there. So
+> **S1's annotation *"the unmeasured question of what Testnet retains (`M5m-032`) is S4's to
+> answer first"* is answered** (about two days), and **S4's calibration against the Testnet
+> trades of 2026-09-04 to 2026-09-25 cannot take its klines from the Testnet REST path.**
+> That is an open question for the owner, not decided here: the bars those trades saw are
+> gone from the venue, and the store holds mainnet bars only.
+>
+> **The smoke run's three open items are each ruled or explained.** (1) The shared log: R-AG,
+> which P107's C1 carries out. (2) The editable install: R-AH, which P107's C2 carries out. (3) `M5m-183`, the refusal P106 could not
+> explain, is **explained** (`M5m-184`, `M5m-185`): it is the legitimate death cross of
+> ETHUSDT at `2024-03-05T08:04`, refused because an extra `CLOSE` at `03:34:59.999` had already
+> closed the position, and that extra `CLOSE` is the strategy treating an exact tie of the
+> two averages as a cross, decided by floating-point noise that depends on the buffer's
+> length. It is not the owner's hypothesis of a down-cross before any up-cross. **What stops
+> being true:** the P106 C6 annotation's *"One of the 17 `nothing_to_close` refusals per run
+> is unexplained (`M5m-183`)"* and its two other *"for the owner"* items as open; and the S1
+> annotation named above. **What survives:** every S2 ruling, S3's list, and the arming
+> conditions.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
