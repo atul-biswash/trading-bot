@@ -839,6 +839,25 @@ that first multiplies it by money"*.
 > annotation named above. **What survives:** every S2 ruling, S3's list, and the arming
 > conditions.
 
+> **ANNOTATED AT M5m P109 (C3), BY THE OWNER'S RULINGS R-AQ AND R-AX: THE TIE IS FIXED, AND
+> `sma` IS WINDOW-ONLY.** `indicators.sma` no longer uses pandas' `rolling().mean()`, whose
+> running sum made the last digit of a window depend on every row ahead of it. Each window is
+> now summed along its own row of a contiguous block and divided once, so a value is the same
+> bits whatever the buffer holds before the window; tested against buffer starts, against the
+> whole series and against chunk boundaries, and reproduced on the M5m-184 bar from 120 real
+> closes, where `rolling` flips with the buffer and `sma` does not (`tests/unit/test_sma_window_only.py`).
+> No tie tolerance is added (R-AX), so a decimal tie of the two averages is still decided by the
+> float64 rounding of each window, now the same rounding in every buffer. **What stops being
+> true:** the paragraph above's *"decided by floating-point noise that depends on the buffer's
+> length"* (true of the code until this commit, false after it); RUN_LEDGER section 33's S0d,
+> *"Nothing was changed ... and the question is the owner's"* (ruled by R-AQ); and its account
+> that the averages tie *"mathematically and the floats differ in the last digit"*, which
+> P108 C1 corrected: the DECIMAL closes tie (both 3627.774), while the float64 closes sum to
+> averages 9.09e-15 apart. **What survives:** `M5m-183`'s explanation of the 17th refusal, the
+> one extra `CLOSE` at `03:34:59.999` as the cause, and the arming conditions. The census of the
+> other indicators (P108 C3) stands: `ema`, `macd`, `rsi`, `atr` are recursive and
+> `bollinger_bands` still uses `rolling`; none is read by a live strategy.
+
 > **ANNOTATED AT M5m P107 (C1): R-AG IS CARRIED OUT -- A BACKTEST LOGS ONLY TO A FILE IN ITS
 > OWN RUN DIRECTORY.** For the `backtest` command `main` switches the config's file sink off
 > and attaches `DeferredFileHandler` (`utils/logger.py`), which holds every record from the

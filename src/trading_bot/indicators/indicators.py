@@ -53,6 +53,28 @@ because a silent disagreement is a money bug:
 * **A perfectly flat window gives RSI 50.0**, not 100 and not NaN -- see
   :func:`rsi`.
 
+A value depends only on its own window, or it does not (R-AQ, M5m-184 and M5m-185)
+-------------------------------------------------------------------------------
+CLAUDE.md requires a strategy to recompute from the buffer, identically after a restart and
+in a backtest, and a buffer's length is the one thing that differs between those. **``sma`` is
+window-only**: the value at a row is a function of the ``period`` values ending at that row and of
+nothing before them, so the same window gives the same bits whatever the buffer holds ahead of it.
+pandas' ``rolling().mean()`` is not: it keeps a running sum, so its last digit depends on every row
+that came before the window, and an exact tie of two averages (SMA(20) equals SMA(50) in the decimal
+closes, as on ETHUSDT 5m at 2024-03-05T03:30Z) was decided by that noise and flipped with the
+buffer's length. Measured at P108: 40 to 52 of 60 end bars changed value across twelve buffer
+lengths under ``rolling``, none under the window-only mean.
+
+**What is NOT window-only, stated so nobody reads "pure" as "stateless".** ``ema``, ``macd``,
+``rsi`` and ``atr`` are recursive by construction and depend on where the buffer starts, by a
+factor that decays geometrically with the rows since the seed (``(13/14)^k`` for Wilder's ``atr``,
+8e-17 at 500 rows); measured at P108 on ETHUSDT 5m, the difference is at most 9e-16 relative for
+``rsi`` and ``atr``, 2.3e-12 for the ``macd`` signal line, and moved none of 8,928 ATR stop levels
+at the 0.01 tick. ``bollinger_bands`` uses ``rolling`` for its mean and its standard deviation and
+carries the same defect as ``sma`` did, up to 4.8e-13 relative, on every bar. Nothing live reads
+those, and the first strategy that does must decide whether that is acceptable (see
+``docs/NEXT_MILESTONE.md``).
+
 Errors
 ------
 * :class:`ValueError` for invalid *parameters* (``period < 1``,
@@ -73,6 +95,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from numpy.lib.stride_tricks import sliding_window_view
 from pandas.api.types import is_numeric_dtype
 
 from trading_bot.core.exceptions import DataError
@@ -145,6 +168,13 @@ class BollingerBandsResult:
     def to_frame(self) -> pd.DataFrame:
         """Return the three series as one DataFrame (inspection, plotting)."""
         return pd.concat([self.upper, self.middle, self.lower], axis=1)
+
+
+#: The most window elements held at once while a window-only mean is computed: windows are summed
+#: in chunks of ``_WINDOW_BUDGET // period`` rows, so memory is bounded whatever the series' length
+#: and the period. A window's sum is taken along its own row of a C-contiguous block, which does not
+#: depend on how many rows share the block (tested with the budget shrunk to a few rows).
+_WINDOW_BUDGET = 1 << 20
 
 
 # ---------------------------------------------------------------------------
@@ -259,7 +289,10 @@ def sma(series: pd.Series, period: int) -> pd.Series:
     :param series: numeric series, typically a frame's ``close`` column.
     :param period: lookback in bars; must be ``>= 1``.
     :returns: ``float64`` Series named ``sma_<period>``, first ``period - 1``
-        values NaN, sharing ``series``'s index.
+        values NaN, sharing ``series``'s index. A window holding a NaN gives NaN.
+        **Window-only:** a value depends on its own ``period`` inputs and on nothing
+        before them (see the module docstring), so it is the same whatever the
+        buffer's length or start.
     :raises ValueError: if ``period < 1``.
     :raises DataError: if ``series`` is not numeric.
 
@@ -268,8 +301,31 @@ def sma(series: pd.Series, period: int) -> pd.Series:
     """
     _check_period(period)
     values = _numeric_float(series, label="series")
-    result = values.rolling(period, min_periods=period).mean()
-    return result.rename(f"sma_{period}")
+    return pd.Series(
+        _window_mean(values.to_numpy(), period), index=values.index, name=f"sma_{period}"
+    )
+
+
+def _window_mean(values: np.ndarray, period: int) -> np.ndarray:
+    """The mean of each full window, ``NaN`` before the first and for a window holding a ``NaN``.
+
+    Each window is copied into a C-contiguous block and summed along its own row, so the result at
+    a row is a function of that row's ``period`` values alone (pairwise summation within the row,
+    one division by ``period``). The blocks are bounded by :data:`_WINDOW_BUDGET`.
+    """
+    out = np.full(len(values), np.nan, dtype=np.float64)
+    count = len(values) - period + 1
+    if count <= 0:
+        return out
+    rows = max(1, _WINDOW_BUDGET // period)
+    for first in range(0, count, rows):
+        stop = min(first + rows, count)
+        block = np.ascontiguousarray(sliding_window_view(values[first : stop + period - 1], period))
+        # An infinity of each sign in one window sums to NaN, as IEEE says; pandas' rolling mean
+        # does not warn about it either, so neither does this.
+        with np.errstate(invalid="ignore"):
+            out[first + period - 1 : stop + period - 1] = block.sum(axis=1) / period
+    return out
 
 
 def ema(series: pd.Series, period: int) -> pd.Series:

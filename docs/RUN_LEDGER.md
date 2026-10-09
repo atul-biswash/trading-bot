@@ -1737,6 +1737,11 @@ re-masks ATR to NaN long after warmup"* (`config/models.py`). That is true of
 a NaN value in the series and not of a missed bar, which leaves no NaN
 (`M5l-064`).
 
+> **ANNOTATED AT M5m P109 (C3): `sma` NO LONGER USES `values.rolling(period)`.** It is the
+> window-only mean of R-AQ (`indicators.sma`), which also counts rows, not time, so the finding
+> stands: its window still spans a gap. Only the bullet's mechanism changed. `ema`, `rsi` and `atr`
+> are unchanged.
+
 > **ANNOTATED AT M5l (P68, C16): THE REFUSAL TEXT NO LONGER SAYS THAT.** C16
 > replaced it with *"A lost bar leaves no NaN to warn anyone: the indicators
 > count rows, not time, so SMA and ATR silently span the gap."* It also
@@ -3680,6 +3685,14 @@ cause was neither as stated, and the mechanism is not in the trade log.**
   after a restart"* does not hold at a tie, and this is a property of the live path too: the buffer
   after a restart is seeded to a different length. Nothing was changed (the strategy and the
   indicator are not this prompt's), and the question is the owner's. `M5m-184`, `M5m-185`.
+
+> **ANNOTATED AT M5m P109 (C3): THIS BULLET'S TWO CLAIMS ARE NO LONGER TRUE.** *"Nothing was
+> changed ... and the question is the owner's"*: the owner ruled it (R-AQ, R-AX) and `sma` is now
+> window-only, so the strategy's recomputation is identical at every buffer length. And the
+> mechanism's *"the tie is mathematical and the floats differ in the last digit"* was corrected
+> at P108 C1 (section 36): it is the DECIMAL closes that tie, the float64 closes' averages being
+> 9.09e-15 apart. **What survives:** the probe's measurements as taken (`rolling` at 1,000, 831
+> and 543 rows) and the cause named: pandas' running sum.
 
 ### S0e -- the survey test file, 50 bare runs
 
