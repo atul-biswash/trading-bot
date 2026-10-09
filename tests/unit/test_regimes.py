@@ -149,7 +149,8 @@ class TestClassify:
 class TestLabelQuarters:
     def test_a_complete_quarter_is_labelled_from_its_first_open_and_last_close(self) -> None:
         labels = label_quarters(quarter_of_bars("2024Q1", "100", "130"))
-        (label,) = labels
+        assert len(labels) == 1, labels
+        label = labels[0]
         assert label.quarter == "2024Q1"
         assert (label.start, label.end) == (date(2024, 1, 1), date(2024, 4, 1))
         assert (label.bars, label.expected_bars) == (91, 91)
@@ -194,7 +195,9 @@ class TestLabelQuarters:
 
     def test_a_missing_day_makes_the_quarter_partial_with_the_day_named(self) -> None:
         bars = quarter_of_bars("2024Q1", "100", "130", skip=frozenset({date(2024, 2, 10)}))
-        (label,) = label_quarters(bars)
+        labels = label_quarters(bars)
+        assert len(labels) == 1, labels
+        label = labels[0]
         assert label.regime is None and label.complete is False
         assert (label.bars, label.expected_bars) == (90, 91)
         assert label.note == "1 daily bar(s) missing, the first on 2024-02-10"

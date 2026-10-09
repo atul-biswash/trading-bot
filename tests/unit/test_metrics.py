@@ -279,16 +279,10 @@ class TestTheEquityCurve:
         assert (found.drawdown_peak, found.drawdown_trough) == (D(200), D(170))
         assert found.max_drawdown == D("0.15")
 
-    def test_the_comparison_is_exact_where_a_rounded_quotient_would_tie(self) -> None:
-        """1/3 and 1e-30 below 1/3 print the same to 28 digits; cross-multiplying tells them apart."""
-        third_down = D(3)  # 3 -> 2 is a decline of exactly 1/3
-        found = curve(
-            "3",
-            (1, "2", 0),
-            (2, "3000000000000000000000000000000", 0),
-            (3, "2000000000000000000000000000001", 0),
-        )
-        assert (found.drawdown_peak, found.drawdown_trough) == (third_down, D(2))
+    def test_equal_fractions_with_different_amounts_are_a_tie_and_keep_the_first(self) -> None:
+        """3 -> 2 and 300 -> 200 are both exactly a third; the earlier pair stays."""
+        found = curve("3", (1, "2", 0), (2, "300", 0), (3, "200", 0))
+        assert (found.drawdown_peak, found.drawdown_trough) == (D(3), D(2))
         assert found.max_drawdown == D(1) / D(3)
 
     def test_samples_must_not_go_back_in_time_but_may_share_an_instant(self) -> None:
@@ -442,9 +436,9 @@ class TestSharpeAndSortino:
     def test_a_year_of_252_days_would_give_a_different_number(self) -> None:
         sharpe = sharpe_ratio(self.RETURNS)
         assert sharpe is not None
-        assert sharpe.quantize(TWENTY) != (D(1050).sqrt() / D(6)).quantize(
-            TWENTY
-        )  # sqrt(252 * ...)
+        # The same three returns over a 252-day year would give sqrt(3 * 252) / 6.
+        assert sharpe.quantize(TWENTY) != (D(756).sqrt() / D(6)).quantize(TWENTY)
+        assert sharpe.quantize(TWENTY) == (D(1095).sqrt() / D(6)).quantize(TWENTY)
 
     def test_undefined_cases_are_none_and_not_zero(self) -> None:
         assert sharpe_ratio((D("0.02"),)) is None
@@ -681,7 +675,9 @@ class TestTheTradesFile:
         )
         path = tmp_path / "trades.csv"
         path.write_text(self.HEADER + "\n" + row + "\n", encoding="utf-8", newline="")
-        (loaded,) = load_trades_csv(path)
+        rows = load_trades_csv(path)
+        assert len(rows) == 1, rows
+        loaded = rows[0]
         assert loaded == TradeFacts(
             symbol="BTCUSDT",
             entry_time=datetime(2024, 3, 1, 1, tzinfo=timezone.utc),

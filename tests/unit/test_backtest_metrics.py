@@ -64,9 +64,11 @@ class TestTheProbeSamplesThePortfolioAtMarket:
             timeframe="1h",
             open_time=opened,
             close_time=opened + HOUR - timedelta(milliseconds=1),
-            open=D(close),
-            high=D(close),
-            low=D(close),
+            # The open, the high and the low all differ from the close, so a mark taken from any
+            # of them is a different number and a test of the mark can tell them apart.
+            open=D(close) + D(7),
+            high=D(close) + D(11),
+            low=D(close) - D(13),
             close=D(close),
             volume=D(1),
         )
@@ -242,6 +244,7 @@ class TestTheRecordedMetricsCanBeRecomputed:
         result = await run(build_world(tmp_path), regimes=RISING_Q1)
         metrics = block(result, "metrics")
         regimes = metrics["by_regime"]
+        assert isinstance(regimes, dict), regimes
         assert regimes["rising"]["trades"] == metrics["overall"]["trades"]
         assert regimes["falling"]["trades"] == regimes["sideways"]["trades"] == 0
         assert regimes["unlabelled"]["trades"] == 0

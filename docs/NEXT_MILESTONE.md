@@ -949,6 +949,23 @@ where it is money and states its denominator.
 > REAFFIRMED** until the Q2 survey of `metrics.py` has run, and is retired by the commit that
 > records it.
 
+> **ANNOTATED AT M5m P107 (C6b): THE Q2 SURVEY OF `metrics.py` HAS RUN, AND S3'S ARMING CONDITION
+> IS RESOLVED AND RETIRED HERE.** Thirty mutations, in a disposable detached worktree outside the
+> repository, predictions written first (`F:\trading bot\scratch\p107\predictions_survey.txt`),
+> an unmutated baseline of 3147 passed and 4 skipped there, the import location proven in all 30
+> full-suite sessions, every restore byte-identical, and the worktree removed. **Predicted 59
+> kills; observed 98, none fewer.** Twenty-six mutations matched their predicted sets exactly;
+> four killed more (Q02, Q18, Q29, Q30), each through a run-level test in
+> `test_backtest_metrics.py`, `test_backtest_engine.py` or `test_main_backtest.py`, which is real
+> coverage. The two declared equivalents survived, as predicted: touching exposure intervals
+> merged or added (Q11) and the drawdown comparison by 28-digit quotient (Q16; `M5m-207`).
+> Preparing the survey found and fixed three tests that would have mis-scored it (`M5m-208`,
+> `M5m-209`, `M5m-210`). **S3 is closed.** Nothing in the register changes: the condition was
+> parsed in S3's own text, which stands as the record. **What stops being true:** the C6
+> annotation's *"S3's arming condition stays REAFFIRMED until the Q2 survey of `metrics.py` has
+> run"*. **What survives:** C7's recomputation of the smoke run, and Q2's survey of S2's fill
+> model, which ran at P106.
+
 **S4. Calibration against the venue — the backtester's own acceptance test.** Replay
 the strategy over the windows the bot actually traded on Testnet, from S1's data, and
 compare trade by trade with S0's census. **The backtester is trusted only if its

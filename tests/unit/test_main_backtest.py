@@ -248,6 +248,7 @@ class TestTheRegimeLabelsReachTheRecord:
         assert record["regime_labels"] == {"sha256": sidecar.split()[0]}
         metrics = record["metrics"]
         by_regime = metrics["by_regime"]
+        assert isinstance(by_regime, dict), by_regime
         # March 2024 is in 2024Q1, which the committed file labels rising.
         assert by_regime["rising"]["trades"] == metrics["overall"]["trades"] > 0
         assert by_regime["falling"]["trades"] == by_regime["sideways"]["trades"] == 0

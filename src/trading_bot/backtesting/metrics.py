@@ -17,11 +17,15 @@ R-AK: *"The per-trade return and its 95% interval are computed exactly as
 scripts/trade_census.py computes them (z = 1.96, sample sd, return on the entry quote total),
 and parity is proven by test on a shared set of trades."*
 
-**Drawdown is exact because it is compared, not divided.** :class:`EquityCurve` keeps the pair
-(peak, trough) that has the largest decline as a fraction of its peak, and decides whether a new
-sample beats it by cross-multiplying, so no rounded quotient chooses the maximum; the quotient is
-taken once, for the report. The running peak starts at the initial balance, so a run that never
-rises above it still measures its decline from the start.
+**Drawdown is sampled at every bar and compared without a division.** :class:`EquityCurve` keeps
+the pair (peak, trough) that has the largest decline as a fraction of its peak, and decides
+whether a new sample beats it by cross-multiplying; the quotient is taken once, for the report.
+**That is exact while the products fit the ``Decimal`` context, 28 significant digits** -- equity
+below about 1e13 at eight decimals -- and beyond it rounds as a quotient would; within that range a
+28-digit quotient resolves every difference the cross-multiplication does, so the choice buys no
+resolution and only keeps a division out of the per-bar loop (``M5m-207``). The running peak starts
+at the initial balance, so a run that never rises above it still measures its decline from the
+start.
 
 **Definitions the rulings leave open, chosen here (``M5m-200``):**
 

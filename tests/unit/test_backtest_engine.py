@@ -136,7 +136,8 @@ class TestARunIsAResult:
                 "sha256": hashlib.sha256(info_path.read_bytes()).hexdigest(),
             }
         }
-        (pair,) = record["pairs"]  # type: ignore[misc]
+        assert len(record["pairs"]) == 1, record["pairs"]
+        pair = record["pairs"][0]
         assert (
             pair["manifest_sha256"]
             == hashlib.sha256((series / "MANIFEST.jsonl").read_bytes()).hexdigest()
@@ -177,7 +178,8 @@ class TestARunIsAResult:
         result = await run(
             settings, window=window.model_copy(update={"data_dir": str(tmp_path / "hist")})
         )
-        (pair,) = result.record["pairs"]  # type: ignore[misc]
+        assert len(result.record["pairs"]) == 1, result.record["pairs"]
+        pair = result.record["pairs"][0]
         assert pair["bars_served"] == 5 * 24
         assert pair["first_open_time"] == at(19 * 24).isoformat()
 
@@ -485,7 +487,8 @@ class TestARunThatRaisedIsNotAResult:
             monkeypatch.setattr(SimulatedExecutor, "finish", leaky)
             result = await system.run()
         assert not result.complete
-        (problem,) = result.problems
+        assert len(result.problems) == 1, result.problems
+        problem = result.problems[0]
         assert problem.startswith("cash_identity_residual=")
         assert D(problem.split("=")[1]) == -1
         results = result.record["results"]
