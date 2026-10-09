@@ -119,7 +119,15 @@ def make_settings(
     base_currency: str = "USDT",
     start: str = "2024-03-10",
     end: str = "2024-03-31",
+    file_logging: bool = False,
 ) -> Settings:
+    """A config over ``root``. ``file_logging`` turns on the bot's own file sink, at the
+    default relative path ``logs/trading_bot.log``, so a test can prove a command leaves it."""
+    log_block = (
+        "logging:\n  console: false\n  file:\n    enabled: true\n    path: logs/trading_bot.log\n"
+        if file_logging
+        else "logging:\n  console: false\n  file:\n    enabled: false\n"
+    )
     pair_block = "".join(
         f"    - symbol: {symbol}\n      timeframe: {timeframe}\n      enabled: true\n"
         for symbol, timeframe in pairs
@@ -137,7 +145,7 @@ def make_settings(
         "  reconcile_deadline_s: 2.3\n"
         "backtesting:\n"
         f"  start_date: '{start}'\n  end_date: '{end}'\n  data_dir: {root.as_posix()}\n"
-        "logging:\n  console: false\n  file:\n    enabled: false\n",
+        + log_block,
         encoding="utf-8",
     )
     get_settings.cache_clear()
@@ -145,11 +153,20 @@ def make_settings(
 
 
 def build_world(
-    tmp_path: Path, *, omit: frozenset[int] = frozenset(), symbols: tuple[str, ...] = ("BTCUSDT",)
+    tmp_path: Path,
+    *,
+    omit: frozenset[int] = frozenset(),
+    symbols: tuple[str, ...] = ("BTCUSDT",),
+    file_logging: bool = False,
 ) -> Settings:
     """A store of every symbol's March, a mainnet snapshot for each, and a config naming them."""
     root = tmp_path / "hist"
     for index, symbol in enumerate(symbols):
         store_series(root, symbol, omit=omit, shift=index)
         store_snapshot(root, "mainnet", symbol, exchange_info(symbol))
-    return make_settings(tmp_path, root, pairs=tuple((symbol, "1h") for symbol in symbols))
+    return make_settings(
+        tmp_path,
+        root,
+        pairs=tuple((symbol, "1h") for symbol in symbols),
+        file_logging=file_logging,
+    )

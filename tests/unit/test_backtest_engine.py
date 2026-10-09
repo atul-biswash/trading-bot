@@ -441,6 +441,39 @@ class TestWriteRun:
         with pytest.raises(FileExistsError):
             write_run(result, tmp_path / "out")
 
+    async def test_a_directory_the_caller_made_can_be_filled_and_keeps_what_it_held(
+        self, tmp_path: Path
+    ) -> None:
+        """The command makes the directory first, for its log; `existing=True` fills it."""
+        result = await run(build_world(tmp_path))
+        directory = tmp_path / "out"
+        directory.mkdir()
+        (directory / "backtest.log").write_bytes(b"a log line\n")
+        run_path, trades_path = write_run(result, directory, existing=True)
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "backtest.log",
+            "run.json",
+            "trades.csv",
+        ]
+        assert (directory / "backtest.log").read_bytes() == b"a log line\n"
+        assert (run_path.parent, trades_path.parent) == (directory, directory)
+
+    async def test_existing_requires_the_directory_to_exist(self, tmp_path: Path) -> None:
+        result = await run(build_world(tmp_path))
+        with pytest.raises(FileNotFoundError):
+            write_run(result, tmp_path / "never-made", existing=True)
+        assert not (tmp_path / "never-made").exists()
+
+    async def test_existing_never_overwrites_a_record_already_there(self, tmp_path: Path) -> None:
+        result = await run(build_world(tmp_path))
+        directory = tmp_path / "out"
+        directory.mkdir()
+        (directory / "run.json").write_bytes(b"an earlier record\n")
+        with pytest.raises(FileExistsError):
+            write_run(result, directory, existing=True)
+        assert (directory / "run.json").read_bytes() == b"an earlier record\n"
+        assert not (directory / "trades.csv").exists()
+
     async def test_a_run_with_no_trade_still_writes_the_columns(self, tmp_path: Path) -> None:
         settings = build_world(tmp_path)
         window = settings.config.backtesting.model_copy(

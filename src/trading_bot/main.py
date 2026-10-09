@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import signal
 import sys
@@ -39,7 +40,7 @@ from trading_bot.config.settings import (
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.exceptions import ConfigError, LiveTradingBlockedError, TradingBotError
 from trading_bot.utils.helpers import utc_now
-from trading_bot.utils.logger import get_logger, setup_logging
+from trading_bot.utils.logger import DeferredFileHandler, get_logger, setup_logging
 from trading_bot.utils.provenance import Provenance, collect_provenance, refusal_message
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -212,16 +213,42 @@ def _resolve_window(
         raise ConfigError(f"Invalid backtest window: {exc}") from exc
 
 
+BACKTEST_LOG_NAME = "backtest.log"
+
+
+def _seal_run_directory(run_log: DeferredFileHandler, working: Path, suffix: str) -> None:
+    """Close the run's log and rename its working directory, best effort.
+
+    Used when a run did not finish: the directory holds only its log, and a name ending in
+    ``suffix`` says so. A rename that fails (an antivirus scan, a name already taken) leaves
+    the ``-running`` name, which is still true.
+    """
+    run_log.close_file()
+    with contextlib.suppress(OSError):
+        working.rename(working.with_name(working.name.removesuffix("-running") + f"-{suffix}"))
+
+
 def _cmd_backtest(
-    settings: Settings, start: date | None, end: date | None, symbols: list[str] | None
+    settings: Settings,
+    start: date | None,
+    end: date | None,
+    symbols: list[str] | None,
+    run_log: DeferredFileHandler,
 ) -> int:
     """Replay the window, write the run record, and say whether it is a result.
 
     The window the run used is the RESOLVED one -- the flags laid over the config -- and it is
     what the record names. Returns 1 for a run that is not a result: a handler failure, an
     ERROR logged, a pair that served nothing, or a cash identity that does not close.
+
+    **The log (R-AG) goes to ``<run directory>/backtest.log`` and nowhere else on disk**:
+    ``main`` has switched the config's file sink off for this command and attached
+    ``run_log``, which has held every record since the banner. The directory is made, and the
+    log opened, only after the window and the symbols are validated, so a refusal leaves no
+    directory. It is made as ``<stamp>-running`` and renamed to ``<stamp>-<digest>`` once the
+    record is written, or to ``<stamp>-failed`` if the run raised.
     """
-    from trading_bot.backtesting.engine import run_backtest, write_run
+    from trading_bot.backtesting.engine import run_backtest, select_pairs, write_run
 
     log = get_logger(__name__)
     window = _resolve_window(settings.config.backtesting, start, end)
@@ -231,23 +258,35 @@ def _cmd_backtest(
         window.end_date,
         "all enabled" if symbols is None else ",".join(symbols),
     )
-    result = asyncio.run(run_backtest(settings, window=window, symbols=symbols))
+    select_pairs(settings, symbols)  # refuse an unenabled symbol before any directory exists
     # Microseconds, so two runs of one history started within a second do not name one directory.
     stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
-    directory = (
-        Path(window.data_dir).parent / "backtests" / f"{stamp}-{result.trade_log_sha256[:12]}"
-    )
-    run_path, trades_path = write_run(result, directory)
-    log.info(
-        "Backtest %s: %d trade(s), trade log %s; record %s, trades %s",
-        "complete" if result.complete else "INCOMPLETE",
-        len(result.trades),
-        result.trade_log_sha256,
-        run_path,
-        trades_path,
-    )
-    for problem in result.problems:
-        log.error("Backtest problem: %s", problem)
+    base = Path(window.data_dir).parent / "backtests"
+    working = base / f"{stamp}-running"
+    base.mkdir(parents=True, exist_ok=True)
+    working.mkdir()
+    run_log.open(working / BACKTEST_LOG_NAME)
+    try:
+        result = asyncio.run(run_backtest(settings, window=window, symbols=symbols))
+        final = base / f"{stamp}-{result.trade_log_sha256[:12]}"
+        write_run(result, working, existing=True)
+        log.info(
+            "Backtest %s: %d trade(s), trade log %s; record %s, trades %s, log %s",
+            "complete" if result.complete else "INCOMPLETE",
+            len(result.trades),
+            result.trade_log_sha256,
+            final / "run.json",
+            final / "trades.csv",
+            final / BACKTEST_LOG_NAME,
+        )
+        for problem in result.problems:
+            log.error("Backtest problem: %s", problem)
+    except BaseException as exc:
+        log.error("Backtest aborted: %s: %s", type(exc).__name__, exc)
+        _seal_run_directory(run_log, working, "failed")
+        raise
+    run_log.close_file()
+    working.rename(final)
     return 0 if result.complete else 1
 
 
@@ -291,7 +330,30 @@ def main(argv: list[str] | None = None) -> int:
     except LiveTradingBlockedError:
         raise SystemExit(LIVE_TRADING_BLOCKED_MESSAGE) from None
 
-    setup_logging(settings.config.logging)
+    # R-AG: a backtest logs only to a file in its own run directory, never to the bot's
+    # `logs/trading_bot.log`. So for `backtest` the config's file sink is switched off and a
+    # deferred handler holds every record until `_cmd_backtest` has made the directory.
+    run_log: DeferredFileHandler | None = None
+    logging_config = settings.config.logging
+    if args.command == "backtest":
+        no_file = logging_config.file.model_copy(update={"enabled": False})
+        setup_logging(logging_config.model_copy(update={"file": no_file}))
+        run_log = DeferredFileHandler(json_format=logging_config.file.json_format)
+        logging.getLogger().addHandler(run_log)
+    else:
+        setup_logging(logging_config)
+    try:
+        return _dispatch(args, settings, run_log)
+    finally:
+        if run_log is not None:
+            logging.getLogger().removeHandler(run_log)
+            run_log.close()
+
+
+def _dispatch(
+    args: argparse.Namespace, settings: Settings, run_log: DeferredFileHandler | None
+) -> int:
+    """Log the banner and the provenance line, then run the subcommand."""
     log = get_logger(__name__)
     log.info("%s", _BANNER)
     facts = collect_provenance(settings.config_path, settings.config_sha256)
@@ -303,7 +365,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "run":
             return _cmd_run(settings, args.mode)
         if args.command == "backtest":
-            return _cmd_backtest(settings, args.start, args.end, args.symbols)
+            if run_log is None:  # main attaches it for exactly this command
+                raise RuntimeError("backtest dispatched without its run log")
+            return _cmd_backtest(settings, args.start, args.end, args.symbols, run_log)
         if args.command == "strategies":
             return _cmd_strategies()
     except LiveTradingBlockedError:

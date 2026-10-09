@@ -247,6 +247,76 @@ def setup_logging(config: LoggingConfig) -> None:
     _configured = True
 
 
+class DeferredFileHandler(logging.Handler):
+    """Holds records until a file is chosen, then writes them and everything after.
+
+    A backtest names its log only once its run directory exists, which is after its
+    arguments are validated -- but the banner and the provenance line are logged before
+    that, and they are the lines that say which code ran. So the command attaches this
+    handler at its first line, and :meth:`open` flushes what was held into the file the
+    moment the directory is made. A command that is refused before it opens a file
+    leaves nothing on disk, and the held records are dropped with the handler.
+
+    **The file is created with mode ``x``**: a log is never appended to, and an existing
+    path is an error rather than an overwrite. At most ``capacity`` records are held;
+    any beyond it are counted in :attr:`dropped` and not written.
+    """
+
+    def __init__(self, *, json_format: bool, capacity: int = 100_000) -> None:
+        super().__init__()
+        self.setFormatter(
+            JsonFormatter() if json_format else PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT)
+        )
+        self._capacity = capacity
+        self._held: list[logging.LogRecord] = []
+        self._file: logging.FileHandler | None = None
+        self._closed_file = False
+        self.dropped = 0
+
+    @property
+    def is_open(self) -> bool:
+        """True from :meth:`open` until :meth:`close_file`."""
+        return self._file is not None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if self._file is not None:
+            self._file.handle(record)
+        elif self._closed_file:
+            return  # the file was sealed; nothing after it is written anywhere
+        elif len(self._held) < self._capacity:
+            self._held.append(record)
+        else:
+            self.dropped += 1
+
+    def open(self, path: Path) -> None:
+        """Create ``path``, write the held records into it, and write every later one.
+
+        :raises ValueError: a file is already open, or was opened and sealed.
+        :raises FileExistsError: ``path`` exists.
+        """
+        if self._file is not None or self._closed_file:
+            raise ValueError("this handler's file has already been opened")
+        file_handler = logging.FileHandler(path, mode="x", encoding="utf-8")
+        file_handler.setFormatter(self.formatter)
+        for record in self._held:
+            file_handler.handle(record)
+        self._held.clear()
+        self._file = file_handler
+
+    def close_file(self) -> None:
+        """Flush and close the file; records after this are dropped. Idempotent."""
+        if self._file is not None:
+            self._file.flush()
+            self._file.close()
+            self._file = None
+            self._closed_file = True
+
+    def close(self) -> None:
+        self.close_file()
+        self._held.clear()
+        super().close()
+
+
 def get_logger(name: str) -> logging.Logger:
     """Return a module logger. Falls back to a basic config if setup was skipped.
 

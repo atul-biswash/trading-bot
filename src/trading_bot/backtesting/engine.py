@@ -97,6 +97,7 @@ __all__ = [
     "backtest_system",
     "record_digest",
     "run_backtest",
+    "select_pairs",
     "write_run",
 ]
 
@@ -259,7 +260,13 @@ def _default_code_facts(settings: Settings) -> CodeFacts:
     return collect
 
 
-def _select_pairs(settings: Settings, symbols: Sequence[str] | None) -> list[PairConfig]:
+def select_pairs(settings: Settings, symbols: Sequence[str] | None) -> list[PairConfig]:
+    """The enabled pairs a run replays: all of them, or the named ones.
+
+    Public so a command can refuse an unenabled symbol BEFORE it makes a run directory.
+
+    :raises ConfigError: a named symbol is not an enabled pair.
+    """
     enabled = settings.config.trading.enabled_pairs
     if symbols is None:
         return list(enabled)
@@ -298,7 +305,7 @@ async def backtest_system(
     """
     resolved_window = window if window is not None else settings.config.backtesting
     config = settings.config
-    selected = _select_pairs(settings, symbols)
+    selected = select_pairs(settings, symbols)
     effective = Settings(
         config.model_copy(
             update={"trading": config.trading.model_copy(update={"pairs": selected})}
@@ -559,18 +566,28 @@ def record_digest(record: Mapping[str, object]) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-def write_run(result: BacktestResult, directory: Path) -> tuple[Path, Path]:
-    """Write ``run.json`` and ``trades.csv`` into a NEW ``directory``; return their paths.
+def write_run(
+    result: BacktestResult, directory: Path, *, existing: bool = False
+) -> tuple[Path, Path]:
+    """Write ``run.json`` and ``trades.csv`` into ``directory``; return their paths.
 
-    :raises FileExistsError: ``directory`` exists, so no earlier run is overwritten.
+    By default ``directory`` must be NEW. With ``existing=True`` it must already exist, as
+    the directory a command made to hold its own log does; either way each file is created
+    with mode ``x``, so no earlier run's file is ever overwritten.
+
+    :raises FileExistsError: ``directory`` exists (default), or one of the two files does.
+    :raises FileNotFoundError: ``existing`` is set and ``directory`` does not exist.
     """
-    directory.mkdir(parents=True, exist_ok=False)
+    if existing:
+        if not directory.is_dir():
+            raise FileNotFoundError(directory)
+    else:
+        directory.mkdir(parents=True, exist_ok=False)
     run_path = directory / "run.json"
-    run_path.write_text(
-        json.dumps(result.record, sort_keys=True, indent=2) + "\n", encoding="utf-8", newline="\n"
-    )
+    with run_path.open("x", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(result.record, sort_keys=True, indent=2) + "\n")
     trades_path = directory / "trades.csv"
-    with trades_path.open("w", encoding="utf-8", newline="") as handle:
+    with trades_path.open("x", encoding="utf-8", newline="") as handle:
         # The header is the dataclass's, so a run with no trade still writes the columns.
         names = [field.name for field in dataclasses.fields(SimulatedTrade)]
         writer = csv.DictWriter(handle, fieldnames=names, lineterminator="\n")

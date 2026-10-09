@@ -839,6 +839,24 @@ that first multiplies it by money"*.
 > annotation named above. **What survives:** every S2 ruling, S3's list, and the arming
 > conditions.
 
+> **ANNOTATED AT M5m P107 (C1): R-AG IS CARRIED OUT -- A BACKTEST LOGS ONLY TO A FILE IN ITS
+> OWN RUN DIRECTORY.** For the `backtest` command `main` switches the config's file sink off
+> and attaches `DeferredFileHandler` (`utils/logger.py`), which holds every record from the
+> banner on. `_cmd_backtest` validates the window and the symbols first, so a refusal leaves
+> no directory and no file; then it makes `<stamp>-running`, opens `backtest.log` in it (mode
+> `x`, so no log is appended to) and the handler writes the held records and every later one.
+> The run record is written beside it, the log is closed and the directory is renamed to
+> `<stamp>-<trade-log digest>`; a run that raises is renamed `<stamp>-failed` and keeps its log
+> with the error in it. The console sink is unchanged, since R-AG names files. Pinned by
+> `tests/unit/test_main_backtest.py::TestTheLogStaysInTheRunDirectory` (a control arm proves
+> the config does write `logs/trading_bot.log` for `strategies`, so the untouched file is not
+> merely untouched because logging is off) and 11 tests of the handler. **What stops being
+> true:** the P106 C5 annotation's *"writes the run record into a new directory"* as a
+> statement that the directory is made after the run; it is now made before it and renamed.
+> `write_run` gained `existing=` for this, and `select_pairs` in `backtesting/engine.py` is
+> public so the command can refuse an unenabled symbol before it makes anything. **What
+> survives:** the directory's final name, the record, `trades.csv`, and the console output.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`

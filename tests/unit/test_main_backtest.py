@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
+from collections.abc import Iterator
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 
 import trading_bot.main as cli
-from tests.unit.backtest_world import WINDOW_BARS, at, build_world
+from tests.unit.backtest_world import WINDOW_BARS, at, build_world, make_settings, store_series
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import Settings
 from trading_bot.core.exceptions import ConfigError
+from trading_bot.utils.logger import setup_logging as real_setup_logging
 
 
 @pytest.fixture(autouse=True)
@@ -190,3 +193,95 @@ class TestTheCommand:
         assert first.name[:15] == second.name[:15] == "20261008T120000"
         assert first.name != second.name
         assert (first / "trades.csv").read_bytes() == (second / "trades.csv").read_bytes()
+
+
+@pytest.fixture
+def real_logging(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
+    """The real ``setup_logging``, run from ``tmp_path`` so ``logs/trading_bot.log`` resolves
+    there; the root logger is put back as it was. Yields the bot's log path, which may not exist."""
+    root = logging.getLogger()
+    saved_handlers, saved_level = list(root.handlers), root.level
+    monkeypatch.setattr(cli, "setup_logging", real_setup_logging)
+    monkeypatch.chdir(tmp_path)
+    yield tmp_path / "logs" / "trading_bot.log"
+    for handler in list(root.handlers):
+        root.removeHandler(handler)
+        if handler not in saved_handlers:
+            handler.close()
+    for handler in saved_handlers:
+        root.addHandler(handler)
+    root.setLevel(saved_level)
+
+
+class TestTheLogStaysInTheRunDirectory:
+    """R-AG: a backtest logs only to a file in its own run directory."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def test_the_bot_log_is_the_file_a_non_backtest_command_writes(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        """The control arm: with this config `strategies` DOES write `logs/trading_bot.log`, so
+        the untouched file in the next test is not untouched merely because logging is off."""
+        build_world(tmp_path, file_logging=True)
+        assert cli.main(["--config", str(tmp_path / "bt_config.yaml"), "strategies"]) == 0
+        assert real_logging.is_file()
+        assert "boot_provenance" in real_logging.read_text(encoding="utf-8")
+
+    def test_a_backtest_leaves_the_bot_log_exactly_as_it_found_it(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        build_world(tmp_path, file_logging=True)
+        real_logging.parent.mkdir()
+        sentinel = b"the bot's own line, written before the backtest\n"
+        real_logging.write_bytes(sentinel)
+        stamp_before = real_logging.stat().st_mtime_ns
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        assert real_logging.read_bytes() == sentinel
+        assert real_logging.stat().st_mtime_ns == stamp_before
+        assert sorted(p.name for p in real_logging.parent.iterdir()) == ["trading_bot.log"]
+
+    def test_the_run_directory_holds_the_whole_log_from_the_banner_on(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        build_world(tmp_path, file_logging=True)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        directory = only_record(tmp_path)
+        assert sorted(p.name for p in directory.iterdir()) == [
+            "backtest.log",
+            "run.json",
+            "trades.csv",
+        ]
+        text = (directory / "backtest.log").read_text(encoding="utf-8")
+        # The banner and the provenance line were logged BEFORE the directory existed.
+        assert "event=boot_provenance" in text
+        assert "event=intent_dispatched" in text
+        assert text.index("event=boot_provenance") < text.index("Backtest window:")
+        assert text.index("Backtest window:") < text.index("event=intent_dispatched")
+        assert "Backtest complete" in text
+        assert str(directory / "run.json") in text
+
+    def test_a_refusal_before_the_run_writes_no_file_at_all(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        build_world(tmp_path, file_logging=True)
+        assert cli.main(argv(tmp_path, "--symbols", "DOGEUSDT")) == 1
+        assert records(tmp_path) == []
+        assert not real_logging.parent.exists()
+        assert list(tmp_path.rglob("*.log")) == []
+
+    def test_a_run_that_raises_keeps_its_log_in_a_failed_directory(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        root = tmp_path / "hist"
+        store_series(root, "BTCUSDT")  # a store and no exchangeInfo snapshot
+        make_settings(tmp_path, root, file_logging=True)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 1
+        directory = only_record(tmp_path)
+        assert directory.name.endswith("-failed")
+        assert sorted(p.name for p in directory.iterdir()) == ["backtest.log"]
+        text = (directory / "backtest.log").read_text(encoding="utf-8")
+        assert "Backtest aborted: ConfigError" in text
+        assert "download_exchange_info" in text
+        assert "event=boot_provenance" in text
+        assert not real_logging.parent.exists()
