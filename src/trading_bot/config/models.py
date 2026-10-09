@@ -267,8 +267,13 @@ class RiskConfig(_Model):
     #: multiplies a price.
     #:
     #: **The upper bound is a ceiling on absurdity, not a supported range.** The
-    #: measured ``PERCENT_PRICE_BY_SIDE`` band is 0.5x-2x of a 5-minute average,
-    #: so a working price far above the recent average is itself band-refusable
+    #: measured ``PERCENT_PRICE_BY_SIDE`` band is asymmetric: a buy's price may sit
+    #: between 0.5x and 1.2x of a 5-minute average and a sell's between 0.8x and
+    #: 2x (``bidMultiplierDown`` / ``bidMultiplierUp`` / ``askMultiplierDown`` /
+    #: ``askMultiplierUp``; ``docs/RUN_LEDGER.md`` section 31, equal on both
+    #: environments on 2026-10-08, and on Testnet again on 2026-10-09). The
+    #: symmetric 2x-and-0.5x reading this comment used to give was the one of
+    #: 2026-08-08. So a working price far above the recent average is itself band-refusable
     #: -- and a band violation refuses the **whole order list**, entry and both
     #: protective legs together, not gracefully. Anything approaching ``0.05`` is
     #: already in that territory and is asking for a market order in disguise.

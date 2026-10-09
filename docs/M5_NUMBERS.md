@@ -135,6 +135,24 @@ JSON number, value `5`, on **both** configured symbols. So does the band itself 
 **TESTNET**, BTCUSDT and ETHUSDT, 2026-08-08, read-only, no order placed.* The
 same `avgPriceMins: 5` appears on `NOTIONAL`.
 
+> **ANNOTATED AT M5m P109 (C1), BY THE OWNER'S RULING R-AU: THE BAND IS NOT 0.5x-2x, AND IT IS
+> NOT SYMMETRIC.** R-AU, verbatim: *"The stale 0.5x-2x band text (P107 S0b) is annotated in
+> docs/M5_NUMBERS.md and docs/QC_PROTECTIVE_ORDERS.md and corrected in the config/models.py
+> comment. The test fixture is left as data."* **MEASURED**, from the raw `exchangeInfo`
+> responses stored at P105 C3 (`docs/RUN_LEDGER.md` section 31): on 2026-10-08, on Testnet and
+> on mainnet alike, `bidMultiplierUp` is `1.2`, `bidMultiplierDown` `0.5`, `askMultiplierUp`
+> `2` and `askMultiplierDown` `0.8`, over `avgPriceMins` 5; and on Testnet again, equal in
+> every filter, on 2026-10-09 (section 36). So a buy's price must lie between 0.5x and 1.2x of
+> the 5-minute average and a sell's between 0.8x and 2x. **What stops being true:** this
+> section's *"The band is 0.5x-2x of the 5-minute average"*, and the paragraph's
+> *"`bidMultiplierUp` / `askMultiplierUp` `"2"` and `bidMultiplierDown` / `askMultiplierDown`
+> `"0.5"`"*, which is what Testnet answered on 2026-08-08: the up multiplier of a bid and the
+> down multiplier of an ask have since changed. **What survives:** the four-field shape, the
+> five minutes, the provenance of the 2026-08-08 reading as dated, and the status of the
+> margin, **PLACEHOLDER -- NOT MEASURED**. The `SYMBOL_FULL_TESTNET` fixture in
+> `tests/unit/test_exchange_mappers.py` and the 2 / 0.5 assertions in
+> `tests/unit/test_exchange_info.py` are left as data, by the same ruling.
+
 **This changes nothing about §2's status, and the distinction is the point:
 measuring the INTERVAL did not measure the SERIES.** What is now measured is *how
 many minutes* of average the filter uses. What remains unestablished is *which

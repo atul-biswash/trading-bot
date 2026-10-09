@@ -42,6 +42,20 @@ dummy never-filling leg is impossible — `PERCENT_PRICE_BY_SIDE` bounds every
 pending price to 0.5x-2x of the 5-minute average, enforced at submission, with a
 violation refusing the whole list (MEASURED, S4). The arity branch is irreducible.
 
+> **ANNOTATED AT M5m P109 (C1), BY THE OWNER'S RULING R-AU: *"0.5x-2x of the 5-minute average"*
+> IS NOT THE BAND THE VENUE NOW STATES.** R-AU, verbatim: *"The stale 0.5x-2x band text (P107
+> S0b) is annotated in docs/M5_NUMBERS.md and docs/QC_PROTECTIVE_ORDERS.md and corrected in the
+> config/models.py comment. The test fixture is left as data."* MEASURED (`docs/RUN_LEDGER.md`
+> section 31, and section 36 for Testnet on 2026-10-09): `bidMultiplierUp` 1.2,
+> `bidMultiplierDown` 0.5, `askMultiplierUp` 2, `askMultiplierDown` 0.8, over 5 minutes, on both
+> environments. **What survives, and it is this paragraph's argument:** the band bounds every
+> pending price relative to the 5-minute average, a violation refuses the whole list, and
+> therefore a dummy never-filling leg is impossible and the arity branch is irreducible. None of
+> that depends on the multipliers' values. Only the numbers `0.5x-2x` are replaced: a buy's
+> price lies in 0.5x to 1.2x of the average, a sell's in 0.8x to 2x. The protective legs are
+> sells, so their upper bound is the 2x of the ask side; the entry is a buy, so its upper bound
+> is 1.2x.
+
 | Config | Shape | Endpoint |
 |---|---|---|
 | stop + TP | OTOCO, 3 legs | `v3_post_order_list_otoco` |

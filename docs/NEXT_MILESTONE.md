@@ -1049,6 +1049,99 @@ takes and the bot did not is a finding about one of them.
 > (`M5m-131`). **What survives:** S4's acceptance test as written, *"Divergence is diagnosed,
 > never tuned away"*, and the census of record.
 
+> **ANNOTATED AT M5m P109 (C1), BY THE OWNER'S RULINGS R-AM TO R-BB: S4 IS MEASURED BY A FRESH
+> TESTNET RUN WHOSE KLINES WE RECORD OURSELVES.** The rulings, verbatim. R-AM to R-AU were ruled in
+> P108 and R-AV to R-BB in P109.
+>
+> R-AM: "S4 is measured by option (c). The census of record's window, 2026-09-04 to 2026-09-25, is
+> unmeasurable in retrospect, because Testnet's kline history now begins 2026-10-07 (P107 S0f). The
+> census of record stays the evidence for M5m's premise and is no longer S4's comparison set."
+>
+> R-AN: "A keyless recorder stores Testnet 1m and 5m klines for the configured pairs, in the
+> archive's normalised format with a manifest, under a store root separate from the mainnet store.
+> It runs at least daily and backfills from its last stored bar, so a power cut or a venue reset
+> cannot take a recorded window with it."
+>
+> R-AO: "S4's acceptance is pre-registered in a committed file before the run starts: the fixed
+> start instant, the stop rule, R-C's figures (entries reproduced on the same symbol and entry bar,
+> at least 80%; the backtester's per-trade gross mean inside the run's census interval; the trade
+> count within 10%) and R-C2's refusal comparison, with the backtest's parameters for the
+> comparison. Nothing in it changes after the start."
+>
+> R-AP: "The S4 run uses a deployment clone of a pushed commit, the committed config and Testnet,
+> under the deployment procedure, and is recorded in RUN_LEDGER.md. Every restart during it,
+> including one after a power cut, is recorded and is part of the evidence."
+>
+> R-AQ: "The exact-tie dependence of an indicator on buffer length (M5m-184, M5m-185) is a defect
+> against CLAUDE.md's stateless-recomputation rule. It is fixed, and the fix pushed, before the S4
+> run starts."
+>
+> R-AR: "A backtest run record carries evidence_eligible, true only when the provenance verdict is
+> accepted. Every S4 to S7 comparison or decision refuses a record whose evidence_eligible is
+> false."
+>
+> R-AS: "During a backtest the console carries WARNING and above; the full log goes to the run
+> directory's file."
+>
+> R-AT: "M5m-194 and M5m-200 are ratified: a trade in a partial quarter belongs to no regime, and
+> S7's regime test counts complete quarters only."
+>
+> R-AU: "The stale 0.5x-2x band text (P107 S0b) is annotated in docs/M5_NUMBERS.md and
+> docs/QC_PROTECTIVE_ORDERS.md and corrected in the config/models.py comment. The test fixture is
+> left as data."
+>
+> R-AV: "Clearing the Testnet BTC and ETH holdings with scripts/clear_testnet_holdings.py is
+> authorised once, in P110, before the pre-registration commit. Equity is about 95,190 with or
+> without it, because pre-existing holdings count toward equity; the clearing only unblocks
+> entries."
+>
+> R-AW: "The recorder commits come immediately after the docs commit. The recorder runs from its own
+> clone of a pushed commit, outside F:\trading bot\deploy, with no .env. It is keyless and touches
+> no account, so the one-runnable-clone check over F:\trading bot\deploy is unchanged."
+>
+> R-AX: "No tie tolerance is added. sma becomes the window-only computation of P108 C2. A tolerance
+> is strategy research and belongs to S6 if anywhere."
+>
+> R-AY: "The S4 run stops at the first UTC midnight that is at least T0 plus 21 days and has at least
+> 150 bookings since T0, with a cap at T0 plus 35 days. At the cap S4 is evaluated if at least 100
+> bookings exist; otherwise it is not measured, and a new pre-registration is required. T0 is the
+> boot_provenance instant of the S4 clone's first boot, which must come after the pre-registration
+> commit."
+>
+> R-AZ: "A venue reset during the run ends the run at the reset. S4 is evaluated on the bookings
+> before it if there are at least 100; otherwise the run restarts under a new pre-registration."
+>
+> R-BA: "R-C2 is diagnostic: every refusal disagreement is listed and diagnosed, and it is not a
+> separate gate. Its effect is gated through R-C's trade-count test."
+>
+> R-BB: "The pre-registration states the predicted entry notional at the post-clear equity and the
+> census of record's median entry quote total. If they differ by more than 2x, the owner reviews
+> before launch."
+>
+> **What stops being true:**
+> - S4's own text, *"Replay the strategy over the windows the bot actually traded on Testnet ...
+>   and compare trade by trade with S0's census"*, and the P99 annotation's *"S4 calibrates on
+>   Testnet klines, for the windows the census covers"*: the comparison set is the fresh run's
+>   (R-AM), not the census of record's.
+> - The P101 annotation's figures as S4's gates, the per-trade gross mean inside
+>   [-0.2223%, +0.0941%] and a trade count of 149 to 181: R-C's tests stand, but against
+>   **the run's own** census interval and **the run's own** booked count (R-AO). The census of
+>   record stays the evidence for M5m's premise. The 80% reproduction test is unchanged.
+> - R-C2's *"a second test"*: it is diagnostic and not a separate gate (R-BA), and its effect
+>   is gated through the trade-count test.
+> - *"S4 depends on Testnet klines, whose retention is UNMEASURED (`M5m-032`)"*: measured
+>   (`docs/RUN_LEDGER.md` section 33, S0f, and section 36): history begins 2026-10-07T10:30Z and
+>   had not rolled between two readings an hour apart.
+> - **T0 is not a pre-registered calendar instant** (R-AY): it is the `boot_provenance` instant of
+>   the S4 clone's first boot, after the pre-registration commit. P108's draft fixed it at a UTC
+>   midnight; that draft is superseded where it differs.
+>
+> **What survives:** *"Divergence is diagnosed, never tuned away"*, R-C's 80% reproduction test,
+> R-B2's 1.20% stop slippage as the gate arm, the Testnet `exchangeInfo` snapshot (R-Z), and the
+> arming condition. **Where each ruling is carried out:** R-AN in the recorder commits (P109 C2),
+> R-AQ and R-AX in C3, R-AR and R-AS in C4, R-AU in this commit, R-AV in P110, and R-AO, R-AY,
+> R-AZ, R-BA and R-BB in the pre-registration commit.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

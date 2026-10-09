@@ -3891,3 +3891,145 @@ P106's 1,114,155).
 | `bench_probe_c7.py` (the scratchpad) | `f47e0826d29b8197ea22e9e20b6d5ea24aae3944471f56aa0f38724cbd140bb1` |
 | `run.json` of the run | `7c98ee33dbb75335c317b99f394e8b6c39d7bb9d455f635c08b707c1a06d7ad1` |
 | `backtest.log` of the run (751,361 bytes) | `639f2a82d2f9bcc6f2322d1f362efc172febf193bd2f3b5c32745910f1f35a94` |
+
+## 36. M5m S4: P108 Phase 1's measurements -- the account, the snapshot, the retention, the klines weight, the tie and the indicators
+
+Recorded at M5m P109 (C1). An observation log, so this section only adds. P108 was a Phase 1: it
+changed nothing in the tree and launched nothing, and everything below was read on
+**2026-10-09** with `HEAD` at `df3dd214353ac8dd4f66b3da19fe0f06a43687fd` (equal to `origin/main`).
+Predictions: `F:\trading bot\scratch\p108\predictions_p108_halts_and_partA.txt`, SHA-256
+`977ec0bbcf60225de2e72d081b279ace7266a03243224fa711f8dce67143c70d`, written before any of it ran.
+**All six halts held**: HEAD as predicted; `origin/main` equal to HEAD with 0 ahead (the "or" branch of
+the prediction: the owner had pushed); the tree clean; ping `200` at `2026-10-09T18:07:21Z`; the gate
+173 / 92 / 3150 passed, 1 skipped in `gate_h5.txt` (SHA-256
+`3227ed73792e2cd4d3139cc6667966af8835e075fdddd2a52898369dc8354476`); the findings audit M5m-001 to
+M5m-219, gapless, blockless `[934eb45]`.
+
+### A1 -- the active deployment clone and its store
+
+`F:\trading bot\deploy\51a5f2711a09` is the only directory under `deploy` with a runnable
+`.venv\Scripts\python.exe`; its `HEAD` is `51a5f2711a0984697a915b192bb481f65949567f` with a clean tree.
+`data/state.json` (2,010 bytes, SHA-256 `1f91fc4335a3d62899ae9ba430aa6abd41a6f4468a0605ba5b252143f7677396`,
+schema 2) holds **`"positions": []` and `"pending": []`**: no position record, no pending placement and
+no held record. Its ledger is 21 days of `daily_history` (2026-09-10 to 2026-10-04), today's ledger
+(`pnl_date` 2026-10-05, `realised_pnl` 3.95683720, 3 trades) and `lifetime_realised` -432.76307650. The
+last run ended `2026-10-05T05:07:02Z` with *"Received SIGINT; shutting down gracefully"* and
+`engine_stopped clean_shutdown=True` at `05:07:03Z`. `logs/.bot.lock` holds the text `27224`, a stale
+pid, which does not matter: the lock is an OS-level file lock. **Predicted zero records, and it held.**
+After a venue reset a record would meet the first row of `restoration.py`'s decision table, *"no list
+carries our id"*, and refuse the boot; there is none, so no release step is needed.
+
+### A2 -- the account (`scripts/check_testnet.py`, read-only, from that clone)
+
+`a2_check_testnet.txt` (2,519 bytes, SHA-256
+`0710776a276789144580e1437edbbb938cb50304cb29ae84b275151889478ab8`), `2026-10-09T18:11:29Z`:
+**517 assets** with a non-zero balance; **BTC free 1.00000000, ETH free 1.00000000, USDT free
+10000.00000000**; BTCUSDT last 82,702.01, ETHUSDT last 2,487.92. **Both holdings are reported
+*"BLOCKS entries"*** (82,702 and 2,487.92 against `min_notional` 5), so a bot started on this account
+dispatches nothing under `RefusalStage.UNMANAGED_HOLDING`. **0 open orders** on either symbol and
+**0 order lists** on the account; the store names none, so none of its lists exists at the venue.
+Equity counts the holdings, so it is about 95,190 with or without the clearing (R-AV).
+
+### A3 -- `exchangeInfo`, Testnet, against the P105 C3 snapshot
+
+Two keyless GETs, `2026-10-09T18:12:29Z`. Every one of the eleven filters of BTCUSDT and ETHUSDT equals
+the stored snapshot's, and so does every non-filter field and every top-level field: **no difference**.
+The whole-file digests differ only through `serverTime` (04:37:33 on 10-08 against 18:12:29 on 10-09):
+BTCUSDT `d7e7a91e4689a300de60aa28a383723826f624e1fd15b4fe626a41504fb16cd9` now against
+`40e24c66110ba645ef49ca595618321fdbe2a36f9eab9638eea564dd8b797dc7` stored (both 2,239 bytes); ETHUSDT
+`4959f3e25caccc73206c7c105add2ba34efffb48c7b465f23ffe741226d50762` against
+`87e5095e0e177267d7fe039b8ce1925c8e07903a0f64211c2b948f82705777cc` (both 2,240 bytes). The band is
+still **1.2 / 0.5 / 2 / 0.8**. The response carries `rateLimits`: `REQUEST_WEIGHT` 6000 a minute.
+
+### A4 -- Testnet kline retention, two readings an hour apart
+
+| reading | server time (UTC) | earliest 1m open, BTCUSDT and ETHUSDT | earliest 5m open |
+|---|---|---|---|
+| 1 | 2026-10-09T18:12:27Z | 2026-10-07T10:32:00Z | 2026-10-07T10:30:00Z |
+| 2 | 2026-10-09T19:13:06Z | 2026-10-07T10:32:00Z | 2026-10-07T10:30:00Z |
+
+Sixty minutes and 39 seconds apart; **the window did not roll**, and the earliest bar is the one S0f
+(section 33) read. Predicted for both, and held. History therefore begins at the venue's reset and is
+not a rolling window of a few days; REASONED, from two readings.
+
+### B1 -- the klines request weight, from the `x-mbx-used-weight-1m` header
+
+`ping` 1; `klines limit=1` 2; `klines limit=1000` 2; `klines limit=1000&startTime=0` 2. **Weight 2
+whatever the limit**, 164,246 bytes for 1000 one-minute rows.
+
+### C1 -- the M5m-184 bar, reproduced (`c1_tie.out`)
+
+ETHUSDT 5m, the bar opening `2024-03-05T03:30:00Z`, the repository's own `sma`, `crossed_below` and
+`last_two` over the stored closes, the buffer the last N bars up to that bar:
+
+| N | 1000 | 900 | 831 | 700 | 543 | 400 | 300 | 200 | 120 | 80 | 60 | 52 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `crossed_below` | True | True | False | True | False | True | False | True | False | False | True | True |
+
+The slow SMA at the bar is `3627.7740000000003` or `3627.7739999999994`, and the fast `3627.774` or
+`3627.7740000000003`, according to N. **The averages are not equal in float64 either**: summed exactly
+over the float64 closes, fast minus slow is -9.09e-15 at the bar, so it is the DECIMAL closes that tie
+(both 3627.774). The cause is pandas' `rolling().mean()`, a running sum that depends on what preceded
+the window.
+
+### C2 -- the window-only mean (`c2_fix.out`, `c2b_signals.out`, `c2c_nocopy.out`)
+
+Per (series, period): the number of end bars, of 60 tried against 12 buffer lengths, whose last value
+is not bitwise the same across the lengths. **The current `sma`: 44 / 50 (full-float walk), 48 / 44
+(0.01-tick walk), 52 / 51 (plateaus) and 40 / 44 (25 NaNs), for periods 20 / 50. A window-only mean
+(`sliding_window_view`, made C-contiguous, summed along each window, divided by the period): 0 in
+all 480 cells**, and bitwise equal to the whole-series value in 1,200 further checks. `math.fsum` per
+window and a last-`period+1`-rows slice were also 0. The contiguous copy is not load-bearing on
+numpy 2.5.1: four variants (copy or view, sum or mean) gave 0 buffer-dependent ends in 800 cases and
+identical values. Cost, `sma(20)` and `sma(50)` over 1,000 rows, median microseconds: current 283.9,
+window-only 138.1, tail slice 381.7, `fsum` 6,278.6. **Over March 2024** (44,640 BTCUSDT 1m bars and
+8,928 ETHUSDT 5m bars, the buffer the last 1000 closes): the window-only mean changes **0** decisions
+on BTCUSDT and **1** on ETHUSDT, the `CLOSE` at `03:30` (current: 105 BUY and 105 CLOSE; window-only:
+105 and 104). A 1e-12 relative tie tolerance would add one `BUY` at `03:35`; it is not adopted (R-AX).
+
+### C3 -- the buffer start's effect on every indicator (`c3_census.out`)
+
+ETHUSDT 5m, March 2024, 8,928 end bars, buffers of 1000, 831, 543 and 500 rows:
+
+| indicator | bars whose value differs | worst relative difference |
+|---|---|---|
+| `sma(20)`, `sma(50)` (rolling) | 4,407, 5,309 | 2.8e-16, 2.9e-16 |
+| `ema(20)` | 0 | 0 |
+| `macd` line, signal | 0, 118 | 0, 2.3e-12 |
+| `rsi(14)` | 2,194 | 8.9e-16 |
+| `atr(14)` | 1,603 | 8.4e-16 |
+| `bollinger_bands` upper | 8,928 | 4.8e-13 |
+
+`stop = close - 2 x ATR(14)`, rounded to the 0.01 tick, differed in **0 of 8,928 bars** between any two
+of the buffer lengths. `(13/14)^500` is 8.1e-17. With short buffers ATR does move: 3.7e-2 at 60 rows,
+2.1e-3 at 100, 1.6e-6 at 200 and 1.5e-9 at 300, against `(13/14)^(n-14)`.
+
+### Digests of the P108 instruments and outputs (SHA-256)
+
+| file (under `F:\trading bot\scratch\p108\` unless a scripts row) | sha256 |
+|---|---|
+| `predictions_p108_halts_and_partA.txt` | `977ec0bbcf60225de2e72d081b279ace7266a03243224fa711f8dce67143c70d` |
+| `gate_h5.txt` | `3227ed73792e2cd4d3139cc6667966af8835e075fdddd2a52898369dc8354476` |
+| `a2_check_testnet.txt` | `0710776a276789144580e1437edbbb938cb50304cb29ae84b275151889478ab8` |
+| `a3_testnet_BTCUSDT.json` | `d7e7a91e4689a300de60aa28a383723826f624e1fd15b4fe626a41504fb16cd9` |
+| `a3_testnet_ETHUSDT.json` | `4959f3e25caccc73206c7c105add2ba34efffb48c7b465f23ffe741226d50762` |
+| `a4_reading1.json` | `fd82c45b61d8087e5d1ffcc7c7384ba8b83f36ca45801ce205351eef75c2fe00` |
+| `a4_reading2.json` | `ada3f304f0e660bf830460e8aab48bdabcccbd25790971340e92c424a4978ec9` |
+| `b1_weight.out` | `0481dc67d069d5f7b5f966ff0d1c86ee926ebfa08b7d7ac8143326c1bdfc4195` |
+| `c1_tie.out` | `fa0e8175032f3700431db4a29da2989db4854a2acd20b28a26297f5801718388` |
+| `c2_fix.out` | `e9f1d7743b82fb2f8f022b34fa1ac017040613e0fcc56855187d55852b8d12b6` |
+| `c2b_signals.out` | `1e41bebaff561a2e8677c12b94972be27599cfb20cfe58d60132f8a428fcc937` |
+| `c2c_nocopy.out` | `4f01e03735dad05ad8a9a166e9b2b9f9e158c8d5d5084fea85a4d0399661e90d` |
+| `c3_census.out` | `481b68ec05cf4fe3b530de5b80e3f8a6276f503483910b31e519a028ee6b838c` |
+| `draft_S4_PREREGISTRATION.md` (a draft; the committed file will differ where R-AY to R-BB rule) | `538413c19494f1a5bef4cc0456444b57c0104b24da0d9eab19a27afef1f53cfd` |
+| `draft_launch_checklist.ps1.txt` | `877d21dee26b4c717dbc1769b09a97dfa356103470c30edbdca9d9b1733e4f43` |
+| `p108_a3_a4.py` (the scratchpad; a comment was edited after reading 1) | `3e7433e41ee9056d63b4ff973c5b3c7b0ebeeb3ac4c3bdddea3a813cefa21d17` |
+| `p108_c1_tie.py` | `b0c387992ae81f228bb86b08f10517d53f43171bbadf569876b237edeb4a3ed2` |
+| `p108_c2_fix.py` | `b4869822efe02e006843f2c9830b847116c958e2dfc159215fa01a2ca49644d6` |
+| `p108_c2b_signals.py` | `630f5e2c6607d72c86ae6c8ac9af6d0a3670026b979adf5daa249746d5594263` |
+| `p108_c2c_nocopy.py` | `776ef391a7ff4dfb87b8c70e430726d6173a3c3fd0989eae5f0c0b5581792c15` |
+| `p108_c3_census.py` | `b2047dc9327735ab456124a7fded29d279f059721ad8ae1d18a8f923f5f7cd05` |
+| `p108_weight.py` | `e60733a2a5f4fa217276b21cd095cff90df403552df21849efae253ab837f079` |
+
+Process slips in P108, recorded: two empty shell heredocs (no content, nothing written), and one
+duplicate keyless klines pass at `2026-10-09T19:13:04Z` whose result file was deleted.
