@@ -234,6 +234,7 @@ def _cmd_backtest(
     end: date | None,
     symbols: list[str] | None,
     run_log: DeferredFileHandler,
+    facts: Provenance,
 ) -> int:
     """Replay the window, write the run record, and say whether it is a result.
 
@@ -247,6 +248,10 @@ def _cmd_backtest(
     log opened, only after the window and the symbols are validated, so a refusal leaves no
     directory. It is made as ``<stamp>-running`` and renamed to ``<stamp>-<digest>`` once the
     record is written, or to ``<stamp>-failed`` if the run raised.
+
+    **The record carries the boot line (R-AH)**: ``facts`` is the very ``Provenance`` that
+    ``main`` logged as ``boot_provenance``, handed to the run, so the record's ``provenance``
+    block is that line's verdict and fields and not a second collection that could differ.
     """
     from trading_bot.backtesting.engine import run_backtest, select_pairs, write_run
 
@@ -267,7 +272,9 @@ def _cmd_backtest(
     working.mkdir()
     run_log.open(working / BACKTEST_LOG_NAME)
     try:
-        result = asyncio.run(run_backtest(settings, window=window, symbols=symbols))
+        result = asyncio.run(
+            run_backtest(settings, window=window, symbols=symbols, code_facts=facts.log_fields)
+        )
         final = base / f"{stamp}-{result.trade_log_sha256[:12]}"
         write_run(result, working, existing=True)
         log.info(
@@ -367,7 +374,7 @@ def _dispatch(
         if args.command == "backtest":
             if run_log is None:  # main attaches it for exactly this command
                 raise RuntimeError("backtest dispatched without its run log")
-            return _cmd_backtest(settings, args.start, args.end, args.symbols, run_log)
+            return _cmd_backtest(settings, args.start, args.end, args.symbols, run_log, facts)
         if args.command == "strategies":
             return _cmd_strategies()
     except LiveTradingBlockedError:

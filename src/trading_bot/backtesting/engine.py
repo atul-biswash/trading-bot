@@ -34,8 +34,9 @@ position still open = the free quote``, exactly. It is the booking identity of t
 ``Portfolio`` summed over the run, and the record carries its residual.
 
 **The run record** is a JSON object (:func:`write_run` also writes the trades as CSV). It names
-the code that ran (commit, dirty state, install kind), the config's digest, the digests of
-every series' manifest and registry, the digests of the ``exchangeInfo`` files, the resolved
+the code that ran (commit, dirty state, install kind), **the ``boot_provenance`` verdict with
+every field of that line (R-AH)**, the config's digest, the digests of every series' manifest
+and registry, the digests of the ``exchangeInfo`` files, the resolved
 window, every fill parameter, the strategy, the library versions, what each pair served, and
 what came of the run. Everything outside ``wall_clock`` is a function of the code, the config
 and the stored bars, so two runs of one history differ only there (:func:`record_digest`).
@@ -104,7 +105,8 @@ __all__ = [
 _log = get_logger(__name__)
 
 #: The shape of the run record. Bump it when a key is added, renamed or removed.
-RUN_RECORD_SCHEMA = 1
+#: 2: ``provenance`` added (R-AH).
+RUN_RECORD_SCHEMA = 2
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MILLISECOND = timedelta(milliseconds=1)
@@ -254,8 +256,7 @@ def _version(distribution: str) -> str:
 
 def _default_code_facts(settings: Settings) -> CodeFacts:
     def collect() -> Mapping[str, str | int | bool]:
-        fields = collect_provenance(settings.config_path, settings.config_sha256).log_fields()
-        return {key: fields[key] for key in _CODE_KEYS}
+        return collect_provenance(settings.config_path, settings.config_sha256).log_fields()
 
     return collect
 
@@ -296,8 +297,10 @@ async def backtest_system(
     :param symbols: the enabled pairs to replay; all of them if omitted.
     :param exchange_info_environment: which stored ``exchangeInfo`` to size with; the
         mainnet files for a backtest on mainnet klines, the Testnet ones for S4.
-    :param code_facts: how the run names the code that ran; injected by tests, since the
-        default runs ``git``.
+    :param code_facts: the ``boot_provenance`` fields the record carries, as
+        ``Provenance.log_fields`` returns them. The command passes the very facts it logged at
+        boot, so the record and the boot line agree; the default collects them afresh (it runs
+        ``git``) and tests inject them.
 
     :raises ConfigError: a requested symbol is not enabled, no pair is, a symbol is enabled
         on two timeframes, or a pair is quoted in an asset other than the base currency.
@@ -492,9 +495,15 @@ def _describe(
     for attempt in attempts:
         by_result[attempt.result] += 1
     strategy = system.settings.config.strategy
+    facts = dict(system._code_facts())
     record: dict[str, object] = {
         "schema": RUN_RECORD_SCHEMA,
-        "code": dict(system._code_facts()),
+        # The short view, as before; the full line is "provenance".
+        "code": {key: facts[key] for key in _CODE_KEYS if key in facts},
+        # R-AH: the boot_provenance verdict and every field of that line. A source that
+        # carries no verdict (a test's injected facts) is recorded as "unrecorded", never as
+        # accepted: S4 to S7 evidence needs the verdict to read "accepted".
+        "provenance": {"verdict": "unrecorded", **facts},
         "config": {
             "path": None
             if system.settings.config_path is None

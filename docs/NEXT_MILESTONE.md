@@ -857,6 +857,24 @@ that first multiplies it by money"*.
 > public so the command can refuse an unenabled symbol before it makes anything. **What
 > survives:** the directory's final name, the record, `trades.csv`, and the console output.
 
+> **ANNOTATED AT M5m P107 (C2): R-AH IS CARRIED OUT -- EVERY RUN RECORD CARRIES THE
+> `boot_provenance` VERDICT AND ITS FIELDS.** The record has a new `provenance` block holding
+> every field of the boot line (`verdict`, `refusal_reasons`, `install_kind`, `code_commit`,
+> `code_intact`, `checkout_commit`, `checkout_dirty`, `commits_agree`, `config_tracked` and the
+> rest), and `RUN_RECORD_SCHEMA` is 2. `main` hands the very `Provenance` it logged at boot to the
+> run, so the block IS that line and not a second collection. A source of facts with no verdict
+> (a test's injected facts) is recorded as `unrecorded`, never as `accepted`. The short `code`
+> block is kept, as the subset of those fields it always was. The block is inside
+> `record_digest`, so a record's digest now changes with its verdict. **What it does and does
+> not do:** a backtest is still not refused on a refused verdict, since it touches no venue,
+> store or lock; R-AH's second sentence, *"a run used as evidence for S4 to S7 comes from a
+> deployment clone, with the verdict accepted"*, is an operator rule that this record makes
+> checkable by reading `provenance.verdict`, and nothing enforces it. **What stops being true:**
+> the P106 C6 annotation's *"the runs were made from the development tree on an EDITABLE
+> install, so the record cannot name the running code beyond a clean checkout"* as a defect of
+> the record: its fields were there and the verdict was not, and both are now. The smoke runs
+> of P106 (schema 1) carry no `provenance` block and stay as they were.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`

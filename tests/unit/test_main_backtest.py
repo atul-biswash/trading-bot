@@ -22,6 +22,7 @@ from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import Settings
 from trading_bot.core.exceptions import ConfigError
 from trading_bot.utils.logger import setup_logging as real_setup_logging
+from trading_bot.utils.provenance import InstallKind, Provenance
 
 
 @pytest.fixture(autouse=True)
@@ -193,6 +194,86 @@ class TestTheCommand:
         assert first.name[:15] == second.name[:15] == "20261008T120000"
         assert first.name != second.name
         assert (first / "trades.csv").read_bytes() == (second / "trades.csv").read_bytes()
+
+
+def provenance(*, accepted: bool) -> Provenance:
+    """A verdict built by hand, as ``test_main.py`` builds one: accepted or refused."""
+    return Provenance(
+        install_kind=InstallKind.VCS if accepted else InstallKind.EDITABLE,
+        code_commit="a" * 40 if accepted else None,
+        code_intact=True if accepted else None,
+        code_files_checked=67 if accepted else 0,
+        module_file=Path("trading_bot/__init__.py"),
+        checkout_root=Path("checkout"),
+        checkout_commit="a" * 40,
+        dirty_paths=() if accepted else ("config.yaml",),
+        commits_agree=True if accepted else None,
+        config_path=Path("checkout/config.yaml"),
+        config_sha256="0" * 64,
+        config_tracked=True,
+        python_version="3.12.10",
+        package_version="0.1.0",
+        unknown_reasons=(),
+    )
+
+
+def boot_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [
+        r
+        for r in caplog.records
+        if r.name == "trading_bot.main" and vars(r).get("event") == "boot_provenance"
+    ]
+
+
+class TestTheRecordCarriesTheBootLine:
+    """R-AH, through the command: the record's ``provenance`` block IS the line `main` logged."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def run_record(self, tmp_path: Path) -> dict[str, dict[str, object]]:
+        return json.loads((only_record(tmp_path) / "run.json").read_text(encoding="utf-8"))
+
+    def test_an_accepted_verdict_and_every_field_reach_the_record_and_match_the_boot_line(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        facts = provenance(accepted=True)
+        monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: facts)
+        build_world(tmp_path)
+        with caplog.at_level(logging.INFO):
+            assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        block = self.run_record(tmp_path)["provenance"]
+        assert block == facts.log_fields()
+        assert block["verdict"] == "accepted"
+        lines = boot_lines(caplog)
+        assert len(lines) == 1
+        for key, value in facts.log_fields().items():
+            assert vars(lines[0]).get(key) == value, key
+
+    def test_a_refused_verdict_is_recorded_and_does_not_stop_a_backtest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        facts = provenance(accepted=False)
+        monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: facts)
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        block = self.run_record(tmp_path)["provenance"]
+        assert block["verdict"] == "refused"
+        assert block["install_kind"] == "editable"
+        assert "install_kind=editable" in str(block["refusal_reasons"])
+        assert block == facts.log_fields()
+
+    def test_the_real_collection_agrees_with_the_boot_line_field_for_field(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        build_world(tmp_path)
+        with caplog.at_level(logging.INFO):
+            assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        block = self.run_record(tmp_path)["provenance"]
+        lines = boot_lines(caplog)
+        assert len(lines) == 1
+        assert block["verdict"] in {"accepted", "refused"}
+        for key, value in block.items():
+            assert vars(lines[0]).get(key) == value, key
 
 
 @pytest.fixture

@@ -16,7 +16,7 @@ import logging
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 
@@ -47,6 +47,7 @@ from trading_bot.config.settings import Settings
 from trading_bot.core.exceptions import ConfigError
 from trading_bot.data.market_data import BufferedMarketDataProvider
 from trading_bot.engine.live_engine import TradingEngine
+from trading_bot.utils.provenance import collect_provenance
 
 D = Decimal
 
@@ -179,6 +180,79 @@ class TestARunIsAResult:
         (pair,) = result.record["pairs"]  # type: ignore[misc]
         assert pair["bars_served"] == 5 * 24
         assert pair["first_open_time"] == at(19 * 24).isoformat()
+
+
+class TestTheRecordCarriesTheBootLine:
+    """R-AH: every run record carries the ``boot_provenance`` verdict and its fields."""
+
+    FACTS: ClassVar[dict[str, str | int | bool]] = {
+        "verdict": "accepted",
+        "refusal_reasons": "",
+        "unknown_reasons": "",
+        "install_kind": "vcs",
+        "code_commit": "a" * 40,
+        "code_intact": True,
+        "code_files_checked": 67,
+        "checkout_commit": "a" * 40,
+        "checkout_dirty": False,
+        "dirty_count": 0,
+        "commits_agree": True,
+        "config_tracked": True,
+        "python_version": "3.12.10",
+        "package_version": "0.1.0",
+    }
+
+    async def test_the_given_fields_are_recorded_whole_with_their_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        result = await run_backtest(build_world(tmp_path), code_facts=lambda: self.FACTS)
+        assert result.record["provenance"] == self.FACTS
+
+    async def test_the_short_code_view_is_a_subset_and_carries_no_verdict(
+        self, tmp_path: Path
+    ) -> None:
+        result = await run_backtest(build_world(tmp_path), code_facts=lambda: self.FACTS)
+        code = result.record["code"]
+        assert isinstance(code, dict)
+        assert code["install_kind"] == "vcs" and code["checkout_dirty"] is False
+        assert "verdict" not in code and "refusal_reasons" not in code
+
+    async def test_facts_with_no_verdict_are_recorded_unrecorded_never_accepted(
+        self, tmp_path: Path
+    ) -> None:
+        result = await run(build_world(tmp_path))  # CODE carries no verdict
+        provenance = result.record["provenance"]
+        assert isinstance(provenance, dict)
+        assert provenance["verdict"] == "unrecorded"
+        assert provenance["install_kind"] == CODE["install_kind"]
+
+    async def test_a_refused_verdict_is_recorded_as_refused(self, tmp_path: Path) -> None:
+        refused = {**self.FACTS, "verdict": "refused", "refusal_reasons": "install_kind=editable"}
+        result = await run_backtest(build_world(tmp_path), code_facts=lambda: refused)
+        provenance = result.record["provenance"]
+        assert isinstance(provenance, dict)
+        assert (provenance["verdict"], provenance["refusal_reasons"]) == (
+            "refused",
+            "install_kind=editable",
+        )
+
+    async def test_the_verdict_is_inside_the_record_digest(self, tmp_path: Path) -> None:
+        settings = build_world(tmp_path)
+        accepted = await run_backtest(settings, code_facts=lambda: self.FACTS)
+        refused = await run_backtest(
+            settings, code_facts=lambda: {**self.FACTS, "verdict": "refused"}
+        )
+        assert accepted.trade_log_sha256 == refused.trade_log_sha256
+        assert record_digest(accepted.record) != record_digest(refused.record)
+
+    async def test_the_default_facts_are_the_live_provenance_line(self, tmp_path: Path) -> None:
+        settings = build_world(tmp_path)
+        result = await run_backtest(settings)
+        provenance = result.record["provenance"]
+        assert isinstance(provenance, dict)
+        live = collect_provenance(settings.config_path, settings.config_sha256).log_fields()
+        assert set(provenance) == set(live)
+        assert provenance["verdict"] in {"accepted", "refused"}
 
 
 class TestTheRootAndItsTeardown:
