@@ -281,10 +281,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  173 files already formatted
-mypy                                   Success: no issues found in 92 source files
-pytest                                 3147 passed, 4 skipped
-                                       (3150 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  175 files already formatted
+mypy                                   Success: no issues found in 93 source files
+pytest                                 3179 passed, 4 skipped
+                                       (3182 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -293,9 +293,9 @@ pytest                                 3147 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `3147 passed, 4 skipped` on a machine without
-  them and `3150 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 3147 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `3179 passed, 4 skipped` on a machine without
+  them and `3182 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 3179 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -386,7 +386,7 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical · repository†
+  data/          market_data · historical · kline_recorder · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)
