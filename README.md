@@ -91,7 +91,7 @@ only venue it will connect to.
 | Order execution — entry, protection, and the discretionary close | ✅ built |
 | Realised P&L reaching the ledger, and surviving a restart | ✅ built |
 | Crash-survivable store for pending records and the ledger | ✅ built |
-| Backtesting: replay, fill model, simulated executor, run record (metrics are not built) | ✅ built, **smoke-run once (March 2024); no result yet** |
+| Backtesting: replay, fill model, simulated executor, run record (the metrics are built, not yet wired into the run) | ✅ built, **smoke-run once (March 2024); no result yet** |
 | Paper simulator, notifications | ⛔ stubs |
 
 `python -m trading_bot run` connects to Testnet and runs
@@ -164,9 +164,9 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > survives:** everything else in this paragraph, the live block included. See
 > `docs/NEXT_MILESTONE.md`.
 
-Nine files are docstring-only placeholders: `execution/order_manager`,
+Eight files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
-`notifications/`, `backtesting/portfolio`, `backtesting/metrics`, `data/repository`. Note
+`notifications/`, `backtesting/portfolio`, `data/repository`. Note
 `persistence/store.py` is **not** among them — it is built and in use; only the
 SQLAlchemy-shaped pair beside it are stubs. Check before assuming behaviour;
 `backtest` replays stored bars through the live decision path and writes a run record
@@ -280,10 +280,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  171 files already formatted
+ruff format --check src tests scripts  172 files already formatted
 mypy                                   Success: no issues found in 92 source files
-pytest                                 3063 passed, 4 skipped
-                                       (3066 passed, 1 skipped with Testnet credentials)
+pytest                                 3125 passed, 4 skipped
+                                       (3128 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -292,9 +292,9 @@ pytest                                 3063 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `3063 passed, 4 skipped` on a machine without
-  them and `3066 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 3063 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `3125 passed, 4 skipped` on a machine without
+  them and `3128 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 3125 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -393,7 +393,7 @@ src/trading_bot/
   execution/     executor · placement · dispatch_budget · resolution
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
-  backtesting/   engine · portfolio† · metrics† · exchange_info · replay · fill_model
+  backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
                  · simulated_executor · regimes
   paper/         simulator†
   persistence/   store · database† · models†

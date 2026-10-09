@@ -910,6 +910,25 @@ where it is money and states its denominator.
 
 *Arming condition:* **whoever next edits `backtesting/metrics.py`.**
 
+> **ANNOTATED AT M5m P107 (C5): S3'S ARMING CONDITION FIRED, AND `backtesting/metrics.py` IS
+> BUILT -- THE PURE HALF.** The stub is now `EquityCurve` (the per-bar accumulator),
+> `compute_metrics` and the functions under it, with 62 tests in `tests/unit/test_metrics.py`.
+> **REAFFIRMED, to be retired by C6:** the item is not complete until the root samples the
+> portfolio in its loop and writes the metrics into the record, which is C6, and until the Q2
+> survey has run on it. What is built, with the definitions the rulings leave open (`M5m-200`):
+> net P&L is the sum of `realised` (net of both fees) and gross is `exit_gross - entry_notional`,
+> with `gross - fees - net` carried as a residual that must be zero; a win is net realised above
+> zero; profit factor is wins over absolute losses, net and gross; the per-trade return and its
+> interval are `scripts/trade_census.py`'s, proven equal on 40 shared trades through the census's
+> own parser; the maximum drawdown (R-AJ) is kept as the (peak, trough) pair with the largest
+> fraction and decided by cross-multiplication, so no rounded quotient picks the maximum; Sharpe
+> and Sortino are over daily closing equity, carried forward over empty days, times `sqrt(365)`,
+> checked against closed forms `sqrt(1095)/6` and `sqrt(1095)/3`; exposure is the union of the
+> trades' holding intervals and of the positions still open; and the breakdowns are by pair and by
+> regime, a trade in a partial quarter being `unlabelled`. Every figure states its denominator in
+> the record. **What stops being true:** nothing in S3's text; the README's *"metrics are not
+> built"* is corrected in place.
+
 **S4. Calibration against the venue — the backtester's own acceptance test.** Replay
 the strategy over the windows the bot actually traded on Testnet, from S1's data, and
 compare trade by trade with S0's census. **The backtester is trusted only if its
