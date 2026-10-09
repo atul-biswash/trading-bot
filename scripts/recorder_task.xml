@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<!--
+  The Windows Task Scheduler definition of the Testnet kline recorder (S4, R-AN, R-AW).
+
+  OWNER-ONLY. Nothing here is registered by the repository. The placeholders are replaced by the
+  owner's PowerShell step (docs/RUN_LEDGER.md, the P109 report):
+    @CLONE@  the recorder's own clone, outside F:\trading bot\deploy
+    @ROOT@   the store root, for example @CLONE@\data\historical_testnet
+    @USER@   DOMAIN\user, the account the task runs as
+
+  What it says, and why:
+    - It runs at start-up (after two minutes) AND every six hours from 00:05, so a power cut costs at
+      most the hours until the next trigger, and the recorder backfills from its last stored bar.
+    - StartWhenAvailable runs a missed trigger as soon as the machine is up.
+    - IgnoreNew: one instance at a time (the recorder also holds an OS lock on its root).
+    - S4U: runs whether or not the user is logged on, with no password stored. The recorder is keyless
+      and opens no account, so it needs no network credential.
+    - 30 minutes at most per run; a run is a few seconds. A failed run is retried three times, ten
+      minutes apart, which covers a transient network fault; an exit status of 2 (a venue reset) is
+      refused again each time and is for the operator.
+    - No .env, no key and no secret is named anywhere in this file.
+-->
+<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Record Binance Spot Testnet 1m and 5m klines into a store of their own (keyless, read-only).</Description>
+    <URI>\tb-recorder</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT2M</Delay>
+    </BootTrigger>
+    <TimeTrigger>
+      <Repetition>
+        <Interval>PT6H</Interval>
+        <StopAtDurationEnd>false</StopAtDurationEnd>
+      </Repetition>
+      <StartBoundary>2026-10-01T00:05:00</StartBoundary>
+      <Enabled>true</Enabled>
+    </TimeTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>@USER@</UserId>
+      <LogonType>S4U</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>true</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT30M</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT10M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>@CLONE@\.venv\Scripts\python.exe</Command>
+      <Arguments>scripts\record_testnet_klines.py --root @ROOT@</Arguments>
+      <WorkingDirectory>@CLONE@</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>

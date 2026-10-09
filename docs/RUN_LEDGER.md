@@ -4033,3 +4033,62 @@ of the buffer lengths. `(13/14)^500` is 8.1e-17. With short buffers ATR does mov
 
 Process slips in P108, recorded: two empty shell heredocs (no content, nothing written), and one
 duplicate keyless klines pass at `2026-10-09T19:13:04Z` whose result file was deleted.
+
+## 37. M5m S4: the Testnet kline recorder's first run (P109 C2b, R-AN)
+
+Recorded at M5m P109 (C2b). An observation log, so this section only adds. **`scripts/record_testnet_klines.py`
+was run once against Testnet, then once more at once.** It is a keyless, read-only capture, not the bot: no key
+was read, no account touched, and it ran from the development tree on its editable install, so the entry names
+`commit` `unknown`. It wrote `data/historical_testnet/` (ignored by git), which is the first real capture of the
+history Testnet holds since its reset, and a backup of it against the next reset. **It is not the S4 store**:
+the owner's recorder clone (R-AW) keeps its own, and may start from a byte-equal copy of this one.
+
+### What was run
+
+- **Code:** the script as it stood before its commit, SHA-256
+  `872d5ab9e0b58b44cca9c38a68ee737b0acee6f600bbf81a2c30895dee88e16e`, and the scheduler definition
+  `scripts/recorder_task.xml`, `8094cc8ef516e0cfcb9035f07aef7dd9fd6927b5482793a8ae00bd130f742574`; both were
+  re-hashed after the runs and are unchanged. The commit that follows holds these bytes.
+- **Run 1:** `2026-10-09T19:46:00Z` to `19:46:05Z` (5 s), server time `1791575161247` ms, **exit 0**, output in
+  `recorder_run1.txt`. **Run 2:** `19:46:26Z`, exit 0, `recorder_run2.txt`.
+- **Requests, run 1:** one `/api/v3/time` and ten `/api/v3/klines` pages (the 1m series four pages each, the 5m
+  one), 11 GETs and a request weight of 21 against the venue's 6000 a minute (M5m-224); no overlap request,
+  because the store was empty.
+
+### Result
+
+| series | bars stored | first open (UTC) | last open (UTC) | pages | forming skipped | gaps | month file SHA-256 |
+|---|---|---|---|---|---|---|---|
+| BTCUSDT 1m | 3,434 | 2026-10-07T10:32 | 2026-10-09T19:45 | 4 (1000, 1000, 1000, 434) | 0 | 0 | `f26e669fd3b0592e4e2e6bb62d5421d0839d125dcbbcfac70ca06553c60881fb` |
+| BTCUSDT 5m | 687 | 2026-10-07T10:30 | 2026-10-09T19:40 | 1 (688) | 1 | 0 | `3ecce7f7d5aa4e4053adf5f780ce12e100c40a84f1dd87c6f43ca0d017d16f09` |
+| ETHUSDT 1m | 3,434 | 2026-10-07T10:32 | 2026-10-09T19:45 | 4 (1000, 1000, 1000, 435) | 1 | 0 | `a10ef0187e667dc777324b75a1a2d1f844d96c72345aa86eba7cfb0a17f34fee` |
+| ETHUSDT 5m | 687 | 2026-10-07T10:30 | 2026-10-09T19:40 | 1 (688) | 1 | 0 | `c2995d447a19f516a875fa0b898a6013b9b95f6c984f06f5d40520913ca52fca` |
+
+**8,242 bars, no gap, nothing quarantined and nothing registered.** The manifests' first open times are
+`1791369120000` (1m) and `1791369000000` (5m). The deep check, `--verify-only` (every stored row re-validated
+under the ingest rule), read **0 problems** in all four series, before and after run 2. Each series has one
+`MANIFEST.jsonl` line and one `RECORDER.jsonl` event per run (`recorded`, then `nothing_new`); the manifest
+digests are `ece78dba...3549` (BTCUSDT 1m), `51fec67a...3219` (BTCUSDT 5m), `4c92646b...01b4` (ETHUSDT 1m)
+and `7b174e9a...96a2` (ETHUSDT 5m), each over a file that run 2 left byte-equal. **Run 2 added 0 bars** to every
+series and changed no month file (the four SHA-256 above were re-derived and the `diff` was empty). A first
+data row, BTCUSDT 1m: `1791369120000,83732.02000000,83732.02000000,83732.02000000,83732.02000000,0.00006000,1791369179999`;
+the last stored: `1791575100000,82410.30000000,82410.30000000,82372.00000000,82372.02000000,0.03679000,1791575159999`.
+The prices are Testnet's, where BTC is about 82,400 and not mainnet's.
+
+### Against the predictions (`F:\trading bot\scratch\p109\predictions_c2b_first_run.txt`)
+
+SHA-256 `407897805f1403d79236baa81f04d63300a6016c18ab8e8c628148f2a7d774d1`, written before the run.
+**The row counts held to the bar**: 3,434 and 687 per series, 8,242 in all, from the first opens A4 read twice. So
+did the page counts (4 and 1), the 11 GETs and the weight of 21, the absence of gaps and irregular bars, the
+one month file and one event per series, the manifest first opens, the clean deep check, and the idempotence of
+run 2 (predicted "+0 or +1": it was +0, run 2 having started in the same minute). **One detail was wrong**
+(`M5m-243`): *"forming_skipped is 1 in every series"*: BTCUSDT 1m reports 0 in run 1, because at `19:46:00Z`
+the venue had not yet returned the bar opening `19:46`; the other three, and all four in run 2, report 1.
+
+### Digests of the C2b outputs (SHA-256)
+
+| file (under `F:\trading bot\scratch\p109\`) | sha256 |
+|---|---|
+| `predictions_c2b_first_run.txt` | `407897805f1403d79236baa81f04d63300a6016c18ab8e8c628148f2a7d774d1` |
+| `recorder_run1.txt` | `31e6d7d564246937e6c4d84afe3c3c2c619bf4ae49894e945ff0c23a39fa1e71` |
+| `recorder_run2.txt` | `b34f0aee070e3810476e857701cb9bdc09273d2cf3364f75c2f4a964cc1d34d9` |
