@@ -347,6 +347,12 @@ class TestTheTable:
         document = build_document(labels, symbol="BTCUSDT", interval="1d", source={})
         return RegimeTable.from_document(document)
 
+    def test_a_table_built_by_hand_has_no_digest_and_one_given_keeps_it(self) -> None:
+        document = {"quarters": [{"quarter": "2024Q1", "regime": "rising"}]}
+        assert RegimeTable.from_document(document).digest is None
+        assert RegimeTable.from_document(document, digest="abc").digest == "abc"
+        assert RegimeTable({}).digest is None
+
     def test_a_date_reads_its_quarters_regime(self) -> None:
         table = self.table()
         assert table.regime_on(date(2024, 1, 1)) is Regime.RISING
@@ -378,6 +384,7 @@ class TestTheTable:
             RegimeTable.from_file(target)  # no digest file at all
         sidecar.write_text(f"{document_digest(rendered)}  labels.json\n", encoding="ascii")
         assert RegimeTable.from_file(target).regime_on(date(2024, 2, 1)) is Regime.RISING
+        assert RegimeTable.from_file(target).digest == document_digest(rendered)
         target.write_bytes(rendered.replace(b"rising", b"falling"))
         with pytest.raises(ValueError, match="does not match its digest file"):
             RegimeTable.from_file(target)

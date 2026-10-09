@@ -265,11 +265,15 @@ def document_digest(rendered: bytes) -> str:
 class RegimeTable:
     """The committed labels, read back: a date's quarter and that quarter's regime."""
 
-    def __init__(self, regimes: Mapping[str, Regime | None]) -> None:
+    def __init__(self, regimes: Mapping[str, Regime | None], *, digest: str | None = None) -> None:
         self._regimes = dict(regimes)
+        #: The SHA-256 of the file the table was read from, or ``None`` if it was built by hand.
+        self.digest = digest
 
     @classmethod
-    def from_document(cls, document: Mapping[str, object]) -> RegimeTable:
+    def from_document(
+        cls, document: Mapping[str, object], *, digest: str | None = None
+    ) -> RegimeTable:
         quarters = document["quarters"]
         if not isinstance(quarters, list):
             raise ValueError("the regime document has no quarters list")
@@ -277,7 +281,7 @@ class RegimeTable:
         for row in quarters:
             label = row["regime"]
             regimes[str(row["quarter"])] = None if label is None else Regime(label)
-        return cls(regimes)
+        return cls(regimes, digest=digest)
 
     @classmethod
     def from_file(cls, path: Path) -> RegimeTable:
@@ -292,7 +296,7 @@ class RegimeTable:
         )
         if recorded != document_digest(data):
             raise ValueError(f"{path} does not match its digest file {digest_file}")
-        return cls.from_document(json.loads(data))
+        return cls.from_document(json.loads(data), digest=recorded)
 
     def regime_on(self, day: date) -> Regime | None:
         """The regime of ``day``'s quarter; ``None`` if it is partial or not in the table."""

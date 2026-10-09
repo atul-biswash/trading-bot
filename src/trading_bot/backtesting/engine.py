@@ -37,8 +37,9 @@ position still open = the free quote``, exactly. It is the booking identity of t
 the code that ran (commit, dirty state, install kind), **the ``boot_provenance`` verdict with
 every field of that line (R-AH)**, the config's digest, the digests of every series' manifest
 and registry, the digests of the ``exchangeInfo`` files, the resolved
-window, every fill parameter, the strategy, the library versions, what each pair served, and
-what came of the run. Everything outside ``wall_clock`` is a function of the code, the config
+window, every fill parameter, the strategy, the library versions, what each pair served, the
+equity summary the per-bar loop accumulated and the S3 metrics computed from it and from the
+trades, and what came of the run. Everything outside ``wall_clock`` is a function of the code, the config
 and the stored bars, so two runs of one history differ only there (:func:`record_digest`).
 """
 
@@ -60,6 +61,8 @@ from pathlib import Path
 
 from trading_bot.backtesting.exchange_info import Snapshot, SnapshotError, load_snapshot
 from trading_bot.backtesting.fill_model import FillParameters
+from trading_bot.backtesting.metrics import EquityCurve, TradeFacts, compute_metrics
+from trading_bot.backtesting.regimes import RegimeTable
 from trading_bot.backtesting.replay import ReplayClient, ReplayStream
 from trading_bot.backtesting.simulated_executor import (
     EntryAttempt,
@@ -105,8 +108,9 @@ __all__ = [
 _log = get_logger(__name__)
 
 #: The shape of the run record. Bump it when a key is added, renamed or removed.
-#: 2: ``provenance`` added (R-AH).
-RUN_RECORD_SCHEMA = 2
+#: 2: ``provenance`` added (R-AH). 3: ``quote_asset``, ``equity``, ``metrics`` and
+#: ``regime_labels`` added (S3, R-AJ).
+RUN_RECORD_SCHEMA = 3
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MILLISECOND = timedelta(milliseconds=1)
@@ -167,6 +171,43 @@ class _BarTally:
         self.last[key] = candle
 
 
+class _EquityProbe:
+    """Marks the portfolio to market after EVERY bar of EVERY pair (R-AJ), inside the loop.
+
+    Registered right after the executor, so a bar's fills are in the portfolio when it samples.
+    The marks are the last closes the provider holds, exact ``Decimal``, for every symbol the
+    portfolio holds; ``Portfolio.equity`` raises on a missing mark rather than guess one, and the
+    provider's isolation turns that raise into an ERROR record that makes the run incomplete.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider: BufferedMarketDataProvider,
+        portfolio: Portfolio,
+        timeframes: Mapping[str, str],
+        clock: Callable[[], datetime],
+        curve: EquityCurve,
+    ) -> None:
+        self._provider = provider
+        self._portfolio = portfolio
+        self._timeframes = timeframes
+        self._clock = clock
+        self._curve = curve
+
+    async def __call__(self, candle: Candle) -> None:
+        marks: dict[str, Decimal] = {}
+        for symbol in self._portfolio.marked_symbols():
+            last = self._provider.last_candle(symbol, self._timeframes[symbol])
+            if last is not None:
+                marks[symbol] = last.close
+        self._curve.observe(
+            self._clock(),
+            self._portfolio.equity(marks),
+            open_since=[position.opened_at for position in self._portfolio.open_positions],
+        )
+
+
 class _ErrorTally(logging.Handler):
     """Counts every record at ERROR or above while attached to the root logger."""
 
@@ -206,6 +247,8 @@ class BacktestSystem:
     pairs: Mapping[str, PairContext]
     executor: SimulatedExecutor
     snapshots: Mapping[str, Snapshot]
+    equity: EquityCurve
+    regimes: RegimeTable | None
     _state: dict[str, object]
     _tally: _BarTally
     _errors: _ErrorTally
@@ -290,6 +333,7 @@ async def backtest_system(
     symbols: Sequence[str] | None = None,
     exchange_info_environment: str = "mainnet",
     code_facts: CodeFacts | None = None,
+    regimes: RegimeTable | None = None,
 ) -> AsyncIterator[BacktestSystem]:
     """Assemble the backtest, yield it, and tear it down.
 
@@ -301,6 +345,8 @@ async def backtest_system(
         ``Provenance.log_fields`` returns them. The command passes the very facts it logged at
         boot, so the record and the boot line agree; the default collects them afresh (it runs
         ``git``) and tests inject them.
+    :param regimes: the committed quarterly labels (R-AI); with them the metrics carry a
+        per-regime breakdown, without them none.
 
     :raises ConfigError: a requested symbol is not enabled, no pair is, a symbol is enabled
         on two timeframes, or a pair is quoted in an asset other than the base currency.
@@ -366,7 +412,17 @@ async def backtest_system(
                     )
                 )
                 tally = _BarTally()
+                curve = EquityCurve(resolved_window.initial_balance, resolved_window.window_start)
                 provider.on_candle(executor)
+                provider.on_candle(
+                    _EquityProbe(
+                        provider=provider,
+                        portfolio=portfolio,
+                        timeframes=timeframes,
+                        clock=stream.now,
+                        curve=curve,
+                    )
+                )
                 provider.on_candle(tally)
                 _log.info(
                     "Backtest ready: %d pair(s), %s %s free, window %s to %s",
@@ -390,6 +446,8 @@ async def backtest_system(
                     pairs=pairs,
                     executor=executor,
                     snapshots=snapshots,
+                    equity=curve,
+                    regimes=regimes,
                     _state={},
                     _tally=tally,
                     _errors=_ErrorTally(),
@@ -410,6 +468,7 @@ async def run_backtest(
     symbols: Sequence[str] | None = None,
     exchange_info_environment: str = "mainnet",
     code_facts: CodeFacts | None = None,
+    regimes: RegimeTable | None = None,
 ) -> BacktestResult:
     """Build a system, run it once, tear it down, and return what it produced."""
     async with backtest_system(
@@ -418,6 +477,7 @@ async def run_backtest(
         symbols=symbols,
         exchange_info_environment=exchange_info_environment,
         code_facts=code_facts,
+        regimes=regimes,
     ) as system:
         return await system.run()
 
@@ -491,6 +551,28 @@ def _describe(
     )
     if residual != 0:
         problems.append(f"cash_identity_residual={residual}")
+    equity = system.equity.summary()
+    metrics = compute_metrics(
+        [
+            TradeFacts(
+                symbol=t.symbol,
+                entry_time=t.entry_bar_open,
+                exit_time=t.exit_time,
+                entry_notional=t.entry_notional,
+                entry_fee=t.entry_fee,
+                entry_quote_total=t.entry_quote_total,
+                exit_gross=t.exit_gross,
+                exit_fee=t.exit_fee,
+                realised=t.realised,
+            )
+            for t in trades
+        ],
+        equity,
+        quote_asset=system.settings.config.trading.base_currency,
+        regimes=system.regimes,
+    )
+    if metrics.overall.fee_residual != 0:
+        problems.append(f"fee_identity_residual={metrics.overall.fee_residual}")
     by_result = dict.fromkeys(EntryResult, 0)
     for attempt in attempts:
         by_result[attempt.result] += 1
@@ -547,6 +629,10 @@ def _describe(
             "cash_identity_residual": str(residual),
             "trade_log_sha256": digest,
         },
+        "quote_asset": metrics.quote_asset,
+        "equity": equity.to_record(),
+        "metrics": metrics.to_record(),
+        "regime_labels": None if system.regimes is None else {"sha256": system.regimes.digest},
         "error_log_records": {"count": system._errors.count, "first": list(system._errors.first)},
         "problems": list(problems),
         "wall_clock": {

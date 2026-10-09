@@ -225,6 +225,64 @@ def boot_lines(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
     ]
 
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+class TestTheRegimeLabelsReachTheRecord:
+    """R-AI through the command: the committed file is read from the launch directory, verified
+    against its digest file, and its digest is recorded."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def record(self, tmp_path: Path) -> dict[str, dict[str, object]]:
+        return json.loads((only_record(tmp_path) / "run.json").read_text(encoding="utf-8"))
+
+    def test_the_committed_labels_are_read_and_their_digest_recorded(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.chdir(REPO_ROOT)
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        record = self.record(tmp_path)
+        sidecar = (REPO_ROOT / "docs" / "REGIME_LABELS.json.sha256").read_text(encoding="ascii")
+        assert record["regime_labels"] == {"sha256": sidecar.split()[0]}
+        metrics = record["metrics"]
+        by_regime = metrics["by_regime"]
+        # March 2024 is in 2024Q1, which the committed file labels rising.
+        assert by_regime["rising"]["trades"] == metrics["overall"]["trades"] > 0
+        assert by_regime["falling"]["trades"] == by_regime["sideways"]["trades"] == 0
+
+    def test_a_label_file_that_does_not_match_its_digest_refuses_before_any_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        launch = tmp_path / "launch"
+        (launch / "docs").mkdir(parents=True)
+        (launch / "docs" / "REGIME_LABELS.json").write_bytes(
+            (REPO_ROOT / "docs" / "REGIME_LABELS.json").read_bytes()
+        )
+        (launch / "docs" / "REGIME_LABELS.json.sha256").write_text(
+            "0" * 64 + "  x\n", encoding="ascii"
+        )
+        monkeypatch.chdir(launch)
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 1
+        assert records(tmp_path) == []
+
+    def test_a_missing_label_file_warns_and_the_run_has_no_regime_breakdown(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        launch = tmp_path / "launch"
+        launch.mkdir()
+        monkeypatch.chdir(launch)
+        build_world(tmp_path)
+        with caplog.at_level(logging.WARNING):
+            assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        record = self.record(tmp_path)
+        assert record["metrics"]["by_regime"] is None
+        assert record["regime_labels"] is None
+        assert any("No regime labels" in r.getMessage() for r in caplog.records)
+
+
 class TestTheRecordCarriesTheBootLine:
     """R-AH, through the command: the record's ``provenance`` block IS the line `main` logged."""
 

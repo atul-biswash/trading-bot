@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from trading_bot.backtesting.regimes import RegimeTable
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import (
     LIVE_TRADING_BLOCKED_MESSAGE,
@@ -215,6 +216,26 @@ def _resolve_window(
 
 BACKTEST_LOG_NAME = "backtest.log"
 
+#: The committed quarterly regime labels (R-AI), relative to the launch directory.
+REGIME_LABELS_PATH = Path("docs") / "REGIME_LABELS.json"
+
+
+def _load_regimes(log: logging.Logger) -> RegimeTable | None:
+    """The committed labels, or ``None`` with a warning if the file is absent.
+
+    A file that is present and does not match its digest file is a ``ConfigError``: a run
+    must not be labelled by regimes nobody can vouch for.
+    """
+    if not REGIME_LABELS_PATH.is_file():
+        log.warning(
+            "No regime labels at %s; the metrics carry no per-regime breakdown", REGIME_LABELS_PATH
+        )
+        return None
+    try:
+        return RegimeTable.from_file(REGIME_LABELS_PATH)
+    except ValueError as exc:
+        raise ConfigError(f"Invalid regime labels: {exc}") from exc
+
 
 def _seal_run_directory(run_log: DeferredFileHandler, working: Path, suffix: str) -> None:
     """Close the run's log and rename its working directory, best effort.
@@ -264,6 +285,7 @@ def _cmd_backtest(
         "all enabled" if symbols is None else ",".join(symbols),
     )
     select_pairs(settings, symbols)  # refuse an unenabled symbol before any directory exists
+    regimes = _load_regimes(log)  # likewise: a label file that does not verify refuses here
     # Microseconds, so two runs of one history started within a second do not name one directory.
     stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
     base = Path(window.data_dir).parent / "backtests"
@@ -273,7 +295,13 @@ def _cmd_backtest(
     run_log.open(working / BACKTEST_LOG_NAME)
     try:
         result = asyncio.run(
-            run_backtest(settings, window=window, symbols=symbols, code_facts=facts.log_fields)
+            run_backtest(
+                settings,
+                window=window,
+                symbols=symbols,
+                code_facts=facts.log_fields,
+                regimes=regimes,
+            )
         )
         final = base / f"{stamp}-{result.trade_log_sha256[:12]}"
         write_run(result, working, existing=True)

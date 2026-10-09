@@ -929,6 +929,26 @@ where it is money and states its denominator.
 > the record. **What stops being true:** nothing in S3's text; the README's *"metrics are not
 > built"* is corrected in place.
 
+> **ANNOTATED AT M5m P107 (C6): S3 IS WIRED INTO THE ROOT, AND R-AJ'S LOOP IS BUILT.**
+> `backtest_system` registers `_EquityProbe` on the provider right after the executor, so after
+> EVERY bar of EVERY pair, with that bar's fills already in the portfolio, it marks every held
+> symbol at the provider's last close (exact `Decimal`) and calls `EquityCurve.observe`; a missing
+> mark makes `Portfolio.equity` raise and the run incomplete rather than guess one. The record
+> (schema 3) gains `quote_asset`, `equity` (the curve's summary: initial and final equity, the
+> worst-decline pair with its times, the daily closes, the positions still open and the span),
+> `metrics` (S3's figures, each with its denominator, whole and by pair and by regime) and
+> `regime_labels` (the digest of the label file, or `null`). A fee identity that fails (`gross -
+> entry fees - exit fees - net`) is a problem that makes the run not a result. `backtest` reads
+> `docs/REGIME_LABELS.json` from the launch directory and refuses, before it makes a directory, a
+> file that does not match its digest file; an absent file is a warning and no regime breakdown.
+> The recorded metrics are recomputable from `trades.csv` and the record's `equity` block alone
+> (tested to exact equality), which is how C7 recomputes the smoke run's. **What stops being
+> true:** the P106 C4 annotation's list of what the record names, which now also names the
+> equity, the metrics and the label digest; and README's *"it has no metrics"* and *"the metrics
+> are built, not yet wired into the run"*, corrected in place. **S3's arming condition stays
+> REAFFIRMED** until the Q2 survey of `metrics.py` has run, and is retired by the commit that
+> records it.
+
 **S4. Calibration against the venue — the backtester's own acceptance test.** Replay
 the strategy over the windows the bot actually traded on Testnet, from S1's data, and
 compare trade by trade with S0's census. **The backtester is trusted only if its
