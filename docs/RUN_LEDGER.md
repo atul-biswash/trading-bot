@@ -3720,3 +3720,58 @@ question, *what Testnet retains*, is answered, and the Testnet trades of 2026-09
 | `s0d_tie.py` | `0d92587a573ac4fe8aab84b501e9a0ffd8a4182b4cf2ed17f2f0eafadaf1e09f` |
 | `s0d_diff.py` | `58a167a1b16958fd95d466392f563beb7f750d77697d5855c88cca82b57caa03` |
 | `s0d_probe.py` | `c0f85e83aefc0cc994b88a74d9a1cc4268648026713bfba97198162d94daafde` |
+
+## 34. M5m S3: the quarterly regime labels, computed once from the store (P107 C4, R-AI)
+
+Recorded at M5m P107 (C4b). An observation log, so this section only adds. **The labels the
+owner's R-AI ordered were computed, once, on `2026-10-09`**, by `scripts/regime_labels.py` as
+committed at `13297bb` (C4a), launched from the development tree with `HEAD` at `13297bb`:
+`PYTHONPATH=src python scripts/regime_labels.py`, exit 0, over `data/historical`. It reads
+BTCUSDT's daily bars through `HistoricalStore.candles`, which hashes each month file as it reads
+it, and writes the two files below with mode `x`.
+
+### What was written
+
+| file | sha256 |
+|---|---|
+| `docs/REGIME_LABELS.json` (475 lines) | `6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72` |
+| `docs/REGIME_LABELS.json.sha256` | records the line above in `sha256sum` format |
+| the store's `BTCUSDT/1d/MANIFEST.jsonl` it was read from | `39247bf6d4a3281a1de88f367f316bdf6fd94de276a9f8ba03ca830930a1ce04` |
+
+Source: 3,332 daily bars, `2017-08-17T00:00Z` to `2026-09-30T00:00Z`, 110 monthly files. **Result:
+37 quarters, 2017Q3 to 2026Q3, 36 labelled and 1 partial** (2017Q3, 45 of 92 days: the history
+begins 2017-08-17). Labelled: **rising 13, falling 7, sideways 16**. `--check` re-derived both
+files from the store and found them equal (exit 0); a second write was refused (exit 2) and
+changed nothing (`regime_run1.txt`, SHA-256
+`01b73765efd48b74c2e445abd90d430a49e0370948069238722675272a3084f6`, holds the first run's output).
+
+| regime | quarters |
+|---|---|
+| rising | 2017Q4 2019Q2 2020Q2 2020Q3 2020Q4 2021Q1 2021Q3 2023Q1 2023Q4 2024Q1 2024Q4 2025Q2 2026Q3 |
+| falling | 2018Q1 2018Q4 2019Q3 2021Q2 2022Q2 2025Q4 2026Q1 |
+| sideways | 2018Q2 2018Q3 2019Q1 2019Q4 2020Q1 2021Q4 2022Q1 2022Q3 2022Q4 2023Q2 2023Q3 2024Q2 2024Q3 2025Q1 2025Q3 2026Q2 |
+| partial | 2017Q3 |
+
+The quarters nearest a threshold, all sideways: **2022Q4 -14.83%**, **2026Q2 -14.15%**,
+**2019Q4 -13.21%**, **2024Q2 -11.94%** and 2025Q1 -11.78%. The nearest to a rising threshold is 2020Q3 at
++17.9%, which is rising. **2022Q4 is 0.17 points from the falling line**: it opened at 19,422.61
+and closed at 16,542.40 against a bound of 19,422.61 x 0.85 = 16,509.2185, so it is sideways by
+33.18 USDT, and a rounded quotient could not have moved it. No other quarter is within a point of
+a line.
+
+### Against the predictions (`F:\trading bot\scratch\p107\predictions_c4_labels.txt`)
+
+SHA-256 `c000d278df4f834b92889d1cb560d2d9b15e97e9516a3074e094be89157f9c1e`, written before the
+script first ran. **The four counts held to the point predictions** (37 quarters, 1 partial,
+rising 13, falling 7, sideways 16), and so did the behaviour (second write exit 2, `--check` equal).
+**One detail was wrong** (`M5m-197`): the prediction expected 2024Q2 near the -15% line from
+memory of prices; it is -11.94%. The prediction gave no labels for 2025Q4 to 2026Q3, which turned
+out falling, falling, sideways, rising.
+
+### Digests of the C4 instruments and outputs (SHA-256)
+
+| file | sha256 |
+|---|---|
+| `predictions_c4_labels.txt` (under `F:\trading bot\scratch\p107\`) | `c000d278df4f834b92889d1cb560d2d9b15e97e9516a3074e094be89157f9c1e` |
+| `predictions_c4_gate.txt` | `0eba899057b4a7b69892a8ce2a8bdaff9c36b459e11093d538d1cde6b87e704d` |
+| `regime_run1.txt` | `01b73765efd48b74c2e445abd90d430a49e0370948069238722675272a3084f6` |

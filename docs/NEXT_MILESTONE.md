@@ -875,6 +875,34 @@ that first multiplies it by money"*.
 > the record: its fields were there and the verdict was not, and both are now. The smoke runs
 > of P106 (schema 1) carry no `provenance` block and stay as they were.
 
+> **ANNOTATED AT M5m P107 (C4a, C4b): R-AI IS CARRIED OUT -- THE REGIME LABELS ARE COMPUTED,
+> COMMITTED WITH THEIR DIGEST, AND FIXED.** `scripts/regime_labels.py` (C4a) read BTCUSDT's
+> daily bars from the store once, through the hash-verifying `HistoricalStore`, and wrote
+> `docs/REGIME_LABELS.json` and `docs/REGIME_LABELS.json.sha256` (C4b): **37 calendar quarters,
+> 2017Q3 to 2026Q3; 36 labelled** (13 rising, 7 falling, 16 sideways) **and 1 partial**
+> (2017Q3, which begins 2017-08-17 and so carries no label). The file's SHA-256 is
+> `6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72`, the digest of the store's
+> `BTCUSDT/1d/MANIFEST.jsonl` it was read from is
+> `39247bf6d4a3281a1de88f367f316bdf6fd94de276a9f8ba03ca830930a1ce04`, and the script's `--check`
+> re-derives both from the store and refuses nothing it finds equal. The script refuses to write
+> over either file (exit 2), and `tests/unit/test_regime_labels_committed.py` fails if the labels
+> are edited by hand. **They are fixed before S6**: a different label set is a new file and a new
+> ruling, not an edit.
+>
+> **The definitions R-AI leaves open were chosen, and are the owner's to overrule (`M5m-194`):**
+> UTC calendar quarters, half-open; the return `close_last / open_first - 1` over the daily
+> bars; a quarter is labelled only if the store holds one daily bar for every day of it; and the
+> thresholds are strict and decided by exact comparison, not by a rounded quotient. A trade
+> whose quarter is partial, or outside the table, has no regime; the metrics report it as
+> `unlabelled`, and S7's *"positive net in at least two of the three regimes"* counts the three
+> regimes only.
+>
+> **What stops being true:** the S7 annotations' *"the regime labels are date ranges fixed in the
+> research log before S6's first run"* (P99, restated at P101): the labels are quarter labels
+> in `docs/REGIME_LABELS.json`, which is the fixing, and no research-log entry is needed to
+> make them so. The "date ranges" survive as the quarters' `[start, end)`. **What survives:**
+> every S7 threshold, the 1.20% pass level, the joint run and the recording of the outcome.
+
 **S3. Metrics.** Fill `backtesting/metrics.py`: trades, net and gross P&L, fees paid,
 win rate, average win and loss, profit factor, maximum drawdown on the equity curve,
 daily Sharpe and Sortino ratios, exposure, and holding period. Each figure is `Decimal`
