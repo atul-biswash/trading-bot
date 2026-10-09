@@ -24,6 +24,7 @@ from trading_bot.config.models import LoggingConfig
 from trading_bot.utils.logger import (
     _DATE_FORMAT,
     _PLAIN_FORMAT,
+    CONSOLE_HANDLER_NAME,
     JsonFormatter,
     PlainFormatter,
     get_logger,
@@ -213,6 +214,38 @@ class TestHandlerWiring:
             LoggingConfig(console=False, file={"enabled": True, "json": True, "path": path})
         )
         assert isinstance(logging.getLogger().handlers[0].formatter, JsonFormatter)
+
+    def test_the_console_handler_is_named_so_a_caller_can_find_it_and_no_other(
+        self, tmp_path: object
+    ) -> None:
+        """R-AS finds the console by this name, so the file sink must not carry it."""
+        setup_logging(
+            LoggingConfig(
+                console=True, file={"enabled": True, "json": False, "path": f"{tmp_path}/b.log"}
+            )
+        )
+        named = [h for h in logging.getLogger().handlers if h.get_name() == CONSOLE_HANDLER_NAME]
+        assert len(named) == 1
+        others = [h for h in logging.getLogger().handlers if h is not named[0]]
+        assert len(others) == 1 and others[0].get_name() != CONSOLE_HANDLER_NAME
+
+    def test_the_stream_fallback_console_is_named_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import builtins
+
+        real_import = builtins.__import__
+
+        def no_rich(name: str, *args: object, **kwargs: object) -> object:
+            if name.startswith("rich"):
+                raise ImportError("rich disabled for this test")
+            return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(builtins, "__import__", no_rich)
+        setup_logging(LoggingConfig(console=True, file={"enabled": False, "json": False}))
+        handler = logging.getLogger().handlers[0]
+        assert type(handler) is logging.StreamHandler
+        assert handler.get_name() == CONSOLE_HANDLER_NAME
 
 
 # --------------------------------------------------------------------------

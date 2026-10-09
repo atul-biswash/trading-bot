@@ -120,13 +120,15 @@ def make_settings(
     start: str = "2024-03-10",
     end: str = "2024-03-31",
     file_logging: bool = False,
+    console_logging: bool = False,
 ) -> Settings:
     """A config over ``root``. ``file_logging`` turns on the bot's own file sink, at the
     default relative path ``logs/trading_bot.log``, so a test can prove a command leaves it."""
+    console = "true" if console_logging else "false"
     log_block = (
-        "logging:\n  console: false\n  file:\n    enabled: true\n    path: logs/trading_bot.log\n"
+        f"logging:\n  console: {console}\n  file:\n    enabled: true\n    path: logs/trading_bot.log\n"
         if file_logging
-        else "logging:\n  console: false\n  file:\n    enabled: false\n"
+        else f"logging:\n  console: {console}\n  file:\n    enabled: false\n"
     )
     pair_block = "".join(
         f"    - symbol: {symbol}\n      timeframe: {timeframe}\n      enabled: true\n"
@@ -158,6 +160,7 @@ def build_world(
     omit: frozenset[int] = frozenset(),
     symbols: tuple[str, ...] = ("BTCUSDT",),
     file_logging: bool = False,
+    console_logging: bool = False,
 ) -> Settings:
     """A store of every symbol's March, a mainnet snapshot for each, and a config naming them."""
     root = tmp_path / "hist"
@@ -169,4 +172,5 @@ def build_world(
         root,
         pairs=tuple((symbol, "1h") for symbol in symbols),
         file_logging=file_logging,
+        console_logging=console_logging,
     )

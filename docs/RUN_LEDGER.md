@@ -3892,6 +3892,12 @@ handler C0 added (751,361 bytes written), the rest of C1 to C6, and the machine,
 cannot separate them. The console sink still carries the whole log (1,114,317 bytes on stdout, as
 P106's 1,114,155).
 
+> **ANNOTATED AT M5m P109 (C4): THE CONSOLE NO LONGER CARRIES THE WHOLE LOG.** R-AS: during a backtest
+> the console carries WARNING and above and the run directory's `backtest.log` carries everything;
+> this run's console output was 1,114,317 bytes, and from C4 a run's is its warnings and one result
+> line. **What survives:** this section's measurements, which are of the run as it was made, and the
+> runtime question, which a quieter console may or may not touch and which nothing here measures.
+
 ### Digests of the C7 instruments and outputs (SHA-256)
 
 | file | sha256 |

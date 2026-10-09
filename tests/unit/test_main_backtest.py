@@ -300,9 +300,11 @@ class TestTheRecordCarriesTheBootLine:
         build_world(tmp_path)
         with caplog.at_level(logging.INFO):
             assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
-        block = self.run_record(tmp_path)["provenance"]
+        record = self.run_record(tmp_path)
+        block = record["provenance"]
         assert block == facts.log_fields()
         assert block["verdict"] == "accepted"
+        assert record["evidence_eligible"] is True  # R-AR
         lines = boot_lines(caplog)
         assert len(lines) == 1
         for key, value in facts.log_fields().items():
@@ -315,7 +317,9 @@ class TestTheRecordCarriesTheBootLine:
         monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: facts)
         build_world(tmp_path)
         assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
-        block = self.run_record(tmp_path)["provenance"]
+        record = self.run_record(tmp_path)
+        block = record["provenance"]
+        assert record["evidence_eligible"] is False  # R-AR: it ran, and it is not evidence
         assert block["verdict"] == "refused"
         assert block["install_kind"] == "editable"
         assert "install_kind=editable" in str(block["refusal_reasons"])
@@ -351,6 +355,97 @@ def real_logging(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Pa
     for handler in saved_handlers:
         root.addHandler(handler)
     root.setLevel(saved_level)
+
+
+class TestTheConsoleIsQuiet:
+    """R-AS: during a backtest the console carries WARNING and above; the file carries everything."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def test_only_the_named_console_handler_is_raised_to_warning(self) -> None:
+        root = logging.getLogger()
+        saved = list(root.handlers)
+        console = logging.StreamHandler()
+        console.set_name(cli.CONSOLE_HANDLER_NAME)
+        loud = logging.StreamHandler()  # somebody else's, unnamed: left alone
+        strict = logging.StreamHandler()
+        strict.set_name(cli.CONSOLE_HANDLER_NAME)
+        strict.setLevel(logging.ERROR)
+        try:
+            for handler in saved:
+                root.removeHandler(handler)
+            for handler in (console, loud, strict):
+                root.addHandler(handler)
+            cli._quiet_console()
+            assert console.level == logging.WARNING
+            assert loud.level == logging.NOTSET
+            assert strict.level == logging.ERROR  # never lowered
+            assert root.level == logging.getLogger().level
+        finally:
+            for handler in (console, loud, strict):
+                root.removeHandler(handler)
+                handler.close()
+            for handler in saved:
+                root.addHandler(handler)
+
+    def test_a_backtest_prints_its_warnings_and_one_result_line_and_the_file_keeps_the_rest(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+        real_logging: Path,
+    ) -> None:
+        monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: provenance(accepted=True))
+        build_world(tmp_path, file_logging=True, console_logging=True)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        out, err = capfd.readouterr()
+        directory = only_record(tmp_path)
+        lines = [line for line in out.splitlines() if line.strip()]
+        assert lines, "the console printed nothing at all"
+        # This world has no docs/REGIME_LABELS.json in its launch directory, so the run logs one
+        # WARNING, which R-AS says the console carries. It is the only record that does.
+        assert "WARNING" in out + err and "No regime labels" in " ".join(out.split())
+        assert out.count("WARNING") + err.count("WARNING") == 1
+        assert lines[-1].startswith("backtest complete: ") and "trade(s); record " in lines[-1]
+        assert lines[-1].endswith(str(directory / "run.json"))
+        assert "INFO" not in out + err and "Backtest window" not in out + err
+        text = (directory / "backtest.log").read_text(encoding="utf-8")
+        assert " INFO " in text and "event=boot_provenance" in text
+        assert "Backtest window:" in text and "Backtest complete" in text
+
+    def test_a_refused_verdict_still_reaches_the_console_because_it_is_an_error(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+        real_logging: Path,
+    ) -> None:
+        monkeypatch.setattr(cli, "collect_provenance", lambda *_a, **_k: provenance(accepted=False))
+        build_world(tmp_path, file_logging=True, console_logging=True)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        out, err = capfd.readouterr()
+        shown = out + err  # rich draws to stdout, the stream fallback to stderr
+        assert "ERROR" in shown and "verdict=refused" in shown
+        assert "INFO" not in shown
+
+    def test_other_commands_keep_their_console_at_info(
+        self, tmp_path: Path, capfd: pytest.CaptureFixture[str], real_logging: Path
+    ) -> None:
+        build_world(tmp_path, file_logging=True, console_logging=True)
+        assert cli.main(["--config", str(tmp_path / "bt_config.yaml"), "strategies"]) == 0
+        out, err = capfd.readouterr()
+        assert "INFO" in out + err and "boot_provenance" in out + err
+
+    def test_main_quiets_the_console_for_a_backtest_and_for_nothing_else(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        calls: list[str] = []
+        monkeypatch.setattr(cli, "_quiet_console", lambda: calls.append("quiet"))
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        assert calls == ["quiet"]
+        assert cli.main(["--config", str(tmp_path / "bt_config.yaml"), "strategies"]) == 0
+        assert calls == ["quiet"]
 
 
 class TestTheLogStaysInTheRunDirectory:

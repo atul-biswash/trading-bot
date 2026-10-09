@@ -59,6 +59,11 @@ from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
 
+from trading_bot.backtesting.evidence import (
+    EVIDENCE_KEY,
+    RUN_RECORD_NAME,
+    is_evidence_eligible,
+)
 from trading_bot.backtesting.exchange_info import Snapshot, SnapshotError, load_snapshot
 from trading_bot.backtesting.fill_model import FillParameters
 from trading_bot.backtesting.metrics import EquityCurve, TradeFacts, compute_metrics
@@ -109,8 +114,9 @@ _log = get_logger(__name__)
 
 #: The shape of the run record. Bump it when a key is added, renamed or removed.
 #: 2: ``provenance`` added (R-AH). 3: ``quote_asset``, ``equity``, ``metrics`` and
-#: ``regime_labels`` added (S3, R-AJ).
-RUN_RECORD_SCHEMA = 3
+#: ``regime_labels`` added (S3, R-AJ). 4: ``evidence_eligible`` added (R-AR); a record of a
+#: schema before 4 has no such key and is not evidence.
+RUN_RECORD_SCHEMA = 4
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MILLISECOND = timedelta(milliseconds=1)
@@ -578,14 +584,17 @@ def _describe(
         by_result[attempt.result] += 1
     strategy = system.settings.config.strategy
     facts = dict(system._code_facts())
+    # R-AH: the boot_provenance verdict and every field of that line. A source that carries no
+    # verdict (a test's injected facts) is recorded as "unrecorded", never as accepted.
+    provenance: dict[str, object] = {"verdict": "unrecorded", **facts}
     record: dict[str, object] = {
         "schema": RUN_RECORD_SCHEMA,
         # The short view, as before; the full line is "provenance".
         "code": {key: facts[key] for key in _CODE_KEYS if key in facts},
-        # R-AH: the boot_provenance verdict and every field of that line. A source that
-        # carries no verdict (a test's injected facts) is recorded as "unrecorded", never as
-        # accepted: S4 to S7 evidence needs the verdict to read "accepted".
-        "provenance": {"verdict": "unrecorded", **facts},
+        # S4 to S7 evidence needs the verdict to read "accepted"; R-AR puts that judgement in
+        # the record itself, true only for an accepted verdict, so no reader has to know it.
+        "provenance": provenance,
+        EVIDENCE_KEY: is_evidence_eligible(provenance),
         "config": {
             "path": None
             if system.settings.config_path is None
@@ -678,7 +687,7 @@ def write_run(
             raise FileNotFoundError(directory)
     else:
         directory.mkdir(parents=True, exist_ok=False)
-    run_path = directory / "run.json"
+    run_path = directory / RUN_RECORD_NAME
     with run_path.open("x", encoding="utf-8", newline="\n") as handle:
         handle.write(json.dumps(result.record, sort_keys=True, indent=2) + "\n")
     trades_path = directory / "trades.csv"

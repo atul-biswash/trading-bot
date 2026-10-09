@@ -172,6 +172,11 @@ def _logfmt(key: str, value: object) -> str:
     return f"{key}={text}"
 
 
+#: The name ``setup_logging`` gives its console handler, so a caller that must change the
+#: console's level (a backtest's, R-AS) can find that handler and no other.
+CONSOLE_HANDLER_NAME = "trading_bot.console"
+
+
 def _console_handler(use_json: bool) -> logging.Handler:
     """Build the console handler. Three sinks exist here, not two.
 
@@ -204,11 +209,13 @@ def _console_handler(use_json: bool) -> logging.Handler:
         else:
             rich_handler = RichHandler(rich_tracebacks=True, show_path=False)
             rich_handler.setFormatter(PlainFormatter("%(message)s"))
+            rich_handler.set_name(CONSOLE_HANDLER_NAME)
             return rich_handler
     handler = logging.StreamHandler()
     handler.setFormatter(
         JsonFormatter() if use_json else PlainFormatter(_PLAIN_FORMAT, _DATE_FORMAT)
     )
+    handler.set_name(CONSOLE_HANDLER_NAME)
     return handler
 
 

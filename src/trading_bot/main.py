@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from trading_bot.backtesting.evidence import RUN_RECORD_NAME
 from trading_bot.backtesting.regimes import RegimeTable
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import (
@@ -41,7 +42,12 @@ from trading_bot.config.settings import (
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.exceptions import ConfigError, LiveTradingBlockedError, TradingBotError
 from trading_bot.utils.helpers import utc_now
-from trading_bot.utils.logger import DeferredFileHandler, get_logger, setup_logging
+from trading_bot.utils.logger import (
+    CONSOLE_HANDLER_NAME,
+    DeferredFileHandler,
+    get_logger,
+    setup_logging,
+)
 from trading_bot.utils.provenance import Provenance, collect_provenance, refusal_message
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -310,7 +316,7 @@ def _cmd_backtest(
             "complete" if result.complete else "INCOMPLETE",
             len(result.trades),
             result.trade_log_sha256,
-            final / "run.json",
+            final / RUN_RECORD_NAME,
             final / "trades.csv",
             final / BACKTEST_LOG_NAME,
         )
@@ -322,6 +328,10 @@ def _cmd_backtest(
         raise
     run_log.close_file()
     working.rename(final)
+    # The one line the console carries on success. It is not a log record, so R-AS leaves it,
+    # and without it a run that logs nothing above WARNING would say nothing at all.
+    outcome = "complete" if result.complete else "INCOMPLETE"
+    print(f"backtest {outcome}: {len(result.trades)} trade(s); record {final / RUN_RECORD_NAME}")
     return 0 if result.complete else 1
 
 
@@ -375,6 +385,7 @@ def main(argv: list[str] | None = None) -> int:
         setup_logging(logging_config.model_copy(update={"file": no_file}))
         run_log = DeferredFileHandler(json_format=logging_config.file.json_format)
         logging.getLogger().addHandler(run_log)
+        _quiet_console()  # R-AS: WARNING and above on the console, everything in the file
     else:
         setup_logging(logging_config)
     try:
@@ -383,6 +394,22 @@ def main(argv: list[str] | None = None) -> int:
         if run_log is not None:
             logging.getLogger().removeHandler(run_log)
             run_log.close()
+
+
+def _quiet_console() -> None:
+    """R-AS: raise the console handler ``setup_logging`` built to WARNING.
+
+    The owner's ruling, verbatim: *"During a backtest the console carries WARNING and above;
+    the full log goes to the run directory's file."* The root logger's own level is not
+    touched, so every record still reaches the run log; only the handler that prints is
+    raised, and one already above WARNING keeps its level. The handler is found by the name
+    ``setup_logging`` gives it, so a handler somebody else attached (a test's capture, say) is
+    never touched. A backtest logs about 1.1 MB at INFO (M5m-191), which on the console buried
+    the one line an operator wants.
+    """
+    for handler in logging.getLogger().handlers:
+        if handler.get_name() == CONSOLE_HANDLER_NAME:
+            handler.setLevel(max(handler.level, logging.WARNING))
 
 
 def _dispatch(

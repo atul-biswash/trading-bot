@@ -1161,6 +1161,29 @@ takes and the bot did not is a finding about one of them.
 > R-AQ and R-AX in C3, R-AR and R-AS in C4, R-AU in this commit, R-AV in P110, and R-AO, R-AY,
 > R-AZ, R-BA and R-BB in the pre-registration commit.
 
+> **ANNOTATED AT M5m P109 (C4): R-AR AND R-AS ARE CARRIED OUT.** *R-AR.* A run record
+> (schema 4) carries `evidence_eligible`, true only when `provenance.verdict` reads `accepted`
+> (`backtesting/evidence.py`, written by `run_backtest`, part of the record digest). The one door
+> is `load_eligible_record(path)` for a file and `require_evidence_eligible(record)` for a record in
+> hand; both refuse a false, absent or non-boolean flag with `EvidenceRefusedError`, naming the verdict
+> and its refusal reasons, so every record before schema 4 (the P106 and P107 smoke runs included) is
+> refused. `tests/unit/test_backtest_evidence.py` reads every module under `src/` and `scripts/` and
+> fails if one names `run.json` (or `RUN_RECORD_NAME`) without calling the door; the three modules
+> allowed to name it are the ones that write or report its path (`engine.py`, `main.py`,
+> `evidence.py`), and adding a fourth is a visible edit to a list in that test. *R-AS.* `backtest`
+> raises the console handler (named `trading_bot.console` by `setup_logging`) to WARNING and leaves
+> every other handler and the root level alone, so the run's file still holds everything. **One
+> thing chosen, the owner's to overrule:** `_cmd_backtest` prints one plain line on completion,
+> `backtest complete: N trade(s); record <path>`, which is not a log record, because a run that logs
+> nothing above WARNING would otherwise say nothing. **What stops being true:** the P107 C1
+> annotation's *"The console sink is unchanged, since R-AG names files"*; the P107 C6 annotation's
+> record, described as schema 3, which is now schema 4; and `M5m-191` and `M5m-193` as open (the
+> console, and R-AH's second sentence, which R-AR enforces for every consumer that goes through the
+> door). **What survives:** R-AH, R-AG and everything else those annotations state. **What is still
+> unenforced, and is not a defect of this commit:** a consumer that does not exist yet. The door
+> exists for S4's comparison tool and S5 to S7's to call, and the census will fail the first of them
+> that does not.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
