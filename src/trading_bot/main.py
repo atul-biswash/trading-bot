@@ -305,6 +305,7 @@ def _cmd_backtest(
                 settings,
                 window=window,
                 symbols=symbols,
+                exchange_info_environment=window.exchange_info_environment,
                 code_facts=facts.log_fields,
                 regimes=regimes,
             )

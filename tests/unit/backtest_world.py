@@ -121,10 +121,16 @@ def make_settings(
     end: str = "2024-03-31",
     file_logging: bool = False,
     console_logging: bool = False,
+    environment: str = "mainnet",
 ) -> Settings:
     """A config over ``root``. ``file_logging`` turns on the bot's own file sink, at the
-    default relative path ``logs/trading_bot.log``, so a test can prove a command leaves it."""
+    default relative path ``logs/trading_bot.log``, so a test can prove a command leaves it.
+    ``environment`` is the stored ``exchangeInfo`` the config selects; the default writes no key,
+    so every existing caller reads the config it always did."""
     console = "true" if console_logging else "false"
+    environment_line = (
+        "" if environment == "mainnet" else f"  exchange_info_environment: {environment}\n"
+    )
     log_block = (
         f"logging:\n  console: {console}\n  file:\n    enabled: true\n    path: logs/trading_bot.log\n"
         if file_logging
@@ -147,6 +153,7 @@ def make_settings(
         "  reconcile_deadline_s: 2.3\n"
         "backtesting:\n"
         f"  start_date: '{start}'\n  end_date: '{end}'\n  data_dir: {root.as_posix()}\n"
+        + environment_line
         + log_block,
         encoding="utf-8",
     )
@@ -161,16 +168,21 @@ def build_world(
     symbols: tuple[str, ...] = ("BTCUSDT",),
     file_logging: bool = False,
     console_logging: bool = False,
+    environment: str = "mainnet",
+    environments: tuple[str, ...] = ("mainnet",),
 ) -> Settings:
-    """A store of every symbol's March, a mainnet snapshot for each, and a config naming them."""
+    """A store of every symbol's March, a snapshot per environment for each (mainnet only, by
+    default), and a config naming them and selecting ``environment``."""
     root = tmp_path / "hist"
     for index, symbol in enumerate(symbols):
         store_series(root, symbol, omit=omit, shift=index)
-        store_snapshot(root, "mainnet", symbol, exchange_info(symbol))
+        for name in environments:
+            store_snapshot(root, name, symbol, exchange_info(symbol))
     return make_settings(
         tmp_path,
         root,
         pairs=tuple((symbol, "1h") for symbol in symbols),
         file_logging=file_logging,
         console_logging=console_logging,
+        environment=environment,
     )

@@ -284,6 +284,27 @@ class TestTheRegimeLabelsReachTheRecord:
         assert any("No regime labels" in r.getMessage() for r in caplog.records)
 
 
+class TestTheConfiguredFiltersAreTheOnesTheRunSizesWith:
+    """S4 sizes with the stored TESTNET filters: the command passes the config's environment on
+    (P110 C3), and the record names the environment and the digest of each snapshot it used."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def snapshots(self, tmp_path: Path) -> dict[str, dict[str, str]]:
+        record = json.loads((only_record(tmp_path) / "run.json").read_text(encoding="utf-8"))
+        return record["exchange_info"]
+
+    def test_a_testnet_config_runs_on_the_testnet_snapshot(self, tmp_path: Path) -> None:
+        build_world(tmp_path, environment="testnet", environments=("mainnet", "testnet"))
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        assert self.snapshots(tmp_path)["BTCUSDT"]["environment"] == "testnet"
+
+    def test_the_default_config_still_runs_on_the_mainnet_snapshot(self, tmp_path: Path) -> None:
+        build_world(tmp_path, environments=("mainnet", "testnet"))
+        assert cli.main(argv(tmp_path, *self.WINDOW)) == 0
+        assert self.snapshots(tmp_path)["BTCUSDT"]["environment"] == "mainnet"
+
+
 class TestTheRecordCarriesTheBootLine:
     """R-AH, through the command: the record's ``provenance`` block IS the line `main` logged."""
 

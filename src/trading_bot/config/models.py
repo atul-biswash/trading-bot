@@ -34,6 +34,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
@@ -561,6 +562,12 @@ class BacktestConfig(_Model):
       take-profit included, because both are market orders once triggered. Its
       default is 1.20%, the owner's R-B2: the mean of the census of record's eight
       stop-loss legs, rounded up.
+    * ``exchange_info_environment``: which stored ``exchangeInfo`` the run sizes with,
+      ``mainnet`` or ``testnet``, read from ``<data_dir>/_exchange_info/<environment>/``.
+      Mainnet is the default, for a backtest on mainnet klines; S4 replays what the bot did
+      on Testnet and sets ``testnet`` (P110 C3). The two names are the ones
+      ``backtesting.exchange_info.ENVIRONMENTS`` keeps, and a test pins them equal because
+      this module cannot import that one.
 
     **The window is half-open, in UTC dates**: ``[start_date, end_date)``, midnight to
     midnight, so ``end_date`` itself is not replayed. A date, not a string, so a
@@ -577,6 +584,7 @@ class BacktestConfig(_Model):
     slippage_percent: Decimal = Field(Decimal("0.05"), ge=0)
     stop_slippage_percent: Decimal = Field(Decimal("1.20"), ge=0)
     data_dir: str = "data/historical"
+    exchange_info_environment: Literal["mainnet", "testnet"] = "mainnet"
 
     @model_validator(mode="after")
     def _check_window(self) -> BacktestConfig:

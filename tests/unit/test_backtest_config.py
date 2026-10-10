@@ -10,10 +10,12 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from pydantic import ValidationError
 
+from trading_bot.backtesting.exchange_info import ENVIRONMENTS
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import get_settings
 
@@ -88,6 +90,29 @@ class TestTheMoneyFieldsAreExactDecimals:
         """A typo such as ``slippage_pct`` must fail at load, not be ignored."""
         with pytest.raises(ValidationError):
             _config(slippage_pct=0.5)
+
+
+class TestWhichStoredFiltersTheRunSizesWith:
+    """``exchange_info_environment`` (P110 C3): mainnet files for a backtest on mainnet klines,
+    the Testnet ones for S4, which replays what the bot did on Testnet."""
+
+    def test_the_default_is_mainnet(self) -> None:
+        assert _config().exchange_info_environment == "mainnet"
+
+    def test_testnet_is_accepted(self) -> None:
+        assert _config(exchange_info_environment="testnet").exchange_info_environment == "testnet"
+
+    @pytest.mark.parametrize("bad", ["", "Testnet", "paper", "main", "mainnet "])
+    def test_anything_else_is_refused_at_load(self, bad: str) -> None:
+        with pytest.raises(ValidationError):
+            _config(exchange_info_environment=bad)
+
+    def test_it_names_exactly_the_environments_the_store_keeps(self) -> None:
+        """The config cannot import ``backtesting`` (the layers run the other way), so the two
+        lists are pinned equal here and a third environment added to one fails this."""
+        assert get_args(BacktestConfig.model_fields["exchange_info_environment"].annotation) == (
+            ENVIRONMENTS
+        )
 
 
 class TestTheWindowIsHalfOpenInUtcDates:

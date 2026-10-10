@@ -418,6 +418,20 @@ that first multiplies it by money"*.
 > submission and the fill model does not model it, but the band is part of what a snapshot
 > records.
 
+> **ANNOTATED AT M5m P110 (C3): THE ENVIRONMENT IS NOW A CONFIG KEY, AND S4's SNAPSHOT IS READ
+> FROM THE TESTNET STORE'S OWN ROOT.** `BacktestConfig.exchange_info_environment` (`mainnet` or
+> `testnet`, default `mainnet`) is passed by `_cmd_backtest` to `run_backtest`, which until now
+> defaulted to mainnet whatever the config said. `load_snapshot` reads
+> `<data_dir>/_exchange_info/<environment>/`, so a run whose `data_dir` is `data/historical_testnet`
+> (`config.s4.yaml`) looks for its Testnet snapshots there and **not** in
+> `data/historical/_exchange_info/testnet/`, where P105 stored them. **What stops being true:** the
+> sentence above that the files live under `data/historical/_exchange_info/<environment>/` is true of
+> a run with the default `data_dir` and not of S4's. **What the S4 run needs:** the two Testnet
+> `.json` files and their `.sha256` copied byte for byte into
+> `data/historical_testnet/_exchange_info/testnet/`, shown SHA-256-equal, which the launch checklist
+> and `docs/S4_PREREGISTRATION.md` do. **What survives:** R-Z, entire: backtests load filters only
+> from a stored file, which is never overwritten, and the digests in `docs/RUN_LEDGER.md` section 31.
+
 > **ANNOTATED AT M5m P105 (C4): THE REPLAY HARNESS IS BUILT, AND R-P1'S GAP RULE IS PINNED
 > ON THE UNCHANGED LIVE PATH.** `trading_bot.backtesting.replay` adds `ReplayClient`, which
 > answers the provider's one REST call, `get_klines`, from the store and refuses every other
