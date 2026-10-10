@@ -1341,6 +1341,18 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every S7 threshold (R-D), the pass level of 1.20% (R-B2), the joint runs (R-Y), R-AI and R-AT, and R-BL, R-BM and the S4 pre-registration entire.
 
+> **ANNOTATED AT M5m P113 (C2a): R-BR IS CARRIED OUT IN THE RECORD AND AT THE DOOR; THE FLAGS ARE C2b.** The run record is schema 5. It carries `effective`
+> (the config's digest, the strategy and its parameters, the pairs and timeframes, the risk bound, the stored-`exchangeInfo` environment, every cost, and the
+> overrides as given), a `candidate_digest` and a `settings_digest` (`src/trading_bot/backtesting/candidate.py`). The evidence door
+> (`require_evidence_eligible`, `load_eligible_record`) refuses a record of schema 5 or later that lacks the block or whose digests are not those of it, and a
+> consumer may pass `min_schema`; S5's report and the S6 guard will. **Two things the implementer chose, for the owner to overrule:** the
+> `candidate_digest` leaves out the stop-slippage arm (a candidate is reported at three arms and read out of sample once, R-B2 and S6), while the
+> `settings_digest` covers every effective setting including it; and numbers are canonical in both (`30`, `30.0` and `Decimal("30")` are one value).
+> **What stops being true:** nothing in R-AR's text, whose flag is still true exactly when the provenance verdict is accepted; what changes is that the flag
+> alone no longer makes a schema-5 record evidence, so a record whose flag is true can still be refused by the door. The door demands no schema by default,
+> because the frozen `scripts/s4_compare.py` judges each live boot line with a synthetic record whose `schema` is the text `live-boot` (`M5m-313`); schema-4
+> records, which the S4 clone writes, still pass it. **What survives:** R-AR, R-AS and the S4 comparison as frozen.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

@@ -59,6 +59,7 @@ from decimal import Decimal
 from importlib import metadata
 from pathlib import Path
 
+from trading_bot.backtesting.candidate import candidate_digest, effective_settings, settings_digest
 from trading_bot.backtesting.evidence import (
     EVIDENCE_KEY,
     RUN_RECORD_NAME,
@@ -115,8 +116,10 @@ _log = get_logger(__name__)
 #: The shape of the run record. Bump it when a key is added, renamed or removed.
 #: 2: ``provenance`` added (R-AH). 3: ``quote_asset``, ``equity``, ``metrics`` and
 #: ``regime_labels`` added (S3, R-AJ). 4: ``evidence_eligible`` added (R-AR); a record of a
-#: schema before 4 has no such key and is not evidence.
-RUN_RECORD_SCHEMA = 4
+#: schema before 4 has no such key and is not evidence. 5: ``effective``, ``candidate_digest``
+#: and ``settings_digest`` added (R-BR); a record of schema 5 or later without them, or whose
+#: digests are not those of its ``effective`` block, is not evidence.
+RUN_RECORD_SCHEMA = 5
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MILLISECOND = timedelta(milliseconds=1)
@@ -255,6 +258,8 @@ class BacktestSystem:
     snapshots: Mapping[str, Snapshot]
     equity: EquityCurve
     regimes: RegimeTable | None
+    #: The command-line overrides as given (R-BR), kept in the record's ``effective`` block.
+    overrides: Mapping[str, object]
     _state: dict[str, object]
     _tally: _BarTally
     _errors: _ErrorTally
@@ -340,6 +345,7 @@ async def backtest_system(
     exchange_info_environment: str = "mainnet",
     code_facts: CodeFacts | None = None,
     regimes: RegimeTable | None = None,
+    overrides: Mapping[str, object] | None = None,
 ) -> AsyncIterator[BacktestSystem]:
     """Assemble the backtest, yield it, and tear it down.
 
@@ -353,6 +359,8 @@ async def backtest_system(
         ``git``) and tests inject them.
     :param regimes: the committed quarterly labels (R-AI); with them the metrics carry a
         per-regime breakdown, without them none.
+    :param overrides: the command-line overrides as given (R-BR). ``settings`` is already the
+        EFFECTIVE settings, so this is only recorded, in the ``effective`` block, for the reader.
 
     :raises ConfigError: a requested symbol is not enabled, no pair is, a symbol is enabled
         on two timeframes, or a pair is quoted in an asset other than the base currency.
@@ -454,6 +462,7 @@ async def backtest_system(
                     snapshots=snapshots,
                     equity=curve,
                     regimes=regimes,
+                    overrides=dict(overrides or {}),
                     _state={},
                     _tally=tally,
                     _errors=_ErrorTally(),
@@ -475,6 +484,7 @@ async def run_backtest(
     exchange_info_environment: str = "mainnet",
     code_facts: CodeFacts | None = None,
     regimes: RegimeTable | None = None,
+    overrides: Mapping[str, object] | None = None,
 ) -> BacktestResult:
     """Build a system, run it once, tear it down, and return what it produced."""
     async with backtest_system(
@@ -484,6 +494,7 @@ async def run_backtest(
         exchange_info_environment=exchange_info_environment,
         code_facts=code_facts,
         regimes=regimes,
+        overrides=overrides,
     ) as system:
         return await system.run()
 
@@ -587,6 +598,14 @@ def _describe(
     # R-AH: the boot_provenance verdict and every field of that line. A source that carries no
     # verdict (a test's injected facts) is recorded as "unrecorded", never as accepted.
     provenance: dict[str, object] = {"verdict": "unrecorded", **facts}
+    # R-BR: every effective setting, after any command-line override, and the digests that name it.
+    effective = effective_settings(
+        system.settings.config,
+        system.window,
+        [(symbol, context.timeframe) for symbol, context in system.pairs.items()],
+        config_sha256=system.settings.config_sha256,
+        overrides=system.overrides,
+    )
     record: dict[str, object] = {
         "schema": RUN_RECORD_SCHEMA,
         # The short view, as before; the full line is "provenance".
@@ -615,6 +634,9 @@ def _describe(
             "initial_balance": str(initial),
         },
         "strategy": {"name": strategy.name, "params": dict(strategy.params)},
+        "effective": effective,
+        "candidate_digest": candidate_digest(effective),
+        "settings_digest": settings_digest(effective),
         "exchange_info": {
             symbol: {"environment": snap.environment, "sha256": snap.sha256}
             for symbol, snap in system.snapshots.items()

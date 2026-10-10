@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from tests.unit.backtest_world import CODE, build_world
+from trading_bot.backtesting.candidate import candidate_digest, settings_digest
 from trading_bot.backtesting.engine import (
     RUN_RECORD_SCHEMA,
     record_digest,
@@ -26,6 +27,7 @@ from trading_bot.backtesting.engine import (
     write_run,
 )
 from trading_bot.backtesting.evidence import (
+    EFFECTIVE_SCHEMA,
     EVIDENCE_KEY,
     RUN_RECORD_NAME,
     EvidenceRefusedError,
@@ -48,13 +50,44 @@ WRITERS = frozenset(
 )
 
 
-def record(verdict: object = "accepted", flag: object = True, **extra: object) -> dict[str, Any]:
+def effective_block() -> dict[str, Any]:
+    """An effective-settings block as ``effective_settings`` writes one (R-BR), by hand."""
     return {
-        "schema": RUN_RECORD_SCHEMA,
+        "config_sha256": "a" * 64,
+        "strategy": {"name": "sma_crossover", "params": {"fast_period": "20", "slow_period": "50"}},
+        "pairs": [{"symbol": "BTCUSDT", "timeframe": "1m"}],
+        "risk": {"max_position_staleness_s": "180"},
+        "exchange_info_environment": "mainnet",
+        "costs": {
+            "fee_percent": "0.1",
+            "slippage_percent": "0.05",
+            "stop_slippage_percent": "1.2",
+            "initial_balance": "10000",
+        },
+        "overrides": {},
+    }
+
+
+def record(
+    verdict: object = "accepted",
+    flag: object = True,
+    schema: int = RUN_RECORD_SCHEMA,
+    **extra: object,
+) -> dict[str, Any]:
+    """A hand-built record. From schema 5 it carries the R-BR block and the digests of it, so the
+    fixture stands for a real record; ``extra`` is laid over it, which is how a test breaks one."""
+    body: dict[str, Any] = {
+        "schema": schema,
         "provenance": {"verdict": verdict, "refusal_reasons": "install_kind=editable"},
         EVIDENCE_KEY: flag,
-        **extra,
     }
+    if schema >= EFFECTIVE_SCHEMA:
+        block = effective_block()
+        body["effective"] = block
+        body["candidate_digest"] = candidate_digest(block)
+        body["settings_digest"] = settings_digest(block)
+    body.update(extra)
+    return body
 
 
 class TestTheJudgement:
@@ -113,6 +146,87 @@ class TestTheJudgement:
                 require_evidence_eligible({EVIDENCE_KEY: False, "provenance": provenance})
 
 
+class TestARecordWithoutItsEffectiveSettingsIsNotEvidence:
+    """R-BR: *"a record without them is not evidence_eligible"*, enforced by the door."""
+
+    def test_a_schema_5_record_with_its_block_and_digests_passes(self) -> None:
+        assert require_evidence_eligible(record()) is None
+
+    def test_a_flag_of_true_is_not_enough_without_the_block(self) -> None:
+        body = record()
+        del body["effective"]
+        with pytest.raises(EvidenceRefusedError, match="carries no effective settings"):
+            require_evidence_eligible(body)
+
+    @pytest.mark.parametrize("name", ["candidate_digest", "settings_digest"])
+    def test_a_missing_digest_is_refused_and_named(self, name: str) -> None:
+        body = record()
+        del body[name]
+        with pytest.raises(EvidenceRefusedError, match=f"carries no {name}"):
+            require_evidence_eligible(body)
+
+    @pytest.mark.parametrize("name", ["candidate_digest", "settings_digest"])
+    def test_a_digest_that_is_not_the_blocks_is_refused(self, name: str) -> None:
+        with pytest.raises(EvidenceRefusedError, match=f"{name} is not the digest"):
+            require_evidence_eligible(record(**{name: "0" * 64}))
+
+    def test_a_block_edited_after_the_digests_were_taken_is_refused(self) -> None:
+        body = record()
+        body["effective"]["strategy"]["params"]["fast_period"] = "30"
+        with pytest.raises(EvidenceRefusedError, match="is not the digest"):
+            require_evidence_eligible(body)
+
+    def test_a_non_mapping_block_is_refused(self) -> None:
+        with pytest.raises(EvidenceRefusedError, match="carries no effective settings"):
+            require_evidence_eligible(record(effective="x"))
+
+    def test_schema_4_is_still_accepted_by_default_for_the_frozen_s4_comparison(self) -> None:
+        assert require_evidence_eligible(record(schema=4)) is None
+
+    def test_a_consumer_that_needs_schema_5_refuses_schema_4(self) -> None:
+        with pytest.raises(
+            EvidenceRefusedError, match="schema 4, and this consumer needs schema 5"
+        ):
+            require_evidence_eligible(record(schema=4), min_schema=5)
+
+    def test_a_record_with_no_integer_schema_is_refused_when_a_minimum_is_asked_for(self) -> None:
+        for schema in (None, "5", True, 5.0):
+            body = record()
+            body["schema"] = schema
+            with pytest.raises(EvidenceRefusedError, match="no integer schema"):
+                require_evidence_eligible(body, min_schema=5)
+
+    def test_by_default_no_schema_is_demanded_so_the_frozen_s4_live_boot_record_passes(
+        self,
+    ) -> None:
+        """``scripts/s4_compare.py`` judges each live boot line with a synthetic record whose
+        ``schema`` is the text ``live-boot``; a door that demanded an integer by default would
+        refuse every S4 comparison. Pinned here because the script is frozen and cannot be edited."""
+        synthetic = {
+            "schema": "live-boot",
+            EVIDENCE_KEY: True,
+            "provenance": {"verdict": "accepted"},
+        }
+        assert require_evidence_eligible(synthetic) is None
+
+    def test_an_integer_schema_of_5_or_more_still_needs_its_block_without_a_minimum(self) -> None:
+        body = record()
+        del body["effective"]
+        with pytest.raises(EvidenceRefusedError, match="carries no effective settings"):
+            require_evidence_eligible(body)
+
+    def test_the_file_door_passes_min_schema_through(self, tmp_path: Path) -> None:
+        path = tmp_path / RUN_RECORD_NAME
+        path.write_text(json.dumps(record(schema=4)), encoding="utf-8")
+        assert load_eligible_record(path)["schema"] == 4
+        with pytest.raises(EvidenceRefusedError, match="needs schema 5"):
+            load_eligible_record(path, min_schema=5)
+
+    def test_the_first_schema_with_the_block_is_5_and_the_writer_is_not_older(self) -> None:
+        assert EFFECTIVE_SCHEMA == 5
+        assert RUN_RECORD_SCHEMA >= EFFECTIVE_SCHEMA
+
+
 class TestTheDoorThatReadsAFile:
     def write(self, tmp_path: Path, content: str) -> Path:
         path = tmp_path / RUN_RECORD_NAME
@@ -149,7 +263,7 @@ class TestARealRunWritesIt:
 
     async def test_an_accepted_verdict_makes_the_record_eligible(self, tmp_path: Path) -> None:
         result = await self.result(tmp_path, {**CODE, "verdict": "accepted"})
-        assert result.record["schema"] == RUN_RECORD_SCHEMA == 4
+        assert result.record["schema"] == RUN_RECORD_SCHEMA == 5
         assert result.record[EVIDENCE_KEY] is True
         require_evidence_eligible(result.record)
 
