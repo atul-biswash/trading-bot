@@ -300,6 +300,19 @@ class TestEveryConsumerGoesThroughTheDoor:
             "src/trading_bot/backtesting/evidence.py",
         ]
 
+    def test_the_real_s4_consumer_is_scanned_names_the_record_and_calls_the_door(self) -> None:
+        """`M5m-253`: until ``scripts/s4_compare.py`` the census passed because no consumer existed.
+        It exists now, so the scan is shown to reach a real one: the file is read, it names the
+        record, it is not exempt, and it calls a door. A rename of the script or of the door
+        fails this rather than emptying the census."""
+        name = "scripts/s4_compare.py"
+        sources = self.sources()
+        assert name in sources
+        assert name not in WRITERS
+        tree = ast.parse(sources[name])
+        assert naming_nodes(tree), f"{name} no longer names the run record"
+        assert calls_a_guard(tree), f"{name} no longer calls the evidence door"
+
     def test_a_main_that_names_the_record_without_the_door_is_caught(self) -> None:
         reader = 'import json\nrecord = json.load(open(directory / "run.json"))\n'
         assert unguarded_readers({"src/trading_bot/main.py": reader}) == ["src/trading_bot/main.py"]

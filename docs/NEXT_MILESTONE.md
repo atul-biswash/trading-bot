@@ -1223,6 +1223,16 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** R-AR and R-AS entire, and the census's two writers. A backtest's exit status is unchanged: 0 for a result, 1 for a run that is not one.
 
+> **ANNOTATED AT M5m P110 (C4a): THE EVIDENCE CENSUS HAS A REAL CONSUMER.** `scripts/s4_compare.py`
+> names the run record and reads it through `load_eligible_record`; each live `boot_provenance` line is
+> judged by `is_evidence_eligible` and passed to `require_evidence_eligible`. **What stops being true:**
+> the P109 C4 annotation's *"What is still unenforced ...: a consumer that does not exist yet"*, and
+> `M5m-253`'s *"no S4 to S7 consumer exists to be pinned"*: one exists, and
+> `test_the_real_s4_consumer_is_scanned_names_the_record_and_calls_the_door` pins that the scan
+> reaches it. **What survives:** the scan is still synthetic for every consumer that is not this one, and
+> a consumer that reads the record by another route (a path built from a string the scan does not see)
+> is still not caught.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
