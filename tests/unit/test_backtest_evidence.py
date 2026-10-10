@@ -36,13 +36,14 @@ from trading_bot.backtesting.evidence import (
 
 REPO = Path(__file__).resolve().parents[2]
 GUARDS = frozenset({"require_evidence_eligible", "load_eligible_record"})
-#: The modules that WRITE or REPORT a run record's path, and the one that defines the door. A module
-#: that names the record and is not here must call the door. Adding a name here is a visible edit.
+#: The modules that WRITE a run record and the one that defines the door. A module that names the
+#: record and is not here must call the door. Adding a name here is a visible edit. ``main.py`` was
+#: listed until R-BF (``M5m-257``): it only printed a path, and a listed module is exempt whatever
+#: it does, so a ``main`` that began to read the record would have gone unchecked.
 WRITERS = frozenset(
     {
         "src/trading_bot/backtesting/engine.py",
         "src/trading_bot/backtesting/evidence.py",
-        "src/trading_bot/main.py",
     }
 )
 
@@ -285,7 +286,22 @@ class TestEveryConsumerGoesThroughTheDoor:
 
     def test_a_listed_writer_is_exempt_and_an_unlisted_namesake_is_not(self) -> None:
         text = 'open("run.json", "x")\n'
-        assert unguarded_readers({"src/trading_bot/main.py": text}) == []
-        assert unguarded_readers({"src/trading_bot/other/main.py": text}) == [
-            "src/trading_bot/other/main.py"
+        assert unguarded_readers({"src/trading_bot/backtesting/engine.py": text}) == []
+        assert unguarded_readers({"src/trading_bot/other/engine.py": text}) == [
+            "src/trading_bot/other/engine.py"
         ]
+
+    def test_main_is_not_a_listed_writer(self) -> None:
+        """R-BF, `M5m-257`: ``main.py`` came off the list. It prints no path to the record, and a
+        ``main`` that ever reads one must call the door like any other consumer."""
+        assert "src/trading_bot/main.py" not in WRITERS
+        assert sorted(WRITERS) == [
+            "src/trading_bot/backtesting/engine.py",
+            "src/trading_bot/backtesting/evidence.py",
+        ]
+
+    def test_a_main_that_names_the_record_without_the_door_is_caught(self) -> None:
+        reader = 'import json\nrecord = json.load(open(directory / "run.json"))\n'
+        assert unguarded_readers({"src/trading_bot/main.py": reader}) == ["src/trading_bot/main.py"]
+        with_door = reader + "from e import load_eligible_record\nload_eligible_record(p)\n"
+        assert unguarded_readers({"src/trading_bot/main.py": with_door}) == []

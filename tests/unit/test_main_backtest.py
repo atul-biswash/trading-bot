@@ -388,7 +388,7 @@ class TestTheConsoleIsQuiet:
             for handler in saved:
                 root.addHandler(handler)
 
-    def test_a_backtest_prints_its_warnings_and_one_result_line_and_the_file_keeps_the_rest(
+    def test_a_backtest_prints_its_warnings_and_no_verdict_and_the_file_keeps_the_rest(
         self,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
@@ -406,8 +406,12 @@ class TestTheConsoleIsQuiet:
         # WARNING, which R-AS says the console carries. It is the only record that does.
         assert "WARNING" in out + err and "No regime labels" in " ".join(out.split())
         assert out.count("WARNING") + err.count("WARNING") == 1
-        assert lines[-1].startswith("backtest complete: ") and "trade(s); record " in lines[-1]
-        assert lines[-1].endswith(str(directory / "run.json"))
+        # R-BE: a backtest prints figures and not a verdict. The printed result line that stood
+        # here ("backtest complete: N trade(s); record <path>") is gone; the exit status and the
+        # file carry what it said.
+        assert not any(line.startswith("backtest ") for line in lines)
+        assert "backtest complete" not in (out + err).lower()
+        assert "backtest incomplete" not in (out + err).lower()
         assert "INFO" not in out + err and "Backtest window" not in out + err
         text = (directory / "backtest.log").read_text(encoding="utf-8")
         assert " INFO " in text and "event=boot_provenance" in text
@@ -494,7 +498,10 @@ class TestTheLogStaysInTheRunDirectory:
         assert text.index("event=boot_provenance") < text.index("Backtest window:")
         assert text.index("Backtest window:") < text.index("event=intent_dispatched")
         assert "Backtest complete" in text
-        assert str(directory / "run.json") in text
+        # R-BF: main.py comes under the evidence census, so it does not name the record file. The
+        # line reports the run directory, which holds it.
+        assert str(directory) in text
+        assert "run.json" not in text
 
     def test_a_refusal_before_the_run_writes_no_file_at_all(
         self, tmp_path: Path, real_logging: Path

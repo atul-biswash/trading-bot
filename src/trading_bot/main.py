@@ -30,7 +30,6 @@ from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
-from trading_bot.backtesting.evidence import RUN_RECORD_NAME
 from trading_bot.backtesting.regimes import RegimeTable
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import (
@@ -263,11 +262,12 @@ def _cmd_backtest(
     run_log: DeferredFileHandler,
     facts: Provenance,
 ) -> int:
-    """Replay the window, write the run record, and say whether it is a result.
+    """Replay the window, write the run record, and return whether it is a result.
 
     The window the run used is the RESOLVED one -- the flags laid over the config -- and it is
     what the record names. Returns 1 for a run that is not a result: a handler failure, an
-    ERROR logged, a pair that served nothing, or a cash identity that does not close.
+    ERROR logged, a pair that served nothing, or a cash identity that does not close. It prints
+    nothing on success (R-BE) and never names the record file (R-BF).
 
     **The log (R-AG) goes to ``<run directory>/backtest.log`` and nowhere else on disk**:
     ``main`` has switched the config's file sink off for this command and attached
@@ -312,11 +312,11 @@ def _cmd_backtest(
         final = base / f"{stamp}-{result.trade_log_sha256[:12]}"
         write_run(result, working, existing=True)
         log.info(
-            "Backtest %s: %d trade(s), trade log %s; record %s, trades %s, log %s",
+            "Backtest %s: %d trade(s), trade log %s; run directory %s, trades %s, log %s",
             "complete" if result.complete else "INCOMPLETE",
             len(result.trades),
             result.trade_log_sha256,
-            final / RUN_RECORD_NAME,
+            final,
             final / "trades.csv",
             final / BACKTEST_LOG_NAME,
         )
@@ -328,10 +328,8 @@ def _cmd_backtest(
         raise
     run_log.close_file()
     working.rename(final)
-    # The one line the console carries on success. It is not a log record, so R-AS leaves it,
-    # and without it a run that logs nothing above WARNING would say nothing at all.
-    outcome = "complete" if result.complete else "INCOMPLETE"
-    print(f"backtest {outcome}: {len(result.trades)} trade(s); record {final / RUN_RECORD_NAME}")
+    # R-BE: nothing is printed here. A backtest prints figures, not a verdict, and its figures are
+    # in the run directory's log and record; the exit status says whether it is a result.
     return 0 if result.complete else 1
 
 
@@ -405,7 +403,7 @@ def _quiet_console() -> None:
     raised, and one already above WARNING keeps its level. The handler is found by the name
     ``setup_logging`` gives it, so a handler somebody else attached (a test's capture, say) is
     never touched. A backtest logs about 1.1 MB at INFO (M5m-191), which on the console buried
-    the one line an operator wants.
+    the warnings an operator needs.
     """
     for handler in logging.getLogger().handlers:
         if handler.get_name() == CONSOLE_HANDLER_NAME:

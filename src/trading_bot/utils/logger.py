@@ -189,11 +189,15 @@ def _console_handler(use_json: bool) -> logging.Handler:
     PROJECT DOES NOT RENDER.** Its format string carries no ``%(asctime)s``, so
     M5h's UTC change cannot reach it -- Rich draws that column from its own
     console clock. Left alone rather than fixed, for two reasons stated rather
-    than assumed: ``rich`` is NOT installed in this environment, so the branch
-    does not execute and a change to it could not be exercised by any test here;
-    and it is CONSOLE-ONLY, where the durable record -- the rotating file, which
-    is the only evidence a finished run leaves -- goes through
-    :class:`PlainFormatter` or :class:`JsonFormatter` and is now UTC.
+    than assumed: it is CONSOLE-ONLY, where the durable record -- the rotating
+    file, which is the only evidence a finished run leaves -- goes through
+    :class:`PlainFormatter` or :class:`JsonFormatter` and is now UTC. (This
+    paragraph's first reason read *"``rich`` is NOT installed in this
+    environment, so the branch does not execute"*, and it was false: ``rich`` is
+    a pinned runtime dependency in ``requirements.txt`` and is installed, so the
+    branch executes wherever the project is installed and ``RichHandler`` is the
+    console sink, drawing to stdout (``M5m-255``, corrected at M5m P110 under
+    R-BD). It is exercised by the backtest console tests.)
 
     So on a machine with ``rich`` installed the console shows local time and the
     file shows UTC. That is a real inconsistency and it is named here rather

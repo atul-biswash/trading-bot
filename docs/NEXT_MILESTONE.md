@@ -1184,6 +1184,31 @@ takes and the bot did not is a finding about one of them.
 > exists for S4's comparison tool and S5 to S7's to call, and the census will fail the first of them
 > that does not.
 
+> **ANNOTATED AT M5m P110 (C2), BY THE OWNER'S RULINGS R-BC TO R-BH.** The rulings, verbatim:
+>
+> R-BC: "M5m-250 is fixed where it lives. If the truncation is in scripts/mutation_survey.py, it is fixed with a test that fails on the old code. Every saved M5m survey log is re-parsed under the fix, and any kill set or abstention that changes is recorded as a finding."
+>
+> R-BD: "The false rich docstring in utils/logger.py (M5m-255) is corrected under the standing docstring authority."
+>
+> R-BE: "A backtest prints figures, not a verdict. The judgement line (M5m-256) is removed."
+>
+> R-BF: "main.py comes under the evidence census (M5m-257)."
+>
+> R-BG: "M5m-251 is carried as an item: bollinger_bands is converted to the window-only form before any S6 candidate that uses it runs. Its arming condition names bollinger_bands and register_strategy."
+>
+> R-BH: "The clearing under R-AV happens only if R-BB's comparison, measured first, is within 2x. Otherwise P110 halts before the clearing, for the owner."
+>
+> **Where each is carried out.** R-BC in P110 C1 (`summary_node_ids` in `scripts/mutation_survey.py`; the re-parse is `docs/RUN_LEDGER.md` section 38: 0 kill sets and 0 abstentions changed in 12 distinct logs, and the mechanism was a reason suffix kept on an id, not a truncated id). R-BD, R-BE, R-BF and R-BG in this commit. R-BH was applied first: `docs/RUN_LEDGER.md` section 38 holds R-BB's comparison, 1.0522 and 1.0523, within 2x, so the clearing is C5.
+>
+> **What stops being true:**
+> - The P109 C4 annotation's *"One thing chosen, the owner's to overrule: `_cmd_backtest` prints one plain line on completion"*: the owner has overruled it (R-BE). The line is gone, and a backtest's console carries only WARNING and above; the run's figures are in its record and in `backtest.log`, whose `Backtest complete` line now names the run directory.
+> - That annotation's *"the three modules allowed to name it are the ones that write or report its path (`engine.py`, `main.py`, `evidence.py`)"*: from R-BF `main.py` is not listed, does not name the record, and must call the door if it ever reads one. The census lists two modules, `engine.py` and `evidence.py`, and `test_main_is_not_a_listed_writer` says so.
+> - `M5m-250`'s *"truncates a long node id at the first ' - '"*: the id is whole and carries pytest's reason (`docs/RUN_LEDGER.md` section 38, S0a).
+> - `utils/logger.py`'s *"`rich` is NOT installed in this environment"* (`M5m-255`): `rich==15.0.0` is a pinned runtime dependency and is installed.
+> - `M5m-256` and `M5m-257` as open: R-BE and R-BF close them. `M5m-251` stays a finding and is item K8.
+>
+> **What survives:** R-AR and R-AS entire, and the census's two writers. A backtest's exit status is unchanged: 0 for a result, 1 for a run that is not one.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
@@ -1826,6 +1851,24 @@ for a bot that re-enters at once after a stop-out. Deferred to the milestone aft
 > parity with live (`M5m-125`), and the item waits for the milestone after a PASS, with the
 > arming condition above. The collision stays recorded as `M5m-134`, and the architect's
 > account of its class is `M5m-161`.
+
+### K8. `bollinger_bands` is still a rolling computation (`M5m-251`)
+
+**Carried as an item, not done now, by the project owner's ruling R-BG at M5m P110,
+verbatim:** *"M5m-251 is carried as an item: bollinger_bands is converted to the window-only
+form before any S6 candidate that uses it runs. Its arming condition names bollinger_bands
+and register_strategy."* MEASURED at P109 (`M5m-251`): `bollinger_bands` in
+`indicators/indicators.py` still uses `rolling().mean()` and `rolling().std()`, so its values
+depend on the buffer's start by up to 4.8e-13 relative on every bar, and its middle band
+equals `sma` only to `assert_series_equal`'s tolerance. `sma` was made window-only at P109 C3
+(R-AQ, R-AX) because a live strategy reads it and an exact tie decides an edge; no live strategy
+reads `bollinger_bands`, so nothing fails today. The conversion is the same shape as `sma`'s:
+contiguous window blocks summed along an axis, with bitwise tests; the standard deviation
+needs its own derivation (REASONED: pandas' rolling standard deviation keeps running sums too,
+which is the dependence on the rows ahead of the window that `sma`'s fix removed). **The order is the owner's: the conversion lands before any S6
+candidate that uses `bollinger_bands` runs.**
+
+*Arming condition:* **whoever next edits `bollinger_bands` in `indicators/indicators.py`, or calls `register_strategy` with a strategy that reads it.**
 
 ---
 
