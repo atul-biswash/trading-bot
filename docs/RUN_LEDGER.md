@@ -4275,3 +4275,60 @@ test whose two counts are equal.
 | `survey_s4.log` | `aed69053dc1017f7bd6ed9fd5b0a411f647665710abb83916f815c6301392c0c` |
 | `compare_s4_out.txt` | `05043b08324de6e0180d5308ef4de46afdce15e65771565a8a996f3908f39cd3` |
 | `import_proof_s4.jsonl` | `82f84b39b005b857223fbe8800f622a4561ccdf18ecb997c2f8d24a9174472f1` |
+
+## 40. M5m S4: the Testnet clearing of R-AV, and the account before and after (P110 C5)
+
+The owner's R-AV, verbatim: *"Clearing the Testnet BTC and ETH holdings with scripts/clear_testnet_holdings.py is
+authorised once, in P110, before the pre-registration commit. Equity is about 95,190 with or without it, because
+pre-existing holdings count toward equity; the clearing only unblocks entries."* R-BH made it conditional on R-BB's
+comparison being within 2x, which section 38 measured first (1.0522 and 1.0523). Predictions:
+`predictions_c5.txt`, SHA-256 `7334425b17094117564adccc64605ea496c572890a925baa64be68c923a08fe3`, written before any
+venue call. Every call below was made from the active deployment clone `F:\trading bot\deploy\51a5f2711a09` (commit
+`51a5f27`, its own venv, the Testnet key slots only), after a process listing showed no python process and exactly one
+clone holding a venv.
+
+| step | call | UTC | result |
+|---|---|---|---|
+| 1 | `scripts/check_testnet.py --symbol BTCUSDT --candidates BTCUSDT,ETHUSDT` (reads only) | before 04:45 | `ping: OK`; 517 assets with a balance; **BTC free 1.00000000, ETH free 1.00000000, USDT free 10000.00000000**, none locked; BTCUSDT last 82,676.00 and ETHUSDT last 2,494.92; both holdings `BLOCKS entries`; 0 open orders; 0 order lists |
+| 2 | `scripts/clear_testnet_holdings.py --symbol BTCUSDT --symbol ETHUSDT` (dry run: `create_test_order`, places nothing) | before 04:45:53 | both sells validated at the venue, remainder 0 |
+| 3 | the same with `--execute` (**the one venue write**) | 04:45:53 to 04:45:59 | `SOLD: status=FILLED executedQty=1.00000000 orderId=1066790` (BTCUSDT) and `orderId=946252` (ETHUSDT); balances after BTC 0, ETH 0 |
+| 4 | `scripts/check_testnet.py` again | 04:46:19 | **BTC 0, ETH 0, USDT free 95170.91000000**, none locked; both holdings `DUST (does not block)`; 0 open orders; 0 order lists |
+
+**Against the prediction.** The after-state matched: both holdings below one lot (they are zero), two filled orders, free
+USDT about 95,190 within 300 (it is **95,170.91**, 19.09 below the owner's figure). **One figure was wrong**: the
+prediction put USDT free before the clearing at about 10,300 to 10,400, from the equity less the two holdings priced at
+the boot snapshot's marks; it was **exactly 10,000.00**. The account is a fresh Testnet reset (10,000 USDT, 1 BTC,
+1 ETH and hundreds of faucet assets), so R-AV's "about 95,190" was 10,000 + 82,676 + 2,494.92 = 95,170.92 at the
+clearing's marks, and the cleared USDT is **95,170.91**: the two market sells took the balance from 10,000.00 by
+85,170.91, a figure to the cent for 1.0 BTC and 1.0 ETH, which is what a fee of zero gives (`M5m-281`; REASONED,
+because the sells' own fills and commissions were not read in this step, only the balances before and after).
+
+**What this fixes.** `config.s4.yaml`'s `initial_balance` is `95170.91` from this commit (it read `95190.0`, S0b's
+figure), the live account's free USDT at the start of the run if nothing trades before it. Its SHA-256 is
+`0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594`. R-BB's comparison recomputed through the real sizer at
+95,170.91 (`s0b_post_clear.txt`): at the recorded closes BTCUSDT 1,902.7937 and ETHUSDT 1,903.2534, at the venue's last
+prices 1,903.2015 and 1,903.3745; ratios to the census of record's medians **1.0518 to 1.0521**, within 2x.
+
+**The Testnet snapshots were copied beside the recorded klines**, byte for byte, into
+`data/historical_testnet/_exchange_info/testnet/`: `BTCUSDT.json` `40e24c66...97dc7`, `ETHUSDT.json` `87e5095e...777cc`
+and their `.sha256` files (`d1bdd4fb...9e29` and `809d70aa...1388`), the four shown equal to the P105 originals by
+`sha256sum`, and `scripts/record_testnet_klines.py --verify-only` still read 0 problems in all four series afterwards.
+
+**A smoke backtest of `config.s4.yaml`**, made once from the development tree over 2026-10-08 (the day with a full
+day of recorded bars), only to show the wiring: record `data/backtests/20261010T044654815300Z-5ef7d3a2370c`, `run.json`
+SHA-256 `50fe54101abf8e93ce07ca95d8e138133310576361f1a7027b157809d596ffd6`, `trades.csv`
+`e5f146b7de8efc27fd139567e436d15834f3ad29613d4fe1eb6b57be5375c6f1`. It read `exchange_info` environment `testnet`
+with the two snapshot digests above, fee 0, `initial_balance` 95190.0 (the value before this commit), 19 trades, 1,440
+BTCUSDT 1m bars and 288 ETHUSDT 5m bars served, no problem, and `evidence_eligible` **false** with verdict `refused` (an
+editable install: a development tree is never evidence). **It is not evidence for anything and decides nothing**;
+19 trades in a day against the census of record's 7.86 booked a day is a difference of regime, window and tree that
+this run cannot attribute.
+
+| file (under `F:\trading bot\scratch\p110\`) | sha256 |
+|---|---|
+| `predictions_c5.txt` | `7334425b17094117564adccc64605ea496c572890a925baa64be68c923a08fe3` |
+| `c5_before_check_testnet.txt` | `91f369b5112f549a187cdeff162a2c76fd7f766fae06e8c3746d0de309446a60` |
+| `c5_dry_run.txt` | `555d4a9115fd22bd4aaa346bc7153b10bc07b9fa0c49c391a24f27775d45de74` |
+| `c5_execute.txt` | `b7d0955744ce48e871c64c5ec7e697199aeedd5bf2b5f118f5e5e19096fa7865` |
+| `c5_after_check_testnet.txt` | `d38652b01ca6008e2c65db932df773ee4552e44f3fc670ebd4a55a5b28edf1cc` |
+| `s0b_post_clear.txt` | `366a725ecc414cb577c885161451819bd5a8840d84ddc37d03454deadedb71b9` |

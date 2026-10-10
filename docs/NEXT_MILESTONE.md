@@ -1233,6 +1233,16 @@ takes and the bot did not is a finding about one of them.
 > a consumer that reads the record by another route (a path built from a string the scan does not see)
 > is still not caught.
 
+> **ANNOTATED AT M5m P110 (C5): R-AV IS CARRIED OUT.** The Testnet BTC and ETH holdings were cleared once, from
+> the active deployment clone, after R-BB's comparison (R-BH) measured 1.0522 and 1.0523: two market sells,
+> both `FILLED`, BTC 0 and ETH 0 afterwards, and the account's free USDT **95,170.91** (`docs/RUN_LEDGER.md`
+> section 40). **What stops being true:** R-AV's *"Equity is about 95,190 with or without it"*, which is right
+> to 19 dollars (the account held exactly 10,000.00 USDT, 1 BTC and 1 ETH before: 95,170.92 at the clearing's
+> marks) but was a figure for the equity and not for the free USDT; `config.s4.yaml`'s `initial_balance` read
+> `95190.0` and is now `95170.91`, the measured free USDT. The P108 draft's "the clearing fixes `<USDT>`" is what
+> happened. **What survives:** everything else in R-AV, and the Testnet snapshots copied beside the recorded
+> klines (section 40) for the C3 annotation's *"What the S4 run needs"*.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

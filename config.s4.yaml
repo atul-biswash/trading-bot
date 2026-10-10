@@ -179,7 +179,7 @@ backtesting:
   end_date: "2026-10-09"
   # The live account's free USDT at the start of the run, after the Testnet BTC and ETH holdings are
   # cleared (R-AV); docs/S4_PREREGISTRATION.md records the figure read from the venue.
-  initial_balance: 95190.0
+  initial_balance: 95170.91
   # Testnet commission is 0 on every fill measured (docs/RUN_LEDGER.md).
   fee_percent: 0
   slippage_percent: 0.05
