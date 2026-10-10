@@ -1297,6 +1297,25 @@ takes and the bot did not is a finding about one of them.
 > `trading_bot.log.1` is the signal, and the checklist's weekly log-size check (3.6) is where it would be seen.
 > **What survives:** R-AY to R-BB and the pre-registration entire.
 
+> **ANNOTATED AT M5m P112 (C1): S4 IS LAUNCHED, R-BJ IS CORRECTED, AND R-BM RULES THE CAPTURE'S REASSEMBLY.** The rulings, verbatim:
+>
+> R-BL: "R-BJ is corrected: a difference between the WebSocket bars and the REST bars is tallied as bar differs, as the frozen s4_compare.py and docs/S4_PREREGISTRATION.md define. No frozen file changes. M5m-290 is the architect's error: a ruling about a component drafted without reading it."
+>
+> R-BM: "If the active log rolls over during the S4 run, the capture is the rotated files concatenated oldest first, each frozen with its SHA-256; the concatenation's SHA-256 is the capture's digest. The daily freeze copies every trading_bot.log* file."
+>
+> **The launch.** `T0` is `2026-10-10T06:05:20Z`, the `run` boot of pid 16076 from `F:\trading bot\deploy\45547f107715`; `docs/RUN_LEDGER.md` section 43 holds the start record, the recorder's clone and task, and the retirement of `51a5f2711a09`. The earliest stop is `2026-11-01T00:00Z`, the cap `2026-11-14T06:05:20Z`, and `W` is `2026-10-11T00:00Z`.
+>
+> **Where each ruling is carried out.** R-BL: no file changes, and `M5m-290` is resolved by it. R-BM: nothing is built. `scripts/s4_compare.py --capture` takes one file and the capture is that file; if the active log rolls over, the rotated files are `trading_bot.log.N` with the highest `N` the oldest (the standard library's `RotatingFileHandler` numbers backups from the newest), so the concatenation reads `trading_bot.log.5`, `.4`, `.3`, `.2`, `.1`, then `trading_bot.log`, each file frozen with its SHA-256 and the concatenation's SHA-256 recorded as the capture's digest.
+>
+> **What stops being true:**
+> - R-BJ's *"It appears among the unexplained disagreements"* (a P111 ruling, quoted in the P111 C1 annotation above): a WebSocket-against-REST difference is tallied as `bar differs`. R-BJ's remaining content stands: the difference is an accepted risk of S4 and is not separately measured in M5m.
+> - The P111 C1 annotation's *"A reading R-BJ needs, which this commit does not decide (`M5m-290`)"* and its *"If the owner means such cases to be called `unexplained`, that is a change to the frozen script and file"*: the owner has decided, and `M5m-290` was the ruling's error and not a defect of `scripts/s4_compare.py` or the pre-registration.
+> - That annotation's *"the comparison cannot read it until the files are reassembled"* and *"the launch checklist's daily freeze copies the active log"*: R-BM supplies the reassembly, and from it the daily freeze copies every `trading_bot.log*` file. The launch checklist is a scratch file, the owner's, and its step 3.3 (*"freeze a copy of the log"*) is read as R-BM says.
+> - The launch checklist's step 2.3, *"CHECK in the log within 60 s: ... `reconciliation_pass` lines"* (`M5m-298`): a fresh start logs none until a position is open.
+> - The pre-registration's own *"the digests of the S4 run's own clone, its `boot_provenance` line and the instant `T0` cannot be recorded before the run"*: it was true when the file was committed and is not edited; they are recorded in section 43.
+>
+> **What survives:** R-BK's capacity finding (62,914,560 bytes against 5.2 to 17.9 MB), the single-file condition (an average rate under 12,483 bytes an hour over 840 h), R-AY to R-BB and the pre-registration entire.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

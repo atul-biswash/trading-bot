@@ -4488,3 +4488,83 @@ counted as one. The commit is not amended; this is the record (`M5m-289`).
 | `measure_logs_busy_out.txt` | `c254d27a2e21468b284a299a30b50c6d67e916ff34777540fca653452bff9270` |
 | `calc_step1.py` | `8ec470fd9e5681c9545af5d564f0148c870821f27740b4d8401d8477f91d3a09` |
 | `calc_step1_out.txt` | `52492666b2c4f9ad8900334c5ce0ee6bc5eb6440a6f755184e6ddb42f777a82e` |
+
+## 43. M5m S4: the launch -- the start record, the recorder, the retirement of `51a5f2711a09`, and what the first hours show (P112 C1)
+
+Recorded at P112 (C1), after the launch. An observation log, so this section only adds. **The start record was written after the bot was
+launched, as the checklist's step 1.10 says it must be**, and the figures marked *owner* are the owner's as stated in the P112 prompt;
+the figures marked *measured* were read at P112 from the places named. Nothing in `F:\trading bot\deploy\45547f107715` was opened for
+writing or run: its log was read through a share-mode copy (`FileShare.ReadWrite`, source opened `FileAccess.Read`), its `state.json`
+and `.env` were not read, and no process of it was touched.
+
+### The start record
+
+| Field | Value | Source |
+|---|---|---|
+| `T0` | `2026-10-10T06:05:20Z`, the `run` boot's `boot_provenance` line | *measured*, log line 24 of the copy; *owner* agrees |
+| pid, launcher | 16076, parent 13976 (`CreationDate` `12:05:19` local, UTC+6, i.e. `06:05:19Z`) | *measured*, `Win32_Process`, read at `2026-10-10T08:46Z` or after |
+| `code_commit`, `checkout_commit` | `45547f10771543b41db42e1cbcb8b5a0a9cf1776`, both, `commits_agree=true` | *measured*, the boot line |
+| `config_sha256` | `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, `config_tracked=true` | *measured*; equals `config.yaml` at `HEAD` (section 42) |
+| `verdict`, `install_kind`, `code_intact` | `accepted`, `vcs`, `true` over 77 files; `checkout_dirty=false` | *measured* |
+| free USDT | `95170.91` | *measured*, the log's `Composition root ready: 2 pair(s), 95170.91000000 USDT free`; *owner* |
+| `data/state.json` | `1F91FC43...7396` | *owner*. The pre-registration records `1f91fc4335a3d62899ae9ba430aa6abd41a6f4468a0605ba5b252143f7677396`; the clone's file was not re-read |
+| Python | 3.12.10, package 0.1.0 (the boot line's `python_version`, `package_version`) | *measured*. The Microsoft Store build, launched from a non-elevated window (`IsInRole Administrator` False), and the clock offset `-0.228 s` against `time.windows.com` at `2026-10-10T06:04:37Z`: *owner* |
+| `W` | `2026-10-11T00:00:00Z`, the first UTC midnight at or after `T0` | derived |
+| earliest stop | `2026-11-01T00:00:00Z`, the first UTC midnight at or after `T0` + 21 days (`2026-10-31T06:05:20Z`) | derived |
+| cap | `2026-11-14T06:05:20Z`, `T0` + 35 days | derived |
+
+The log's first 100 lines hold **three** `boot_provenance` lines, all `verdict=accepted`: pid 27460 at `05:58:02Z` and pid 27176 at `05:58:16Z`,
+each only a banner and that line (the `strategies` verification boots of step 1.4; the log does not say which subcommand booted), and the `run` boot above.
+The engine started at `06:05:24Z` (`Trading engine started: BTCUSDT/1m, ETHUSDT/5m`), 4 s after `T0`, seeded with 499 closed candles per series.
+
+### The recorder, and the retirement of `51a5f2711a09`
+
+| Fact | Value | Source |
+|---|---|---|
+| recorder clone | `F:\trading bot\recorder\45547f107715`, the only entry under `F:\trading bot\recorder` | *measured*, `Get-ChildItem` |
+| task | `tb-recorder`, principal `User`, `S4U`, `Limited`; action `...\45547f107715\.venv\Scripts\python.exe scripts\record_testnet_klines.py --root data\historical_testnet`, working directory the clone | *measured*, `Get-ScheduledTask` |
+| first scheduled run | `2026-10-10T05:52:29Z`, result 0 | *owner* |
+| latest run | `LastRunTime` `12:05:01 PM` local = `06:05:01Z`, `LastTaskResult` 0, next `6:05:00 PM` local = `12:05:00Z`, 0 missed runs | *measured*, `Get-ScheduledTaskInfo`, read at about `08:46Z` |
+| the retired clone | `51a5f2711a09.retired-20261010T060037Z`, `.venv.disabled` present, no `.venv\Scripts\python.exe` | *measured* |
+| the one runnable venv | `45547f107715` alone (`Test-Path` True; every other directory under `deploy` False) | *measured* |
+| recorder's first run in the clone | added 588 bars (1m) and 117 (5m) per symbol, exactly the grid since the last stored bar | *owner* |
+
+### What the first hours show (a copy of the log taken at `2026-10-10T08:45:57Z`)
+
+The copy is `F:\trading bot\scratch\p112\s4_log_copy_h5.log`, 19,778 bytes, 100 lines, SHA-256
+`57abddd4914b6b1414f9f992ae01699a5b31da4cd2c3f970a38b2bb077a7771d`. It is a reading of the first 2 h 40 m and is **not an S4 result**: the
+capture S4 reads is the frozen log at the stop.
+
+| Fact | Value |
+|---|---|
+| records by pid | 78 pid 16076, 2 pid 27176, 2 pid 27460, and the banner's untagged lines |
+| levels | 3 `WARNING` (`boot_assets_excluded` 514 assets, `close_window_open`, `reconciliation_untrusted`), no `ERROR`, no `CRITICAL` |
+| events | 47 `reconciliation_pass`, 3 `risk_refused`, 3 `intent_dispatched`, 2 `order_placed`, 1 `close_booked`, 1 `exit_booked`; no `engine_stopped` |
+| first `reconciliation_pass` | `06:48:00Z`, 42 min 40 s after `T0` and 59 s after the first order list (`06:47:01Z`) |
+| trade 1 | BTCUSDT list 34993 placed `06:47:01Z`, closed by the bot's own `CLOSE` (death cross) `07:06:03Z`, `close_booked` `realised=-2.38611150` on `entry_quote_total=1900.90191150` (-0.1255%) |
+| trade 2 | BTCUSDT list 35415 placed `07:46:01Z`, entry 82,850.77, stop 81,193.76 (1.99999% below the entry); the stop leg filled `08:28:40.621Z` in 3 fills, `quote_total=1625.00953000` for 0.02297000 BTC, an average of **70,744.86** (exact `Decimal` division, below), `exit_booked` `08:29:02Z` `realised=-276.17165970`, `fee=0E-8 fee_asset=USDT` |
+
+Trade 2's average fill is **12.869% below the stop's trigger** and 14.612% below the entry, a return of -14.526% on the entry quote total, against the
+1.20% stop slippage S5 and S7 are specified at (R-B2). The arithmetic is exact `Decimal`: `1625.00953000 / 0.02297000`, the stop `81193.76`, the
+entry `82850.77`. It is one fill. It is recorded as an observation (`M5m-302`) and decides nothing in S4, whose tests read the frozen capture.
+
+`scripts/s4_compare.py`'s own `down_intervals`, run over the copy (`run_down_intervals.py`, output `down_intervals_out.txt`), returns two intervals:
+pid 27460 to pid 27176, `05:58:02Z` to `05:58:16Z` (0.2 min), and pid 27176 to pid 16076, `05:58:17Z` to `06:48:00Z` (**49.7 min**), the second ending at
+the run's first `reconciliation_pass` and not at its boot. Both lie before `W`. See `M5m-301`.
+
+### The R-BJ and R-BM rulings
+
+Quoted in `docs/NEXT_MILESTONE.md` (the P112 C1 annotation). R-BL: a WebSocket-against-REST difference is tallied as `bar differs`, and no frozen file changes.
+R-BM: if the active log rolls over, the capture is the rotated files concatenated oldest first (`trading_bot.log.5` ... `.1`, then `trading_bot.log`), each frozen with
+its SHA-256, the concatenation's SHA-256 being the capture's digest; the daily freeze copies every `trading_bot.log*` file.
+
+### Digests of the P112 instruments and outputs (SHA-256)
+
+| File | SHA-256 |
+|---|---|
+| `predictions_halts.txt` | `36308498a45108e4a7f3ef78181df38fb725e95f8a67f0e4347d94c3e6f87c6d` |
+| `predictions_c1.txt` | `0b4587e3b786a6d96731e5793c69d4b1c1d07614ffdb148f9247f0e6d67867de` |
+| `gate_h3.txt` | `c084b952ec7aa21b57e06198ad7a0718f495e521ee5c5657d347a4c7790bbbc8` |
+| `s4_log_copy_h5.log` | `57abddd4914b6b1414f9f992ae01699a5b31da4cd2c3f970a38b2bb077a7771d` |
+| `run_down_intervals.py` | `882acc49d032f60694feb2e28506e9dd689bcacbe632ce646ddb3feac2b28996` |
+| `down_intervals_out.txt` | `2a1d21e3c9159c7d79fc28c6bbcbcfaed47024fa6ea9649ac877e7fbfaae340d` |
