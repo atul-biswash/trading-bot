@@ -4568,3 +4568,35 @@ its SHA-256, the concatenation's SHA-256 being the capture's digest; the daily f
 | `s4_log_copy_h5.log` | `57abddd4914b6b1414f9f992ae01699a5b31da4cd2c3f970a38b2bb077a7771d` |
 | `run_down_intervals.py` | `882acc49d032f60694feb2e28506e9dd689bcacbe632ce646ddb3feac2b28996` |
 | `down_intervals_out.txt` | `2a1d21e3c9159c7d79fc28c6bbcbcfaed47024fa6ea9649ac877e7fbfaae340d` |
+
+## 44. M5m S5/S6: P113's halts, and the Phase 1 measurements whose findings are declared at P113 C1
+
+Recorded at P113 (C1). An observation log, so this section only adds. P112's Phase 1 was read only and produced no commit, so its probe
+findings (`M5m-303` to `M5m-312`) are declared in the commit that records their measurements, which is this one, and their instruments are listed here.
+
+### The halt conditions (predictions: `F:\trading bot\scratch\p113\predictions_halts.txt`, SHA-256 `2665860f92038b6342e80d3534e59e18349224f6ef056363efb40482fb9359d5`)
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1 `HEAD`, `origin/main` | `af51911` for `HEAD`; `origin/main` `af51911` if pushed, else `45547f1` (the file leaned to pushed) | both `af5191155d72e9a8ebf3e5bc5e035e5c5e3b2296`: **the owner has pushed** |
+| H2 `git status --porcelain` | empty | empty |
+| H3 `scripts/check.py`, bare to a file | 183 / 96 / 3371 passed, 1 skipped | the same, exit 0, 222.5 s (pytest 215.30 s); Testnet ping 200 at `2026-10-10T09:12:06Z` and `09:15:49Z`; `gate_h3.txt` SHA-256 `a175a8b3b3ae2a939c1e4b902e8154c9ff912f1820c672d92c3a5e08337b7d66` |
+| H4 `scripts/check_findings.py milestone/M5l..HEAD M5m` | `M5m-001` to `M5m-302`, gapless, blockless `[934eb45]` | 302 declared, 302 distinct, no duplicate, no gap, cited-not-declared none, blockless `[934eb45]` |
+
+### The P112 Phase 1 instruments and outputs (SHA-256), under `F:\trading bot\scratch\p112\`
+
+| File | SHA-256 |
+|---|---|
+| `predictions_phase1.txt` | `34b36db3ab9336655157a7050ec4960af3b687be601572753f53f3d3452581ee` |
+| `p1_store.py` | `b48b2088d1815b4c00b345da53538b875101d205d2ab95b881a9846a46ff9f01` |
+| `p1_store_out.txt` | `cb0c8b9d552d2c920f72cc8bbfcc215825b1cf0970f3c7cf56cceaf95fbd52df` |
+| `p1_warmup.py` | `4fa57353724d737314f548d57fed05391a30890fd4abd82da1080101cde913b2` |
+| `p1_warmup_out.txt` | `ebef21cb3916a3e71a36f644fe8df0705538d41b189ebcfb30c99fc674851257` |
+
+### The research protocol, as committed
+
+`docs/research/PROTOCOL.md`, SHA-256 `4f1e31fe8e800d5d6948599fdcbc405a7d736097a94167cdaeaec06824472cdd`, and `docs/research/LOG.md`, SHA-256
+`95b2f3cfb0e557e202632768212154a250fae8f5b87997884d4f7c1613dae438`, in the tree this commit leaves. The protocol declares 216 variants (54 `sma_crossover`,
+162 `rsi`), the out-of-sample window `[2024-01-01, 2026-10-01)` with its eleven labelled quarters (4 rising, 5 sideways, 2 falling), and the
+labels file's digest `6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72`. Items the owner has not ruled and may overrule before the push are
+marked DRAFTED in the file: the grids, the selection rule and the walk-forward report, the in-sample trade minimum and the entry file's shape.

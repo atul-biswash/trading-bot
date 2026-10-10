@@ -1316,6 +1316,31 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** R-BK's capacity finding (62,914,560 bytes against 5.2 to 17.9 MB), the single-file condition (an average rate under 12,483 bytes an hour over 840 h), R-AY to R-BB and the pre-registration entire.
 
+> **ANNOTATED AT M5m P113 (C1): THE S5/S6 FOUNDATION IS RULED, AND ITS PROTOCOL IS COMMITTED BEFORE ANY S5 RUN EXISTS.** The rulings, verbatim:
+>
+> R-BN: "M5m-301 stands for S4. The frozen scripts/s4_compare.py is not edited while S4 runs; its down-interval exclusion applies to both sides. Any analysis with a corrected down interval is exploratory under the ratified CHOSEN line 5. Every restart during S4 is recorded."
+>
+> R-BO: "M5m-302, a Testnet stop filled 12.87% beyond its trigger, is recorded as evidence for U10. No S4 or S7 parameter changes on its account."
+>
+> R-BP: "S6's in-sample window ends, and its out-of-sample window begins, at 2024-01-01T00:00Z. The out-of-sample window is 2024Q1 to 2026Q3: 11 complete quarters, 4 rising, 2 falling, 5 sideways."
+>
+> R-BQ: "Backtest clones read the mainnet store through a directory junction to one canonical store: a frozen copy outside the development tree and every clone, hash-verified against its manifests, with an ACL denying writes and deletes. A junction is removed with cmd /c rmdir before its clone is deleted; Remove-Item -Recurse is never run on a clone holding a junction."
+>
+> R-BR: "Backtests take --stop-slippage and strategy, timeframe and parameter overrides on the command line. Every effective setting is written into the run record and into the candidate digest; a record without them is not evidence_eligible."
+>
+> R-BS: "The trend filter is close above SMA(200)."
+>
+> R-BT: "The protocol file, with every candidate family and its full parameter grid, is committed before any S5 run exists. S5's report gives in-sample and out-of-sample figures separately. S5 is recorded in the research log as a full-history read of a non-candidate configuration."
+>
+> **Where each is carried out.** R-BN: nothing in `scripts/s4_compare.py` changes, and every restart of the S4 run is recorded in `docs/RUN_LEDGER.md` (the owner's procedure, as the checklist's step 3.5 already says). R-BO: the paragraph added to U10 below. R-BP and R-BT: `docs/research/PROTOCOL.md` and `docs/research/LOG.md` in this commit (the boundary, the eleven out-of-sample quarters with their labels, the twelve cells and their full grids, 216 variants, the S5 baseline entry); S5's report is C6. R-BQ: C7 builds the canonical store, and the junction steps are the owner's. R-BR: C2 (the overrides, the effective settings and the digests) and C4 (the guard that reads them). R-BS: C5.
+>
+> **What stops being true:**
+> - S6's *"the oldest 70% of the history is in-sample, the newest 30% is out-of-sample"* as an approximation: R-BP makes the boundary exactly `2024-01-01T00:00Z`, which is 69.87% in-sample and 30.13% out-of-sample. P112's Phase 1 had computed the exact 70% instant as `2024-01-05T10:48:00Z`; the owner chose the quarter boundary, so that no quarter is split (finding `M5m-307`).
+> - S6's *"a research log under `docs/`"* is `docs/research/LOG.md` with its entries under `docs/research/entries/`, and S7's *"the regime labels are date ranges fixed in the research log before S6's first run"* is carried out in `docs/research/PROTOCOL.md` section 2, which also records the labels file's digest.
+> - Nothing in S5's own text is false. R-BT adds to it: the report gives the in-sample and the out-of-sample figures separately, and S5 is a full-history read of a non-candidate configuration.
+>
+> **What survives:** every S7 threshold (R-D), the pass level of 1.20% (R-B2), the joint runs (R-Y), R-AI and R-AT, and R-BL, R-BM and the S4 pre-registration entire.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
@@ -1353,6 +1378,16 @@ than twenty days.
   meaningless.
 
 *Arming condition:* **whoever next registers a strategy with `register_strategy` in `strategies/registry.py`.**
+
+> **ANNOTATED AT M5m P113 (C1): S6's PROTOCOL IS `docs/research/PROTOCOL.md`.** It carries out, in one file
+> committed before any S5 run, the split (R-BP: the boundary is `2024-01-01T00:00Z`, so *"the oldest 70%"* is
+> 69.87% and *"the newest 30%"* is 30.13%), the candidate families and **every parameter grid** (216 variants:
+> `sma_crossover` 54, `rsi` 162), the trend filter (R-BS: a `BUY` only when the close is above its 200-period
+> simple moving average), the selection rule and the walk-forward report, the read-once rule and its guard, and
+> the regime labels as date ranges (S7's annotation below). **What stops being true:** S6's *"for example, long
+> only above a 200-period average"* is no longer an example; it is the filter. **What survives:** the
+> arming condition on `register_strategy`, which this commit does not fire (it registers nothing), and the
+> three-line shape of the split, the candidates and the research log.
 
 **S7. The decision gate.** A candidate PASSES only if, **out of sample and net of fees and
 S2's stop slippage**, all of these hold:
@@ -2479,6 +2514,18 @@ guarantees the exit, not the price; measured 4.2% beyond the stop on Testnet
 `STOP_LOSS_LIMIT` or another type bounds the price, and what it costs in
 exits that do not fill, is the review's question and is not decided here. Not a
 gate by the owner's P87 ruling: marked for review before live trading.
+
+> **ADDED AT M5m P113 (C1), BY THE OWNER'S RULING R-BO: A SECOND MEASUREMENT (`M5m-302`).** R-BO, verbatim:
+> *"M5m-302, a Testnet stop filled 12.87% beyond its trigger, is recorded as evidence for U10. No S4 or S7
+> parameter changes on its account."* On `2026-10-10`, in the first 2 h 40 m of the S4 run, the stop leg of
+> BTCUSDT order list 35415 (stop `81193.76`) filled in 3 fills at an average of `70744.86`, **12.869% below
+> the trigger** (14.612% below the entry), `exit_booked` `realised=-276.17165970`, order 1105693, from the
+> S4 log copy whose SHA-256 is `57abddd4914b6b1414f9f992ae01699a5b31da4cd2c3f970a38b2bb077a7771d`
+> (`docs/RUN_LEDGER.md` section 43). The first measurement above is 4.2%; this one is three times it. Both are
+> Testnet fills of a `STOP_LOSS` order, which guarantees the exit and not the price. **What this changes:**
+> nothing, by the ruling: R-B2's 1.20% pass level and the S4 pre-registration are untouched. **What it is:** the
+> largest observed excursion for the review this item asks for, and a reason that review should look at the
+> tail and not the mean.
 
 *Arming condition:* **whoever next edits `build_placement` in `execution/placement.py`, which fixes the protective leg types, or rules on N6's preconditions.**
 
