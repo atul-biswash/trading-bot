@@ -4332,3 +4332,28 @@ this run cannot attribute.
 | `c5_execute.txt` | `b7d0955744ce48e871c64c5ec7e697199aeedd5bf2b5f118f5e5e19096fa7865` |
 | `c5_after_check_testnet.txt` | `d38652b01ca6008e2c65db932df773ee4552e44f3fc670ebd4a55a5b28edf1cc` |
 | `s0b_post_clear.txt` | `366a725ecc414cb577c885161451819bd5a8840d84ddc37d03454deadedb71b9` |
+
+## 41. M5m S4: the pre-registration, as committed (P110 C6)
+
+`docs/S4_PREREGISTRATION.md`, 155 lines, SHA-256 `49e4fdbba55a5f407d8db130ebdc6cf68fc13813a101ab7849e4740050c6566f`
+in the tree this commit leaves. It states what R-AO, R-AY, R-AZ, R-BA and R-BB require and nothing the run can change.
+**The inputs it freezes, by digest, as read when it was written:**
+
+| input | SHA-256 |
+|---|---|
+| `config.yaml` | `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0` |
+| `config.s4.yaml` | `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594` |
+| `scripts/s4_compare.py` | `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08` |
+| `scripts/trade_census.py` | `926bdd4674d7fe9fa418fb5e8b67f3d089012255ba8f478492a043fbbe35d9bb` |
+| Testnet `BTCUSDT.json` (exchangeInfo) | `40e24c66110ba645ef49ca595618321fdbe2a36f9eab9638eea564dd8b797dc7` |
+| Testnet `ETHUSDT.json` (exchangeInfo) | `87e5095e0e177267d7fe039b8ce1925c8e07903a0f64211c2b948f82705777cc` |
+| `docs/REGIME_LABELS.json` | `6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72` |
+| the active clone's `data/state.json` (schema 2, 0 positions, 0 pending) | `1f91fc4335a3d62899ae9ba430aa6abd41a6f4468a0605ba5b252143f7677396` |
+| the census of record's capture (`trading_bot.m5k-close-20260925T182818Z.log`) | `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528` |
+
+**The seven lines the owner may overrule before the push**, each marked `CHOSEN` in the file: the comparison window
+`[W, M)` with `W` the first UTC midnight at or after `T0`; `window-edge` as a cause beyond P108's closed list; `T0` as the
+first `run` boot rather than any boot (the launch checklist's `strategies` verification also logs a `boot_provenance`
+line); `unexplained` reported and not gated; NOT MEASURED when a recorded gap touches more than 5% of the live entries;
+the backtest starting at `W` with the balance the live run had at `T0`; and any other backtest of the window being
+exploratory.

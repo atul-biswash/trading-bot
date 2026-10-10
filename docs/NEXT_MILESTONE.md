@@ -1243,6 +1243,17 @@ takes and the bot did not is a finding about one of them.
 > happened. **What survives:** everything else in R-AV, and the Testnet snapshots copied beside the recorded
 > klines (section 40) for the C3 annotation's *"What the S4 run needs"*.
 
+> **ANNOTATED AT M5m P110 (C6): THE PRE-REGISTRATION IS WRITTEN.** `docs/S4_PREREGISTRATION.md` carries out R-AO,
+> R-AY, R-AZ, R-BA and R-BB, which the P109 C1 annotation assigned to *"the pre-registration commit"*: the stop
+> rule and cap, the interruptions and the reset rule, the backtest's parameters with their digests, the acceptance
+> tests A to C and the diagnosis D (diagnostic, not a gate), and R-BB's comparison at the measured 95,170.91
+> (ratios 1.0518 to 1.0521). **What stops being true:** that annotation's *"R-AO, R-AY, R-AZ, R-BA and R-BB in the
+> pre-registration commit"* as a future event, and P108's draft where it differs (a calendar `T0`, a whole-midnight
+> window start, a `[OWNER: 0]` cap on `unexplained`). **What the owner may overrule before the push:** seven lines
+> marked `CHOSEN` in the file, listed in `docs/RUN_LEDGER.md` section 41. **What survives:** *"Divergence is
+> diagnosed, never tuned away"*, R-C's three tests as the gate, and R-AY's definition of `T0`, narrowed to the first
+> `run` boot by one `CHOSEN` line. Nothing is launched by this commit.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
