@@ -490,6 +490,54 @@ def load_spec(path: Path) -> tuple[Path, list[Mutation]]:
     return target, mutations
 
 
+#: What pytest puts between a node id and the reason it appends to a short-summary line.
+_REASON_SEPARATOR: Final = " - "
+
+
+def _node_id_of(text: str) -> str:
+    """The node id at the front of ``text``, without the ``- <reason>`` pytest appends.
+
+    pytest prints ``FAILED <node id> - <reason>`` and trims the REASON to the terminal width,
+    so a line may read ``... - AssertionE...`` or carry no reason at all. The id ends at the
+    first `` - `` that is not inside square brackets, because a ``parametrize`` id is free
+    text and ``test_x[a - b]`` is a legitimate node id.
+
+    **AN UNBALANCED ``[`` IN A PARAMETER ID MAKES THE CUT SKIP THE REAL SEPARATOR**, and the
+    id then keeps its reason, which is the old behaviour and the safe direction: an id is
+    never cut short of its own name. No id in this tree is unbalanced.
+    """
+    depth = 0
+    for index, char in enumerate(text):
+        if char == "[":
+            depth += 1
+        elif char == "]":
+            depth = max(0, depth - 1)
+        elif depth == 0 and text.startswith(_REASON_SEPARATOR, index):
+            return text[:index]
+    return text
+
+
+def summary_node_ids(summary: Sequence[str], prefix: str) -> tuple[str, ...]:
+    """Node ids of the ``prefix`` lines of pytest's short summary, in the order it printed them.
+
+    **AN ID IS A NODE ID AND NOTHING ELSE** (R-BC, `M5m-250`). This used to return everything
+    after the word, so a survey's ``failed`` tuple held ``<node id> - <reason>`` where it was
+    documented to hold ids, and a predicted test name could look unobserved because the row
+    that held it carried pytest's own suffix. The reason is cut by :func:`_node_id_of`.
+
+    A line is read only if it starts with ``prefix`` and contains ``::``, which every pytest
+    node id does and a captured log line (``ERROR `` is the level prefix of one) does not --
+    the filter this function replaces, unchanged. The test is on the whole line and not on
+    the cut id, so a module-level collection error whose REASON happens to contain ``::`` is
+    read exactly as before; it is also an exit status 2, which abstains regardless.
+    """
+    return tuple(
+        _node_id_of(line.split(" ", 1)[1].strip())
+        for line in summary
+        if line.startswith(prefix) and "::" in line
+    )
+
+
 def run_suite(*, args: Sequence[str] = ()) -> SuiteOutcome:
     """Run pytest from the repo root and classify every failure.
 
@@ -518,7 +566,9 @@ def run_suite(*, args: Sequence[str] = ()) -> SuiteOutcome:
     Two guards, because either alone still admits a mistake. The scan starts
     after the ``short test summary info`` banner, which is the one section
     whose lines are all verdicts. And an id must contain ``::``, which every
-    pytest node id does and no log line does.
+    pytest node id does and no log line does. **What is kept of such a line is
+    its node id alone** (:func:`summary_node_ids`, R-BC): pytest's own
+    `` - <reason>`` suffix, which it trims to the width, is not part of an id.
 
     **THE DECODE IS PINNED TO UTF-8 WITH ``errors="replace"``, AND BOTH HALVES
     ARE LOAD-BEARING.** ``text=True`` alone decodes with the locale encoding,
@@ -577,18 +627,11 @@ def run_suite(*, args: Sequence[str] = ()) -> SuiteOutcome:
     start = next((i for i, line in enumerate(body) if "short test summary info" in line), len(body))
     summary = body[start:]
 
-    def ids(prefix: str) -> tuple[str, ...]:
-        return tuple(
-            line.split(" ", 1)[1].strip()
-            for line in summary
-            if line.startswith(prefix) and "::" in line
-        )
-
     kills = sum(1 for row in rows if row["kill"])
     return SuiteOutcome(
         exit_code=proc.returncode,
-        failed=ids("FAILED "),
-        errored=ids("ERROR "),
+        failed=summary_node_ids(summary, "FAILED "),
+        errored=summary_node_ids(summary, "ERROR "),
         kills=kills,
         crashes=len(rows) - kills,
         total=len(rows),

@@ -574,3 +574,117 @@ def test_a_corrupted_restore_raises_rather_than_returning(
     assert "was not restored" in message
     backup_path = message.rsplit("A clean copy is at ", 1)[-1].rstrip(".")
     assert Path(backup_path).exists(), f"the backup was deleted: {backup_path}"
+
+
+# ---------------------------------------------------------------------------
+# The short summary's ids. `M5m-250`, `M5m-258`, R-BC.
+# ---------------------------------------------------------------------------
+def test_a_failed_tests_id_is_its_node_id_and_carries_no_reason(tmp_path: Path) -> None:
+    """**THE FAILING-FIRST TEST FOR R-BC.** `M5m-250`.
+
+    MUTATION: make the id parser keep the whole line after the word.
+
+    pytest's short summary reads ``FAILED <node id> - <reason>`` and trims the reason to the
+    terminal width, ``...`` included. The old parser kept all of it, so a survey's `failed`
+    tuple held ``test_probe.py::test_the_answer_is_one - assert 2 == 1`` where it was
+    documented to hold a node id, and a predicted test name could look unobserved because
+    the row that held it had a suffix.
+
+    **REAL PYTEST, AGAINST THE THROWAWAY VICTIM**, because the thing under test is what
+    pytest actually prints in a subprocess with captured output and not what a fixture says
+    it prints. The probe's bare ``assert`` renders as ``assert 2 == 1``, a reason that is
+    present on every pytest this project has run.
+
+    **THE ASSERTION NAMES THE TEST AND NOT ITS FILE, AND THAT IS MEASURED RATHER THAN
+    LAZY.** The probe lives in ``tmp_path``, outside the rootdir, and pytest 9.1.1 prints
+    such a node id with an EMPTY file part: ``FAILED ::test_a - assert 2 == 1``. Asserting
+    the file name would test pytest's path handling, which is not this script's.
+    """
+    victim, mutation, args = _mutant(tmp_path, "    return 2\n")
+    result = survey.apply_and_report(victim, mutation, dry_run=False, suite_args=args)
+
+    assert result is not None
+    assert len(result.failed) == 1
+    node_id = result.failed[0]
+    assert node_id.endswith("::test_the_answer_is_one"), node_id
+    assert " - " not in node_id
+
+
+def test_the_reason_pytest_appends_is_dropped_from_each_id() -> None:
+    """**The pure form, over lines pytest has printed.**
+
+    MUTATION: return the text after the word unchanged.
+
+    The first line carries a reason pytest trimmed to the width (``AssertionE...``), the
+    second carries none at all because the node id alone filled the line, and the third's
+    reason contains the separator itself. All three are cut at the FIRST `` - ``.
+    """
+    lines = [
+        "FAILED tests/unit/test_a.py::test_x - AssertionE...",
+        "FAILED tests/unit/test_a.py::TestK::test_a_very_long_name_that_filled_the_whole_line",
+        "FAILED tests/unit/test_a.py::test_y - ValueError: a - b - c",
+    ]
+
+    assert survey.summary_node_ids(lines, "FAILED ") == (
+        "tests/unit/test_a.py::test_x",
+        "tests/unit/test_a.py::TestK::test_a_very_long_name_that_filled_the_whole_line",
+        "tests/unit/test_a.py::test_y",
+    )
+
+
+def test_a_separator_inside_a_parameter_id_belongs_to_the_id() -> None:
+    """MUTATION: cut at the first `` - `` wherever it is, brackets or not.
+
+    ``pytest.mark.parametrize`` ids are free text, and ``[a - b]`` is a legitimate one. A cut
+    that ignored the brackets would turn two different tests into the same truncated id.
+    The reason that FOLLOWS a bracketed id is still cut.
+    """
+    lines = [
+        "FAILED tests/unit/test_a.py::test_x[a - b] - assert 1 == 2",
+        "FAILED tests/unit/test_a.py::test_x[c - d]",
+        "FAILED tests/unit/test_a.py::test_x[e - f - g] - KeyError: 'k'",
+    ]
+
+    assert survey.summary_node_ids(lines, "FAILED ") == (
+        "tests/unit/test_a.py::test_x[a - b]",
+        "tests/unit/test_a.py::test_x[c - d]",
+        "tests/unit/test_a.py::test_x[e - f - g]",
+    )
+
+
+def test_only_lines_with_the_asked_for_word_and_a_node_id_are_read() -> None:
+    """MUTATION: drop the ``::`` requirement, or ignore the prefix.
+
+    A collection error reads ``ERROR <file> - <reason>`` with no ``::``, and a captured log
+    line may begin ``ERROR `` too (`M5i-086`'s shape). Neither is a node id. A ``FAILED``
+    request must not return an ``ERROR`` line and the reverse.
+    """
+    lines = [
+        "FAILED tests/unit/test_a.py::test_x - assert 1 == 2",
+        "ERROR tests/unit/test_b.py::test_y - fixture 'z' not found",
+        "ERROR tests/unit/test_c.py - SyntaxError: invalid syntax",
+        "ERROR boom, not a test",
+        "",
+    ]
+
+    assert survey.summary_node_ids(lines, "FAILED ") == ("tests/unit/test_a.py::test_x",)
+    assert survey.summary_node_ids(lines, "ERROR ") == ("tests/unit/test_b.py::test_y",)
+
+
+def test_the_ids_keep_the_order_pytest_printed_them_in() -> None:
+    """MUTATION: sort the ids, or return them as a set.
+
+    The survey's summary lists a mutation's killers in pytest's own order, which is the
+    order they ran; a reader comparing two surveys line by line relies on it.
+    """
+    lines = [
+        "FAILED tests/z.py::test_b - x",
+        "FAILED tests/a.py::test_a - x",
+        "FAILED tests/m.py::test_c",
+    ]
+
+    assert survey.summary_node_ids(lines, "FAILED ") == (
+        "tests/z.py::test_b",
+        "tests/a.py::test_a",
+        "tests/m.py::test_c",
+    )

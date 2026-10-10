@@ -4111,3 +4111,115 @@ the venue had not yet returned the bar opening `19:46`; the other three, and all
 | `predictions_c2b_first_run.txt` | `407897805f1403d79236baa81f04d63300a6016c18ab8e8c628148f2a7d774d1` |
 | `recorder_run1.txt` | `31e6d7d564246937e6c4d84afe3c3c2c619bf4ae49894e945ff0c23a39fa1e71` |
 | `recorder_run2.txt` | `b34f0aee070e3810476e857701cb9bdc09273d2cf3364f75c2f4a964cc1d34d9` |
+
+## 38. M5m S4: P110's Step 0 and C1 -- the halts, R-BB's comparison, and the survey ids re-parsed (R-BC)
+
+Observations of 2026-10-10, taken with the working tree at `524d53a`. Scratch directory
+`F:\trading bot\scratch\p110\`. Every prediction below was written to a file before the measurement it
+predicts (R-T).
+
+### The halt conditions (predictions: `predictions_halts.txt`, SHA-256 `8d6707f10e14a90304eb3fb134670b58bcc7b71cd4c38cc4fa27cddd98e2b0b8`)
+
+| halt | predicted | observed |
+|---|---|---|
+| H1 `git rev-parse HEAD` | `524d53a9e1cb9bd3b09db9885faeedcea23bf418` | the same |
+| H2 `origin/main`, `origin/main..HEAD` | `524d53a` and 0 if pushed, else `df3dd21` and 5 (about 60% for the first) | `524d53a9e1cb9bd3b09db9885faeedcea23bf418` and **0**: the owner has pushed |
+| H3 `git status --porcelain` | empty | empty |
+| H4 keyless Testnet ping | 200 | 200 at `2026-10-10T03:48:14Z`, and 200 again at `03:57:18Z` after H5 |
+| H5 `scripts/check.py`, bare to a file | 180 files / 95 source files / 3273 passed, 1 skipped, exit 0 | exactly that, 499.20 s of pytest, exit 0 (`gate_h5.txt`, SHA-256 `bf7c430be93c5fc2ba254f9d9e1452d38a341fe60a78e991e239b04a86c8b660`) |
+| H6 `check_findings.py milestone/M5l..HEAD M5m` | `M5m-001` to `M5m-257`, gapless, blockless `[934eb45]` | declared 257, distinct 257, no gap, no duplicate, nothing cited and not declared, blockless `[934eb45]`, exit 1 for that commit only |
+| H7 `data/historical_testnet` verifies clean | clean; the owner's task has NOT run (two `RECORDER.jsonl` lines per series) | 4 series, 0 gaps, **0 problems**; two lines per series; `F:\trading bot\recorder` does not exist, so **no recorder is running and the store has not grown since `2026-10-09T19:45Z`** |
+
+### S0a: where `M5m-250`'s ids come from
+
+`scripts/mutation_survey.py`, `run_suite`, the nested `ids()` (before C1): `line.split(" ", 1)[1].strip()` for
+every short-summary line that starts with `FAILED ` or `ERROR ` and contains `::`. **It does not truncate
+anything.** It keeps everything after the word, which includes pytest's own `- <reason>` suffix, and pytest
+trims that suffix to the terminal width (80 under capture) with `...`; pytest never trims the node id (and,
+when the id alone fills the line, prints no reason at all). So `M5m-250`'s *"truncates a long node id at the
+first ' - '"* names the wrong mechanism: **the id is whole and carries a reason**. Its consequence stands (a
+predicted name can look unobserved because the row holding it has a suffix). Annotated here and not amended,
+because a finding later found imprecise is annotated.
+
+Also measured: on pytest 9.1.1 a test file outside the rootdir is printed with an EMPTY file part,
+`FAILED ::test_a - assert 2 == 1`, so the harness's self-tests that run a probe in `tmp_path` get ids that
+begin `::`.
+
+### C1: the fix, failing first (`c1_failing_first.txt`, SHA-256 `dc8c04776c08dce250a18988ffa8bbe8bad5b608aa954f76569c5173e27b8ccd`)
+
+Five new tests in `tests/unit/test_mutation_survey.py`, run BEFORE the fix: **5 failed**, the real-pytest one at
+its assertion (`AssertionError: ::test_the_answer_is_one - assert 2 == 1`, the old id with its reason) and the
+four pure ones with `AttributeError` (`summary_node_ids` did not exist). After the fix the file reads 19 passed
+(`c1_after.txt`, `87e0f12f292e2be799a12b683ae910852c00bbbff0ab931ff24c80f99db23869`). The fix is
+`summary_node_ids` and `_node_id_of`: the id ends at the first ` - ` outside square brackets.
+
+### C1: every saved M5m survey log re-parsed (`reparse_out.txt`, SHA-256 `2b89ee7d47b44cf415c7d826cbc55f309919e33f1c103c646d0449d05a4e7a9d`)
+
+`reparse_logs.py` (scratchpad) reads each log's mutation blocks, takes every `FAILED` line as the OLD parser
+kept it, runs the NEW parser over the same text, and compares per block the verdict the log states (killed,
+crashed, abstained), the line count, the distinct-id count, and the log's own `raw FAILED` figure. It asserts
+that every new id is the old line cut at its own ` - `. Sixteen files were found: three under
+`F:\trading bot\scratch\` and thirteen in the session scratchpad, of which `survey_s.log` is byte-equal to
+`p109/survey_sma.log`, `survey_c5.log` to `p105/survey_c5.log`, and `survey_c4.log.bak` to `survey_c4.log`, and
+`survey_s0.log` holds no verdict block. Twelve distinct logs hold verdicts:
+
+| log | SHA-256 | blocks | failed lines | lines carrying a suffix | abstained | survivors | kill sets changed |
+|---|---|---|---|---|---|---|---|
+| `p105/survey_c5.log` (`fill_model.py`) | `607fe4e7cba4fa4fcb974ba9025ce2048fb97087cedd4157589c1f00be3d4ced` | 42 | 141 | 0 | 0 | 1 | **0** |
+| `p106/survey_sim.log` (simulated executor) | `ca16f0d0c3a521edb7a0519f48e62d6c86a7dbb82a339603eff1e0c4ce53ec99` | 33 | 111 | 0 | 0 | 2 | **0** |
+| `p109/survey_sma.log` (`indicators.py`) | `34da38775718866d538eef435658dd15f6e44c604d32a2056b7fe9cc0c22631d` | 15 | 120 | **11** | 0 | 4 | **0** |
+| `survey_c1.log` | `79a23e368ad74fbf31e76a4f2de213a4327c39725bdcc35dfdbd03f1b0da67a4` | 39 | 222 | 0 | 0 | 0 | **0** |
+| `survey_c2.log` | `855b91deebe966b81b11b894a5403ca4b019d25c2c274ddfd40faf835e57a9e6` | 19 | 107 | 0 | 0 | 0 | **0** |
+| `survey_c4.log` | `59671265115163d4de5d26b765c33cb077fc6f8db0dfa4899aa977c8641dab16` | 17 | 23 | 0 | 0 | 0 | **0** |
+| `survey_c5p.log` | `f4c3c39896107bae1106dc7d2419b623f0c3df5500d02a8af9544cd1d896e477` | 8 | 21 | 0 | 0 | 0 | **0** |
+| `survey_hist.log` | `7b45693a50392f60750817af14b215174a6a951be82029e0d53f62f597971b40` | 29 | 124 | 0 | 0 | 0 | **0** |
+| `survey_hist_run1.log` | `2c5e3da00af47ed97536c50f09733c39ab12fe715ea48cf4c99126efbbfdf6d5` | 29 | 124 | 0 | 0 | 0 | **0** |
+| `survey_q2.log` | `b9097140dfc993d3ea51c2624733f9014e3114df175412de48166547dae5d281` | 30 | 98 | 0 | 0 | 2 | **0** |
+| `survey_sim_rerun.log` | `04295a3bdef516efe4e62d1cfc03e1ebca181ed84c1170f41953bb079e9ddbe0` | 2 | 5 | 0 | 0 | 0 | **0** |
+
+**No kill set and no abstention changes in any log**, as predicted (`predictions_c1.txt`, SHA-256
+`45c280e57fc43f636f3b55b8514dc767fcbbb2f1d228e134b48c6753323bdd4c`). The reason is structural: a block's
+kill count and its abstention are the in-process hook's and `exit_code`'s, and the parser only supplied the
+printed ids and `outcome.failed`. **Only the `indicators.py` survey (P109) had any suffix, 11 lines of 120**,
+and the cause is the width: pytest prints a reason only when the line leaves room for one, which it does for
+the short test names in `test_indicators.py` and does not for the long ones in the other eleven logs. That
+is why `M5m-250` was met in P109 and in none of the earlier surveys. The logs' own `raw FAILED` figure equals
+the number of `FAILED` lines in every block.
+
+The logs were not all of M5m's surveys: P106 C4's and C5p's specs (`spec_c4.json`, `spec_c5p.json`) have logs in
+the scratchpad (`survey_c4.log`, `survey_c5p.log`, in the table), and **no log was found for any survey run
+before P105**; a survey whose output was not saved cannot be re-parsed.
+
+### S0b: R-BB's comparison, measured before any venue write (predictions: `predictions_s0b.txt`)
+
+The configured rule, from `config.yaml` at `HEAD`: `risk.position_sizing.method: fixed_fraction`, `fraction: 0.02`,
+`limits.max_position_size_percent: 20.0`. Through the real `calculate_position_size`, with the stored Testnet
+`exchangeInfo` filters, **equity 95,190 (R-AV's figure; NOT read from the venue in this step, which is a
+signed call)** and the last recorded closes (BTCUSDT 82,372.02, ETHUSDT 2,478.84):
+
+| symbol | step | quantity | predicted entry notional | census of record: entries | median entry quote total | predicted / median |
+|---|---|---|---|---|---|---|
+| BTCUSDT | 0.00001 | 0.02311 | **1,903.6174** | 140 | **1,809.1410** (range 1,769.17 to 1,813.86) | **1.0522** |
+| ETHUSDT | 0.0001 | 0.768 | **1,903.7491** | 25 | **1,809.1747** (range 1,805.55 to 1,814.07) | **1.0523** |
+
+**Within 2x, so R-BH's halt does not fire.** The prediction held: both notionals 1,903.6 and 1,903.7 (2% of
+95,190 is 1,903.80 less a remainder under one lot) and a ratio inside 0.9 to 1.3. The census of record is
+`scripts/trade_census.py` on the M5k capture, SHA-256
+`3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`: 165 bookings, 140 + 25 entries with a known
+entry quote total. The two medians are 1,809.1, which is 2% of an equity of about 90,460 at September's prices; the
+5.2% difference is the ratio of 95,190 to about 90,460 (REASONED: the September equity is inferred from the
+median and is not a recorded figure), and the sizing rule is the same.
+
+### Digests of the Step 0 and C1 outputs (SHA-256)
+
+| file (under `F:\trading bot\scratch\p110\`) | sha256 |
+|---|---|
+| `predictions_halts.txt` | `8d6707f10e14a90304eb3fb134670b58bcc7b71cd4c38cc4fa27cddd98e2b0b8` |
+| `gate_h5.txt` | `bf7c430be93c5fc2ba254f9d9e1452d38a341fe60a78e991e239b04a86c8b660` |
+| `predictions_s0b.txt` | `b812ff43514eab76815dc13c011e552b799c13d0f5618e4a735444073e7848b1` |
+| `s0b_out.txt` | `fc3a715e1042ea33581561eb74bd8f1fbdba0b08994e5b8b1e24698fd7e7eaf5` |
+| `census_of_record.txt` | `4afcd91f01d1b4e4f6c57602e533a39af544efb0d6f3fe514d996c958732bfc9` |
+| `predictions_c1.txt` | `45c280e57fc43f636f3b55b8514dc767fcbbb2f1d228e134b48c6753323bdd4c` |
+| `c1_failing_first.txt` | `dc8c04776c08dce250a18988ffa8bbe8bad5b608aa954f76569c5173e27b8ccd` |
+| `c1_after.txt` | `87e0f12f292e2be799a12b683ae910852c00bbbff0ab931ff24c80f99db23869` |
+| `reparse_out.txt` | `2b89ee7d47b44cf415c7d826cbc55f309919e33f1c103c646d0449d05a4e7a9d` |
