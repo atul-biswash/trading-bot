@@ -1254,6 +1254,49 @@ takes and the bot did not is a finding about one of them.
 > diagnosed, never tuned away"*, R-C's three tests as the gate, and R-AY's definition of `T0`, narrowed to the first
 > `run` boot by one `CHOSEN` line. Nothing is launched by this commit.
 
+> **ANNOTATED AT M5m P111 (C1): THE OWNER RATIFIED THE SEVEN `CHOSEN` LINES AND RULED R-BJ AND R-BK.** Recorded here
+> and not in `docs/S4_PREREGISTRATION.md`, which stays frozen. The rulings, verbatim:
+>
+> R-BI: "The seven CHOSEN lines in docs/S4_PREREGISTRATION.md are ratified as written. Line 4: the live equity at W differs from the T0 balance by what was booked between T0 and W; R-C's figures are returns on the entry quote total, so the difference does not enter them, and it is accepted. Line 7: an unexplained disagreement is not a separate gate, and it counts against R-C's 80% match."
+>
+> R-BJ: "A difference between the WebSocket bars the bot trades on and the REST bars the recorder stores is an accepted risk of S4. It appears among the unexplained disagreements, and it is not separately measured in M5m."
+>
+> R-BK: "The S4 capture must contain every log record from T0 to the stop. If the configured log rotation cannot hold the run's predicted volume twice over, P111 halts for the owner before launch."
+>
+> **Where each is carried out.** R-BI: nothing in the pre-registration changes. This commit contains
+> `docs/S4_PREREGISTRATION.md` unchanged, SHA-256 `49e4fdbba55a5f407d8db130ebdc6cf68fc13813a101ab7849e4740050c6566f`,
+> so a clone of this commit satisfies its `T0` clause (the first `run` boot of a clone of a commit that contains the
+> file). R-BK: P111's Step 1, `docs/RUN_LEDGER.md` section 42. The configured rotation holds 62,914,560 bytes (the
+> active file and five backups of 10,485,760), the predicted volume of the 35-day cap is 5.2 to 8.3 MB at every
+> measured rate and 17.9 MB at a structural bound, and the capacity is at least 1.75 times twice the volume in every
+> case, so P111 did not halt. R-BJ: no instrument is added.
+>
+> **What stops being true:**
+> - The C6 annotation's *"What the owner may overrule before the push: seven lines marked `CHOSEN` in the file"*, and
+>   its *"R-AY's definition of `T0`, narrowed to the first `run` boot by one `CHOSEN` line"* as an open choice: R-BI
+>   ratified all seven as written. The `CHOSEN` marks stay in the pre-registration, which is not edited; read them as
+>   ratified. `docs/RUN_LEDGER.md` section 41's *"The seven lines the owner may overrule before the push"* is the same.
+>
+> **A reading R-BJ needs, which this commit does not decide (`M5m-290`).** R-BJ says the WebSocket-against-REST
+> difference *"appears among the unexplained disagreements"*. The shipped `scripts/s4_compare.py` (SHA-256
+> `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`, frozen by the pre-registration) and the
+> pre-registration's D list a cause `bar differs` ahead of `unexplained`: a disagreement on a bar whose recorded
+> close differs from the close the live signal logged as its reference is tallied as `bar differs`, and only a
+> disagreement with no such difference is `unexplained` (`_input_cause`). So a WebSocket-against-REST close
+> difference that decides a signal is reported under `bar differs` wherever the live reference was logged. Neither
+> count is a gate, and test C counts every unmatched entry whatever its cause, so A, B, C and the verdict are the
+> same either way. If the owner means such cases to be called `unexplained`, that is a change to the frozen script
+> and file, not a reading of them.
+>
+> **R-BK's other half: one capture file (`M5m-292`).** `scripts/s4_compare.py --capture` takes one file, and the
+> launch checklist's daily freeze copies the active `logs\trading_bot.log`. The whole run stays in that one file
+> while its average rate over 840 h is under 12,483 bytes an hour (10,485,760 / 840). Every measured rate is under
+> it (the highest is 9,827); the structural bound (21,347) is over it, and there one rollover would put the first
+> records in `logs\trading_bot.log.1`. No record is lost by that, since five backups are kept; the cost is that the
+> capture is then two files and the comparison cannot read it until they are reassembled. The appearance of
+> `trading_bot.log.1` is the signal, and the checklist's weekly log-size check (3.6) is where it would be seen.
+> **What survives:** R-AY to R-BB and the pre-registration entire.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

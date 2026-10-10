@@ -4357,3 +4357,134 @@ first `run` boot rather than any boot (the launch checklist's `strategies` verif
 line); `unexplained` reported and not gated; NOT MEASURED when a recorded gap touches more than 5% of the live entries;
 the backtest starting at `W` with the balance the live run had at `T0`; and any other backtest of the window being
 exploratory.
+
+> **ANNOTATED AT P111 (section 42): the owner ratified all seven as written (R-BI).** The paragraph above is the record of
+> what was open when the file was committed.
+
+## 42. M5m S4: P111 -- the halts, the log rotation against the run's volume (R-BK), and the owner's rulings R-BI to R-BK
+
+Recorded at P111 (C1). An observation log, so this section only adds. The rulings are quoted in `docs/NEXT_MILESTONE.md`
+(the P111 C1 annotation). **`docs/S4_PREREGISTRATION.md` is in this commit unchanged**: SHA-256
+`49e4fdbba55a5f407d8db130ebdc6cf68fc13813a101ab7849e4740050c6566f`, read from the working file with `sha256sum` before the
+commit and from `git show HEAD:docs/S4_PREREGISTRATION.md` after it, and the commit's numstat does not list it.
+
+### The halt conditions (predictions: `F:\trading bot\scratch\p111\predictions_halts.txt`, SHA-256 `ddb1c11de6e2c9b9ed25e716d6c2c8c9d0473ec7b72ff2267687c333cde34a94`)
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1 `git rev-parse HEAD` | `e248a736663ecca045af3a72b02e23a8361af122` | the same |
+| H2 `origin/main`, `git rev-list --count origin/main..HEAD` | `e248a73` and `0` if the owner has pushed, else `524d53a` and `7` (the prediction file leaned to the second) | `e248a73` and `0`: **the owner has pushed** |
+| H3 `git status --porcelain` | empty | empty |
+| H4 `scripts/check.py`, bare to a file | 183 / 96 / 3371 passed, 1 skipped | the same, exit 0, 187.3 s (pytest 185.57 s); Testnet ping 200 at `2026-10-10T05:06:23Z` and at `05:09:49Z` |
+| H5 `scripts/check_findings.py milestone/M5l..HEAD M5m` | `M5m-001` to `M5m-288`, gapless, blockless `[934eb45]` only | 288 declared, 288 distinct, no duplicate, no gap, cited-not-declared none, blockless `[934eb45]`; exit 1 for that commit alone, as before |
+| H6 the recorder | `F:\trading bot\recorder` does not exist | it does not (`Test-Path` False); `Get-ScheduledTaskInfo -TaskName tb-recorder`: "The system cannot find the file specified"; `F:\trading bot` holds `deploy`, `files` and `scratch` |
+
+The gate's file is `F:\trading bot\scratch\p111\gate_h4.txt`, SHA-256 `ee5e91b3a5b5142d573c8f59f478dba308933cb616088ce0821baa29418fa443`.
+**The first H4 invocation measured nothing**: it was run with the system `python`, and the gate's interpreter guard refused
+("this interpreter is not the one that would measure this tree"), exit 1. The same command with `.venv/Scripts/python.exe`
+is the one above. The H2 fetch was `git fetch origin main`, read only.
+
+### Step 1a: the configuration that governs the deployment clone's log
+
+`config.yaml` at `HEAD` (SHA-256 `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, the digest the observation run's
+`boot_provenance` line recorded, section 26) lines 193 to 201:
+
+    logging:
+      level: INFO
+      console: true
+      file:
+        enabled: true
+        path: logs/trading_bot.log
+        max_bytes: 10485760       # 10 MB
+        backup_count: 5
+        json: false               # true -> structured JSON lines
+
+`src/trading_bot/utils/logger.py`, `setup_logging`, lines 239 to 247: `RotatingFileHandler(path, maxBytes=config.file.max_bytes,
+backupCount=config.file.backup_count, encoding="utf-8")`. The rotation's total capacity is the active file and five
+backups: 6 x 10,485,760 = **62,914,560 bytes**; one file holds 10,485,760. The deployment clone's `config.yaml` is the committed one (a
+launch from a modified config is refused), so this is the rotation S4 runs under.
+
+### Step 1b: the growth, MEASURED (predictions: `predictions_step1.txt`, SHA-256 `34f07455d446a576a17e6f771b2934bc1becc6b6570198ca10941aa9632f58a3`)
+
+Instrument: `F:\trading bot\scratch\p111\measure_logs.py` (SHA-256 `c9c42a5dbf898b2ae81c247eee5e2f5835697b99d0be9f35a93b5b27780affd3`),
+read only, over the frozen copies in `F:\trading bot\files\binance-trading-bot\m5j-evidence\`. A rate is the bytes of a pid's tagged lines (CRLF
+counted as written) over the hours from its first to its last record. Untagged lines are 544 bytes per boot (the banner). The whole-file rate divides
+the file's size by the same hours and is what the prediction file used.
+
+| Capture | SHA-256 | Pid and run | Tagged bytes | Hours | Tagged B/h | Whole-file B/h |
+|---|---|---|---|---|---|---|
+| `trading_bot.m5l-observation-run-pid24980.log` (53,021 bytes) | `023c72a1870eb4f770f837b82173cf9bc7e8339b196231a290e60c28bb7944eb` | 24980, `2026-10-03T20:08:24Z` to `2026-10-04T04:29:50Z`, section 26 | 51,646 | 8.357 | **6,180** | 6,344 |
+| `trading_bot.m5l-evidence-run-pid21520.log` (23,625 bytes) | `c1471d3c3b61a1f765b339bfc83af549c71bbb92821310f158c8b4ff85bc089f` | 21520, `2026-09-27T13:30:56Z` to `16:53:23Z`, section 21 | 22,234 | 3.374 | **6,589** | 7,002 |
+| `trading_bot.m5k-close-20260925T182818Z.log` (5,074,996 bytes) | `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528` | 16 pids with 20 or more records, 193.8 h in all | 1,314,213 | 193.8 | pooled **6,783** | |
+
+In the third capture the highest single pid is 7888 at **9,827** B/h and the longest is pid 16216, 52.6 h at 7,780 B/h. Every one of the older
+captures also holds about 3.7 MB of untagged lines from before the `pid=` field began on `2026-08-27`; they are ignored. A `reconciliation_pass` line
+is **192.0 bytes** in both runs (`calc_step1.py`: 170 lines, 32,640 bytes, in the observation run; 58 lines, 11,136 bytes, in the evidence run), and it is
+logged once per pass, only while a position is open: 170 passes in 8.357 h is 20 an hour, against the 60 an hour a one-minute bar allows. Five earlier
+captures were also measured, and every pid in them is a pid of the third capture (read from the output, not assumed), so they add no rate:
+`trading_bot.live-20260917T182829Z.log` `d0219fb3cecc9e9280b6df780b1d2b27331da3a61694cbfbc18dfe381a2bece4`,
+`trading_bot.live-20260917T183900Z.log` `4b88118a64f884190ac85f22dcd9046f23cbd0e11b5cac06c43ff70140347c32`,
+`trading_bot.final-20260917T185851Z.log` `0e6b673e16671152a4e08ca6cc8390e7b72ea8b75c3e7303fa0c16b4e04d223e`,
+`trading_bot.x1-20260918T175500Z.log` `bbdeb1787ac0caf5782229391ef6cf5931a046193d8b6fef078ef3941121e182` and
+`trading_bot.p2a5-20260923T064334Z.log` `e747b3e80ce3be4f76da41da7262ef19adacfc3c34b0fcb739b4055dc44c2589`. The measure's whole output is
+`measure_logs_out.txt` (SHA-256 `1fc0d7396422c561c36eedcf256ad9c91723924c17cf4b2c667e1bd7de4d69c4`) and `measure_logs_busy_out.txt`
+(`c254d27a2e21468b284a299a30b50c6d67e916ff34777540fca653452bff9270`).
+
+### Step 1c: the volume of a 35-day run against the capacity (`calc_step1.py`, SHA-256 `8ec470fd9e5681c9545af5d564f0148c870821f27740b4d8401d8477f91d3a09`;
+output `calc_step1_out.txt`, `52492666b2c4f9ad8900334c5ce0ee6bc5eb6440a6f755184e6ddb42f777a82e`)
+
+840 h is the cap (R-AY); the 21-day minimum is 504 h, 60% of each figure.
+
+| Rate used | B/h | Volume over 840 h | Capacity / 2 x volume | One file / volume | Rollovers at 10 MiB |
+|---|---|---|---|---|---|
+| observation run, tagged | 6,180 | 5,191,036 | 6.06 | 2.02 | 0 |
+| evidence run, tagged | 6,589 | 5,535,162 | 5.68 | 1.89 | 0 |
+| pooled, older pids | 6,783 | 5,697,610 | 5.52 | 1.84 | 0 |
+| highest single pid seen | 9,827 | 8,254,905 | 3.81 | 1.27 | 0 |
+| structural: 60 pass lines an hour (192.0 bytes) on top of the highest seen | 21,347 | 17,931,705 | **1.75** | 0.58 | 1 |
+
+The structural row is a bound and not a measurement: a position open for the whole run, which no capture shows, plus the highest rate any pid
+logged (which already contains some pass lines, so the sum double counts them). The capacity holds twice the volume at a rate up to **37,449 B/h**.
+It does not model a failure state: a handler that raises a traceback every bar has no bound in lines, and the run would be stopped and
+investigated before it mattered.
+
+### Step 1d: the decision
+
+**Capacity is at least twice the predicted volume in every row, the smallest margin being 1.75 times over twice the volume, so P111 does not halt on R-BK.**
+The owner's options 1d lists (a daily freeze of every rotated file with a reassembly; `s4_compare.py` accepting several captures in order;
+a larger rotation in `config.yaml`) are not needed and none was chosen. **One further fact, for the owner and not a halt:** `scripts/s4_compare.py --capture`
+takes one file (`add_argument("--capture", type=Path, required=True)`), and the whole run stays in the one active file only while its average rate is
+under 12,483 B/h over 840 h (10,485,760 / 840). Every measured rate is under it; the structural bound is over it.
+
+### Against the predictions (`predictions_step1.txt`)
+
+| Predicted | Observed |
+|---|---|
+| capacity 62,914,560; one file 10,485,760 | the same |
+| observation run about 6,300 B/h; evidence run about 7,000 | 6,344 and 7,002 on the whole-file basis (6,180 and 6,589 tagged) |
+| the 2026-09-17 capture's busy rate **15,000 to 40,000 B/h** | **WRONG**: no pid in any capture is above 9,827 B/h. The 2026-09-17 pids sit at 7,328 to 8,715. The prediction took a day of 13 trades to mean a much louder log; the older code logged about as much per hour |
+| a pass line of about 230 bytes | **WRONG**: 192.0 bytes |
+| 35-day volume 5.3 to 5.9 MB at the quiet rates | 5.19 to 5.70 MB tagged, 5.33 to 5.88 MB whole-file |
+| the structural worst case about 17 MB, margin about 1.8x over twice the volume | 17.93 MB, 1.75 |
+| the whole run in one file at the quiet rate, margin about 1.9x | 1.84 to 2.02 |
+| P111 does not halt | it does not |
+
+### The C5 line count (`ceaaa9b`)
+
+`ceaaa9b`'s message says *"Numstat: 3 paths, 68 changed lines (RUN_LEDGER.md 57, NEXT_MILESTONE.md 10, config.s4.yaml 1/1)"*. `git diff --numstat
+ceaaa9b^ ceaaa9b -- . ':(exclude)config.yaml'` reads `1 1 config.s4.yaml`, `10 0 docs/NEXT_MILESTONE.md`, `57 0 docs/RUN_LEDGER.md`: 69, the 1/1 having been
+counted as one. The commit is not amended; this is the record (`M5m-289`).
+
+### Digests of the P111 instruments and outputs (SHA-256)
+
+| File | SHA-256 |
+|---|---|
+| `predictions_halts.txt` | `ddb1c11de6e2c9b9ed25e716d6c2c8c9d0473ec7b72ff2267687c333cde34a94` |
+| `predictions_step1.txt` | `34f07455d446a576a17e6f771b2934bc1becc6b6570198ca10941aa9632f58a3` |
+| `predictions_c1.txt` | `30986333e262c236342890b3629ce161f4f1a4ad6d2788ce2221b308f7836262` |
+| `gate_h4.txt` | `ee5e91b3a5b5142d573c8f59f478dba308933cb616088ce0821baa29418fa443` |
+| `measure_logs.py` | `c9c42a5dbf898b2ae81c247eee5e2f5835697b99d0be9f35a93b5b27780affd3` |
+| `measure_logs_out.txt` | `1fc0d7396422c561c36eedcf256ad9c91723924c17cf4b2c667e1bd7de4d69c4` |
+| `measure_logs_busy_out.txt` | `c254d27a2e21468b284a299a30b50c6d67e916ff34777540fca653452bff9270` |
+| `calc_step1.py` | `8ec470fd9e5681c9545af5d564f0148c870821f27740b4d8401d8477f91d3a09` |
+| `calc_step1_out.txt` | `52492666b2c4f9ad8900334c5ce0ee6bc5eb6440a6f755184e6ddb42f777a82e` |
