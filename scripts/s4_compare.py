@@ -39,10 +39,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
+from itertools import pairwise
 from pathlib import Path
 
 from run_census import CaptureRefusedError, digest_of, reject_live_log
-from trade_census import ReturnStats, Trade, build_trades, parse_capture, return_stats
+from trade_census import Placement, ReturnStats, Trade, build_trades, parse_capture, return_stats
 
 from trading_bot.backtesting.evidence import (
     EVIDENCE_KEY,
@@ -52,26 +53,43 @@ from trading_bot.backtesting.evidence import (
     load_eligible_record,
     require_evidence_eligible,
 )
+from trading_bot.data.historical import HistoricalDataError, HistoricalStore
 
 __all__ = [
+    "CAUSES",
     "BacktestEntry",
     "Boot",
+    "Disagreement",
+    "DownInterval",
     "Figures",
     "InputError",
     "LiveEntry",
     "Matching",
+    "SeriesChecks",
+    "Signal",
+    "backtest_view_of",
+    "carried_in",
+    "diagnose",
+    "down_intervals",
+    "exclude_downtime",
     "figures_of",
+    "in_downtime",
     "live_boots",
     "live_entries",
     "load_backtest",
     "main",
     "match_entries",
     "read_backtest_trades",
+    "read_signals",
     "render",
+    "render_diagnosis",
     "require_live_run_eligible",
+    "timeframe_delta",
+    "unfilled_placements",
 ]
 
 TRADES_NAME = "trades.csv"
+BACKTEST_LOG_NAME = "backtest.log"
 _REFUSED_EXIT = 2
 _INPUT_EXIT = 3
 _HUNDRED = Decimal(100)
@@ -316,6 +334,38 @@ def within(
     return tuple(entry for entry in entries if start <= entry.entry_bar_open < end)
 
 
+def strategy_facts(record: Mapping[str, object]) -> tuple[dict[str, str], int, int]:
+    """Each pair's timeframe and the strategy's two periods, as the run record states them.
+
+    :raises InputError: the record lacks a pair list or the two periods (it is not a record this
+        tool can read), so no diagnosis is guessed from defaults.
+    """
+    pairs = record.get("pairs")
+    timeframes: dict[str, str] = {}
+    if isinstance(pairs, list):
+        for pair in pairs:
+            if isinstance(pair, dict) and isinstance(pair.get("symbol"), str):
+                timeframes[str(pair["symbol"])] = str(pair.get("timeframe"))
+    strategy = record.get("strategy")
+    params = strategy.get("params") if isinstance(strategy, dict) else None
+    fast = params.get("fast_period") if isinstance(params, dict) else None
+    slow = params.get("slow_period") if isinstance(params, dict) else None
+    if not timeframes or not isinstance(fast, int) or not isinstance(slow, int):
+        raise InputError(
+            "the run record names no pairs or no fast_period and slow_period, so the ties and the "
+            "downtime bars cannot be computed"
+        )
+    return timeframes, fast, slow
+
+
+def _data_dir(record: Mapping[str, object]) -> str:
+    window = record.get("window")
+    value = window.get("data_dir") if isinstance(window, dict) else None
+    if not isinstance(value, str):
+        raise InputError("the run record names no window.data_dir; pass --store")
+    return value
+
+
 # --------------------------------------------------------------------------------------
 # The comparison
 # --------------------------------------------------------------------------------------
@@ -384,6 +434,469 @@ def figures_of(
             Decimal(difference) / Decimal(live_count) * _HUNDRED if live_count else None
         ),
     )
+
+
+# --------------------------------------------------------------------------------------
+# Diagnosis: bot downtime, signals, ties and gaps (R-BA, R-AO D)
+# --------------------------------------------------------------------------------------
+#: The closed list of causes (docs/S4_PREREGISTRATION.md, D). Every disagreement gets exactly one.
+CAUSES = (
+    "recorded-gap",
+    "bar differs",
+    "exact-decimal tie",
+    "window-edge",
+    "risk refusal differs",
+    "fok-unfilled",
+    "fill-model",
+    "unexplained",
+)
+#: A signal whose bar closes inside a bot-down interval, or this many bars after it, is excluded.
+EXCLUDED_BARS_AFTER_DOWNTIME = 2
+
+_LOG_LINE = re.compile(
+    r"^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})Z \| [A-Z]+\s*\| pid=(\d+) \|"
+)
+_FIELD = re.compile(r"(?<![\w.])([a-z][a-z0-9_]*)=(\S+)")
+_SIGNAL_EVENT = re.compile(r"event=(intent_dispatched|risk_refused)\b")
+_PASS_EVENT = "event=reconciliation_pass"
+_TIMEFRAME = re.compile(r"(\d+)([mhd])")
+_UNIT_MS = {"m": 60_000, "h": 3_600_000, "d": 86_400_000}
+
+
+@dataclass(frozen=True)
+class DownInterval:
+    """From the last line one process wrote to the first reconciliation pass of the next."""
+
+    start: datetime
+    end: datetime
+    before_pid: str
+    after_pid: str
+
+
+@dataclass(frozen=True)
+class Signal:
+    """What one side did with one ``BUY`` signal bar: dispatched an intent, or refused it."""
+
+    symbol: str
+    signal_close: datetime
+    outcome: str
+    stage: str | None
+    reference: Decimal | None
+
+
+@dataclass(frozen=True)
+class Disagreement:
+    """One entry, or one pair, on which the two sides differ, with its single cause."""
+
+    kind: str
+    symbol: str
+    signal_close: datetime
+    cause: str
+    evidence: str
+
+
+def timeframe_delta(timeframe: str) -> timedelta:
+    """``1m`` -> one minute. Only the units the bot trades are accepted."""
+    found = _TIMEFRAME.fullmatch(timeframe)
+    if found is None:
+        raise InputError(f"unreadable timeframe {timeframe!r}")
+    return timedelta(milliseconds=int(found.group(1)) * _UNIT_MS[found.group(2)])
+
+
+def _stamp_of(match: re.Match[str]) -> datetime:
+    year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
+    return datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
+
+
+def down_intervals(lines: Sequence[str]) -> tuple[DownInterval, ...]:
+    """Every span between one process's last line and the next process's first reconciliation pass.
+
+    Processes are ordered by their first line. A process that never reaches a pass is taken to have
+    resumed at its first line, so the interval is never longer than the evidence supports. A span
+    with no length is not an interval.
+    """
+    order: list[str] = []
+    first: dict[str, datetime] = {}
+    last: dict[str, datetime] = {}
+    first_pass: dict[str, datetime] = {}
+    for line in lines:
+        found = _LOG_LINE.match(line)
+        if found is None:
+            continue
+        pid, stamp = found.group(7), _stamp_of(found)
+        if pid not in first:
+            first[pid] = stamp
+            order.append(pid)
+        last[pid] = max(last.get(pid, stamp), stamp)
+        if _PASS_EVENT in line and pid not in first_pass:
+            first_pass[pid] = stamp
+    intervals: list[DownInterval] = []
+    for before, after in pairwise(order):
+        resumed = first_pass.get(after, first[after])
+        if resumed > last[before]:
+            intervals.append(DownInterval(last[before], resumed, before, after))
+    return tuple(intervals)
+
+
+def in_downtime(
+    signal_close: datetime, intervals: Sequence[DownInterval], bar: timedelta
+) -> DownInterval | None:
+    """The interval a signal bar's close falls in, or within two bars after, or ``None``."""
+    for interval in intervals:
+        if interval.start <= signal_close < interval.end + EXCLUDED_BARS_AFTER_DOWNTIME * bar:
+            return interval
+    return None
+
+
+def read_signals(lines: Sequence[str]) -> dict[tuple[str, datetime], Signal]:
+    """Every ``BUY`` signal either side logged, keyed by (symbol, signal bar close); first wins."""
+    signals: dict[tuple[str, datetime], Signal] = {}
+    for line in lines:
+        found = _SIGNAL_EVENT.search(line)
+        if found is None:
+            continue
+        fields: dict[str, str] = {}
+        for key, value in _FIELD.findall(line):
+            fields.setdefault(key, value)
+        if fields.get("action") != "BUY" or "symbol" not in fields or "signal_ts" not in fields:
+            continue
+        try:
+            close = datetime.fromisoformat(fields["signal_ts"]).astimezone(timezone.utc)
+            reference = Decimal(fields["reference"]) if "reference" in fields else None
+        except (ValueError, InvalidOperation):
+            continue
+        dispatched = found.group(1) == "intent_dispatched"
+        signals.setdefault(
+            (fields["symbol"], close),
+            Signal(
+                symbol=fields["symbol"],
+                signal_close=close,
+                outcome="dispatched" if dispatched else "refused",
+                stage=None if dispatched else fields.get("stage"),
+                reference=reference,
+            ),
+        )
+    return signals
+
+
+class SeriesChecks:
+    """The recorded closes behind a signal: a gap near it, a bar that differs, an exact tie.
+
+    Every method answers ``None`` when the store cannot answer (no store, an unreadable or short
+    series), and a cause that needs an answer then falls through to ``unexplained`` -- never to a
+    guess. Money is ``Decimal`` from the stored strings; a simple moving average here is a sum over
+    the window divided by its length, exact, so two averages are equal when they are equal.
+    """
+
+    def __init__(
+        self, store: HistoricalStore | None, timeframes: Mapping[str, str], fast: int, slow: int
+    ) -> None:
+        self._store = store
+        self._timeframes = dict(timeframes)
+        self._fast = fast
+        self._slow = slow
+
+    def _bar(self, symbol: str) -> timedelta | None:
+        timeframe = self._timeframes.get(symbol)
+        return None if timeframe is None else timeframe_delta(timeframe)
+
+    def _closes(
+        self, symbol: str, signal_close: datetime, count: int
+    ) -> list[tuple[datetime, Decimal]] | None:
+        bar = self._bar(symbol)
+        if self._store is None or bar is None:
+            return None
+        signal_open = signal_close + _ONE_MS - bar
+        try:
+            candles = list(
+                self._store.candles(
+                    symbol, self._timeframes[symbol], signal_open - bar * count, signal_open + bar
+                )
+            )
+        except HistoricalDataError:
+            return None
+        return [(candle.open_time, candle.close) for candle in candles]
+
+    def recorded_close(self, symbol: str, signal_close: datetime) -> Decimal | None:
+        """The recorded close of the signal bar itself, or ``None`` if the store has no such bar."""
+        closes = self._closes(symbol, signal_close, 0)
+        bar = self._bar(symbol)
+        if closes is None or bar is None:
+            return None
+        signal_open = signal_close + _ONE_MS - bar
+        for opened, close in closes:
+            if opened == signal_open:
+                return close
+        return None
+
+    def gap_near(self, symbol: str, signal_close: datetime) -> bool | None:
+        """Whether the series has a missing bar in the ``slow`` bars up to the signal bar."""
+        bar = self._bar(symbol)
+        closes = self._closes(symbol, signal_close, self._slow)
+        if closes is None or bar is None:
+            return None
+        signal_open = signal_close + _ONE_MS - bar
+        have = {opened for opened, _ in closes}
+        return any(signal_open - bar * back not in have for back in range(self._slow))
+
+    def tie_near(self, symbol: str, signal_close: datetime) -> bool | None:
+        """Whether the exact fast and slow averages are equal at the signal bar or the bar before it."""
+        bar = self._bar(symbol)
+        closes = self._closes(symbol, signal_close, self._slow + 1)
+        if closes is None or bar is None or len(closes) < self._slow + 1:
+            return None
+        values = [close for _, close in closes]
+        for end in (len(values), len(values) - 1):
+            fast_mean = sum(values[end - self._fast : end], Decimal(0)) / self._fast
+            slow_mean = sum(values[end - self._slow : end], Decimal(0)) / self._slow
+            if fast_mean == slow_mean:
+                return True
+        return False
+
+
+def carried_in(trades: Sequence[Trade], start: datetime) -> tuple[tuple[str, datetime | None], ...]:
+    """Live positions opened before the window and still open at its start: (symbol, exit time).
+
+    The backtest starts flat at the window's start, so a signal the live bot refused with
+    ``already_in_position`` on such a symbol is the window's edge and not a disagreement of the models.
+    """
+    carried: list[tuple[str, datetime | None]] = []
+    for trade in trades:
+        placement = trade.placement
+        if placement is None or placement.entry_bar_time + _ONE_MS >= start:
+            continue
+        if trade.exit_time is None or trade.exit_time > start:
+            carried.append((placement.symbol, trade.exit_time))
+    return tuple(carried)
+
+
+def _input_cause(
+    symbol: str, signal_close: datetime, checks: SeriesChecks, *, live_reference: Decimal | None
+) -> tuple[str, str]:
+    """Why two sides saw different signals on one bar, from the recorded series alone.
+
+    Precedence, stated because a bar can be several things: a missing bar first (the series is
+    not the one the live bot saw), then a recorded close that differs from the close the live bot
+    logged, then an exact tie of the two averages, else nothing explains it.
+    """
+    if checks.gap_near(symbol, signal_close):
+        return "recorded-gap", "a bar is missing from the recorded series near the signal bar"
+    if live_reference is not None:
+        recorded = checks.recorded_close(symbol, signal_close)
+        if recorded is not None and recorded != live_reference:
+            return (
+                "bar differs",
+                f"recorded close {recorded}, the live signal's reference {live_reference}",
+            )
+    if checks.tie_near(symbol, signal_close):
+        return (
+            "exact-decimal tie",
+            "the exact fast and slow averages are equal at the bar or the one before",
+        )
+    unchecked = checks.gap_near(symbol, signal_close) is None
+    return (
+        "unexplained",
+        "the recorded series could not be read" if unchecked else "no recorded input explains it",
+    )
+
+
+def diagnose(
+    matching: Matching,
+    *,
+    live_signals: Mapping[tuple[str, datetime], Signal],
+    backtest_signals: Mapping[tuple[str, datetime], Signal],
+    checks: SeriesChecks,
+    carried: Sequence[tuple[str, datetime | None]],
+    timeframes: Mapping[str, str],
+) -> tuple[Disagreement, ...]:
+    """One cause from the closed list for every entry only one side has, and every pair whose exits differ."""
+    found: list[Disagreement] = []
+    for live in matching.live_only:
+        key = (live.symbol, live.signal_bar_close)
+        other = backtest_signals.get(key)
+        mine = live_signals.get(key)
+        if other is None:
+            cause, evidence = _input_cause(
+                live.symbol,
+                live.signal_bar_close,
+                checks,
+                live_reference=None if mine is None else mine.reference,
+            )
+        elif other.outcome == "refused":
+            cause, evidence = (
+                "risk refusal differs",
+                f"the backtest refused at {other.stage}; the live bot dispatched",
+            )
+        else:
+            cause, evidence = "fill-model", "the backtest dispatched and did not fill"
+        found.append(Disagreement("live only", live.symbol, live.signal_bar_close, cause, evidence))
+    for bt in matching.backtest_only:
+        close = bt.entry_bar_open - _ONE_MS
+        key = (bt.symbol, close)
+        other = live_signals.get(key)
+        edge = any(
+            symbol == bt.symbol and (exit_time is None or exit_time > close)
+            for symbol, exit_time in carried
+        )
+        if other is None:
+            cause, evidence = _input_cause(bt.symbol, close, checks, live_reference=None)
+        elif other.outcome == "refused" and other.stage == "already_in_position" and edge:
+            cause, evidence = (
+                "window-edge",
+                "the live bot still held a position opened before the window",
+            )
+        elif other.outcome == "refused":
+            cause, evidence = (
+                "risk refusal differs",
+                f"the live bot refused at {other.stage}; the backtest filled",
+            )
+        else:
+            cause, evidence = (
+                "fok-unfilled",
+                "the live bot placed and nothing was booked (the venue read is the daily capture's)",
+            )
+        found.append(Disagreement("backtest only", bt.symbol, close, cause, evidence))
+    for live, bt in matching.matched:
+        if _exit_class(live.exit_kind) != _exit_class(bt.exit_reason):
+            found.append(
+                Disagreement(
+                    "different exit",
+                    live.symbol,
+                    live.signal_bar_close,
+                    "fill-model",
+                    f"live {live.exit_kind} at {live.exit_price}, backtest {bt.exit_reason} at {bt.exit_price}",
+                )
+            )
+    return tuple(found)
+
+
+def _exit_class(kind: str) -> str:
+    """Live ``SL``/``TP``/``CLOSE`` and the backtest's ``stop_loss``/``take_profit``/``close`` as one vocabulary."""
+    lowered = kind.strip().lower()
+    return {"sl": "stop", "stop_loss": "stop", "tp": "target", "take_profit": "target"}.get(
+        lowered, lowered
+    )
+
+
+def exclude_downtime(
+    live: Sequence[LiveEntry],
+    backtest: Sequence[BacktestEntry],
+    intervals: Sequence[DownInterval],
+    timeframes: Mapping[str, str],
+) -> tuple[
+    tuple[LiveEntry, ...],
+    tuple[BacktestEntry, ...],
+    tuple[tuple[str, str, datetime, DownInterval], ...],
+]:
+    """Drop, on BOTH sides, every entry whose signal bar closed in a bot-down interval or just after it.
+
+    The bot could not have acted on a signal it was down for, and the backtester would have, so the
+    entry is a fact about the outage and not about the models. Returns the kept entries and one row
+    per exclusion: (side, symbol, signal bar close, the interval).
+    """
+    excluded: list[tuple[str, str, datetime, DownInterval]] = []
+    kept_live: list[LiveEntry] = []
+    for entry in live:
+        bar = timeframe_delta(_timeframe_of(timeframes, entry.symbol))
+        interval = in_downtime(entry.signal_bar_close, intervals, bar)
+        if interval is None:
+            kept_live.append(entry)
+        else:
+            excluded.append(("live", entry.symbol, entry.signal_bar_close, interval))
+    kept_backtest: list[BacktestEntry] = []
+    for bt in backtest:
+        bar = timeframe_delta(_timeframe_of(timeframes, bt.symbol))
+        close = bt.entry_bar_open - _ONE_MS
+        interval = in_downtime(close, intervals, bar)
+        if interval is None:
+            kept_backtest.append(bt)
+        else:
+            excluded.append(("backtest", bt.symbol, close, interval))
+    return tuple(kept_live), tuple(kept_backtest), tuple(excluded)
+
+
+def _timeframe_of(timeframes: Mapping[str, str], symbol: str) -> str:
+    try:
+        return timeframes[symbol]
+    except KeyError as exc:
+        raise InputError(f"the run record names no timeframe for {symbol}") from exc
+
+
+def unfilled_placements(
+    placements: Sequence[Placement],
+    trades: Sequence[Trade],
+    *,
+    start: datetime,
+    end: datetime,
+) -> tuple[Placement, ...]:
+    """Live placements in the window that no booking in the capture claims (R-BA).
+
+    The log cannot say WHY none was booked (a FOK that expired, or a position still open when the
+    capture ends); the venue read the pre-registration takes daily is what separates them.
+    """
+    booked = {trade.placement.line_no for trade in trades if trade.placement is not None}
+    return tuple(
+        placement
+        for placement in placements
+        if placement.line_no not in booked and start <= placement.entry_bar_time + _ONE_MS < end
+    )
+
+
+def backtest_view_of(
+    placement: Placement,
+    backtest: Sequence[BacktestEntry],
+    backtest_signals: Mapping[tuple[str, datetime], Signal],
+) -> str:
+    """What the backtester did with the bar on which the live bot placed an order nobody booked."""
+    entry_open = placement.entry_bar_time + _ONE_MS
+    if any(e.symbol == placement.symbol and e.entry_bar_open == entry_open for e in backtest):
+        return "backtest FILLED"
+    signal = backtest_signals.get((placement.symbol, placement.entry_bar_time))
+    if signal is None:
+        return "backtest emitted no signal"
+    if signal.outcome == "refused":
+        return f"backtest refused at {signal.stage}"
+    return "backtest dispatched and did not fill"
+
+
+def render_diagnosis(
+    *,
+    intervals: Sequence[DownInterval],
+    excluded: Sequence[tuple[str, str, datetime, DownInterval]],
+    unfilled: Sequence[tuple[Placement, str]],
+    disagreements: Sequence[Disagreement],
+) -> list[str]:
+    """The downtime, the unfilled placements and the causes, each listed."""
+    out = ["", "BOT DOWNTIME (R-AP)"]
+    for interval in intervals:
+        out.append(
+            f"  pid {interval.before_pid} -> pid {interval.after_pid}: "
+            f"{interval.start.isoformat()} to {interval.end.isoformat()}"
+        )
+    out.append(
+        f"  excluded on both sides ({len(excluded)}): signal bar closed in or within "
+        f"{EXCLUDED_BARS_AFTER_DOWNTIME} bars after an interval"
+    )
+    for side, symbol, close, _interval in excluded:
+        out.append(f"    {side} {symbol} signal bar close {close.isoformat()}")
+    out.append("")
+    out.append(
+        f"LIVE PLACEMENTS WITH NO BOOKING IN THE CAPTURE ({len(unfilled)}) -- R-BA, reported"
+    )
+    for placement, view in unfilled:
+        out.append(
+            f"  {placement.symbol} entry bar {(placement.entry_bar_time + _ONE_MS).isoformat()}: {view}"
+        )
+    out.append("")
+    out.append(f"DISAGREEMENTS ({len(disagreements)}), one cause each from the closed list")
+    for cause in CAUSES:
+        count = sum(1 for d in disagreements if d.cause == cause)
+        out.append(f"  {cause:<22}: {count}")
+    for d in disagreements:
+        out.append(
+            f"  [{d.cause}] {d.kind} {d.symbol} signal bar {d.signal_close.isoformat()}: {d.evidence}"
+        )
+    return out
 
 
 # --------------------------------------------------------------------------------------
@@ -480,6 +993,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--window-start", type=_utc_instant, required=True)
     parser.add_argument("--window-end", type=_utc_instant, required=True)
     parser.add_argument("--quote-asset", default="USDT")
+    parser.add_argument(
+        "--store",
+        type=Path,
+        default=None,
+        help="the recorded series the backtest ran over (default: the record's window.data_dir)",
+    )
+    parser.add_argument(
+        "--backtest-log",
+        type=Path,
+        default=None,
+        help="the backtest's own log (default: backtest.log in the run directory)",
+    )
     return parser
 
 
@@ -504,10 +1029,44 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"INPUT ERROR: {exc}")
         return _INPUT_EXIT
     parsed = parse_capture(lines)
-    live, unplaced = live_entries(build_trades(parsed, args.quote_asset), start=start, end=end)
-    backtest = within(all_backtest, start=start, end=end)
+    all_trades = build_trades(parsed, args.quote_asset)
+    log_path = args.backtest_log if args.backtest_log is not None else args.run / BACKTEST_LOG_NAME
     try:
+        timeframes, fast, slow = strategy_facts(record)
+        backtest_lines = (
+            log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            if log_path.is_file()
+            else []
+        )
+        store_root = args.store if args.store is not None else Path(_data_dir(record))
+        store = HistoricalStore(store_root) if store_root.is_dir() else None
+        intervals = down_intervals(lines)
+        live_in, unplaced = live_entries(all_trades, start=start, end=end)
+        backtest_in = within(all_backtest, start=start, end=end)
+        live, backtest, excluded = exclude_downtime(live_in, backtest_in, intervals, timeframes)
         matching = match_entries(live, backtest)
+        checks = SeriesChecks(store, timeframes, fast, slow)
+        backtest_signals = read_signals(backtest_lines)
+        disagreements = diagnose(
+            matching,
+            live_signals=read_signals(lines),
+            backtest_signals=backtest_signals,
+            checks=checks,
+            carried=carried_in(all_trades, start),
+            timeframes=timeframes,
+        )
+        unfilled = [
+            (placement, backtest_view_of(placement, backtest, backtest_signals))
+            for placement in unfilled_placements(
+                parsed.placements, all_trades, start=start, end=end
+            )
+            if in_downtime(
+                placement.entry_bar_time,
+                intervals,
+                timeframe_delta(_timeframe_of(timeframes, placement.symbol)),
+            )
+            is None
+        ]
     except InputError as exc:
         print(f"INPUT ERROR: {exc}")
         return _INPUT_EXIT
@@ -517,9 +1076,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "run.json sha256": digest_of(args.run / RUN_RECORD_NAME),
         "trades.csv sha256": digest_of(args.run / TRADES_NAME),
         "record schema": str(record.get("schema")),
+        "recorded series": "unreadable" if store is None else str(store_root),
     }
     for line in render(
         figures, matching, boots=boots, unplaced=unplaced, sources=sources, window=(start, end)
+    ):
+        print(line)
+    for line in render_diagnosis(
+        intervals=intervals, excluded=excluded, unfilled=unfilled, disagreements=disagreements
     ):
         print(line)
     return 0

@@ -4223,3 +4223,55 @@ median and is not a recorded figure), and the sizing rule is the same.
 | `c1_failing_first.txt` | `dc8c04776c08dce250a18988ffa8bbe8bad5b608aa954f76569c5173e27b8ccd` |
 | `c1_after.txt` | `87e0f12f292e2be799a12b683ae910852c00bbbff0ab931ff24c80f99db23869` |
 | `reparse_out.txt` | `2b89ee7d47b44cf415c7d826cbc55f309919e33f1c103c646d0449d05a4e7a9d` |
+
+## 39. M5m S4: the mutation survey of `scripts/s4_compare.py` (P110 C4b)
+
+Taken 2026-10-10, over the final bytes of `scripts/s4_compare.py` (SHA-256
+`b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`, 1,093 lines) and
+`tests/unit/test_s4_compare.py` (SHA-256 `89c806969ed07125082c88b4703d0c8c54053ab185c904317382f7a81c7b772b`, 75 test
+ids), in a detached worktree of `a18f1b4` at `F:\trading bot\scratch\p110\wt_s4`, outside the repository, with
+those two files copied in and shown SHA-256-equal. The formatter had run before the first mutation and nothing was
+re-laid-out after it.
+
+**The path.** The test modules that reach the mutated module, measured by `grep -rln s4_compare` over `src`,
+`scripts` and `tests`: `tests/unit/test_s4_compare.py` imports it; nothing imports it transitively;
+`tests/unit/test_backtest_evidence.py` reads its source with `ast`. The survey runs those two modules (119 ids,
+`PYTEST_ADDOPTS`), which is every test that can move.
+
+**The proof of where it ran.** A session plugin recorded, for the unmutated baseline and for each of the 23
+mutated runs, where `trading_bot`, `s4_compare`, `tests` and the working directory resolved: 23 rows, 0 outside the
+worktree (`import_proof_s4.jsonl`). The baseline read **119 passed** (`baseline_s4.txt`). All 23 restores were
+verified by byte identity, and the worktree was removed afterwards (`git worktree list` shows the main worktree only).
+
+**The result against the prediction** (`predictions_survey_s4.txt`, SHA-256
+`01e02b26d5a8c54e388b07dca2c498f66509a66ac985bda5b600d60639d14711`, written after the tests existed and before the
+survey ran): 23 mutations, 42 kills predicted and 50 observed, **no predicted kill missing**, 0 crashes, 0
+abstentions of a mutation. Twenty-two mutations killed exactly the tests predicted. **S24** (a one-minute timeframe
+of six seconds) was predicted as a lower bound of 2 and killed 10: the extra 8 are the series checks and the
+`diagnose` tests that build a real store (`test_a_complete_series_has_no_gap`,
+`test_a_live_entry_the_backtest_never_signalled_on_a_tie_is_a_tie`,
+`test_a_recorded_close_that_differs_from_the_live_reference_outranks_a_tie`,
+`test_a_signal_nothing_explains_is_unexplained_and_says_why`, `test_a_tie_at_the_bar_before_the_signal_bar_counts`,
+`test_averages_that_differ_at_both_bars_are_no_tie`, `test_equal_exact_averages_at_the_signal_bar_are_a_tie`,
+`test_the_recorded_close_is_the_signal_bars_and_a_missing_bar_has_none`), a reach error in the direction the rule
+records and does not halt on.
+
+**Two weaknesses the survey found BEFORE running, by the prediction exercise, and fixed in the tests**
+(`M5m-275`): the return-definition test summed a +1% and a -1% backtest return to a mean of zero, which a return
+left as a fraction also gives, so a mutation removing the x 100 would have survived it (its second row is now over
+150, mean -0.5); and nothing pinned the backtest window's upper bound or a window of no length, so two mutations
+would have survived (`test_backtest_entries_outside_the_window_are_dropped_at_both_ends` and
+`test_a_window_with_no_length_is_refused_too` were added). **Declared abstentions that are limits and not defects:**
+the census test `test_the_real_s4_consumer_is_scanned_names_the_record_and_calls_the_door` cannot tell the two
+doors apart (removing either leaves the other's call), and a mutation of one denominator is not seen by the report
+test whose two counts are equal.
+
+| file (under `F:\trading bot\scratch\p110\`) | sha256 |
+|---|---|
+| `predictions_survey_s4.txt` | `01e02b26d5a8c54e388b07dca2c498f66509a66ac985bda5b600d60639d14711` |
+| `spec_s4.json` | `e593c60643e0f0f5123f76dd0f5bbeeae634280868f6aca66a0bcdda943cb855` |
+| `pred_s4.json` | `8af90a5be1597888f475abde03f446d5fcd92e3bf33e71af697aeab34cd36ba9` |
+| `baseline_s4.txt` | `e4cadee7e2588a0f9110b15bb08a22ea83a0dc2f3a2869443d24b839aacaf316` |
+| `survey_s4.log` | `aed69053dc1017f7bd6ed9fd5b0a411f647665710abb83916f815c6301392c0c` |
+| `compare_s4_out.txt` | `05043b08324de6e0180d5308ef4de46afdce15e65771565a8a996f3908f39cd3` |
+| `import_proof_s4.jsonl` | `82f84b39b005b857223fbe8800f622a4561ccdf18ecb997c2f8d24a9174472f1` |
