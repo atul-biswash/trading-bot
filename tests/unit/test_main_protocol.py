@@ -19,6 +19,7 @@ import logging
 import re
 from dataclasses import replace
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -28,13 +29,16 @@ import trading_bot.backtesting.protocol as protocol_module
 import trading_bot.main as cli
 from tests.unit.backtest_world import build_world
 from tests.unit.protocol_world import PROTOCOL, REPO
+from tests.unit.selection_world import RULES
 from tests.unit.test_main_backtest import argv, only_record, provenance, records
+from trading_bot.backtesting import selection as sel
 from trading_bot.backtesting.candidate import candidate_digest, effective_settings
 from trading_bot.backtesting.engine import RUN_RECORD_SCHEMA, run_backtest, select_pairs
 from trading_bot.backtesting.overrides import apply_overrides, build_overrides
 from trading_bot.backtesting.protocol import (
     Entry,
     Refusal,
+    Variant,
     WindowClass,
     check_run,
     load_entries,
@@ -147,6 +151,80 @@ class TestAnInSampleWindowNeedsNothing:
         assert cli.main(argv(tmp_path, *OOS)) == 1
         assert "cannot be read" in refusal_text(caplog)
         assert records(tmp_path) == []
+
+
+class TestAnInSampleGridPointNamesItsVariant:
+    """The path S6's selection and sweep rest on: the REAL command, over a grid point, in sample.
+
+    The selection and the sweep are tested against an imitation of the record (``selection_world``); these
+    drive ``cli.main`` and read back what the ENGINE wrote, so the writer and the reader cannot drift apart.
+    The world's two days stand for the in-sample window (the boundary is moved to 2030).
+    """
+
+    GRID_FLAGS = (*OOS, "--stop-slippage", "1.20", *CANDIDATE)
+
+    def run_in_sample(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *flags: str
+    ) -> dict[str, Any]:
+        late = replace(PROTOCOL, boundary=date(2030, 1, 1))
+        monkeypatch.setattr(protocol_module, "load_protocol", lambda *_a, **_k: late)
+        build_world(tmp_path, symbols=("BTCUSDT", "ETHUSDT"))
+        assert cli.main(argv(tmp_path, *flags)) == 0
+        return read_record(only_record(tmp_path))
+
+    def test_the_record_names_the_variant_the_command_line_selected(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        record = self.run_in_sample(tmp_path, monkeypatch, *self.GRID_FLAGS)
+        block = record["protocol"]
+        assert block["window_class"] == "in_sample" and block["arm"] == "1.2"
+        assert block["entry_id"] is None and block["kind"] is None
+        assert block["variant"] == {
+            "family": "sma_crossover",
+            "timeframe": "1h",
+            "filtered": False,
+            "params": {"fast_period": "10", "slow_period": "50"},
+        }
+
+    def test_the_record_the_engine_wrote_reads_back_as_a_point_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deployment: None
+    ) -> None:
+        record = self.run_in_sample(tmp_path, monkeypatch, *self.GRID_FLAGS)
+        directory = only_record(tmp_path)
+        rules = replace(RULES, history_start=date(2024, 3, 12), boundary=date(2024, 3, 14))
+        got = sel.read_run(directory, PROTOCOL, rules)
+        assert isinstance(got, sel.PointRun), got
+        assert got.variant == Variant(
+            "sma_crossover", "1h", False, {"fast_period": "10", "slow_period": "50"}
+        )
+        assert got.run == directory.name
+        assert (
+            got.record_sha256 == hashlib.sha256((directory / "run.json").read_bytes()).hexdigest()
+        )
+        assert got.candidate_digest == record["candidate_digest"]
+        assert got.trade_log_sha256 == record["results"]["trade_log_sha256"]
+        assert len(got.trades) == record["results"]["trades"]
+        assert got.initial_balance == Decimal(record["equity"]["initial"])
+        assert got.max_drawdown == Decimal(record["metrics"]["max_drawdown"])
+        assert [str(day) for day, _ in got.daily_closes] == sorted(record["equity"]["daily_closes"])
+
+    def test_an_off_grid_run_names_no_variant_and_reads_back_as_off_grid(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, deployment: None
+    ) -> None:
+        flags = (
+            *OOS,
+            "--stop-slippage",
+            "1.20",
+            "--param",
+            "fast_period=15",
+            "--param",
+            "slow_period=50",
+        )
+        record = self.run_in_sample(tmp_path, monkeypatch, *flags)
+        assert "variant" not in record["protocol"]
+        rules = replace(RULES, history_start=date(2024, 3, 12), boundary=date(2024, 3, 14))
+        got = sel.read_run(only_record(tmp_path), PROTOCOL, rules)
+        assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.OFF_GRID
 
 
 class TestAnOutOfSampleWindowIsGuarded:
