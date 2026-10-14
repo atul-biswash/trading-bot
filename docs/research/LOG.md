@@ -37,6 +37,20 @@ read by this configuration at three stop-slippage arms.
 | what the read cannot be used for | selecting, tuning or rejecting any S6 candidate: the window it read is the window S7 reserves, so any choice made from these figures is a choice made after seeing it |
 | status | **read**. The machine-checked file `docs/research/entries/s5-baseline.json` stays `pending`, because `tests/unit/test_main_protocol.py` asserts it, so marking it read is a code-and-test commit left to the owner; until then a fresh clone's guard would still allow a second read of the baseline |
 
+## Entry 3 -- S5, the baseline: the entry file marked read (P116 C1, R-BY)
+
+Entry 2 recorded the read and left the machine-checked file `pending`, because a test asserted it. **R-BY ruled the assertion overturned.** `docs/research/entries/s5-baseline.json` is now `status`
+`read`, and its `oos.records` carry, per arm, the run directory and the SHA-256 of its `run.json`:
+
+| arm | run | `run.json` SHA-256 |
+|---|---|---|
+| 0.05 | `20261014T070004816981Z-6b9d3b8c7f89` | `36b7b1a6f09c34b2fc7ac03006b676eced720d30bba67021202cb9e71fa51a61` |
+| 0.66 | `20261014T104541570489Z-e5111d9f08f7` | `c4f4fe39065cbc071e69ac00668b642ecf26386a294c3d3637abccfe475d7c0a` |
+| 1.20 | `20261014T155450267068Z-52e1f0448bc4` | `8837f2d074354e3382b7017e228364551e893978648bec265dd4931773a93e47` |
+
+**From a clone of this commit the guard refuses a second read of the baseline at any arm**, as `already_read`, with no state outside git. The digests were recomputed from share-mode copies of the run records on the day they were
+written here and agree with `docs/RUN_LEDGER.md` section 50.
+
 ## Candidate entries
 
 None yet. No variant has been run.

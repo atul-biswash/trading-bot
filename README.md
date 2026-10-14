@@ -285,8 +285,8 @@ new finding is a regression.
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  196 files already formatted
 mypy                                   Success: no issues found in 100 source files
-pytest                                 3787 passed, 4 skipped
-                                       (3790 passed, 1 skipped with Testnet credentials)
+pytest                                 3788 passed, 4 skipped
+                                       (3791 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -295,9 +295,9 @@ pytest                                 3787 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `3787 passed, 4 skipped` on a machine without
-  them and `3790 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 3787 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `3788 passed, 4 skipped` on a machine without
+  them and `3791 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 3788 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.

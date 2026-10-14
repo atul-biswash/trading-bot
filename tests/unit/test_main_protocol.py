@@ -383,7 +383,13 @@ class TestTheCommittedBaselineEntry:
     def test_the_entry_names_the_committed_configs_baseline_and_is_allowed_at_each_arm(
         self,
     ) -> None:
-        committed = load_entries(REPO / "docs" / "research" / "entries")
+        """The entry's BINDING to the committed config's baseline, judged on the entry as it stood
+        before the read: R-BY marked the committed entry ``read``, which the guard now refuses, so the
+        entries are reset to ``pending`` in memory. Every assertion below is the original one."""
+        committed = [
+            replace(entry, status="pending", oos=None)
+            for entry in load_entries(REPO / "docs" / "research" / "entries")
+        ]
         assert [e.id for e in committed] == ["s5-baseline"]
         window = (PROTOCOL.history_start, PROTOCOL.history_end)
         for arm in ("0.05", "0.66", "1.2"):
@@ -401,11 +407,37 @@ class TestTheCommittedBaselineEntry:
             assert decision.entry_id == "s5-baseline"
             assert decision.arm == arm
 
-    def test_the_entry_is_the_declared_baseline_and_is_pending(self) -> None:
+    def test_the_entry_is_the_declared_baseline_and_is_read_with_its_three_records(self) -> None:
+        """R-BY overturned this test's old ``entry.status == "pending" and entry.oos is None``."""
         (entry,) = load_entries(REPO / "docs" / "research" / "entries")
         assert entry.kind == "baseline" and entry.ref == "s5-baseline"
-        assert entry.status == "pending" and entry.oos is None
+        assert entry.status == "read" and entry.oos is not None
+        records = entry.oos["records"]
+        assert sorted(records) == ["0.05", "0.66", "1.20"]
+        for arm, record in records.items():
+            assert re.fullmatch(r"\d{8}T\d{12}Z-[0-9a-f]{12}", record["run"]), arm
+            assert re.fullmatch(r"[0-9a-f]{64}", record["run_json_sha256"]), arm
         assert entry.candidate_digest == candidate_digest(self.baseline("1.2"))
+
+    def test_a_fresh_clones_guard_refuses_a_second_read_of_the_baseline_at_every_arm(
+        self,
+    ) -> None:
+        """No state outside git: a clone of this commit holds no record (``local_reads`` is empty), and
+        the committed entry alone refuses the baseline at each arm."""
+        committed = load_entries(REPO / "docs" / "research" / "entries")
+        for arm in ("0.05", "0.66", "1.2"):
+            with pytest.raises(protocol_module.ProtocolRefusalError) as caught:
+                check_run(
+                    PROTOCOL,
+                    committed,
+                    effective=self.baseline(arm),
+                    window_start=PROTOCOL.history_start,
+                    window_end=PROTOCOL.history_end,
+                    provenance_accepted=True,
+                    local_reads=frozenset(),
+                )
+            assert caught.value.reason is Refusal.ALREADY_READ, arm
+            assert "has been read out of sample already" in str(caught.value), arm
 
     def test_an_edit_to_the_config_makes_the_entry_refuse(self) -> None:
         """A different config digest is a different candidate: the entry must be re-made, not reused."""

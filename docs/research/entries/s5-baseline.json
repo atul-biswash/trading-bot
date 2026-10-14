@@ -5,6 +5,21 @@
   "ref": "s5-baseline",
   "candidate_digest": "546487e307ca14ff6aa8c57ccd1470a22f22cedad9ace341ddd3aacee424d27a",
   "arms": ["0.05", "0.66", "1.20"],
-  "status": "pending",
-  "oos": null
+  "status": "read",
+  "oos": {
+    "records": {
+      "0.05": {
+        "run": "20261014T070004816981Z-6b9d3b8c7f89",
+        "run_json_sha256": "36b7b1a6f09c34b2fc7ac03006b676eced720d30bba67021202cb9e71fa51a61"
+      },
+      "0.66": {
+        "run": "20261014T104541570489Z-e5111d9f08f7",
+        "run_json_sha256": "c4f4fe39065cbc071e69ac00668b642ecf26386a294c3d3637abccfe475d7c0a"
+      },
+      "1.20": {
+        "run": "20261014T155450267068Z-52e1f0448bc4",
+        "run_json_sha256": "8837f2d074354e3382b7017e228364551e893978648bec265dd4931773a93e47"
+      }
+    }
+  }
 }
