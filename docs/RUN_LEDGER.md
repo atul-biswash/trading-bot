@@ -4600,3 +4600,34 @@ findings (`M5m-303` to `M5m-312`) are declared in the commit that records their 
 162 `rsi`), the out-of-sample window `[2024-01-01, 2026-10-01)` with its eleven labelled quarters (4 rising, 5 sideways, 2 falling), and the
 labels file's digest `6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72`. Items the owner has not ruled and may overrule before the push are
 marked DRAFTED in the file: the grids, the selection rule and the walk-forward report, the in-sample trade minimum and the entry file's shape.
+
+## 45. M5m S5/S6: the committed config at every timeframe, and what the override layer therefore does (P113 C2b)
+
+Recorded at P113 (C2b). An observation log, so this section only adds. R-BR's `--timeframe` has to produce a config that `AppConfig` accepts. The committed
+`config.yaml` (SHA-256 `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`) was loaded, dumped, every pair's timeframe replaced, and re-validated
+(`probe_override_validate.py`, SHA-256 `1971032046b1c44b1ba9f89ef5f331e5207f4cdc3a1bf54047240d0ca0478434`; output `probe_override_validate_out.txt`, SHA-256
+`467547ef563a93770f60739b799fa8b4e3b6dbd0634b1dfe9f0717fcf5fce6e5`, both under `F:\trading bot\scratch\p113\`). The round trip itself is lossless (`again == config` True).
+
+| timeframe of every pair | the validator, with `risk.max_position_staleness_s` 180 | the floor it names |
+|---|---|---|
+| 1m | valid | (below 180) |
+| 5m | refused | 756 s: (1 + 0.5 + 1) x 300 + 1.0 + 5 |
+| 1h | refused | 9,006 s |
+| 4h | refused | 36,006 s |
+| 1d | refused | 216,006 s |
+
+The committed 180 s passes only because the shortest timeframe is 1m. The override layer therefore raises the bound, **only when the validator refuses it**, to the round value its own message
+recommends, `(3 + k) x T` with `k = min(max_open_positions, enabled pairs) - 1 = 1`: **1,200 s at 5m, 14,400 s at 1h, 57,600 s at 4h and 345,600 s at 1d** (`tests/unit/test_backtest_overrides.py`
+pins all four, and that 1m is left at 180). A backtest stamps every open position on every bar of every pair (`simulated_executor.py`, step 4), so the bound never acts in a backtest; the raised value
+is in the run record's `effective.risk` and in both digests.
+
+**A float for an integer period.** `--param fast_period=4.0` builds `SmaCrossoverStrategy` and then every bar raises `TypeError: 'float' object cannot be interpreted as an integer` inside
+`_window_mean`; the engine counted six ERROR records and quarantined `BTCUSDT/1h` after five consecutive failures, so the run ended having traded nothing (seen in a test run during C2b, the output
+not kept). The override layer now refuses a non-integer for a parameter whose constructor annotation is `int`; a float for a float threshold (`oversold=30` and `30.0`) is accepted and is one candidate.
+
+| file | SHA-256 |
+|---|---|
+| `predictions_c2a.txt` | `2f4d329f6698734a4c1916f8c0bb4ef3762f68d1e1123b2b25efd969a184c7af` |
+| `predictions_c2b.txt` | `f91700449d8df77b6b570b6f0970df2423ba9694b7587ad90a856b2bf1a9c435` |
+| `gate_c2a.txt` | `2ab29fb36ae72db176646ed760086aae748788c7c6d134d595015633cba953ab` |
+| `gate_c2b.txt` | `0e79faebd0e9bb5624fcdf3ed5d365cc18182ea754cfe68fee45d90b112931cc` |

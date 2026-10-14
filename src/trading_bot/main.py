@@ -13,6 +13,7 @@ Examples
     python -m trading_bot run --mode paper
     python -m trading_bot backtest            # the configured window, every enabled pair
     python -m trading_bot backtest --start 2024-03-01 --end 2024-04-01 --symbols BTCUSDT
+    python -m trading_bot backtest --stop-slippage 0.66 --strategy rsi --timeframe 1h --param period=14
     python -m trading_bot strategies          # list registered strategies
 """
 
@@ -25,11 +26,18 @@ import logging
 import signal
 import sys
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
 
+from trading_bot.backtesting.overrides import (
+    Overrides,
+    apply_overrides,
+    build_overrides,
+    parse_percent,
+)
 from trading_bot.backtesting.regimes import RegimeTable
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import (
@@ -107,6 +115,32 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SYMBOL",
         help="Enabled pairs to replay (default: every enabled pair).",
     )
+    backtest_cmd.add_argument(
+        "--stop-slippage",
+        type=_percent,
+        default=None,
+        metavar="PERCENT",
+        help="Stop slippage in percent, the arm (default: backtesting.stop_slippage_percent).",
+    )
+    backtest_cmd.add_argument(
+        "--strategy",
+        default=None,
+        metavar="NAME",
+        help="Replace strategy.name; the configured parameters are dropped with it.",
+    )
+    backtest_cmd.add_argument(
+        "--timeframe",
+        default=None,
+        metavar="TIMEFRAME",
+        help="Replace every pair's timeframe; the staleness bound is raised to fit it.",
+    )
+    backtest_cmd.add_argument(
+        "--param",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="Set one strategy parameter; repeatable. Numbers and booleans are read as JSON.",
+    )
     sub.add_parser("strategies", help="List available (registered) strategies.")
     return parser
 
@@ -117,6 +151,14 @@ def _iso_date(text: str) -> date:
         return date.fromisoformat(text)
     except ValueError:
         raise argparse.ArgumentTypeError(f"not a YYYY-MM-DD date: {text!r}") from None
+
+
+def _percent(text: str) -> Decimal:
+    """A non-negative percentage as an exact ``Decimal``, for argparse; a bad one is a usage error."""
+    try:
+        return parse_percent(text)
+    except ConfigError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
 
 
 def _install_shutdown_handlers(engine: TradingEngine) -> None:
@@ -261,11 +303,16 @@ def _cmd_backtest(
     symbols: list[str] | None,
     run_log: DeferredFileHandler,
     facts: Provenance,
+    overrides: Overrides | None = None,
 ) -> int:
     """Replay the window, write the run record, and return whether it is a result.
 
     The window the run used is the RESOLVED one -- the flags laid over the config -- and it is
-    what the record names. Returns 1 for a run that is not a result: a handler failure, an
+    what the record names. **The settings are the EFFECTIVE ones (R-BR):** ``overrides`` (the
+    stop-slippage arm, the strategy, the timeframe, the strategy parameters) are laid over the
+    config and the result re-validated BEFORE anything else, so an override the config's own
+    checks refuse leaves no directory; the record's ``effective`` block holds what was used.
+    Returns 1 for a run that is not a result: a handler failure, an
     ERROR logged, a pair that served nothing, or a cash identity that does not close. It prints
     nothing on success (R-BE) and never names the record file (R-BF).
 
@@ -283,7 +330,11 @@ def _cmd_backtest(
     from trading_bot.backtesting.engine import run_backtest, select_pairs, write_run
 
     log = get_logger(__name__)
+    given = overrides if overrides is not None else Overrides()
+    settings = settings.with_config(apply_overrides(settings.config, given))
     window = _resolve_window(settings.config.backtesting, start, end)
+    if not given.is_empty:
+        log.info("Backtest overrides: %s", given.record())
     log.info(
         "Backtest window: %s -> %s, symbols %s",
         window.start_date,
@@ -308,6 +359,7 @@ def _cmd_backtest(
                 exchange_info_environment=window.exchange_info_environment,
                 code_facts=facts.log_fields,
                 regimes=regimes,
+                overrides=given.record(),
             )
         )
         final = base / f"{stamp}-{result.trade_log_sha256[:12]}"
@@ -428,7 +480,15 @@ def _dispatch(
         if args.command == "backtest":
             if run_log is None:  # main attaches it for exactly this command
                 raise RuntimeError("backtest dispatched without its run log")
-            return _cmd_backtest(settings, args.start, args.end, args.symbols, run_log, facts)
+            overrides = build_overrides(
+                stop_slippage=args.stop_slippage,
+                strategy=args.strategy,
+                timeframe=args.timeframe,
+                params=args.param,
+            )
+            return _cmd_backtest(
+                settings, args.start, args.end, args.symbols, run_log, facts, overrides
+            )
         if args.command == "strategies":
             return _cmd_strategies()
     except LiveTradingBlockedError:

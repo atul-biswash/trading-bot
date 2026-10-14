@@ -12,12 +12,14 @@ import json
 import logging
 from collections.abc import Iterator
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 import trading_bot.main as cli
 from tests.unit.backtest_world import WINDOW_BARS, at, build_world, make_settings, store_series
+from trading_bot.backtesting.engine import RUN_RECORD_SCHEMA
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import Settings
 from trading_bot.core.exceptions import ConfigError
@@ -548,3 +550,170 @@ class TestTheLogStaysInTheRunDirectory:
         assert "download_exchange_info" in text
         assert "event=boot_provenance" in text
         assert not real_logging.parent.exists()
+
+
+class TestTheOverrideFlags:
+    """R-BR: ``--stop-slippage``, ``--strategy``, ``--timeframe`` and ``--param`` on the command line,
+    with every effective setting in the record and in the candidate digest."""
+
+    WINDOW = ("--start", "2024-03-12", "--end", "2024-03-14")
+
+    def run_record(self, tmp_path: Path, *flags: str) -> dict[str, object]:
+        before = set(records(tmp_path))
+        assert cli.main(argv(tmp_path, *self.WINDOW, *flags)) == 0
+        made = [path for path in records(tmp_path) if path not in before]
+        assert len(made) == 1, made
+        loaded = json.loads((made[0] / "run.json").read_text(encoding="utf-8"))
+        assert isinstance(loaded, dict)
+        return loaded
+
+    def test_the_flags_parse_to_their_types(self) -> None:
+        args = cli._build_parser().parse_args(
+            [
+                "backtest",
+                "--stop-slippage",
+                "0.66",
+                "--strategy",
+                "rsi",
+                "--timeframe",
+                "4h",
+                "--param",
+                "period=14",
+                "--param",
+                "oversold=30",
+            ]
+        )
+        assert args.stop_slippage == Decimal("0.66")
+        assert isinstance(args.stop_slippage, Decimal)
+        assert (args.strategy, args.timeframe) == ("rsi", "4h")
+        assert args.param == ["period=14", "oversold=30"]
+        bare = cli._build_parser().parse_args(["backtest"])
+        assert (bare.stop_slippage, bare.strategy, bare.timeframe, bare.param) == (
+            None,
+            None,
+            None,
+            None,
+        )
+
+    @pytest.mark.parametrize("bad", ["-1", "abc", "nan", ""])
+    def test_a_bad_stop_slippage_is_a_usage_error(self, bad: str) -> None:
+        with pytest.raises(SystemExit) as exit_info:
+            cli._build_parser().parse_args(["backtest", "--stop-slippage", bad])
+        assert exit_info.value.code == 2
+
+    def test_a_run_without_flags_records_empty_overrides(self, tmp_path: Path) -> None:
+        build_world(tmp_path)
+        record = self.run_record(tmp_path)
+        effective = record["effective"]
+        assert isinstance(effective, dict)
+        assert effective["overrides"] == {}
+        assert effective["costs"]["stop_slippage_percent"] == "1.2"
+
+    def test_the_arm_is_in_the_fill_parameters_the_effective_block_and_the_settings_digest(
+        self, tmp_path: Path
+    ) -> None:
+        build_world(tmp_path)
+        base = self.run_record(tmp_path)
+        arm = self.run_record(tmp_path, "--stop-slippage", "0.66")
+        assert arm["fill_parameters"]["stop_slippage_percent"] == "0.66"
+        assert arm["effective"]["costs"]["stop_slippage_percent"] == "0.66"
+        assert arm["effective"]["overrides"] == {"stop_slippage_percent": "0.66"}
+        assert arm["candidate_digest"] == base["candidate_digest"]
+        assert arm["settings_digest"] != base["settings_digest"]
+
+    def test_a_param_changes_the_strategy_the_record_and_the_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        build_world(tmp_path)
+        base = self.run_record(tmp_path)
+        moved = self.run_record(tmp_path, "--param", "fast_period=4")
+        assert moved["strategy"]["params"] == {"fast_period": 4, "slow_period": 8}
+        assert moved["effective"]["strategy"]["params"] == {"fast_period": "4", "slow_period": "8"}
+        assert moved["effective"]["overrides"] == {"params": {"fast_period": "4"}}
+        assert moved["candidate_digest"] != base["candidate_digest"]
+
+    def test_a_threshold_typed_as_an_integer_or_a_float_is_one_candidate(
+        self, tmp_path: Path
+    ) -> None:
+        """``oversold`` is declared ``float``, so ``30`` and ``30.0`` are both accepted and are one
+        candidate: the digest reads the number, not how it was typed."""
+        build_world(tmp_path)
+        as_int = self.run_record(tmp_path, "--strategy", "rsi", "--param", "oversold=30")
+        as_float = self.run_record(tmp_path, "--strategy", "rsi", "--param", "oversold=30.0")
+        assert as_int["candidate_digest"] == as_float["candidate_digest"]
+        assert as_int["settings_digest"] == as_float["settings_digest"]
+
+    def test_a_float_for_an_integer_period_is_refused_before_any_directory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """``M5m-315``: ``fast_period=4.0`` builds the strategy and then raises ``TypeError`` on every
+        bar, so the run would finish having traded nothing. It is refused up front."""
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW, "--param", "fast_period=4.0")) == 1
+        assert records(tmp_path) == []
+        assert any("fast_period is an integer parameter" in r.getMessage() for r in caplog.records)
+
+    def test_a_new_strategy_runs_and_is_recorded_by_name(self, tmp_path: Path) -> None:
+        build_world(tmp_path)
+        record = self.run_record(tmp_path, "--strategy", "rsi", "--param", "period=5")
+        assert record["strategy"] == {"name": "rsi", "params": {"period": 5}}
+        assert record["effective"]["strategy"] == {"name": "rsi", "params": {"period": "5"}}
+
+    def test_a_timeframe_override_is_recorded_on_every_pair(self, tmp_path: Path) -> None:
+        build_world(tmp_path)
+        record = self.run_record(tmp_path, "--timeframe", "1h")
+        assert record["effective"]["pairs"] == [{"symbol": "BTCUSDT", "timeframe": "1h"}]
+        assert record["effective"]["overrides"] == {"timeframe": "1h"}
+
+    def test_every_effective_setting_is_in_the_record_a_run_writes(self, tmp_path: Path) -> None:
+        build_world(tmp_path)
+        record = self.run_record(tmp_path, "--stop-slippage", "0.05", "--param", "fast_period=4")
+        effective = record["effective"]
+        assert isinstance(effective, dict)
+        assert sorted(effective) == [
+            "config_sha256",
+            "costs",
+            "exchange_info_environment",
+            "overrides",
+            "pairs",
+            "risk",
+            "strategy",
+        ]
+        assert record["schema"] == RUN_RECORD_SCHEMA
+
+    @pytest.mark.parametrize(
+        "flags",
+        [
+            ("--param", "nonsense=1"),
+            ("--param", "fast_period=9"),
+            ("--param", "fast_period=1", "--param", "fast_period=2"),
+            ("--param", "novalue"),
+            ("--strategy", "nope"),
+            ("--timeframe", "7x"),
+        ],
+    )
+    def test_an_override_the_checks_refuse_is_a_message_and_exit_one_with_no_directory(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture, flags: tuple[str, ...]
+    ) -> None:
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW, *flags)) == 1
+        assert records(tmp_path) == []
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+    def test_the_refusal_names_what_the_strategy_would_have_accepted(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        build_world(tmp_path)
+        assert cli.main(argv(tmp_path, *self.WINDOW, "--param", "nonsense=1")) == 1
+        assert any(
+            "Accepted parameters: fast_period, slow_period" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_the_overrides_are_logged_into_the_runs_own_log(
+        self, tmp_path: Path, real_logging: Path
+    ) -> None:
+        build_world(tmp_path, file_logging=True)
+        assert cli.main(argv(tmp_path, *self.WINDOW, "--stop-slippage", "0.66")) == 0
+        text = (only_record(tmp_path) / "backtest.log").read_text(encoding="utf-8")
+        assert "Backtest overrides:" in text and "0.66" in text

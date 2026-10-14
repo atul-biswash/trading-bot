@@ -1353,6 +1353,14 @@ takes and the bot did not is a finding about one of them.
 > because the frozen `scripts/s4_compare.py` judges each live boot line with a synthetic record whose `schema` is the text `live-boot` (`M5m-313`); schema-4
 > records, which the S4 clone writes, still pass it. **What survives:** R-AR, R-AS and the S4 comparison as frozen.
 
+> **ANNOTATED AT M5m P113 (C2b): R-BR'S FLAGS ARE CARRIED OUT.** `backtest` takes `--stop-slippage PERCENT`, `--strategy NAME`, `--timeframe TF` and `--param KEY=VALUE`
+> (repeatable); the overrides are laid over the config, re-validated whole and checked (the strategy is built once, an integer parameter must be an integer) **before a run directory
+> exists**, and the record's `effective` block holds what was used and the overrides as given (`src/trading_bot/backtesting/overrides.py`). **Three behaviours worth knowing, each tested:**
+> `--strategy` drops the configured parameters, which belong to the strategy it replaces; `--timeframe` raises `risk.max_position_staleness_s` to `(3 + k) x T` seconds **only when the config
+> validator refuses the committed 180 s** (`M5m-314`: it accepts it at 1m and refuses 5m, 1h, 4h and 1d, `docs/RUN_LEDGER.md` section 45), and a backtest stamps every position on every bar so the bound never
+> acts; and `--param fast_period=4.0` is refused, because a float for an integer period builds and then raises `TypeError` on every bar (`M5m-315`). **What stops being true:** `M5m-306`'s
+> *"the backtest command takes only --start, --end and --symbols"*; README's usage line (corrected in place). **What survives:** the config file stays as committed, and a run with no flag is the run it always was.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

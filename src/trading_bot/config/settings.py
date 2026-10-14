@@ -111,6 +111,17 @@ class Settings:
         # An explicit BOT_MODE in the environment wins over config.yaml.
         self.mode: TradingMode = secrets.bot_mode or config.mode
 
+    def with_config(self, config: AppConfig) -> Settings:
+        """These settings over a different, already-validated config.
+
+        The secrets, the loaded file's path and its digest carry over unchanged, because the
+        FILE is the same one: a backtest's command-line overrides (R-BR) change the effective
+        settings and not the bytes that were read, and the run record names both.
+        """
+        return Settings(
+            config, self._secrets, config_path=self.config_path, config_sha256=self.config_sha256
+        )
+
     @property
     def is_live(self) -> bool:
         return self.mode is TradingMode.LIVE
