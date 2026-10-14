@@ -4631,3 +4631,76 @@ not kept). The override layer now refuses a non-integer for a parameter whose co
 | `predictions_c2b.txt` | `f91700449d8df77b6b570b6f0970df2423ba9694b7587ad90a856b2bf1a9c435` |
 | `gate_c2a.txt` | `2ab29fb36ae72db176646ed760086aae748788c7c6d134d595015633cba953ab` |
 | `gate_c2b.txt` | `0e79faebd0e9bb5624fcdf3ed5d365cc18182ea754cfe68fee45d90b112931cc` |
+
+## 46. M5m S4: the run's interruptions to 2026-10-14, and the state it was left in (P113, R-BN)
+
+Recorded at P113, after the fact. An observation log, so this section only adds. R-BN, verbatim: *"Every restart during S4 is recorded."* The owner told the reviewer that they had forgotten the bot
+was running and powered the PC off; this section is what the S4 log and the operating system's own System event log show, in UTC. **Nothing in `F:\trading bot\deploy\45547f107715` was opened for writing, run or
+changed**: the log was read through a share-mode copy, the clone's `.env` and `state.json` were not read, and no venue write was made. The Testnet account was read once, by `scripts/check_testnet.py` from the
+development tree (GET only; it places no order).
+
+### What was read
+
+| Item | Value |
+|---|---|
+| the log copy | `F:\trading bot\scratch\p113\s4_log_copy_after_shutdown.log`, 648,252 bytes, 2,738 lines, SHA-256 `19314c80c0b38700555eb1d7bc2ba532515d7ab314eb9fad776a3a9f68538ed6`, taken shortly after `2026-10-14T04:00Z` |
+| the source | `logs\trading_bot.log` last written `2026-10-13T07:00:48Z`; `.bot.lock` last written `07:00:45Z`; no `trading_bot.log.1`, so the log has not rotated (R-BM does not apply) |
+| the System log | `Get-WinEvent` ids 12, 13, 41, 42, 107, 109, 1074, 6005, 6006, 6008, 6013 from `2026-10-12T00:00Z`; the machine's clock is UTC+6 |
+| the Testnet account | `check_testnet_after_shutdown.txt`, SHA-256 `e258a81331aa024d6a130f00b3dc63b954c1865b7599d10285711f7bb777065b`, read after the log copy on `2026-10-14` |
+
+### The timeline (UTC)
+
+| Instant | Event | Source |
+|---|---|---|
+| `2026-10-10T06:05:20Z` | pid 16076 boots (`T0`, section 43); the engine starts `06:05:24Z` | log |
+| `2026-10-12T04:17:41Z` | `Received SIGINT; shutting down gracefully`; `04:17:43Z` `engine_stopped clean_shutdown=True` (pid 16076 ran 46.206 h) | log |
+| `04:20:57Z` to `04:21:07Z` | the owner powers the PC off (event 1074, then 13) | System log |
+| `10:44:33Z` to `10:45:49Z` | the machine starts and is powered off again 69 s later | System log |
+| `18:10:57Z` | the machine starts | System log |
+| `19:17:35Z` | **pid 22304 boots** (a restart: 14 h 59 m 52 s after the stop); its boot line is `verdict=accepted`; the engine starts `19:17:49Z`; free USDT `94,857.78263310`; its first `reconciliation_pass` is `19:20:01Z`, a restored position | log |
+| `2026-10-13T06:54:01Z` | **pid 22304's last record** (an `exit_book_refused` WARNING on ETHUSDT) | log |
+| `06:55:31Z` to `06:55:40Z` | **the owner powers the PC off while pid 22304 runs** (event 1074 "Other (Unplanned)", then 13). There is no `SIGINT` line and no `engine_stopped` for pid 22304: **the close was ungraceful, 1 min 30 s after its last record** | log, System log |
+| `06:59:09Z` | the machine starts | System log |
+| `07:00:36Z` | **pid 3444 boots**; `07:00:48Z` it **refuses** (ERROR): *"1 restored record(s) cannot be resolved at boot ... ETHUSDT, order list tb1-ETHUSDT-1791858599999-0-L: a leg is partly executed; list 71012 ALL_DONE: W FILLED 0.76400000/0.76400000, SL EXPIRED 0.07560000/0.76400000, TP EXPIRED 0E-8/0.76400000 ... Nothing on disk was changed."* | log |
+| `07:02:57Z` to `07:03:03Z` | the owner powers the PC off again (event 1074, 13) | System log |
+| `18:04:11Z` | the machine starts | System log |
+| `22:29:09Z` to `22:32:18Z` | **Windows restarts the machine twice by itself** (event 1074, `MoUsoCoreWorker.exe` "Service pack (Planned)", then `TrustedInstaller.exe` "Upgrade (Planned)"); it is up from `22:32:18Z` | System log |
+| `2026-10-14T04:00Z` | no `python` process of `trading_bot` exists (`Win32_Process`); **no bot has run since `07:00:48Z` on 10-13** | `Win32_Process` |
+
+### The bot-down intervals, as the frozen `scripts/s4_compare.py` computes them
+
+`down_intervals` over the copy (`run_down_intervals.py`, `down_intervals_after_shutdown_out.txt`) returns four. Two are the `strategies` verification boots of the launch (`05:58:02Z` to `05:58:16Z`, and
+`05:58:17Z` to `06:48:00Z`, M5m-301). **`04:17:43Z` to `19:20:01Z` on 10-12 (902.3 min, 15.04 h)** is the first restart. **`06:54:01Z` to `07:00:35Z` on 10-13 (6.6 min)** is the second: the refused boot is a process, so the
+interval ends at the refusal's first line and not at any resumption. The outage that follows is not an interval yet; it will be measured from the refused boot's last line, `07:00:48Z`, to the next process's first
+`reconciliation_pass`. The OS had the machine off from `06:55:40Z`, so the log's own last line understates the outage by 1 min 39 s at its start.
+
+### What the log shows besides the shutdown
+
+- **The ETHUSDT stop leg filled 0.0756 of 0.764 ETH and expired.** Order list 71012 was placed `2026-10-13T02:30:02Z` (0.764 at 2,483.25, stop 2,433.59). From `02:59:02Z` every reconciliation pass reported *"leg SL reports
+  EXPIRED with 0.07560000 executed"* and refused to book it (*"the fill is partial"*, order 1867449): **171 refusals** over 3 h 55 m, the last at `06:54:01Z`. The remainder, 0.6884 ETH, was never sold.
+- **A MARKET sell on BTCUSDT filled partially on 2026-10-11.** `close_position_naked` (CRITICAL) at `16:00:02Z`, `reason=close_partial_fill`, 0.02279 BTC, list 51703, then 29 `exit_unbookable` CRITICAL lines to
+  `16:51:01Z`; the strategy's next `CLOSE` at `16:52:00Z` followed and the lines stop.
+- **Network.** 8 ERROR records: a failed reconciliation pass on BTCUSDT/1m at `2026-10-11T03:37:02Z`, WebSocket drops at `03:59:31Z` (keepalive ping timeout; `getaddrinfo failed`) and `13:29:21Z`, and the refusal above.
+- **Counts:** 43 order lists placed (34 BTCUSDT, 9 ETHUSDT), 40 `close_booked` and 2 `exit_booked`, so **42 bookings** (38 in pid 16076, 4 in pid 22304) in 57.81 h of uptime: **17.4 a day while up**, against the
+  pre-registration's census-of-record rate of 7.86; 444 WARNING, 8 ERROR, 30 CRITICAL records.
+
+### The state it was left in, for the owner
+
+| Fact | Value |
+|---|---|
+| ETH | free `0.68840000` (= 0.764 - 0.0756), locked 0, about 1,729.65 USDT at the last price 2,512.57; `check_testnet.py`: *"unmanaged holding ... BLOCKS entries"* |
+| BTC | 0 |
+| USDT | free `93,139.88439310` (the run started with 95,170.91) |
+| the bot's record | the store holds an ETHUSDT record that boot refuses; releasing it needs `scripts/release_position.py --symbol ETHUSDT --preview`, run from the S4 clone with the bot stopped, **after** the ETH is resolved at the venue |
+| the recorder | `--verify-only` over `2026-10-07T10:32Z` to `2026-10-14T00:04Z`: 1m 9,453 bars and 5m 1,891 bars on both symbols, **0 gaps, 0 problems**; `tb-recorder` last ran `06:05:01 AM` local (`00:05Z`), result 0; so there is no sign of a Testnet reset (R-AZ) and the shutdowns cost no recorded data |
+| the pre-registration clock | unchanged: the cap `2026-11-14T06:05:20Z`, the earliest stop `2026-11-01T00:00Z`; downtime is excluded on both sides and never moves them |
+
+**What the reviewer did not do**, because each is a venue write or the owner's: sell the ETH, release the record, restart the bot, or add the two partial fills to U10 (R-BO covers the price excursion only).
+
+| File (under `F:\trading bot\scratch\p113\` unless named) | SHA-256 |
+|---|---|
+| `predictions_s4_record.txt` | `67f0682c0b5c02619c7f4a04275ad50624c6fdcab180ba3df37bb82db4b6391a` |
+| `run_down_intervals.py` | `bac8a66f68fe7aebb4f13032ffed7bcd8f4ce65e6fe6eb2e95d7a9d8d5b2f075` |
+| `down_intervals_after_shutdown_out.txt` | `58136c29f17fe4d8c775ba0ce3c8b0d6ac77bac0c5da04cf5bcc9dba5b9c2369` |
+| `restore_c2b.py` (C2b's script edit, reported in its message) | `b29e1e98d009861c8786bd5a9eeb1a8d64a6a4b8744d9b189e91b3dc99196760` |
+| `msg_c2b.txt` | `2181bbaf7f72678d2e53823e69ba4a401299bf13e9c4abbf66f0d267c470f71c` |
