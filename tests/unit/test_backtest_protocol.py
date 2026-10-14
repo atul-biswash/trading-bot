@@ -537,3 +537,35 @@ class TestLoadEntries:
         loaded = load_entries(REPO / ENTRIES_DIR)
         assert isinstance(loaded, tuple)
         assert all(isinstance(e, Entry) for e in loaded)
+
+
+class TestAnEntrysSelectionBlock:
+    """The block S6's freeze writes into a candidate's entry (PROTOCOL.md section 6 step 6): kept, never read
+    by the guard, and refused if it is present and not an object."""
+
+    def body(self, **changes: Any) -> str:
+        data = json.loads(entry_text(CANDIDATE))
+        data.update(changes)
+        return json.dumps(data)
+
+    def test_it_is_kept_as_written(self) -> None:
+        block = {"variant": {"family": "sma_crossover"}, "trades": 350}
+        assert parse_entry(self.body(selection=block)).selection == block
+
+    def test_an_entry_without_one_has_none(self) -> None:
+        assert parse_entry(self.body()).selection is None
+
+    @pytest.mark.parametrize("bad", ["text", 5, ["a"], True])
+    def test_one_that_is_present_and_not_an_object_is_refused(self, bad: object) -> None:
+        with pytest.raises(ProtocolError, match="selection that is not an object"):
+            parse_entry(self.body(selection=bad))
+
+    def test_the_guard_ignores_it(self) -> None:
+        plain = parse_entry(self.body())
+        with_block = parse_entry(self.body(selection={"variant": {"family": "x"}}))
+        assert (plain.id, plain.candidate_digest, plain.status, plain.oos) == (
+            with_block.id,
+            with_block.candidate_digest,
+            with_block.status,
+            with_block.oos,
+        )

@@ -250,7 +250,7 @@ src/trading_bot/
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
                  · simulated_executor · regimes · evidence · candidate · overrides · protocol
-                 · selection
+                 · selection · gate
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
@@ -2287,10 +2287,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  205 files already formatted
-mypy                                   Success: no issues found in 103 source files
-pytest                                 3940 passed, 4 skipped
-                                       (3943 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  208 files already formatted
+mypy                                   Success: no issues found in 104 source files
+pytest                                 4031 passed, 4 skipped
+                                       (4034 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2299,14 +2299,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `3943 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `3940 passed, 4 skipped` on a machine without them
+- `4034 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `4031 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 3940 and must not read it as a regression against a documented
-3943. Quote the count with its condition, never bare.
+runner will see 4031 and must not read it as a regression against a documented
+4034. Quote the count with its condition, never bare.
 
-Only the `3943` is measured here; `3940 passed, 4 skipped` is that run minus the
+Only the `4034` is measured here; `4031 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -2417,8 +2417,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 205 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 103 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 208 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 104 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all

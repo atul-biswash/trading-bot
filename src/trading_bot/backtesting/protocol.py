@@ -215,6 +215,9 @@ class Entry:
     arms: tuple[str, ...]
     status: str
     oos: Mapping[str, Any] | None
+    #: The ``selection`` block of a candidate's entry (PROTOCOL.md section 6 step 6): the evidence that
+    #: chose it. The guard never reads it; S7's gate cross-checks the variant against it.
+    selection: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -457,7 +460,8 @@ def parse_entry(text: str) -> Entry:
 
     :raises ProtocolError: it is not JSON, lacks a field, has a kind other than ``candidate`` or
         ``baseline``, a status other than ``pending`` or ``read``, a digest that is not 64 hex digits,
-        a ``pending`` entry with an ``oos`` block, or a ``read`` entry without one.
+        a ``pending`` entry with an ``oos`` block, a ``read`` entry without one, or a ``selection`` that
+        is present and not an object.
     """
     try:
         data = json.loads(text)
@@ -502,6 +506,11 @@ def parse_entry(text: str) -> Entry:
             f"research entry {fields['id']!r} is {fields['status']!r} and "
             f"{'has' if oos is not None else 'lacks'} an oos block"
         )
+    selection = data.get("selection")
+    if selection is not None and not isinstance(selection, dict):
+        raise ProtocolError(
+            f"research entry {fields['id']!r} has a selection that is not an object"
+        )
     return Entry(
         sha256=hashlib.sha256(text.encode("utf-8")).hexdigest(),
         id=fields["id"],
@@ -511,6 +520,7 @@ def parse_entry(text: str) -> Entry:
         arms=arms,
         status=fields["status"],
         oos=oos,
+        selection=selection,
     )
 
 
