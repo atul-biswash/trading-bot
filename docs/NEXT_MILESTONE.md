@@ -1464,6 +1464,125 @@ takes and the bot did not is a finding about one of them.
 > R-BY's letter and is the owner's to confirm"* is confirmed by R-CA. PROTOCOL.md's old section 6 (a 100-trade minimum, the profit factor in USDT, a per-cell log line for walk-forward) is replaced in place, and the amendment
 > records what it read. **What survives:** S7's other three thresholds, the pass level of 1.20%, the regime labels, the pooling of both pairs, R-BW, and every other line of S5, S6 and S7.
 
+> **ANNOTATED AT M5m P117 (C8): THE S6 AND S7 TOOLING EXISTS, NOTHING HAS RUN, AND THESE ARE THE OWNER'S STEPS.** Built and committed in P117, in order: `66f64ce` (PROTOCOL.md amendment 2), `8bee34c` (the baseline
+> tests select by id), `35d6b38` and `d96045b` (`backtesting/selection.py`), `119b25c` (`scripts/s6_select.py`), `6b26c97` (`scripts/s6_sweep.py`), `9fd2e2e` (the CLI pin), `4dc445a` and `8e17898`
+> (`backtesting/gate.py` and `scripts/s7_gate.py`) and `a417700` (the probe times both strategies; the selection refuses another protocol digest); `docs/RUN_LEDGER.md` section 51 holds the build record and
+> P116's measurements. **What stops being true:** nothing in this file; S6 and S7 above stand as annotated. **What is not built:** an end-to-end rehearsal of the whole chain (`M5m-424`).
+>
+> **Three rules for every step below.** (1) **`docs/research/PROTOCOL.md` must not change by one byte between O3's first run and S7**, a documentation edit included: the selection and the gate refuse a record made
+> under another protocol digest. (2) **Nothing untracked is written into a clone** (no report, no note, no copy): a dirty checkout makes the next run's record not evidence, and S5's clone shows the shape of the
+> mistake (an untracked `s5_report.txt` beside its records). `data/` and `logs/` are ignored and are fine. (3) **The S4 clone and the S5 clone are not touched.** None of the commands below needs a venue key or a `.env`.
+>
+> **O1. Build the S6 sweep clone (once).** Needs the network for `pip` only. `$SHA` is the full 40-hex SHA of the pushed commit that carries this block.
+>
+> ```powershell
+> $SHA    = '<the 40-hex SHA of the pushed C8 commit>'
+> $S      = $SHA.Substring(0, 12)
+> $CLONE  = "F:\trading bot\backtest\$S"
+> $PYTHON = "$env:LOCALAPPDATA\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
+> $S5PY   = 'F:\trading bot\backtest\67b7563de683\.venv\Scripts\python.exe'
+> git clone https://github.com/atul-biswash/trading-bot.git $CLONE
+> git -C $CLONE checkout --detach $SHA
+> & $PYTHON -m venv "$CLONE\.venv"
+> $PY = "$CLONE\.venv\Scripts\python.exe"
+> & $S5PY -B -m pip freeze | Where-Object { $_ -notmatch '^binance-trading-bot' } | Set-Content "$env:TEMP\s6_constraints.txt" -Encoding ascii
+> & $PY -m pip install -c "$env:TEMP\s6_constraints.txt" "binance-trading-bot @ git+file:///F:/trading%20bot/backtest/$S@$SHA"
+> cmd /c mklink /J "$CLONE\data\historical" "F:\trading bot\store\mainnet-historical"
+> Set-Location $CLONE
+> ```
+>
+> CHECK, each its own command, none piped into a verdict: `git rev-parse HEAD` prints `$SHA`; `git status --porcelain` prints nothing; `(Get-Item "$CLONE\data\historical").LinkType` prints `Junction`;
+> `Test-Path "$CLONE\data\historical\BTCUSDT\1h"` prints `True`; `& $PY --version` prints `Python 3.12.10`; and `& $PY -m trading_bot strategies 2>&1 | Select-String boot_provenance` shows one line with
+> `verdict=accepted`, `install_kind=vcs`, `code_intact=true`, `code_commit=<$SHA>`, `checkout_dirty=false`, `commits_agree=true` and `config_tracked=true`. About 10 to 20 minutes.
+>
+> **O2. The timing probe (six real in-sample runs, serially).** The first declared variant of each family and timeframe, heaviest first; they are evidence and count toward the 216.
+>
+> ```powershell
+> Set-Location $CLONE
+> & $PY scripts\s6_sweep.py --probe
+> "exit $LASTEXITCODE"
+> $bars = @{ '1h' = 111394; '4h' = 27900; '1d' = 4656 }
+> Get-Content data\s6_sweep_manifest.jsonl | ForEach-Object { $_ | ConvertFrom-Json } | Where-Object event -eq finish |
+>   ForEach-Object { '{0} {1}: exit {2}, {3} s, {4:N2} ms a bar' -f $_.variant.family, $_.variant.timeframe, $_.returncode, $_.seconds, ($_.seconds * 1000 / $bars[$_.variant.timeframe]) }
+> ```
+>
+> CHECK: `exit 1` (a probe is never a complete sweep), six `finish` lines with `exit 0`, and the report's `with a sealed evidence-eligible record 6`. **Compare the ms a bar with the derived figures** (P116: about 2.5 for
+> `sma_crossover` and 3.8 for `rsi`; the 1d runs are short and dominated by the 3 s boot); while a run is going note python.exe's working set in Task Manager (peak memory is UNMEASURED and decides how many
+> workers O3 can use). If any exit is not 0, or a figure is more than twice the derived one, stop and report. About 15 to 20 minutes.
+>
+> **O3. The sweep.** R-CH's check runs first by itself: one variant serially and then beside another, and the two trade-log digests are compared.
+>
+> ```powershell
+> Set-Location $CLONE
+> & $PY scripts\s6_sweep.py --workers 8
+> "exit $LASTEXITCODE"
+> ```
+>
+> CHECK: `exit 0` and `COMPLETE`; `variants declared 216; with a sealed evidence-eligible record 216`; `parallel check: the trade-log digests are equal`; no `MISSING`, `CONFLICT` or `FAILED` line (a `DUPLICATED` line for the
+> check's one variant is expected); then `git status --porcelain` prints nothing. **If the digests differ the sweep runs serially by itself and ends with a CONFLICT: stop; the engine is not deterministic and the selection
+> will refuse.** If the machine restarts or the window closes, run the same command again: completion is read from the records and only what is missing runs. Derived time, 1.3 to 2 hours at 8 workers.
+>
+> **O4. Review the selection and push the entries.** In the DEVELOPMENT checkout, never in the clone.
+>
+> ```powershell
+> $DEV = 'F:\trading bot\files\binance-trading-bot\binance-trading-bot'
+> Set-Location $DEV
+> git status --porcelain
+> (Get-FileHash docs\research\PROTOCOL.md).Hash -eq (Get-FileHash "$CLONE\docs\research\PROTOCOL.md").Hash
+> & .\.venv\Scripts\python.exe scripts\s6_select.py --backtests "$CLONE\data\backtests"
+> ```
+>
+> CHECK: the status is empty, the comparison prints `True`, and the report reads `variants declared 216; with a run 216` and `cells with a candidate N of 12`. Read it (the walk-forward is a report and removes nothing). It
+> writes nothing. When satisfied:
+>
+> ```powershell
+> & .\.venv\Scripts\python.exe scripts\s6_select.py --backtests "$CLONE\data\backtests" --out docs\research\selection.json --entries-dir docs\research\entries
+> & .\.venv\Scripts\python.exe scripts\check.py
+> git add docs/research/selection.json docs/research/entries
+> git commit -m "research: the S6 selection and its pending entries"
+> git push
+> git rev-parse HEAD
+> git ls-remote origin refs/heads/main
+> ```
+>
+> CHECK: the first command prints `selection file ... sha256 <digest>` (RECORD THE DIGEST) and one `entry` line per candidate; `git status --porcelain` before the commit lists `selection.json` and N `s6-*.json` and nothing else;
+> the gate is green; the last two commands print the same SHA. It refuses to overwrite, so a second run fails closed. About 15 minutes and the gate's 5.
+>
+> **O5. Rebuild at the entries commit.** The guard reads the entries from the clone's tree, and an out-of-sample read comes only from a clone of a pushed commit that holds them. Repeat O1 with `$SHA` = the SHA O4
+> pushed (a NEW directory; leave the sweep clone as it is, it holds the in-sample records the selection file cites). CHECK, beside O1's: `(Get-ChildItem "$CLONE\docs\research\entries" -Filter 's6-*.json').Count` equals N,
+> and `(Get-FileHash docs\research\PROTOCOL.md).Hash` there equals the sweep clone's.
+>
+> **O6. The out-of-sample reads (at most 3 x N runs, each candidate once per arm).** Resumable: a finished (entry, arm) is skipped, and a run cut off leaves no record, so the guard allows it again.
+>
+> ```powershell
+> Set-Location $CLONE
+> $entries = Get-ChildItem "$CLONE\docs\research\entries" -Filter 's6-*.json' | ForEach-Object { Get-Content $_.FullName -Raw | ConvertFrom-Json }
+> foreach ($e in $entries) {
+>   $v = $e.selection.variant
+>   foreach ($arm in '0.05', '0.66', '1.20') {
+>     $done = Get-ChildItem data\backtests -Directory -ErrorAction SilentlyContinue |
+>       Where-Object { Test-Path "$($_.FullName)\run.json" } |
+>       ForEach-Object { Get-Content "$($_.FullName)\run.json" -Raw | ConvertFrom-Json } |
+>       Where-Object { $_.protocol.entry_id -eq $e.id -and [decimal]$_.protocol.arm -eq [decimal]$arm }
+>     if ($done) { "skip $($e.id) $arm"; continue }
+>     $a = @('-m', 'trading_bot', 'backtest', '--start', '2024-01-01', '--end', '2026-10-01', '--stop-slippage', $arm, '--strategy', $v.family, '--timeframe', $v.timeframe)
+>     foreach ($p in $v.params.PSObject.Properties) { $a += @('--param', "$($p.Name)=$($p.Value)") }
+>     "run $($e.id) $arm"
+>     & $PY @a
+>     if ($LASTEXITCODE -ne 0) { throw "FAILED: $($e.id) arm $arm exit $LASTEXITCODE" }
+>   }
+> }
+> Get-ChildItem data\backtests -Directory | Where-Object { Test-Path "$($_.FullName)\run.json" } | ForEach-Object {
+>   $r = Get-Content "$($_.FullName)\run.json" -Raw | ConvertFrom-Json
+>   [pscustomobject]@{ run = $_.Name; entry = $r.protocol.entry_id; arm = $r.protocol.arm; window = $r.protocol.window_class; evidence = $r.evidence_eligible; trades = $r.results.trades; sha256 = (Get-FileHash "$($_.FullName)\run.json" -Algorithm SHA256).Hash.ToLower() }
+> } | Sort-Object entry, arm | Format-Table -AutoSize | Out-String -Width 250 | Out-File 'F:\trading bot\scratch\o6_runs.txt' -Encoding ascii
+> Get-Content 'F:\trading bot\scratch\o6_runs.txt'
+> git status --porcelain
+> ```
+>
+> CHECK: 3 x N rows, every `window` `out_of_sample`, every `evidence` `True`, each (entry, arm) exactly once, and `git status --porcelain` empty. The table is the input the next step needs to mark the entries `read` with each
+> record's digest and to run `scripts/s7_gate.py`. Derived time, 1 to 2 hours serially. **Do not edit PROTOCOL.md, in any checkout, before S7.**
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

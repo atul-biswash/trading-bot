@@ -5032,3 +5032,40 @@ because it had no position to reconcile; **the interval it quotes, ending `06:34
 | `s5_report.txt` (UTF-16LE) | `6b73bc8bb9bbdc339c3c81d6ef46a36ceb144703436931f76429756fa7e02bb1` |
 | `runs\...\backtest.log`, Arm 1 / Arm 2 / Arm 3 / aborted / smoke | `970168f8dc4f94a4a4279c483bef2accc544a3b19861cc418577deb692d0c1b1` / `db0ef80810bc5a6c977d82d85bb5055951eb843f71e21a5f08d805ed9307bf21` / `9b897b70690baf8a0366526971f543ea18160991b6368251d3d1ea68a95df930` / `6f78642cf83eab166828608c16fde14e773024e993192942cf9c8ddd525d3925` / `61768a1ea3deba91b5cec444d35f254a0ace6fbee7280d51064c77d9755ea10e` |
 | `runs\...\trades.csv`, Arm 1 / Arm 2 / Arm 3 | `1f8fc37c7df5b5534fa97529b73a28bd9f5186c5e125b9730ab80aad891f648b` / `d35838a74ee2faf915da4988a3a05dcecccc681ac2ee38fc7132911ff3fafb97` / `4c54d6e6a89c41c3a710383a71182860fcdbcc74cf3f574aec6be278ee53b1c8` |
+
+## 51. M5m S6/S7: Phase 1's measurements (P116) and the tooling built to carry S6 out (P117 C8)
+
+Read only on the canonical store (`F:\trading bot\store\mainnet-historical`) and on the share-mode copies of S5's runs; no run was made, no record was written, no venue call. The S4 clone and the S5 clone
+were not touched. Every scratch file below is under `F:\trading bot\scratch\p116\` (the measurements) or `p117\` (the build).
+
+### Part 1. What P116 measured
+
+| Measurement | Result | File, SHA-256 |
+|---|---|---|
+| The untradeable-equity floor of a 2% entry, BTCUSDT and ETHUSDT at 1h, 4h and 1d, in and out of sample | at most **312.29 USDT** of equity over the stored history (BTCUSDT near 124,918), 281.19 in sample; ETHUSDT at most 272.70. The configured 10,000 survives a 95% drawdown with 500 left; the floor binds past a 96.9% drawdown (97.2% in sample) | `p1_floor_out.txt` `a861f1239ec03462770194cb4e367ddb98087842b644db748a0341034788923c` |
+| Entry counts of the 216 variants, in sample, from the repository's own indicators and the strategy helpers' crossing definitions | by buy-edge count 97 of 216 can reach 100 entries (78 by a replay in which only the strategy's CLOSE exits), 69 reach 232 (43); three of twelve cells (1d `sma_crossover` off and on, 1d `rsi` on) cannot reach 100; at 1d only 6 of 72 reach 100 and none 232 | `p1_signals_out.txt` `0ed4ad6717f941bc4044740b6f3afa4d12aa7126e2cb93a83b260887744edb68`, `p1_variant_counts.csv` `a156ba6844cdf091b55f32c84fadf2b63b0cd246116f22c502b950572c2ce07d` |
+| The vectorised counts against the REAL strategies on the engine's 1000-row buffer | 0 BUY and 0 CLOSE mismatches over 5 variants of 3,000 bars (BTCUSDT 1h, bars 1000 to 4000) | the same file |
+| `generate_signal` per call on a 1000-row buffer | `sma_crossover` 603 to 771 microseconds, `rsi` 1,901 to 2,099 | the same file |
+| S5 Arm 3's net profit factor in USDT against on per-trade returns, in sample | 0.3007 against 0.2724; the mean entry quote total falls from 182.33 (2017) to 9.70 (2023) and 2017 and 2018 carry 56.4% of the absolute net result | `p1_thresholds_out.txt` `5a7d4302b4a776a23d15dde91857114c71d16e6559750db6a86f19525f3b10eb` |
+| The window ratio | 1,004 out-of-sample days to 2,328 in-sample: 100 out-of-sample trades is about 232 in sample at a constant rate | the same file |
+| All 216 variants through `build_overrides`, `apply_overrides`, `effective_settings` and the guard | 216 of 216 return as themselves, 216 distinct candidate digests, both pairs at the variant's timeframe, balance 10,000; the timeframe override sets `risk.max_position_staleness_s` to 14,400, 57,600 and 345,600 s at 1h, 4h and 1d | `p1_roundtrip_out.txt` `d2548217b54d5bfea1afe2346ac0481e54666505a370190f2a9b6766ccca4d40` |
+
+The per-bar cost at 1h, 4h and 1d is DERIVED and not measured, because measuring it needs a run that writes a record: S5's engine spent 2.408 ms a bar (13,788.218 s over 5,725,299 bars), so about 1.8 ms is not
+the strategy. Derived single-process time: about 10.2 h for the 216 in-sample runs at one arm, 30.6 h at three, up to 1.8 h for 36 out-of-sample runs. Peak memory, parallel speed-up and the effect of trade
+density are UNMEASURED; the owner's timing probe (O2, `scripts/s6_sweep.py --probe`) measures the first and the sweep's first minutes the others.
+
+### Part 2. What P117 built, in the order it was committed
+
+| Commit | What | Gate after it (ruff format / mypy / pytest passed) | Survey |
+|---|---|---|---|
+| `66f64ce` C1 | `PROTOCOL.md` amendment 2: R-CA to R-CJ verbatim, the return profit factor and its tie-break, the ruin rule (0.95), the 250-trade minimum, the walk-forward report, the freeze, S7's two profit factors; `min_in_sample_trades` 250 | 196 / 100 / 3791 | 3 mutations, 1 + 1 + 0 kills, as predicted (`survey_c1_out.txt` `aecd27a3deabadd854cf439147dca9197185d6e1fa30eb2bbde5a86d3ba94779`) |
+| `8bee34c` C2 | R-CI: the baseline tests select the entry by id | 196 / 100 / 3791 | 4 mutations over two specs, all as predicted (`survey_c2a_out.txt` `6ed4f8787a53c788505d11916da873ea4fb354e18cb6f21be9116fb57bdc0bfa`, `survey_c2b_out.txt` `ec043fc6afbdf84f446f26233bb3ddb02d793278a5c01cd540c2945175cd6c16`) |
+| `35d6b38` C3a, `d96045b` C3b | `backtesting/selection.py` (split: 1,880 lines would exceed the ceiling), 99 tests | 199 / 101 / 3844, then 200 / 101 / 3890 | 14 mutations, 35 of 35 predicted kills (`survey_c3b_out.txt` `eee2aedad5357ad6f5dd3591f60040196b057960604f64291be0fd05f44bd889`) |
+| `119b25c` C4 | `scripts/s6_select.py`, 18 tests | 202 / 102 / 3908 | none asked |
+| `6b26c97` C5 | `scripts/s6_sweep.py`, 30 tests, the `-running` rule in `read_run` | 205 / 103 / 3940 | 5 mutations of R-CH's check and the order, 9 predicted, 10 observed (`survey_c5_out.txt` `33ec22cddcc861b9dfd252bbc21308ab9c2ccf37ceb7d5cb9fab382c9e6793cf`) |
+| `9fd2e2e` C6 | the CLI pin: the engine's own in-sample record names its variant and reads back through `read_run` | 205 / 103 / 3943 | none asked |
+| `4dc445a` C7a, `8e17898` C7b | `backtesting/gate.py` and `scripts/s7_gate.py`, 106 tests | 208 / 104 / 4034, then 210 / 105 / 4049 | 27 mutations, all as predicted (`survey_c7_out.txt` `508de21237d9f50cd76f2e1ab00b953ac24cd407492342235dcb0034d48c04df`) |
+| `a417700` C7c | the probe times both strategies; the selection refuses another protocol digest | 210 / 105 / 4052 | 2 mutations, as predicted (`survey_c7c_out.txt` `60464fe9426cd20d1bbd3ba6a620ae029da1243513ca8dfc26e908cdc86bc46e`) |
+
+Credentialed gate throughout (the venue answered 200); the uncredentialed figure is DERIVED as three fewer passed. **The chain sweep, selection, entries, out-of-sample reads and gate has never run as one**:
+each hop is tested against fixtures, and two faults (C7c) sat on the seams between hops.

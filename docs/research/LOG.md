@@ -51,6 +51,20 @@ Entry 2 recorded the read and left the machine-checked file `pending`, because a
 **From a clone of this commit the guard refuses a second read of the baseline at any arm**, as `already_read`, with no state outside git. The digests were recomputed from share-mode copies of the run records on the day they were
 written here and agree with `docs/RUN_LEDGER.md` section 50.
 
+## Entry 4 -- S6: the protocol amended, the tooling built, nothing run (P117 C1 to C8, R-CA to R-CJ)
+
+No variant has been run and no candidate has been read. What changed, for a reader arriving later.
+
+| | |
+|---|---|
+| the protocol | amendment 2 (`66f64ce`), before any S6 run: selection on **per-trade returns** (R-CB), a run whose per-bar drawdown exceeds **0.95** is ruined and ineligible, the balance stays 10,000 (R-CC), at least **250** in-sample trades (R-CD), the **1.20%** arm only for selection (R-CE), walk-forward **reported not gated** over four anchored folds, 2020 to 2023 (R-CF), all **216** variants run and counted, 1d included (R-CG), S7 passes only if **both** profit factors, in returns and in USDT, are at least 1.3 (R-CJ) |
+| the freeze | `scripts/s6_select.py` writes one selection file, committed unedited with its SHA-256 recorded here, and one pending entry per candidate; the entries are pushed before any out-of-sample read, and the guard refuses a digest with no entry |
+| the denominator | 216 variants declared. P116 measured that by buy-edge count at most 97 can reach 100 in-sample trades and 69 can reach 232; at 250 and by the replay in which only the strategy's CLOSE exits, 42; three of the twelve cells (1d `sma_crossover` off and on, 1d `rsi` on) cannot reach even 100. The number of candidates is therefore expected to be well under twelve; **it is not known until the sweep is read** |
+| the tooling | `backtesting/selection.py` and `scripts/s6_select.py`, `scripts/s6_sweep.py` (resumable, parallel only after R-CH's check), `backtesting/gate.py` and `scripts/s7_gate.py` (a refusal withholds every verdict); `docs/RUN_LEDGER.md` section 51 holds the build record and the surveys' digests |
+| two rules the tooling adds | `PROTOCOL.md` is byte-stable from the first sweep run to S7 (a run made under another digest is skipped by the selection and refused by the gate); nothing untracked is written into a clone |
+| the owner's steps | O1 to O6, with a CHECK each, in `docs/NEXT_MILESTONE.md` (the P117 C8 block) |
+| status | **tooling built; no S6 run exists.** The baseline entry stays `read` (Entry 3) |
+
 ## Candidate entries
 
 None yet. No variant has been run.
