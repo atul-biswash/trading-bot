@@ -4901,3 +4901,134 @@ The pre-registration clock is unchanged: downtime is excluded on both sides and 
 | `h5_out.txt` | `cf14597a8592ee61790e9d9d421e0480aae5a20326f98b06388b13e8ffce195a` |
 | `s4_log_copy_06h45.log` | `3af6327d3cae1616a0882dff9f9d1f331cc9706a74470d1db1271ba6a50ae5da` |
 | `h6_down_intervals.txt` | `3251da9278513a953a3388b60a9b057524e934ca2f094df27dea62a2b1696116` |
+
+## 50. M5m S5: the baseline's runs and report, the sizing floor, and the frozen function's rule (P115 C1, R-BW, R-BX)
+
+Read on `2026-10-14` to `2026-10-15` from COPIES, made share-mode, of the five run directories and the report in `F:\trading bot\backtest\67b7563de683` (the S5 clone), which is read only; nothing was written there. The S4
+clone was not touched and no venue call of any kind was made. Predictions: `predictions_halts.txt` (SHA-256 `e64abc611dffde0b18f276ea471adaf921f02599fc67e75bd18bad3c52b02b76`, before any halt or measurement) and
+`predictions_c1.txt` (SHA-256 `7e7a746e982a094024fde98acc639b643291361d36ccfeb61c37dd85eeb9cef2`, before the documents).
+
+### The clone and its runs
+
+The clone is a deployment clone of `67b7563de683cb64f500f0a0d2264f93e7f9089e`, with its own venv and a VCS install. Its `boot_provenance` line, from the 0.05 arm's log at `2026-10-14T07:00:04Z` (pid 24584), reads
+`verdict=accepted`, `install_kind=vcs`, `code_intact=true` over 80 files, `code_commit=67b7563de683cb64f500f0a0d2264f93e7f9089e`, `checkout_dirty=false`, `commits_agree=true`,
+`config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, `config_tracked=true`, Python 3.12.10. Every record below carries `schema 6`, `evidence_eligible` true, empty `problems`, and a `protocol` block
+(`entry_id` `s5-baseline`, `kind` `baseline`, `window_class` `straddling`, `protocol_sha256` `79dfc4fde9707101e83f26ba258d3380714d68d4eb6079f9bbdc745bf5b0d032`).
+
+| Directory | What | Started to finished (UTC) | Wall | Trades | `run.json` SHA-256 | Trade-log digest the record carries (its directory name's suffix is this digest's first 12 characters; it is NOT the SHA-256 of `trades.csv`, which is in the Files table) |
+|---|---|---|---|---|---|---|
+| `20261014T065931721605Z-d2f44e62cf89` | smoke run, `2017-08-17` to `2017-08-20`, arm 1.20, `in_sample`, no entry needed | `06:59:31` to `06:59:42` | 10.56 s | 57 | `3629ef038e2d14ac5c7e98b0ee26edc27b00a552b2379a29f676a61f318093af` | `d2f44e62cf89c2ea7346a18e74163fd293c49d259521e2a74bbb349c72c700be` |
+| `20261014T070004816981Z-6b9d3b8c7f89` | **Arm 1, stop slippage 0.05%**, `[2017-08-17, 2026-10-01)` | `07:00:04` to `10:41:27` | 13,282.98 s = 3.69 h | 62,796 | `36b7b1a6f09c34b2fc7ac03006b676eced720d30bba67021202cb9e71fa51a61` | `6b9d3b8c7f893b4b0307d20f48340e89138fc16b501494d9dc66e865870d968d` |
+| `20261014T104541570489Z-e5111d9f08f7` | **Arm 2, 0.66%** | `10:45:41` to `14:17:54` | 12,733.30 s = 3.54 h | 58,237 | `c4f4fe39065cbc071e69ac00668b642ecf26386a294c3d3637abccfe475d7c0a` | `e5111d9f08f7fedcc874d6a43c61c54a68b2233c9270598ee872011b0ec1bb97` |
+| `20261014T154834857585Z-failed` | **the aborted Arm 3 attempt**: `backtest.log` only, **no `run.json`** | `15:48:34` to `15:50:40` | 126 s | none | none | none |
+| `20261014T155450267068Z-52e1f0448bc4` | **Arm 3, 1.20%** (the committed config, no flag) | `15:54:50` to `19:44:38` | 13,788.22 s = 3.83 h | 54,399 | `8837f2d074354e3382b7017e228364551e893978648bec265dd4931773a93e47` | `52e1f0448bc48e8263950fbc766db5652429e544c3957f63d4bfdbfbed3489df` |
+
+**The aborted attempt (pid 17436).** Its log shows the boot, `Backtest ready` at `15:48:34Z`, simulated time reaching `2017-09-15T03:54:59Z`, then `Trading engine stopped event=engine_stopped clean_shutdown=False` and
+`ERROR ... Backtest aborted: KeyboardInterrupt` at `15:50:40Z`: the owner's Ctrl+C. **That is 126 seconds after the start, not the 35 the prompt of P115 states**; the directory was sealed `-failed` by the command and holds
+no record, so the guard did not count it (`local_reads` reads `run.json` only) and the arm was rerun six minutes later. The three arms ran sequentially, as M5m-339 replaced the parallel option.
+
+**The report.** `s5_report.txt`, 34,176 bytes, written `2026-10-15 01:45:41` local = `2026-10-14T19:45:41Z`, one minute after Arm 3 finished, SHA-256 `6b73bc8bb9bbdc339c3c81d6ef46a36ceb144703436931f76429756fa7e02bb1`.
+**It is UTF-16LE with a byte-order mark**, because the step that wrote it redirected a native command's output in Windows PowerShell 5.1; it reads as text only when decoded as UTF-16, and a `grep` or `Select-String`
+for `PASS` over it would find nothing whether or not the word were there.
+
+### The report's figures, in sample and out of sample, as printed
+
+| | 0.05% | 0.66% | 1.20% |
+|---|---|---|---|
+| in sample: trades / net P&L / gross P&L | 47,358 / -9390.12 / -2970.52 | 47,358 / -9520.56 / -3695.81 | 47,358 / -9612.50 / -4251.89 |
+| in sample: profit factor net / gross | 0.3779 / 0.7040 | 0.3360 / 0.6213 | 0.3007 / 0.5542 |
+| in sample: net per-trade return, mean (95% interval) | -0.2961% (-0.3034, -0.2888) | -0.3219% | -0.3446% |
+| in sample: equity from 10,000 to | 609.85 | 479.42 | 387.48 |
+| **out of sample (a straddling run's section): equity from / to** | 609.85 / 255.46 | 479.42 / 255.21 | 387.48 / 255.11 |
+| out of sample: trades / net P&L / profit factor net | 15,438 / -354.42 / 0.2721 | 10,879 / -224.23 / 0.2711 | 7,041 / -132.38 / 0.2634 |
+| out of sample: max drawdown of DAILY CLOSES | 0.5811 | 0.4677 | 0.3416 |
+| whole run: per-bar max drawdown (R-AJ) | 0.9745 | 0.9745 | 0.9745 |
+| **S7 PREVIEW, recorded under R-BW as not S7's figures:** regimes with net P&L > 0 | 0 of 3 | 0 of 3 | 0 of 3 |
+
+### P115 Step 1: measurements over the copies, each against its prediction
+
+**1a. The sizing floor** (`step1a.py`, SHA-256 `89ca9d9189263715b38969e723935521d5195ceb953957473a30dec517093396`; output `step1a_out.txt`, `b24f7ea890b3e59d695d0777e9bc3ba40ca471ed26db318eb8d45f639d426090`). Every risk-stage refusal in the
+logs is one of two: a `CLOSE` refused `nothing_to_close` (no entry; in sample 1,312 BTC and 1,597 ETH, the same in every arm) and a `BUY` refused `size_not_tradeable`, whose reason reads *"no trade (fixed_fraction): notional
+# at # below min_notional #"*. There is no in-sample `size_not_tradeable`. The other entry losses are the 876 fill-time FOK refusals the executor counts (`entries_refused`, price above the limit), found as BUY intents with no
+trade row (877 in Arm 1: the 876 and the one ETHUSDT position still open at the end), and the 41 `buy_refused_bars_gap` events, all before the boundary (none in the window). **The out-of-sample BUY signals number 20,242 in
+every arm** (approved plus refused at the sizer, a check that the three logs agree).
+
+| Quarter | 0.05%: approved / refused / quarter-end equity | 0.66% | 1.20% |
+|---|---|---|---|
+| 2024Q1 | 1850 / 0 / 551.54 | 1850 / 0 / 431.84 | 1850 / 0 / 348.10 |
+| 2024Q2 | 1866 / 0 / 494.60 | 1866 / 0 / 386.65 | 1866 / 0 / 311.41 |
+| 2024Q3 | 1851 / 0 / 447.00 | 1851 / 0 / 348.30 | 1772 / 79 / 281.71 |
+| 2024Q4 | 1832 / 0 / 405.92 | 1832 / 0 / 315.68 | 850 / 982 / 268.41 |
+| 2025Q1 | 1777 / 0 / 367.18 | 1564 / 213 / 288.23 | 500 / 1277 / 259.46 |
+| 2025Q2 | 1818 / 0 / 331.91 | 1260 / 558 / 267.56 | 148 / 1670 / 256.26 |
+| 2025Q3 | 1839 / 0 / 300.21 | 202 / 1637 / 264.22 | 15 / 1824 / 255.96 |
+| 2025Q4 | 1624 / 244 / 272.10 | 250 / 1618 / 259.05 | 22 / 1846 / 255.48 |
+| 2026Q1 | 603 / 1234 / 262.01 | 104 / 1733 / 257.38 | 8 / 1829 / 255.34 |
+| 2026Q2 | 278 / 1557 / 256.80 | 79 / 1756 / 255.48 | 9 / 1826 / 255.13 |
+| 2026Q3 | 101 / 1768 / 255.46 | 21 / 1848 / 255.21 | 1 / 1868 / 255.11 |
+| total | 15,439 / 4,803 (23.73%) | 10,879 / 9,363 (46.26%) | 7,041 / 13,201 (65.22%) |
+
+"Approved" counts BUY intents dispatched; the refused column is `size_not_tradeable`. First refusal: **Arm 3 `2024-09-19T14:11:59Z`** (BTCUSDT, notional 4.95858 at 61,982.25), **Arm 2 `2025-01-31T21:42:59Z`** (4.9980825 at
+99,961.65), **Arm 1 `2025-10-02T20:14:59Z`** (4.7354008 at 118,385.02). The lowest daily-close equity in any arm is **255.11** (Arm 3, `2026-09-25`), so no arm's account ever closed a day below 250. **The floor is price-dependent
+and above 250** (`step1a_floor.py`, `5ea68c0cfcefa266d60e801271478a4fc4ac41824afdaf1edee04ea7893bae14`, output `db70d590472604e97499bf510e70e9f84e6b2c16a353523ae5f2c272c20f445e`): the BTCUSDT lot step is 0.00001 and the minimum
+notional 5, so a 2% entry is untradeable below `ceil(5 / (price x 0.00001)) x 0.00001 x price / 0.02` of equity, which is 295.96, 299.88 and 278.92 at the three first refusals, 270.00 at a price of 60,000 and 250.72 at a 2017
+price of 4,322.71. The refused notionals are 4, 5 and 8 lots of 0.00001. Trades kept being entered after the first refusal (2,569, 2,868 and 1,708 in the three arms), small ones, while the equity decayed toward the floor.
+
+**1b. Gross against net, in sample** (`step1bc.py`, SHA-256 `24fc7e1b5f2f6d503fe6f93cfd165aafb5a4b5a6b9ba2973b75541f3c8cc74e7`; output `step1bc_out.txt`, `cafe96a858a08b2548554a7fffe40e7ec7905736a89a01181061d1e7247a4097`).
+The instrument is proved against the report: Arm 1's in-sample net mean -0.2961% with the interval (-0.3034, -0.2888) over 47,358 trades is the report's own. A trade's gross result is `exit_gross - entry_notional`, its net result
+`realised`, and a return is the result over the entry quote total in percent.
+
+| In sample | 0.05% | 0.66% | 1.20% |
+|---|---|---|---|
+| gross win rate | 24.97% (11,825) | 24.97% (11,825) | 24.97% (11,825) |
+| net win rate | 15.37% (7,279) | 15.37% (7,279) | 15.37% (7,279) |
+| gross mean return (95% interval) | -0.0964% (-0.1037, -0.0891) | -0.1222% (-0.1293, -0.1150) | -0.1450% (-0.1521, -0.1379) |
+| net mean return | -0.2961% | -0.3219% | -0.3446% |
+| gross P&L / net P&L | -2970.52 / -9390.12 | -3695.81 / -9520.56 | -4251.89 / -9612.50 |
+| profit factor gross / net | 0.7040 / 0.3779 | 0.6213 / 0.3360 | 0.5542 / 0.3007 |
+
+The three arms hold the SAME 47,358 trades: symbol, signal bar, entry bar, exit bar, exit kind and exit time are equal row for row, and the entry price too; the quantity differs in 47,350 rows (the equity paths differ) and so do the
+exit prices. **The census of record** (the capture whose SHA-256 is `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`, section 19 of this ledger: 165 Testnet bookings in 21 days) gives, gross of fees: all bookings win rate
+34.5%, mean -0.0641% (95% interval -0.2223%, +0.0941%), profit factor 0.75; strategy `CLOSE`s only (154) win rate 35.1%, mean +0.0050% (-0.0602%, +0.0702%), profit factor 1.04; protective legs only (11) win rate 27.3%, mean
+-1.0320%. The backtest's `CLOSE`-only in-sample figures are a gross win rate of 24.13% and a mean of -0.1301% (-0.1349, -0.1253), below the census interval's lower end of -0.0602%; the backtest charges 0.05% slippage on each
+side of a trade, which would account for about 0.10 of that 0.13 and is a reasoned attribution, not a measured one.
+
+**1c. Exits in sample by kind** (the same script and output; the counts and the `CLOSE` figures are equal in all three arms):
+
+| Exit kind | Count (share) | Net mean return, 0.05% / 0.66% / 1.20% | Gross mean, same order |
+|---|---|---|---|
+| `close` | 45,370 (95.80%) | -0.3298% / -0.3298% / -0.3298% | -0.1301% / -0.1301% / -0.1301% |
+| `stop_loss` | 1,109 (2.34%) | -2.1676% / -2.7647% / -3.2932% | -1.9698% / -2.5674% / -3.0965% |
+| `take_profit` | 879 (1.86%) | +3.8020% / +3.1685% / +2.6077% | +4.0058% / +3.3717% / +2.8103% |
+
+No stop was a winner (0 of 1,109) and every take-profit was (879 of 879). The take-profit mean falls as the arm's slippage rises, as it must: `stop_slippage_percent` applies to both protective legs (the committed config's own
+comment).
+
+**1d. The frozen `down_intervals`** (`scripts/s4_compare.py` line 536, `resumed = first_pass.get(after, first[after])`), over section 49's log copy (SHA-256 `3af6327d3cae1616a0882dff9f9d1f331cc9706a74470d1db1271ba6a50ae5da`):
+
+| pid | first line | first `reconciliation_pass` | last line | the interval before it ends at |
+|---|---|---|---|---|
+| 27460 | `2026-10-10T05:58:02Z` | none | `05:58:02Z` | its first line |
+| 27176 | `05:58:16Z` | none | `05:58:17Z` | its first line |
+| 16076 | `06:05:20Z` | `06:48:00Z` | `2026-10-12T04:17:43Z` | **its first pass**, 42 min after its first line |
+| 22304 | `2026-10-12T19:17:35Z` | `19:20:01Z` | `2026-10-13T06:54:01Z` | **its first pass**, 2 min 26 s after its first line |
+| 3444 | `2026-10-13T07:00:35Z` | none | `07:00:48Z` | its first line |
+| 25352 | `2026-10-14T06:34:32Z` | none at the copy | `06:34:37Z` at the copy | its first line, at the copy |
+
+**The rule the code applies: an interval ends at the next process's first reconciliation pass if it logged one, and at its first line if it did not.** It is in the function's docstring too. **`M5m-301`'s text** (the commit
+message of `af51911`) named the pass branch and its REASONED effect after a restart with no open position, and omitted the first-line branch: it was incomplete, not wrong, and the 49.7-minute and 902.3-minute intervals it
+and sections 43 and 46 describe are the pass branch at work. **Section 49's sentence** that the function "ends an interval at the next pid's FIRST line" described the no-pass branch alone, true of pid 25352 at the copy
+because it had no position to reconcile; **the interval it quotes, ending `06:34:32Z`, will end at pid 25352's first pass in any later copy** (not re-run: the S4 log was not touched). The P114 H6 prediction that the figure
+"extends past 06:34:37Z" was therefore the effect of a pass the process had not yet logged.
+
+### Files
+
+| File (under `F:\trading bot\scratch\p115\` unless named) | SHA-256 |
+|---|---|
+| `predictions_halts.txt` | `e64abc611dffde0b18f276ea471adaf921f02599fc67e75bd18bad3c52b02b76` |
+| `predictions_c1.txt` | `7e7a746e982a094024fde98acc639b643291361d36ccfeb61c37dd85eeb9cef2` |
+| `gate_h3.txt` | `54d2933a064e4b9c5a715077e8ce1d512bd94aaef4534a884789355d03cde3ef` |
+| `findings_h4.txt` | `5f18db4c6f794c085d9dbc954ad4a7de9dd065da601e98494553c09473ac0b4c` |
+| `s5_report.txt` (UTF-16LE) | `6b73bc8bb9bbdc339c3c81d6ef46a36ceb144703436931f76429756fa7e02bb1` |
+| `runs\...\backtest.log`, Arm 1 / Arm 2 / Arm 3 / aborted / smoke | `970168f8dc4f94a4a4279c483bef2accc544a3b19861cc418577deb692d0c1b1` / `db0ef80810bc5a6c977d82d85bb5055951eb843f71e21a5f08d805ed9307bf21` / `9b897b70690baf8a0366526971f543ea18160991b6368251d3d1ea68a95df930` / `6f78642cf83eab166828608c16fde14e773024e993192942cf9c8ddd525d3925` / `61768a1ea3deba91b5cec444d35f254a0ace6fbee7280d51064c77d9755ea10e` |
+| `runs\...\trades.csv`, Arm 1 / Arm 2 / Arm 3 | `1f8fc37c7df5b5534fa97529b73a28bd9f5186c5e125b9730ab80aad891f648b` / `d35838a74ee2faf915da4988a3a05dcecccc681ac2ee38fc7132911ff3fafb97` / `4c54d6e6a89c41c3a710383a71182860fcdbcc74cf3f574aec6be278ee53b1c8` |

@@ -1410,6 +1410,18 @@ takes and the bot did not is a finding about one of them.
 >
 > **Where each is carried out.** R-BU: `docs/RUN_LEDGER.md` section 49, which holds the three owner steps, the sale as the venue records it (read-only, at `2026-10-14T06:42:28Z`: order 2272092, `FILLED`, 0.68840000 for 1723.64345600 USDT in one fill at 2503.84, no commission), the release's store digests as the owner gave them, and the restart record R-BN asks for. R-BV: U10 below. **What stops being true:** `docs/RUN_LEDGER.md` section 46's state table (ETH held, the record unreleased, no bot running) describes `2026-10-14` at about `04:xx Z` and nothing later; it is an observation and is left as written. Nothing in this file says the S4 run is stopped. **What survives:** R-BN, R-BO, the S4 pre-registration and its clock (downtime is excluded on both sides and never moves the cap or the earliest stop), and `scripts/s4_compare.py` as frozen.
 
+> **ANNOTATED AT M5m P115 (C1), BY THE OWNER'S RULINGS R-BW AND R-BX.** The rulings, verbatim:
+>
+> R-BW: "An out-of-sample figure used for S7 comes only from a run whose window starts at 2024-01-01 with the configured initial balance. The out-of-sample section of a run that straddles the boundary carries in-sample equity and is not comparable with S7's thresholds. S5's S7 preview is recorded as such."
+>
+> R-BX: "S5 is complete. The shipped sma_crossover 20/50 on BTCUSDT 1m and ETHUSDT 5m loses over the in-sample window both gross and net of fees, in every stop-slippage arm, confirming the census's prediction. It is not an S6 candidate."
+>
+> **Where each is carried out.** Both are annotated at the items they touch, S5 and S7 below, and `docs/RUN_LEDGER.md` section 50 holds the runs, the report and P115's measurements. `docs/research/LOG.md` Entry 2 records the read.
+>
+> **One thing the ruling's reader should know and the ruling does not say: the S7 preview in `s5_report.txt` is the report's last section for each arm, and its figures are not S7's.** R-BW is why, and section 50 measures how much it matters: the out-of-sample section of each straddling run starts at 609.85, 479.42 and 387.48 USDT (6.1, 4.8 and 3.9 percent of the 10,000 initial balance), and the sizer refuses 23.7, 46.3 and 65.2 percent of its entry signals because the account is too small to size a tradeable lot.
+>
+> **THE FROZEN `down_intervals`' RULE, AND `M5m-301`'s TEXT (P115 Step 1d).** `scripts/s4_compare.py`, `down_intervals`, line 536: `resumed = first_pass.get(after, first[after])`. An interval ends at the next process's first `reconciliation_pass` if that process has logged one, and at its first line if it has not (its docstring says so: *"A process that never reaches a pass is taken to have resumed at its first line"*). Measured over `docs/RUN_LEDGER.md` section 49's log copy: pids 16076 and 22304 had passes (`06:48:00Z`, `19:20:01Z`) and their intervals end there; pids 27460, 27176, 3444 and 25352 had none and theirs end at their first line. **`M5m-301`'s text, *"ends an interval at the next process's first reconciliation_pass ... after any restart with no open position the interval would run to the next entry's first pass"*, was not wrong; it was incomplete.** It named the pass branch and not the first-line branch, and its REASONED effect (the interval runs on to the next entry's pass) is what the function will return once pid 25352 logs a pass, which it had not at the copy (9 lines, no position). **So the figure section 49 quotes, an interval ending at `06:34:32Z`, is a fact about the log at `06:42:43Z` and will end later in any later copy.** Not re-run, because the S4 log is not touched. R-BN stands, and so does the frozen function; this is the rule it applies and nothing in it changes.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
@@ -1432,6 +1444,14 @@ than twenty days.
 > one portfolio. **What it implies, measured by P104 (`M5m-121`):** about 5.7 million bars
 > in one process, 3.2 to 3.7 h at the current per-bar cost and once per stop-slippage
 > level reported.
+
+> **ANNOTATED AT M5m P115 (C1), BY THE OWNER'S RULING R-BX: S5 IS COMPLETE, AND THE CENSUS'S PREDICTION IS CONFIRMED.** Three joint runs, one per stop-slippage arm, of the committed config over `[2017-08-17, 2026-10-01)`
+> from the deployment clone `F:\trading bot\backtest\67b7563de683` (code `67b7563de683cb64f500f0a0d2264f93e7f9089e`, config `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, verdict `accepted`), 3.54 to
+> 3.83 hours each, `docs/RUN_LEDGER.md` section 50. **In sample, over the same 47,358 trades in all three arms (the same entry bars, exit bars and exit kinds; only the sizes and the protective legs' fill prices differ), the strategy loses both gross and net:** gross P&L -2970.52, -3695.81 and -4251.89 USDT and net P&L -9390.12,
+> -9520.56 and -9612.50 at 0.05%, 0.66% and 1.20%; profit factor 0.7040, 0.6213 and 0.5542 gross and 0.3779, 0.3360 and 0.3007 net; a per-trade return of -0.0964%, -0.1222% and -0.1450% gross and -0.2961%, -0.3219% and
+> -0.3446% net, each interval excluding zero. The prediction, *"the number the census predicts to be negative"*, is confirmed, and **R-BX rules that the configuration is not an S6 candidate** (its timeframes are 1m and 5m;
+> `docs/research/LOG.md` Entry 2). **What stops being true:** *"S5 confirms or refutes it"* is settled; the text stands as the record of what was predicted. **What survives:** R-Y (S5 was one joint run per arm), the
+> S4 comparison, and the in-sample/out-of-sample split of the report, which R-BW qualifies at S7.
 
 **S6. Research, under a protocol fixed before the first result is seen.**
 
@@ -1521,6 +1541,15 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 > trade count is over the joint run. **What survives:** every threshold, the pass level
 > of 1.20%, the regime labels and the recording of the outcome; and the per-pair
 > breakdowns are reported beside the joint figure, not instead of it.
+
+> **ANNOTATED AT M5m P115 (C1), BY THE OWNER'S RULING R-BW: WHICH RUN MAY SUPPLY AN OUT-OF-SAMPLE FIGURE.** R-BW, verbatim: *"An out-of-sample figure used for S7 comes only from a run whose window starts at 2024-01-01
+> with the configured initial balance. The out-of-sample section of a run that straddles the boundary carries in-sample equity and is not comparable with S7's thresholds. S5's S7 preview is recorded as such."* **What it
+> means for S6, as the protocol already has it:** a candidate's out-of-sample read is exactly `[2024-01-01, 2026-10-01)` (PROTOCOL.md section 7) and the guard refuses any other window for a candidate, so a candidate's
+> run starts at 2024-01-01 with the configured 10,000 USDT by construction; only the baseline reads the whole history, and it is not a candidate. **What it means for S5's preview:** the `S7 PREVIEW` section of
+> `s5_report.txt` (profit factor 0.2721, 0.2711 and 0.2634 net; trades 15,438, 10,879 and 7,041; daily-close drawdown 0.5811, 0.4677 and 0.3416; 0 of 3 regimes positive, at 0.05%, 0.66% and 1.20%) is recorded as a
+> figure of a straddling run and is NOT an S7 figure. **MEASURED at P115 (`docs/RUN_LEDGER.md` section 50):** that section's starting equity is 609.85, 479.42 and 387.48 USDT, and the sizer refuses 23.7, 46.3 and 65.2
+> percent of its 20,242 BUY signals as too small to trade, from `2025-10-02`, `2025-01-31` and `2024-09-19`. **What stops being true:** nothing in S7's thresholds. **What survives:** every threshold, the 1.20% pass level, and
+> R-Y; the daily-close and per-pair figures in the report are labelled as what they are.
 
 ### What M5m does NOT do
 
