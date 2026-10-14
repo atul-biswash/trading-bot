@@ -1396,6 +1396,12 @@ takes and the bot did not is a finding about one of them.
 > `problems`, whose `trades.csv` has another row count, or a set that is two candidates, a repeated arm or an arm the protocol does not declare (exit 2). **What stops being true:** the C1 note's *"S5's report is C6"* is no
 > longer pending. **What survives:** every S7 threshold as ruled at P99, and the decision's being the owner's, made against the protocol.
 
+> **ANNOTATED AT M5m P113 (C7): R-BQ'S CANONICAL STORE EXISTS, AND IT IS FROZEN.** `F:\trading bot\store\mainnet-historical` holds the mainnet store (BTCUSDT and ETHUSDT, five timeframes, 1,100 CSV months,
+> and the `exchangeInfo` snapshots; not `_zips`), copied, verified month by month against the manifests (0 mismatches, 0 problems from `HistoricalStore.verify`), and write-protected by an inheritable deny of write and
+> delete for the owner's account. A backtest clone reads it through `cmd /c mklink /J data\historical <store>`. `docs/RUN_LEDGER.md` section 48 holds the digests, the ACL, the tests that it refuses a write and a
+> delete, the junction check, and how to lift it. **What stops being true:** the C1 note's *"R-BQ: C7 builds the canonical store"* is no longer pending. **What survives:** the owner's steps (the clone, the junction, the
+> runs), which are theirs.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

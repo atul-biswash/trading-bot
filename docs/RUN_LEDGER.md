@@ -4704,3 +4704,128 @@ interval ends at the refusal's first line and not at any resumption. The outage 
 | `down_intervals_after_shutdown_out.txt` | `58136c29f17fe4d8c775ba0ce3c8b0d6ac77bac0c5da04cf5bcc9dba5b9c2369` |
 | `restore_c2b.py` (C2b's script edit, reported in its message) | `b29e1e98d009861c8786bd5a9eeb1a8d64a6a4b8744d9b189e91b3dc99196760` |
 | `msg_c2b.txt` | `2181bbaf7f72678d2e53823e69ba4a401299bf13e9c4abbf66f0d267c470f71c` |
+
+## 47. M5m S5/S6: the Q2 mutation survey of the research-protocol guard, and what its harness taught (P113 C4)
+
+Recorded here as an observation of 2026-10-14; the table of results is in the message of `478a746`.
+
+- **Where.** A detached worktree at `caa75cb` under `F:\trading bot\scratch\p113\survey\wt_c4`, outside the repository, with the ten C4 files copied in and shown SHA-256-equal; removed afterwards
+  (`git worktree list` shows the main worktree only). The harness was the worktree's own `scripts/mutation_survey.py`.
+- **The import location was proven on every outermost session** by a pytest plugin (`survey_probe.py`) that raises if `trading_bot`, `tests` or `trading_bot.backtesting.protocol` resolve outside the worktree. The
+  first two baselines failed four `tests/unit/test_mutation_survey.py` tests with pytest exit 3: that file starts pytest sessions of its own, which inherit `PYTEST_ADDOPTS` and `PYTHONPATH`, set
+  `PYTEST_CURRENT_TEST` and **import the development tree even inside a worktree** (`probe.log` and `probe2.log` show their `trading_bot` resolving to `F:\trading bot\files\...\src`). Those nested sessions test throwaway
+  targets and are not the survey's; the probe now judges only a session without `PYTEST_CURRENT_TEST` (`M5m-325`).
+- **The unmutated baseline in the worktree, no `.env`:** 3703 passed, 4 skipped, exit 0, in 122.01 s (`baseline3.txt`).
+- **Seventeen mutations, 2026-10-14T04:51:29Z to 05:27:40Z: 49 kills predicted and 49 observed, every killing test the one named in the predictions, no crash, no abstention that was not declared.** The twelve in
+  `protocol.py` killed 3, 3, 3, 8, 5, 3, 4, 3, 2, 1, 4 and 2; the four in `main.py` 1, 2, 0 (equivalent, `H3`) and 2; the one in `engine.py` 3.
+
+| File (under `F:\trading bot\scratch\p113\` unless named) | SHA-256 |
+|---|---|
+| `predictions_c4_survey.txt` | `7c7798ddbbd493d2c38beaeae32edc67cba338e1a0739f8a103459d913e7a0d6` |
+| `survey\spec_protocol.json` | `aec5c9ad73ba55110e8f8341b7f89296205606ef3691deb5b5ff5c1863a5f1aa` |
+| `survey\spec_main.json` | `6f06396b5a9998ae6c66e41c51ee98cb230ee9ebd93078325cb484ed2787880b` |
+| `survey\spec_engine.json` | `06d7d17c708cee19c846cdd4e7a84a7f2469ea88862c9fa70cfab025c9d881cf` |
+| `survey\survey_probe.py` | `4900f3425f1952ae56bf8e1c6c101014fa8c5456f9761d8195f925d7d982729d` |
+| `survey\baseline3.txt` | `5ef55420eef92913cb33dca3c0d0dfe10d8c33c57f966281cab0729899b5cd98` |
+| `survey\result_protocol.txt` | `25a7b042bfcac28798c5e429af8f76409efd0593c60e5e545f37404c2a6f1375` |
+| `survey\result_main.txt` | `e71e469882c26427621fd092a93da37827d62faf248ae431cad931d2e943180d` |
+| `survey\result_engine.txt` | `f8f5ac388d605e900343dfaa98a61ad6e387e6d01f29d7fda1686128a337f650` |
+
+## 48. M5m S5/S6: the canonical frozen mainnet store, copied, verified and write-protected (P113 C7, R-BQ)
+
+R-BQ, as the owner ruled it: backtest clones read the mainnet store through a directory junction to ONE canonical frozen store, with an ACL denying write and delete. This section records that store. It is
+an observation of 2026-10-14, 10:55 to 11:20 local (04:55 to 05:20Z); predictions were written before the copy (`predictions_c7.txt`, SHA-256
+`6a9790e94ec675f115d34de6e11838355b687d92c704bbe7819ba2e7d8cb050e`).
+
+**Where and what.** `F:\trading bot\store\mainnet-historical`, copied by `robocopy /E /COPY:DAT` from `data\historical` of the development tree: `BTCUSDT` (559 files, 558.76 MB), `ETHUSDT` (559 files,
+538.11 MB) and `_exchange_info` (8 files, 15.1 KB; both the `mainnet` and the `testnet` snapshots, of which a backtest reads only the environment its config names). **`_zips` (542 MB of downloaded archives) is not
+copied**: a backtest never reads it. The development store's root `.gitkeep` is not copied. In total **1,126 files, 1,150,169,679 bytes, 1,100 CSV months**, the S5 series holding 5,725,299 rows (BTCUSDT 1m 4,767,676 +
+ETHUSDT 5m 957,623).
+
+**Verified, by a read-only tool run on the source and on the copy (`store_check.py`, SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592`):**
+
+| Check | Source (`data\historical`) | Canonical copy | After the ACL |
+|---|---|---|---|
+| files, excluding `_zips` | 1,127 (the 1,126 and `.gitkeep`) | 1,126 | 1,126 |
+| CSV months hashed against their manifest's `csv_sha256` | 1,100 of 1,100 | 1,100 of 1,100 | 1,100 of 1,100 |
+| mismatched / missing / extra | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| `HistoricalStore.verify` problems over the 10 series | 0 | 0 | 0 |
+| snapshots against their `.sha256` | 4 of 4 | 4 of 4 | 4 of 4 |
+| inventory digest (SHA-256 of every `path size sha256` line) | `e010765d...4799` (with `.gitkeep`) | `6167e1693a486e6666686cda6cd5082d41320dd39af74bac88bbb64c81a3e116` | the same |
+
+The copy's per-file inventory (`c7_canonical_inventory.jsonl`, 1,126 lines of path, size and SHA-256) is **equal** to the source's inventory minus `.gitkeep`, by a dictionary comparison, and the inventory taken after
+the ACL is byte-identical to the one taken before it (SHA-256 `2e152a5d9527d705d7c8e1c42070894fd31d477aff5e0b87631ff89263248018` for both).
+
+**The descriptive files' digests** (the manifests and registries a month is held to, and the snapshots a backtest sizes with; identical in the source and the copy):
+
+| SHA-256 | File under the store root |
+|---|---|
+| `39247bf6d4a3281a1de88f367f316bdf6fd94de276a9f8ba03ca830930a1ce04` | `BTCUSDT/1d/MANIFEST.jsonl` |
+| `4f549ffedaf7ed55596a389b028fc71db620d3c687d53a8a56a351ab3e34887d` | `BTCUSDT/1h/MANIFEST.jsonl` |
+| `16e1919645f100937f2894d5467954b9c4d2ad38d2b9732d1d552745364de1f8` | `BTCUSDT/1m/MANIFEST.jsonl` |
+| `5351a4ce959a9b81a490af2f674fc05e44e549241596eed977159a5f244383ce` | `BTCUSDT/4h/MANIFEST.jsonl` |
+| `6e748f83f6378121a07b5dba0ff8d71f4821626bceb2242b6ef2b4691acff4f5` | `BTCUSDT/5m/MANIFEST.jsonl` |
+| `e456846220ef3ffb47107769a391082ab4404d7fc884f657a00f367616d54645` | `ETHUSDT/1d/MANIFEST.jsonl` |
+| `71d0f1e99ef2bcc68a042e4866e5df7345e36034adb047c0a90789e67dc907b2` | `ETHUSDT/1h/MANIFEST.jsonl` |
+| `1cdca7c3f0d28fa7688146f632aed6aad787364e7a37f911f67a46933bbba5d9` | `ETHUSDT/1m/MANIFEST.jsonl` |
+| `f650f94bdf4c4bb5545efe1ff62d525f3d70584ccb9aba3e4182874b05aedb82` | `ETHUSDT/4h/MANIFEST.jsonl` |
+| `e9b879dffe0932ccf7f717c81276656f1fe21fd398a6a5164f72b6451dbaf1e6` | `ETHUSDT/5m/MANIFEST.jsonl` |
+| `db69e0ba89c12c9dc2e4d9a071ca6413c9016cd71d6ed8cd2c12a6a16f8ae4d3` | `BTCUSDT/1h/IRREGULAR.jsonl` |
+| `496b2fd52dbac04af2b7b79e1358965389063b78ac2c75f67d0800e26919d8f7` | `BTCUSDT/1m/IRREGULAR.jsonl` |
+| `7c4ee9c601d1188f0dc9ec5436233e9391bd0c266156313d87c916d5656f7b9f` | `BTCUSDT/4h/IRREGULAR.jsonl` |
+| `0cb2068f6e53ea73e645a1729a76f6e00be6c681a51c7f948cbe79cff3f2b1d1` | `BTCUSDT/5m/IRREGULAR.jsonl` |
+| `ffeb425a48ab489a5de14ecb74bafe56023c7c48fe222492952d85a519dcd8a5` | `ETHUSDT/1h/IRREGULAR.jsonl` |
+| `13b340b18a72b143cbc344ea22042f87602192e539c702e78b2d1b2f395e62de` | `ETHUSDT/1m/IRREGULAR.jsonl` |
+| `e81691cbb703c68c0c6fb43c73447ba91a945f056512130230386f0b7b8ebf6c` | `ETHUSDT/4h/IRREGULAR.jsonl` |
+| `76e237f0c3d23ff3ff08ef581cfe007f595add2c8ee5536d4e00fe8fa7b51f8d` | `ETHUSDT/5m/IRREGULAR.jsonl` |
+| `9cf9d5446e7f83508b445a825d2cf776276a8f528ca9313c04e92eeb3d5c0591` | `_exchange_info/mainnet/BTCUSDT.json` |
+| `9dc83b78736d16fa790cf559aac0c90a15c902498b257e77aa743fbc0dd037fe` | `_exchange_info/mainnet/BTCUSDT.json.sha256` |
+| `55c2038ade11928a9e7d27f776bebe37c563ce346682daaf251ea1881090db75` | `_exchange_info/mainnet/ETHUSDT.json` |
+| `ec7e35182c2a900afdcf739d244528d504c5e82db8bca70ec31ec2d38d51b9c4` | `_exchange_info/mainnet/ETHUSDT.json.sha256` |
+| `40e24c66110ba645ef49ca595618321fdbe2a36f9eab9638eea564dd8b797dc7` | `_exchange_info/testnet/BTCUSDT.json` |
+| `d1bdd4fb10bcbf3ba7efb6001f4296d64757f66420c3fe5f230a0ee709186e29` | `_exchange_info/testnet/BTCUSDT.json.sha256` |
+| `87e5095e0e177267d7fe039b8ce1925c8e07903a0f64211c2b948f82705777cc` | `_exchange_info/testnet/ETHUSDT.json` |
+| `809d70aa9228553b1b59e5d1379eef8736b3df219df5bd3eb2bf97ffffd81388` | `_exchange_info/testnet/ETHUSDT.json.sha256` |
+
+**The ACL.** One entry on the root, inheritable to every file and folder under it: **DENY** to `ATUL\User` (SID `S-1-5-21-1869652020-2349085804-1297793637-1001`) of `WriteData, AppendData,
+WriteExtendedAttributes, WriteAttributes, Delete, DeleteSubdirectoriesAndFiles` (SDDL mask `0x10156`). Read, execute, `ReadPermissions` and `Synchronize` are not denied, so the store can be read, hashed and walked.
+The inherited entry is present on a nested CSV (`D;ID;DCLCRPDTCRSD`) and on a nested directory (`D;OICIID;DCLCRPDTCRSD`). **MEASURED, with the tests run on 2026-10-14:**
+
+| Attempt | Result |
+|---|---|
+| create a file in the root | `UnauthorizedAccessException` |
+| create a directory in the root | `UnauthorizedAccessException` |
+| append to a CSV | `UnauthorizedAccessException` |
+| overwrite a CSV | `UnauthorizedAccessException` |
+| delete a CSV | `UnauthorizedAccessException` |
+| rename a CSV | `UnauthorizedAccessException` |
+| delete a directory tree (`_exchange_info\testnet`) | `UnauthorizedAccessException` |
+| read and hash a CSV | works; SHA-256 `3568FA29A6AD762CD43E9C7E3210418D65FE43B2B681BF8D67BD0F16BF461CBE` before and after |
+| the probe file and the probe directory | neither exists afterwards; 8 snapshot files intact |
+
+**Two things the first attempt taught, because the first ACL was wrong.** (1) `icacls ... /deny "User:(OI)(CI)(W,D,DC)"` also made every file UNREADABLE, by its owner too (`Get-FileHash`: *"Access to the path
+... is denied"*): icacls's simple right `W` includes `SYNCHRONIZE`, and a .NET or Python open of a file for reading asks for it (SDDL mask `0x110156` against the right one's `0x10156`). (2) `icacls ... /remove:d User` by
+BARE NAME printed *"Successfully processed 1 files"* and removed NOTHING (the deny entry was still there, and the specific-rights re-add merged into it); removing by SID worked. The ACE was then set through
+.NET's `FileSystemAccessRule`, naming the rights explicitly, and the tests above were run on that. **The canonical store was never writable by this process between the copy and the freeze beyond the copy itself.**
+
+**Read through a junction, as a backtest clone will** (`junction_check.py`, SHA-256 `0d76b28025689d0384207420086e5eba85395f34a0d9beef9ac1ad873fc36501`): `cmd /c mklink /J` from a scratch directory to the canonical
+store; `HistoricalStore.verify` for BTCUSDT and ETHUSDT at 1d and 4h returned no problem, and 10,080 BTCUSDT 1m bars were streamed for `2024-03-01` to `2024-03-08` (7 days x 1,440); `is_junction` true. The junction was
+removed with `cmd /c rmdir` and the canonical store was shown intact afterwards (1,126 files). `Remove-Item` on a path of this layout is blocked by the session's tool guard, which is left alone: the junction test above
+is the only deletion a junction ever needed.
+
+**To lift the freeze (owner only):** `icacls "F:\trading bot\store\mainnet-historical" /remove:d "*S-1-5-21-1869652020-2349085804-1297793637-1001"`. **Nothing in this tree changes the store after the freeze**, and a
+backtest clone reads it and writes only to its own `data\backtests` beside its junction.
+
+**The development store is untouched** (`data\historical`: no deny entry; the inventory was taken before the copy and the copy changed nothing in it), and the S4 clone `F:\trading bot\deploy\45547f107715` was not opened.
+
+| File (under `F:\trading bot\scratch\p113\` unless named) | SHA-256 |
+|---|---|
+| `predictions_c7.txt` | `6a9790e94ec675f115d34de6e11838355b687d92c704bbe7819ba2e7d8cb050e` |
+| `store_check.py` | `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592` |
+| `junction_check.py` | `0d76b28025689d0384207420086e5eba85395f34a0d9beef9ac1ad873fc36501` |
+| `c7_source_inventory.jsonl` (1,127 lines, with `.gitkeep`) | `af3b9fae07d94f984e16d3f3f3668433cd391ac439a01e0f982fcc5b9dd778f8` |
+| `c7_source_check.txt` | `ddcea3d7d8e7d25d9c81604dde8a2539455a783e3e10753535f81be0497f3b25` |
+| `c7_canonical_inventory.jsonl` (1,126 lines) | `2e152a5d9527d705d7c8e1c42070894fd31d477aff5e0b87631ff89263248018` |
+| `c7_canonical_check.txt` | `cee3b439c74259b323c06b1e1316371a1d6ca2001c467f1281c0fe69c118e46b` |
+| `c7_canonical_inventory_after_acl.jsonl` | `2e152a5d9527d705d7c8e1c42070894fd31d477aff5e0b87631ff89263248018` |
+| `c7_canonical_check_after_acl.txt` | `cee3b439c74259b323c06b1e1316371a1d6ca2001c467f1281c0fe69c118e46b` |
