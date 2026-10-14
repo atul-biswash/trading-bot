@@ -9,17 +9,23 @@ drift from the code that applies them.
 
 from __future__ import annotations
 
+import csv
+import dataclasses
 import hashlib
 import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
+from pathlib import Path
 from typing import Any
 
-from tests.unit.protocol_world import PROTOCOL, PROTOCOL_TEXT
+from tests.unit.protocol_world import PROTOCOL, PROTOCOL_TEXT, effective
 from trading_bot.backtesting import selection as sel
+from trading_bot.backtesting.candidate import candidate_digest, settings_digest
+from trading_bot.backtesting.engine import RUN_RECORD_SCHEMA
 from trading_bot.backtesting.metrics import TradeFacts
 from trading_bot.backtesting.protocol import Variant
+from trading_bot.backtesting.simulated_executor import SimulatedTrade
 
 D = Decimal
 UTC = timezone.utc
@@ -100,6 +106,95 @@ def full_ledger(
         for i, v in enumerate(PROTOCOL.variants())
     ]
     return sel.reconcile(PROTOCOL, found)
+
+
+GRID = Variant("sma_crossover", "1h", False, {"fast_period": "10", "slow_period": "50"})
+CLOSES = {"2017-08-17": "10000", "2020-01-01": "12000", "2023-12-31": "9000"}
+
+
+def make_run(
+    root: Path,
+    name: str = "20260101T000000000000Z-aaaaaaaaaaaa",
+    *,
+    variant: Variant = GRID,
+    **over: Any,
+) -> Path:
+    """A run directory written the way the engine writes one: ``run.json`` and ``trades.csv``.
+
+    ``over`` overrides: ``arm``, ``timeframe``, ``rows`` (``(symbol, entry, realised)`` triples), ``protocol``
+    (the whole block, or ``None``), ``schema``, ``flag`` (``evidence_eligible``), ``window``, ``problems``,
+    ``declared`` (the trade count the record claims), ``drawdown`` and ``log`` (the trade-log digest).
+    """
+    eff = effective(
+        name=variant.family,
+        params=dict(variant.params),
+        timeframe=over.get("timeframe", variant.timeframe),
+        arm=over.get("arm", "1.2"),
+    )
+    rows = over.get(
+        "rows",
+        [
+            ("BTCUSDT", "2018-03-01T00:00:00+00:00", "10"),
+            ("ETHUSDT", "2018-04-01T00:00:00+00:00", "-4"),
+        ],
+    )
+    protocol_block: Any = over.get(
+        "protocol",
+        {
+            "window_class": "in_sample",
+            "arm": over.get("arm", "1.2"),
+            "variant": {
+                "family": variant.family,
+                "timeframe": variant.timeframe,
+                "filtered": variant.filtered,
+                "params": dict(variant.params),
+            },
+        },
+    )
+    record: dict[str, Any] = {
+        "schema": over.get("schema", RUN_RECORD_SCHEMA),
+        "evidence_eligible": over.get("flag", True),
+        "provenance": {"verdict": "accepted"},
+        "window": over.get("window", {"start_date": "2017-08-17", "end_date": "2024-01-01"}),
+        "effective": eff,
+        "candidate_digest": candidate_digest(eff),
+        "settings_digest": settings_digest(eff),
+        "protocol": protocol_block,
+        "results": {
+            "trades": over.get("declared", len(rows)),
+            "trade_log_sha256": over.get("log", "e" * 64),
+        },
+        "equity": {"initial": "10000", "daily_closes": CLOSES},
+        "metrics": {
+            "max_drawdown": over.get("drawdown", "0.31"),
+            "overall": {"profit_factor_net": "0.8"},
+        },
+        "problems": over.get("problems", []),
+    }
+    directory = root / name
+    directory.mkdir()
+    (directory / "run.json").write_text(
+        json.dumps(record, sort_keys=True), encoding="utf-8", newline="\n"
+    )
+    names = [field.name for field in dataclasses.fields(SimulatedTrade)]
+    with (directory / "trades.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=names, lineterminator="\n")
+        writer.writeheader()
+        for symbol, entry, realised in rows:
+            gross = D(1000) + D(realised)
+            writer.writerow(
+                dict.fromkeys(names, "0")
+                | {
+                    "symbol": symbol,
+                    "entry_bar_open": entry,
+                    "exit_time": entry,
+                    "entry_notional": "1000",
+                    "entry_quote_total": "1000",
+                    "exit_gross": str(gross),
+                    "realised": realised,
+                }
+            )
+    return directory
 
 
 def with_selection(change: Any) -> str:
