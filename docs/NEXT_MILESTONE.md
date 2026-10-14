@@ -1361,6 +1361,15 @@ takes and the bot did not is a finding about one of them.
 > acts; and `--param fast_period=4.0` is refused, because a float for an integer period builds and then raises `TypeError` on every bar (`M5m-315`). **What stops being true:** `M5m-306`'s
 > *"the backtest command takes only --start, --end and --symbols"*; README's usage line (corrected in place). **What survives:** the config file stays as committed, and a run with no flag is the run it always was.
 
+> **ANNOTATED AT M5m P113 (C3a): THE PROTOCOL'S GUARD CORE EXISTS; ITS HOOK IS C4.** `src/trading_bot/backtesting/protocol.py` parses the declaration in `docs/research/PROTOCOL.md`
+> and a candidate's entry file, and `check_run` decides whether a run may proceed. A window wholly before `2024-01-01` needs nothing. A window that touches the out-of-sample window is
+> refused unless, in this order: the run's provenance verdict is `accepted`; an entry carries its candidate digest; the candidate is a point of a declared grid (or the declared baseline);
+> the window is exactly the declared one (`[2024-01-01, 2026-10-01)` for a candidate, the whole history for the baseline); the entry lists exactly the three arms and the run's arm is one;
+> the entry has not been read; and this clone holds no record of that candidate at that arm. Nine refusals, each named (`Refusal`) and each tested. **What stops being true:**
+> `docs/research/PROTOCOL.md` section 8's *"`protocol.py` reads the declaration below, and the `backtest` command refuses ..."* described a module that did not exist; the module exists,
+> and the command does not call it until C4. **Amendment 1 to the protocol** (named in its section 10, before any run) adds the declared costs and the `exchangeInfo` environment to the
+> declaration so that a candidate's costs are checked mechanically; no family, grid, boundary or arm changes. **What survives:** every ruling R-BN to R-BT and the 216 variants.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

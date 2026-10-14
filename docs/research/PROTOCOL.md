@@ -159,6 +159,11 @@ An amendment is a commit that edits this file, names the section and the reason,
 it could affect**. A run made before an amendment is not re-read under it. Nothing here is amended after
 a result of an affected family is seen: the family is closed instead, and the log records that.
 
+**Amendment 1 (P113 C3, section 11, before any run).** The declaration gains `costs` (section 3's fee,
+entry slippage and initial balance) and `exchange_info_environment`, so that the guard checks a candidate's
+costs mechanically instead of leaving them to the entry's author. No family, grid, boundary, arm or rule
+changes, and no run exists that it could affect.
+
 ## 11. The machine-readable declaration
 
 `protocol.py` reads only what is between the markers. The test `test_the_declaration_matches_the_tables`
@@ -176,6 +181,8 @@ pins that its families give the 216 variants of section 5.
   "filter": {"param": "trend_filter_period", "value": 200},
   "min_in_sample_trades": 100,
   "pairs": ["BTCUSDT", "ETHUSDT"],
+  "costs": {"fee_percent": "0.1", "slippage_percent": "0.05", "initial_balance": "10000"},
+  "exchange_info_environment": "mainnet",
   "families": [
     {
       "id": "sma_crossover",

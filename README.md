@@ -283,10 +283,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  187 files already formatted
-mypy                                   Success: no issues found in 98 source files
-pytest                                 3526 passed, 4 skipped
-                                       (3529 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  190 files already formatted
+mypy                                   Success: no issues found in 99 source files
+pytest                                 3629 passed, 4 skipped
+                                       (3632 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -295,9 +295,9 @@ pytest                                 3526 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `3526 passed, 4 skipped` on a machine without
-  them and `3529 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 3526 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `3629 passed, 4 skipped` on a machine without
+  them and `3632 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 3629 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -397,7 +397,7 @@ src/trading_bot/
                  · reconciliation · reconciliation_driver · close_plan
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
-                 · simulated_executor · regimes · evidence · candidate · overrides
+                 · simulated_executor · regimes · evidence · candidate · overrides · protocol
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
