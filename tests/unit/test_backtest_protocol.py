@@ -133,7 +133,7 @@ class TestTheRealDeclaration:
         assert PROTOCOL.arms == ("0.05", "0.66", "1.2")
         assert PROTOCOL.gate_arm == "1.2"
         assert PROTOCOL.pairs == ("BTCUSDT", "ETHUSDT")
-        assert PROTOCOL.min_in_sample_trades == 100
+        assert PROTOCOL.min_in_sample_trades == 250
         assert (PROTOCOL.filter_param, PROTOCOL.filter_value) == ("trend_filter_period", "200")
 
     def test_the_labels_digest_is_the_committed_labels_files(self) -> None:

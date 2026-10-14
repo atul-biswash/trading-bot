@@ -1432,6 +1432,38 @@ takes and the bot did not is a finding about one of them.
 >
 > **What this makes false, by content.** `docs/research/LOG.md` Entry 2's *"stays `pending` ... until then a fresh clone's guard would still allow a second read of the baseline"* was true of its instant and is followed by Entry 3. Nothing else in the documents says the entry is pending. **What survives:** every figure and ruling of the P115 block above, including R-BW's and R-BX's text.
 
+> **ANNOTATED AT M5m P117 (C1), BY THE OWNER'S RULINGS R-CA TO R-CJ.** The rulings, verbatim:
+>
+> R-CA: "The 'allowed at each arm' test's in-memory reset of the entry to pending (P116 C1) is ratified: its assertions are unchanged."
+>
+> R-CB: "S6 selects on per-trade returns, not on USDT P&L."
+>
+> R-CC: "A run whose per-bar maximum drawdown exceeds 0.95 is ruined and ineligible for selection. The initial balance stays at the configured 10,000."
+>
+> R-CD: "A variant is eligible for selection only with at least 250 in-sample trades."
+>
+> R-CE: "Selection uses the 1.20% stop-slippage arm only. The 0.05% and 0.66% arms run only in a candidate's out-of-sample read."
+>
+> R-CF: "Walk-forward is reported, not gated: four anchored folds, training on [2017-08-17, Y) and testing on calendar year Y, for Y = 2020 to 2023."
+>
+> R-CG: "All 216 declared variants, the 1d family included, are run and counted in S7's variant denominator."
+>
+> R-CH: "Sweep workers may run in parallel, provided the sweep first runs one variant serially and in parallel and the two trade-log digests are equal; otherwise it runs serially."
+>
+> R-CI: "The entries-directory test assertions select entries by id. That overturn is authorised under this ruling."
+>
+> R-CJ: "S7's profit factor test passes only if both profit factors are at least 1.3: the one from per-trade returns and the one in USDT. Both are printed."
+>
+> **Where each is carried out.** `docs/research/PROTOCOL.md` Amendment 2 (section 10) holds all ten verbatim; section 6 carries R-CB to R-CG as rules (the return profit factor and its tie-break, the ruin and trade-minimum
+> eligibility, the 1.20% arm only, the four anchored folds as a report, all 216 variants, the freeze) and section 7 carries R-CJ. The declaration's `min_in_sample_trades` is 250, and its new `selection` and `s7` blocks hold the
+> numbers. R-CA is the P116 C1 block above, ratified. R-CH is for `scripts/s6_sweep.py` (P117 C5) and R-CI for the tests (P117 C2). **In P117 C1 the one assertion R-CD overturns, in
+> `tests/unit/test_backtest_protocol.py::TestTheRealDeclaration::test_the_boundary_the_history_and_the_arms_are_the_rulings`, changed from `assert PROTOCOL.min_in_sample_trades == 100` to `== 250`**; a survey in a
+> disposable worktree shows it still kills (the commit message holds the table).
+>
+> **What stops being true, by content.** S7's bullet *"profit factor ≥ **1.3**"* and R-D's *"PF >= 1.3"* are now two tests that both must hold (R-CJ); the figure is unchanged. The P116 block's *"One change goes beyond
+> R-BY's letter and is the owner's to confirm"* is confirmed by R-CA. PROTOCOL.md's old section 6 (a 100-trade minimum, the profit factor in USDT, a per-cell log line for walk-forward) is replaced in place, and the amendment
+> records what it read. **What survives:** S7's other three thresholds, the pass level of 1.20%, the regime labels, the pooling of both pairs, R-BW, and every other line of S5, S6 and S7.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

@@ -10,9 +10,11 @@ restates none of them.
 the families (sma_crossover and rsi at 1h, 4h and 1d, each with and without the filter), the protocol's
 timing and S5's treatment (R-BT), the joint runs (R-Y), the three slippage arms with 1.20% as the gate
 (R-B2), the regime labels (R-AI, R-AT) and S7's thresholds (R-D). **Drafted here, and the owner's to
-overrule before the push** (nothing runs until it is pushed): the parameter grids (section 5), the
-selection rule and the walk-forward report (section 6), the in-sample trade minimum, and the entry file's
-shape (section 8). Each is marked DRAFTED where it appears.
+overrule before the push** (nothing runs until it is pushed): the parameter grids (section 5) and the
+entry file's shape (section 8). Each is marked DRAFTED where it appears. **Amendment 2 (section 10, P117)
+replaced the draft of the selection rule, the walk-forward report and the in-sample trade minimum
+(section 6) by the owner's rulings R-CB to R-CF, and added S7's two profit factors (section 7); R-CG
+runs and counts all 216 variants of section 5.**
 
 ## 1. The history and the two windows (R-BP)
 
@@ -89,30 +91,88 @@ window-only form, so the filter has no dependence on where the buffer starts (P1
 grid needs a protocol amendment committed first (section 10), and it adds its own variants to the
 denominator.
 
-## 6. Selection and the walk-forward report (DRAFTED)
+## 6. Selection and the walk-forward report (R-CB to R-CG, amendment 2)
 
 There are twelve **cells**: a family, a timeframe and a filter setting. For each cell:
 
-1. Every grid point is run once over the **in-sample window** at the **1.20% arm**, jointly (section 4).
-2. A point is **eligible** if its in-sample run has at least **100 trades**. A cell with no eligible point
-   has no candidate; that is recorded in the research log and nothing of it is read out of sample.
-3. **The cell's candidate is the eligible point with the highest net profit factor** over the whole
-   in-sample window at 1.20%. A tie to six decimal places goes to the point whose parameter tuple comes
-   first in the grid's declared order. Nothing is chosen by looking at the out-of-sample window.
-4. **Walk-forward (a report, not a second selection).** For the four anchored training windows ending
-   `2020-01-01`, `2021-01-01`, `2022-01-01` and `2023-01-01`, the same rule picks a point from the trades
-   whose entry is before the end, and that point's trades in the following calendar year give its forward
-   figure. All of it is computed from each point's single in-sample run, split by entry time: the account
-   state, the equity and the open-position limit carry across the splits, so a forward figure is an
-   approximation of a re-run and is reported as one. Per cell the log records the chosen point, its
-   forward net profit factor for each of 2020 to 2023, and how many of the four are above 1.
+1. **Every grid point is run**, all 216 variants of section 5 with the 1d family included (R-CG), **once
+   over the in-sample window `[2017-08-17, 2024-01-01)` at the 1.20% arm only** (R-CE), jointly (section 4).
+   The 0.05% and 0.66% arms run only in a candidate's out-of-sample read (section 7). `scripts/s6_sweep.py`
+   makes the runs, and every run's record names its variant (section 8); the selection reads those records
+   and nothing else.
+2. **The statistic is the return profit factor (R-CB).** A trade's *return* is its net realised result
+   divided by its entry quote total (the basis of R-AK). A point's **return profit factor** is the sum of
+   its positive returns over the absolute sum of its negative returns, over every trade of its in-sample
+   run. A run with no losing trade has none (the quotient is undefined) and is ineligible. The profit
+   factor in USDT is recorded beside it and **never selects**: on a compounding path it weights the early
+   trades by the equity they were sized from (P116 measured the first two years of S5 carrying 56.4% of
+   the absolute net result).
+3. **A point is eligible** only if all of these hold, and the reason it is not is recorded:
+   a. **not ruined (R-CC):** its run's per-bar maximum drawdown (R-AJ, the record's `max_drawdown`) is at
+      most **0.95**; a run above it is *ruined* and ineligible. The initial balance stays 10,000 USDT:
+      the untradeable-equity floor of a 2% entry is at most 312.29 USDT over the stored history (P116),
+      so no run within a 95% drawdown can have met it;
+   b. **at least 250 in-sample trades (R-CD)**, the run's trade count, both pairs together;
+   c. its return profit factor is defined.
+4. **The cell's candidate is the eligible point with the highest return profit factor.** A tie to six
+   decimal places goes to the point that comes first in the order `protocol.variants()` yields, which is
+   the grids' declared order. A cell with no eligible point has no candidate; that is recorded in the
+   research log, and nothing of it is read out of sample. **Every cell with a candidate is read**: no
+   candidate is dropped, and none is added, after the selection, by the walk-forward report or by anything
+   else. Nothing is chosen by looking at the out-of-sample window.
+5. **Walk-forward: reported, not gated (R-CF).** Four anchored folds, for Y = 2020, 2021, 2022 and 2023:
+   *training* is the trades whose entry bar opens in `[2017-08-17, Y-01-01)` and *testing* is those whose
+   entry bar opens in `[Y-01-01, (Y+1)-01-01)`. In each fold the rule of steps 2 to 4 picks a point from the
+   training trades alone, with the same 250-trade minimum (not scaled to the shorter window; the number of
+   eligible points is printed so a reader sees what the fold had to choose from). The ruin test of step 3a
+   cannot use a per-bar figure for a part of a run, so a fold uses the **daily-close drawdown** of the run's
+   equity over the training window, which can only under-detect the per-bar figure and is labelled as such.
+   Per cell the report prints, for each fold: the point picked (or none) with the count of eligible
+   points, its forward return profit factor and trades in year Y, and whether it is the cell's candidate;
+   and per cell how many folds have a forward return profit factor above 1. **It is computed from each
+   point's single continuous run, split by entry time**: the account state, the equity and the open-position
+   limit carry across the splits, so a forward figure approximates a re-run, and the report says so. It
+   removes no candidate, adds none and ranks nothing.
+6. **The freeze (the candidate's parameters are fixed before its first out-of-sample read).**
+   `scripts/s6_select.py` writes **one selection file**, the chosen point per cell with its evidence (the
+   run directory and the SHA-256 of its `run.json`, its statistic, its trades, the eligible count and the
+   reason for every ineligible point), and the owner commits it **unedited** with its SHA-256 recorded in the
+   research log. From it, **one entry per candidate** is committed with `status` `pending`, bound to the
+   candidate by its **candidate digest** (which holds the strategy, its parameters, the pairs and timeframe,
+   the costs and the config's digest), and **pushed before any out-of-sample read**. The out-of-sample
+   clone is built from that pushed commit, and the guard refuses a run whose digest has no entry
+   (`NO_ENTRY`): a parameter changed after the freeze is a different digest and has no entry. After the
+   three arms are read each entry becomes `read`, with `oos.records` holding the run directory and
+   the SHA-256 of the `run.json` of each arm.
+
+**What is pre-declared and what is chosen.** Pre-declared, in this file before the first S6 run: the
+families, timeframes and grids (section 5), the filter, the window and its boundary, the arm and the cost
+settings, the statistic and its tie-break, the eligibility rules and their numbers (0.95 and 250), the
+fold dates, S7's thresholds, and the freeze procedure. **Chosen by the data, mechanically**: the winning
+point of each cell (at most twelve), and the point each fold picks (a report). Nothing is chosen by a person
+after the data is seen, and the selection file is the committed record of what was chosen.
 
 ## 7. The out-of-sample read
 
 Each candidate is read **once**, as **three runs, one per arm**, over exactly
 `[2024-01-01, 2026-10-01)`. **A second read of a candidate is refused** (section 8). The twelve candidates
-therefore cost at most 36 out-of-sample runs. S7's figures and its decision are recorded in
-`docs/PHASE_HISTORY.md` at M5m's close, with the variant count of section 5.
+therefore cost at most 36 out-of-sample runs (fewer when a cell has no candidate, section 6 step 4). S7's
+figures and its decision are recorded in `docs/PHASE_HISTORY.md` at M5m's close, with the variant count
+of section 5, which is **216 whatever the selection left** (R-CG).
+
+**S7's tests (R-D, R-B2, R-CJ), applied to the 1.20% record of a candidate and to no other.** A candidate
+PASSES only if all of these hold, out of sample, net of fees and of the arm's stop slippage:
+
+- **both profit factors are at least 1.3: the one from per-trade returns and the one in USDT (R-CJ).**
+  Both are printed. The return profit factor is section 6 step 2's; the USDT one is the record's
+  `profit_factor_net`, over the run's trades from the fresh 10,000 USDT;
+- at least **100 trades**;
+- the per-bar maximum drawdown (R-AJ) is at most **0.20**;
+- a positive net result in at least **two of the three regimes**, counting complete quarters only (R-AT).
+
+The 0.05% and 0.66% records are printed for information and decide nothing. **An out-of-sample figure used
+for S7 comes only from a run whose window starts at 2024-01-01 with the configured initial balance
+(R-BW)**, and `scripts/s7_gate.py` refuses a record that does not.
 
 ## 8. How the protocol is enforced (R-BT, S6's "read once per candidate")
 
@@ -136,6 +196,9 @@ before it makes a run directory when any of these holds:
 again with its `oos` block after it. The sequence for a candidate: commit the entry with `status` `pending`
 and its in-sample evidence; push; clone; run the three arms; commit the entry again with `status` `read` and
 the three record digests. A clone of any later commit then refuses a second read, with no state outside git.
+A candidate's entry also carries a `selection` block holding the evidence of section 6 step 6; the guard
+reads the fields above and ignores that block, so it is the record of why the candidate was chosen and binds
+nothing.
 
 **S5 (R-BT).** S5 is recorded in the research log (`docs/research/LOG.md`) as **a full-history read of a
 non-candidate configuration**: the committed config, `sma_crossover` 20/50 on BTCUSDT 1m and ETHUSDT 5m,
@@ -147,11 +210,17 @@ the in-sample and the out-of-sample figures separately, at the boundary of secti
 
 - The guard cannot see a run made outside a clone of a pushed commit; such a record is not evidence
   (R-AR) and the out-of-sample window is refused to it outright.
-- The walk-forward figures are an approximation (section 6, step 4).
+- The walk-forward figures are an approximation (section 6, step 5): one continuous run split by entry
+  time, and a daily-close drawdown standing for the per-bar one inside a fold.
+- The selection statistic is a per-trade return, so it does not see how large each trade was; S7 also
+  requires the profit factor in USDT, and the two can disagree (P116 measured 0.2724 against 0.3007 on S5).
+- The 250-trade minimum is a constant-rate argument: S7's 100 trades over 1,004 days is about 232 over the
+  2,328 in-sample days, and a candidate's out-of-sample trade count is not guaranteed by it.
 - A per-bar out-of-sample drawdown (R-AJ) cannot be derived from a full-history record; the S5 report
   gives a daily-close drawdown for each window, labelled as such.
-- The grids, the selection rule and the 100-trade minimum are the reviewer's draft until the owner has
-  read them.
+- The grids (section 5) and the entry file's shape (section 8) are the reviewer's draft until the owner
+  has read them; the selection rule, the walk-forward report and the trade minimum are the owner's
+  (amendment 2).
 
 ## 10. Amendments
 
@@ -164,10 +233,36 @@ entry slippage and initial balance) and `exchange_info_environment`, so that the
 costs mechanically instead of leaving them to the entry's author. No family, grid, boundary, arm or rule
 changes, and no run exists that it could affect.
 
+**Amendment 2 (P117 C1; sections 6, 7, 9 and 11 and the intro; before any S6 run).** The owner's rulings,
+verbatim:
+
+- R-CA: "The 'allowed at each arm' test's in-memory reset of the entry to pending (P116 C1) is ratified: its assertions are unchanged."
+- R-CB: "S6 selects on per-trade returns, not on USDT P&L."
+- R-CC: "A run whose per-bar maximum drawdown exceeds 0.95 is ruined and ineligible for selection. The initial balance stays at the configured 10,000."
+- R-CD: "A variant is eligible for selection only with at least 250 in-sample trades."
+- R-CE: "Selection uses the 1.20% stop-slippage arm only. The 0.05% and 0.66% arms run only in a candidate's out-of-sample read."
+- R-CF: "Walk-forward is reported, not gated: four anchored folds, training on [2017-08-17, Y) and testing on calendar year Y, for Y = 2020 to 2023."
+- R-CG: "All 216 declared variants, the 1d family included, are run and counted in S7's variant denominator."
+- R-CH: "Sweep workers may run in parallel, provided the sweep first runs one variant serially and in parallel and the two trade-log digests are equal; otherwise it runs serially."
+- R-CI: "The entries-directory test assertions select entries by id. That overturn is authorised under this ruling."
+- R-CJ: "S7's profit factor test passes only if both profit factors are at least 1.3: the one from per-trade returns and the one in USDT. Both are printed."
+
+*What it changes.* Section 6 read the draft *"A point is eligible if its in-sample run has at least 100
+trades"* and *"the highest net profit factor"* (in USDT, by the record's `profit_factor_net`) and made
+walk-forward a per-cell log line; they are now the rules of section 6 steps 2 to 5, with the ruin test (R-CC).
+`min_in_sample_trades` is 250, where it was 100. Section 7 gains S7's two profit factors (R-CJ). R-CA, R-CH
+and R-CI govern code and tests, not this file, and are recorded here so the protocol holds every ruling that
+shaped S6's machinery. *What it does not change:* the families, grids, filter, boundary, arms, costs, joint
+runs, the read-once guard and S5's baseline. No S6 run exists that it could affect. The S5 records carry
+the earlier protocol digest and are not re-read under this amendment.
+
 ## 11. The machine-readable declaration
 
-`protocol.py` reads only what is between the markers. The test `test_the_declaration_matches_the_tables`
-pins that its families give the 216 variants of section 5.
+`protocol.py` reads only what is between the markers, and of that only the keys it knows. The test
+`test_the_declaration_matches_the_tables` pins that its families give the 216 variants of section 5.
+The `selection` and `s7` blocks (amendment 2) are not read by `protocol.py`, which ignores them; the
+selection and gate modules of the S6 tooling (P117 C3 and C7) read them and refuse a block that is missing
+or mistyped.
 
 <!-- protocol-json:begin -->
 ```json
@@ -179,7 +274,20 @@ pins that its families give the 216 variants of section 5.
   "arms_stop_slippage_percent": ["0.05", "0.66", "1.20"],
   "gate_arm": "1.20",
   "filter": {"param": "trend_filter_period", "value": 200},
-  "min_in_sample_trades": 100,
+  "min_in_sample_trades": 250,
+  "selection": {
+    "statistic": "return_profit_factor",
+    "arm": "1.20",
+    "ruin_max_drawdown": "0.95",
+    "tie_places": 6,
+    "walk_forward": {"train_start": "2017-08-17", "test_years": [2020, 2021, 2022, 2023]}
+  },
+  "s7": {
+    "profit_factor_min": "1.3",
+    "trades_min": 100,
+    "max_drawdown_max": "0.20",
+    "regimes_positive_min": 2
+  },
   "pairs": ["BTCUSDT", "ETHUSDT"],
   "costs": {"fee_percent": "0.1", "slippage_percent": "0.05", "initial_balance": "10000"},
   "exchange_info_environment": "mainnet",
