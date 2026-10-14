@@ -1388,6 +1388,14 @@ takes and the bot did not is a finding about one of them.
 > `tests/unit/test_trend_filter.py` builds all 216 declared variants through the registry, so the parameter the protocol declares is the one the strategies take. **What stops being true:** the prompt's
 > *"R-BS: C5"* is no longer pending. **What survives:** the filter's wording in `docs/research/PROTOCOL.md` section 5, which it implements as written, and S6's arming condition, which this does not fire.
 
+> **ANNOTATED AT M5m P113 (C6): S5'S REPORT EXISTS.** `scripts/s5_report.py RUN_DIR [RUN_DIR ...]` reads the run directories of one candidate, one per stop-slippage arm, through `load_eligible_record` with
+> `min_schema=6`, and prints in-sample and out-of-sample figures SEPARATELY, the trades split by the open of their entry bar at `2024-01-01` and the equity split by UTC day on the record's daily closes: trades, wins, net and
+> gross P&L, fees, profit factor (net and gross), the per-trade return and its 95% interval, per pair and per regime (from the committed labels, checked against the digest the record names), the maximum drawdown **of the
+> daily closes, labelled as such** (the per-bar R-AJ figure covers the whole run only and is printed once, labelled `WHOLE RUN`), Sharpe and Sortino, and an S7 preview of the four ruled quantities beside their thresholds.
+> **It prints no PASS, no FAIL and no INCONCLUSIVE**; a test searches the output for the words. It refuses, before any figure, a record that is not evidence, is below schema 6, has no `protocol` block, carries
+> `problems`, whose `trades.csv` has another row count, or a set that is two candidates, a repeated arm or an arm the protocol does not declare (exit 2). **What stops being true:** the C1 note's *"S5's report is C6"* is no
+> longer pending. **What survives:** every S7 threshold as ruled at P99, and the decision's being the owner's, made against the protocol.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
