@@ -4829,3 +4829,75 @@ backtest clone reads it and writes only to its own `data\backtests` beside its j
 | `c7_canonical_check.txt` | `cee3b439c74259b323c06b1e1316371a1d6ca2001c467f1281c0fe69c118e46b` |
 | `c7_canonical_inventory_after_acl.jsonl` | `2e152a5d9527d705d7c8e1c42070894fd31d477aff5e0b87631ff89263248018` |
 | `c7_canonical_check_after_acl.txt` | `cee3b439c74259b323c06b1e1316371a1d6ca2001c467f1281c0fe69c118e46b` |
+
+## 49. M5m S4: the interruption resolved by the owner, and the run restarted as pid 25352 (P114 C1, R-BU and R-BV, R-BN)
+
+Section 46 left the S4 run stopped, with 0.6884 ETH held and an ETHUSDT record that boot refused. This section is what happened next, read on `2026-10-14` from `06:38Z` to `06:45Z`. The S4 clone
+`F:\trading bot\deploy\45547f107715` was NOT opened for writing and nothing in it was touched but one share-mode copy of its log; no venue write was made; the Testnet key was used for GET calls only.
+
+**What the owner did (R-BU, verbatim in `docs/NEXT_MILESTONE.md`).** Three steps, in this order: (1) `scripts/clear_testnet_holdings.py --symbol ETHUSDT --execute` sold the 0.6884 ETH; (2) `scripts/release_position.py`
+released the ETHUSDT record at `2026-10-14T06:33:40Z`; (3) the bot restarted as pid 25352 at `2026-10-14T06:34:33Z`. The owner's console outputs for the three steps were not handed to this session; what is recorded
+below for step 1 is what the venue says, read independently, and for step 3 what the S4 log says.
+
+**Step 1, as the venue records it** (`h5_read.py`, GET only, at `2026-10-14T06:42:28Z`; ETHUSDT order history, 36 orders of which 9 are MARKET SELLs; this is the latest):
+
+| Field | Value |
+|---|---|
+| order id | `2272092`, client id `x-HNA2TXFJddcecaa79e3ab314575c01` (the library's default prefix, not this bot's `tb1-` scheme) |
+| time | `2026-10-14T06:32:11.472Z`, one minute 29 s before the release and 2 min 22 s before the restart |
+| status | `FILLED` |
+| `origQty` / `executedQty` | `0.68840000` / `0.68840000` |
+| `cummulativeQuoteQty` | `1723.64345600` USDT |
+| fills | 1: price `2503.84000000`, qty `0.68840000`, quote `1723.64345600`, commission `0.00000000` USDT |
+| last ETHUSDT price at the read | `2504.60000000`, so the fill was 0.030% below it |
+| balances after | ETH free `0.00000000` locked `0.00000000`; BTC 0; USDT free `94863.52784910` locked `0` |
+
+The remainder that the stop leg (order `1867449`, list 71012) never sold was therefore sold whole, in one fill, near the last price, with no commission on the venue's own record. **The sale is outside the ledger by design:
+S4 counts this entry as unbooked (R-BU).**
+
+**Step 2, the release's store digests**, as the owner gave them and abbreviated: before `7995924d...8988`, after `7e5c4d42...dd7c`. They are the two SHA-256 figures `scripts/release_position.py` appends to
+`logs/release.log` in the clone; **that file and `data/state.json` were not read here**, because this task touches nothing else in the clone, so the full digests are not in this tree. A digest that differs before and after
+is what a release that removed a record would produce, and is all the abbreviated figures show.
+
+**Step 3, the restart record (R-BN).** From a share-mode copy of the S4 log taken at `2026-10-14T06:42:43Z` (650,432 bytes, SHA-256 `3af6327d3cae1616a0882dff9f9d1f331cc9706a74470d1db1271ba6a50ae5da`):
+
+| Fact | Value |
+|---|---|
+| pid / first line | `25352`, `2026-10-14T06:34:32Z` (the banner); `boot_provenance` at `06:34:33Z` |
+| verdict | `accepted`, `install_kind=vcs`, `code_intact=true` over 77 files, `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true` |
+| `code_commit` | `45547f10771543b41db42e1cbcb8b5a0a9cf1776` -- the same as pids 27460, 27176, 16076, 22304 and 3444 (this is the S4 clone's commit, not the development tree's HEAD) |
+| `config_sha256` | `f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0` -- the same on all six boots |
+| composition root | ready at `06:34:36Z`, 2 pairs, **94863.52784910 USDT free**, 514 assets excluded from equity (the pre-existing warning) |
+| engine | started at `06:34:37Z`: BTCUSDT/1m, ETHUSDT/5m |
+| refusal | none: the one match for "refus" in pid 25352's lines is the field `refusal_reasons=none` |
+| the ETHUSDT record | not mentioned: the boot that refused it was pid 3444 at `2026-10-13T07:00:48Z`, and pid 25352 does not |
+
+At the copy pid 25352 had been up 8 min 11 s and had written 9 lines.
+
+**H6: the down time, from the frozen `scripts/s4_compare.py`'s `down_intervals` over that copy** (`run_down_intervals.py`, the frozen function imported and not edited; 2,753 lines by Python's `splitlines`):
+
+| Interval | From | To | Minutes |
+|---|---|---|---|
+| pid 27460 to pid 27176 | `2026-10-10T05:58:02Z` | `05:58:16Z` | 0.2 |
+| pid 27176 to pid 16076 | `2026-10-10T05:58:17Z` | `06:48:00Z` | 49.7 |
+| pid 16076 to pid 22304 | `2026-10-12T04:17:43Z` | `19:20:01Z` | 902.3 |
+| pid 22304 to pid 3444 | `2026-10-13T06:54:01Z` | `07:00:35Z` | 6.6 |
+| pid 3444 to pid 25352 | `2026-10-13T07:00:48Z` | `2026-10-14T06:34:32Z` | 1,413.7 |
+
+**The run was down from `2026-10-13T06:54:01Z` (pid 22304's last line, the owner's power-off) to `2026-10-14T06:34:37Z` (pid 25352's engine start): 23 h 40 m 36 s, 1,420.6 minutes.** The frozen function reports it as TWO
+intervals, 6.6 and 1,413.7 minutes (1,420.3 together), because pid 3444, the boot that refused, is a process whose 13 seconds of life (`07:00:35Z` to `07:00:48Z`) it counts as up, and because it ends an interval at the
+next pid's FIRST line (`06:34:32Z`) and not at its engine start. **The prediction written before this read said the function's figure "extends past 06:34:37Z", and it does not**: it ends five seconds before. The first
+interval row's pid 27460 and 27176 are the pre-launch boots of `2026-10-10`, recorded in section 43.
+
+The pre-registration clock is unchanged: downtime is excluded on both sides and never moves the cap (`2026-11-14T06:05:20Z`) or the earliest stop (`2026-11-01T00:00Z`).
+
+| File (under `F:\trading bot\scratch\p114\` unless named) | SHA-256 |
+|---|---|
+| `predictions_halts.txt` | `fcea143c6641a219a45748839b00cc67b8b96b706f2ddf9fb9fc3ce768f99456` |
+| `predictions_c1.txt` | `151792f1463476637939507688823229ed3edca6ff165865453d4ba99b282792` |
+| `gate_h3.txt` | `10c0155ede6e9cc05bdf9ded62ffd1022edc6fb1c8c9439f90a376b7fed5ae5c` |
+| `findings_h4.txt` | `a97820ec15c549decda5ad2f00fdb61dd3f505bdf12d693f0c4ab6b7c218be8c` |
+| `h5_read.py` | `373401ce05ee0a35a47871aafdb12e7bb3dee02968817c1b9c448bc885bb37ad` |
+| `h5_out.txt` | `cf14597a8592ee61790e9d9d421e0480aae5a20326f98b06388b13e8ffce195a` |
+| `s4_log_copy_06h45.log` | `3af6327d3cae1616a0882dff9f9d1f331cc9706a74470d1db1271ba6a50ae5da` |
+| `h6_down_intervals.txt` | `3251da9278513a953a3388b60a9b057524e934ca2f094df27dea62a2b1696116` |

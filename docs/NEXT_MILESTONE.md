@@ -1402,6 +1402,14 @@ takes and the bot did not is a finding about one of them.
 > delete, the junction check, and how to lift it. **What stops being true:** the C1 note's *"R-BQ: C7 builds the canonical store"* is no longer pending. **What survives:** the owner's steps (the clone, the junction, the
 > runs), which are theirs.
 
+> **ANNOTATED AT M5m P114 (C1), BY THE OWNER'S RULINGS R-BU AND R-BV: THE S4 INTERRUPTION IS RESOLVED, AND U10 GAINS THREE TESTNET CASES.** The rulings, verbatim:
+>
+> R-BU: "The ETHUSDT position of order list 71012 (stop leg 0.0756 of 0.764 executed, the rest expired) was resolved by the owner: 0.6884 ETH sold with scripts/clear_testnet_holdings.py --symbol ETHUSDT --execute, then the record released with scripts/release_position.py at 2026-10-14T06:33:40Z, then the bot restarted as pid 25352 at 2026-10-14T06:34:33Z. The sale is outside the ledger by design; S4 counts that entry as unbooked."
+>
+> R-BV: "U10 gains three Testnet cases: M5m-302 (a stop filled 12.87% beyond its trigger), the 2026-10-11 BTCUSDT CLOSE sell that executed partly, and order list 71012's stop leg that executed 0.0756 of 0.764 and expired. U10's question now includes whether a STOP_LOSS can be left partly executed by the venue, and what bounds it."
+>
+> **Where each is carried out.** R-BU: `docs/RUN_LEDGER.md` section 49, which holds the three owner steps, the sale as the venue records it (read-only, at `2026-10-14T06:42:28Z`: order 2272092, `FILLED`, 0.68840000 for 1723.64345600 USDT in one fill at 2503.84, no commission), the release's store digests as the owner gave them, and the restart record R-BN asks for. R-BV: U10 below. **What stops being true:** `docs/RUN_LEDGER.md` section 46's state table (ETH held, the record unreleased, no bot running) describes `2026-10-14` at about `04:xx Z` and nothing later; it is an observation and is left as written. Nothing in this file says the S4 run is stopped. **What survives:** R-BN, R-BO, the S4 pre-registration and its clock (downtime is excluded on both sides and never moves the cap or the earliest stop), and `scripts/s4_compare.py` as frozen.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
@@ -2587,6 +2595,27 @@ gate by the owner's P87 ruling: marked for review before live trading.
 > nothing, by the ruling: R-B2's 1.20% pass level and the S4 pre-registration are untouched. **What it is:** the
 > largest observed excursion for the review this item asks for, and a reason that review should look at the
 > tail and not the mean.
+
+> **ADDED AT M5m P114 (C1), BY THE OWNER'S RULING R-BV: THREE TESTNET CASES, AND THE QUESTION WIDENS.** R-BV, verbatim:
+> *"U10 gains three Testnet cases: M5m-302 (a stop filled 12.87% beyond its trigger), the 2026-10-11 BTCUSDT CLOSE sell
+> that executed partly, and order list 71012's stop leg that executed 0.0756 of 0.764 and expired. U10's question now
+> includes whether a STOP_LOSS can be left partly executed by the venue, and what bounds it."* The three, each with its
+> source in `docs/RUN_LEDGER.md`: (1) **`M5m-302`**, order list 35415's stop (trigger `81193.76`) filled at an average of
+> `70744.86`, 12.869% beyond the trigger (section 43); (2) **the 2026-10-11 BTCUSDT `CLOSE` sell**, a MARKET sell that
+> executed partly (`reason=close_partial_fill`, position quantity `0.02279000`, list 51703): `close_position_naked` at
+> `16:00:02Z` and 29 `exit_unbookable` lines to `16:51:01Z` (section 46); (3) **ETHUSDT order list 71012**, placed `2026-10-13T02:30:02Z` for 0.764 at 2,483.25 with its stop at
+> 2,433.59, whose stop leg (order 1867449) executed `0.0756` of `0.764` and expired, leaving 0.6884 ETH unsold until the
+> owner sold it on `2026-10-14` (section 46). **The owner's own sale of that remainder was a single MARKET fill of the
+> whole 0.68840000 at 2503.84 against a last price of 2504.60** (section 49), so the venue filled in full what the stop
+> leg had not.
+> **What stops being true:** this item's first sentence, *"`STOP_LOSS` guarantees the exit, not the price"*, which the
+> third case contradicts: a `STOP_LOSS` leg was left 90.1% unexecuted and then expired, so it guaranteed neither the
+> price nor the exit. The sentence stays standing as the text of the owner's P87 item and is annotated here, not edited.
+> **What survives:** the review's question about `STOP_LOSS_LIMIT` and other types, R-BO's ruling that no S4 or S7
+> parameter changes on `M5m-302`'s account, and the item's status as not a gate. **What the review should add to its
+> question:** whether the venue can leave a `STOP_LOSS` partly executed, what bounds that, and what the bot does with
+> the remainder (today it refuses to book the partial fill and the position stays `UNKNOWN`; the owner sells the rest
+> by hand).
 
 *Arming condition:* **whoever next edits `build_placement` in `execution/placement.py`, which fixes the protective leg types, or rules on N6's preconditions.**
 
