@@ -296,6 +296,62 @@ def _seal_run_directory(run_log: DeferredFileHandler, working: Path, suffix: str
         working.rename(working.with_name(working.name.removesuffix("-running") + f"-{suffix}"))
 
 
+def _check_protocol(
+    settings: Settings,
+    window: BacktestConfig,
+    symbols: list[str] | None,
+    given: Overrides,
+    facts: Provenance,
+    runs: Path,
+) -> dict[str, object]:
+    """Ask the research-protocol guard (R-BT) whether this run may be made; return what it decided.
+
+    Runs BEFORE any run directory exists, so a refusal leaves nothing on disk. The effective block it
+    judges is built here from the same pieces the engine builds the record's from (the effective
+    config, the resolved window, the selected pairs in order, the overrides as given), and a test
+    holds the two digests equal. The protocol and the entries are read from the launch directory,
+    which is the repository root of the clone the run is made from.
+
+    :param runs: this clone's run directories, scanned for a prior out-of-sample read only when the
+        window touches the out-of-sample window.
+    :raises ProtocolRefusalError: the guard refuses the run; ``.reason`` names the rule.
+    :raises ProtocolError: the protocol, an entry or a prior record cannot be read.
+    """
+    from trading_bot.backtesting.candidate import effective_settings
+    from trading_bot.backtesting.engine import select_pairs
+    from trading_bot.backtesting.protocol import (
+        WindowClass,
+        check_run,
+        classify_window,
+        load_entries,
+        load_protocol,
+        local_reads,
+    )
+
+    protocol = load_protocol()
+    entries = load_entries()
+    effective = effective_settings(
+        settings.config,
+        window,
+        [(pair.symbol, pair.timeframe) for pair in select_pairs(settings, symbols)],
+        config_sha256=settings.config_sha256,
+        overrides=given.record(),
+    )
+    touches = classify_window(protocol, window.start_date, window.end_date) is not (
+        WindowClass.IN_SAMPLE
+    )
+    decision = check_run(
+        protocol,
+        entries,
+        effective=effective,
+        window_start=window.start_date,
+        window_end=window.end_date,
+        provenance_accepted=facts.accepted,
+        local_reads=local_reads(protocol, runs) if touches else frozenset(),
+    )
+    return decision.record()
+
+
 def _cmd_backtest(
     settings: Settings,
     start: date | None,
@@ -312,6 +368,9 @@ def _cmd_backtest(
     stop-slippage arm, the strategy, the timeframe, the strategy parameters) are laid over the
     config and the result re-validated BEFORE anything else, so an override the config's own
     checks refuse leaves no directory; the record's ``effective`` block holds what was used.
+    **The research-protocol guard (R-BT) runs in the same place, before any directory exists**: a
+    window that touches the out-of-sample window is made only if :func:`_check_protocol` allows it,
+    and what it decided is the record's ``protocol`` block.
     Returns 1 for a run that is not a result: a handler failure, an
     ERROR logged, a pair that served nothing, or a cash identity that does not close. It prints
     nothing on success (R-BE) and never names the record file (R-BF).
@@ -342,10 +401,18 @@ def _cmd_backtest(
         "all enabled" if symbols is None else ",".join(symbols),
     )
     select_pairs(settings, symbols)  # refuse an unenabled symbol before any directory exists
+    base = Path(window.data_dir).parent / "backtests"
+    # R-BT: the research-protocol guard, likewise before any directory exists.
+    decision = _check_protocol(settings, window, symbols, given, facts, base)
+    log.info(
+        "Research protocol: window %s, arm %s, entry %s",
+        decision["window_class"],
+        decision["arm"],
+        decision["entry_id"],
+    )
     regimes = _load_regimes(log)  # likewise: a label file that does not verify refuses here
     # Microseconds, so two runs of one history started within a second do not name one directory.
     stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
-    base = Path(window.data_dir).parent / "backtests"
     working = base / f"{stamp}-running"
     base.mkdir(parents=True, exist_ok=True)
     working.mkdir()
@@ -360,6 +427,7 @@ def _cmd_backtest(
                 code_facts=facts.log_fields,
                 regimes=regimes,
                 overrides=given.record(),
+                protocol=decision,
             )
         )
         final = base / f"{stamp}-{result.trade_log_sha256[:12]}"

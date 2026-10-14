@@ -1,0 +1,10 @@
+{
+  "entry_schema": 1,
+  "id": "s5-baseline",
+  "kind": "baseline",
+  "ref": "s5-baseline",
+  "candidate_digest": "546487e307ca14ff6aa8c57ccd1470a22f22cedad9ace341ddd3aacee424d27a",
+  "arms": ["0.05", "0.66", "1.20"],
+  "status": "pending",
+  "oos": null
+}

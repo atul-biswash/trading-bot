@@ -1370,6 +1370,18 @@ takes and the bot did not is a finding about one of them.
 > and the command does not call it until C4. **Amendment 1 to the protocol** (named in its section 10, before any run) adds the declared costs and the `exchangeInfo` environment to the
 > declaration so that a candidate's costs are checked mechanically; no family, grid, boundary or arm changes. **What survives:** every ruling R-BN to R-BT and the 216 variants.
 
+> **ANNOTATED AT M5m P113 (C4): THE GUARD IS HOOKED INTO THE `backtest` COMMAND, AND THE RECORD IS SCHEMA 6.** `_cmd_backtest` calls `_check_protocol` after the window and the pairs are
+> validated and BEFORE the run directory is made, so a refusal leaves nothing on disk; it loads `docs/research/PROTOCOL.md` and `docs/research/entries/` from the launch directory, builds the run's
+> effective block from the same pieces the engine builds the record's from, and scans this clone's `backtests/*/run.json` for a prior out-of-sample read only when the window touches the out-of-sample
+> window (`protocol.local_reads`: a record that touched it and is not evidence refuses the scan rather than being skipped). The decision is the record's `protocol` block, and
+> `RUN_RECORD_SCHEMA` is 6. **What stops being true:** C2a's *"The run record is schema 5."*, and C3a's *"the command does not call it until C4"*; and a bare `backtest` over a window that
+> touches `2024-01-01` is now refused from a development tree (its verdict is not `accepted`), where it ran before. **Two things the implementer chose, for the owner to overrule:** the evidence
+> door does NOT demand a `protocol` block (S5's report will, C6), because a door that demanded it would refuse every record `run_backtest` writes when called without the command; and a missing
+> or unreadable protocol file refuses even an in-sample run, because a run whose window cannot be classified is not a run the protocol can describe. **`docs/research/entries/s5-baseline.json` is
+> committed:** kind `baseline`, `pending`, candidate digest `546487e307ca14ff6aa8c57ccd1470a22f22cedad9ace341ddd3aacee424d27a`, which is a function of `config.yaml`'s digest
+> (`f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, the blob last committed as `f20e839`), so ANY edit to `config.yaml` makes the entry refuse and it must be re-made before S5 is run;
+> a test holds it to the committed config. **What survives:** every ruling R-BN to R-BT, the 216 variants, and C2a's door as written.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

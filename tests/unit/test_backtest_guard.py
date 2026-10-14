@@ -176,7 +176,11 @@ class TestEachRefusal:
         reads = {(digest, "1.2")}
         assert refused(entries, CANDIDATE, reads=reads) is Refusal.LOCAL_PRIOR_READ
         other_arm = effective(arm="0.66")
-        assert run([entry_for(other_arm)], other_arm, reads=reads).arm == "0.66"
+        try:
+            allowed = run([entry_for(other_arm)], other_arm, reads=reads)
+        except ProtocolRefusalError as exc:
+            pytest.fail(f"the other arm was refused as {exc.reason.value}")
+        assert allowed.arm == "0.66"
 
     def test_a_read_of_another_candidate_in_this_clone_does_not_block_this_one(self) -> None:
         entries = [entry_for(CANDIDATE)]

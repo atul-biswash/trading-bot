@@ -37,7 +37,8 @@ pushed commit (refused at step 1 for the out-of-sample window and not evidence a
 dates the caller computed wrongly; and an entry whose prose lies. The guard binds an entry to the effective
 settings by digest and nothing else.
 
-Pure but for the two loaders: no clock, no network, no git.
+Pure but for its three readers (the protocol, the entries, and :func:`local_reads` over this clone's run
+records): no clock, no network, no git.
 """
 
 from __future__ import annotations
@@ -55,6 +56,12 @@ from pathlib import Path
 from typing import Any, Final
 
 from trading_bot.backtesting.candidate import candidate_arm, candidate_digest, canonical_number
+from trading_bot.backtesting.evidence import (
+    EFFECTIVE_SCHEMA,
+    RUN_RECORD_NAME,
+    EvidenceRefusedError,
+    require_evidence_eligible,
+)
 from trading_bot.core.exceptions import TradingBotError
 
 __all__ = [
@@ -75,6 +82,7 @@ __all__ = [
     "grid_point",
     "load_entries",
     "load_protocol",
+    "local_reads",
     "parse_entry",
     "parse_protocol",
 ]
@@ -524,6 +532,49 @@ def load_entries(directory: Path = ENTRIES_DIR) -> tuple[Entry, ...]:
         entries.append(parse_entry(text))
     _unique_entries(entries)
     return tuple(entries)
+
+
+def local_reads(protocol: Protocol, directory: Path) -> frozenset[tuple[str, str]]:
+    """The ``(candidate_digest, arm)`` of every record under ``directory`` that touched the out-of-sample window.
+
+    Reads ``<directory>/*/run.json``, the run directories of this clone; a ``-running`` or ``-failed``
+    directory holds none, because the record is written last, so a run that failed leaves no read behind.
+    A record whose window is wholly in sample is skipped unjudged. **A record that did touch the
+    out-of-sample window must be evidence** (:func:`~trading_bot.backtesting.evidence.require_evidence_eligible`,
+    schema 5 or later), and one that is not is an anomaly this guard cannot account for, so it refuses
+    rather than skipping it: skipping would let a candidate be read twice behind it.
+
+    :raises ProtocolError: a record cannot be read, names no window, or touched the out-of-sample window
+        and is not evidence.
+    """
+    reads: set[tuple[str, str]] = set()
+    if not directory.is_dir():
+        return frozenset()
+    for path in sorted(directory.glob(f"*/{RUN_RECORD_NAME}")):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            raise ProtocolError(f"the run record {path} cannot be read: {exc}") from exc
+        window = record.get("window") if isinstance(record, dict) else None
+        if not isinstance(window, dict):
+            raise ProtocolError(f"the run record {path} names no window")
+        try:
+            start = date.fromisoformat(str(window["start_date"]))
+            end = date.fromisoformat(str(window["end_date"]))
+        except (KeyError, ValueError) as exc:
+            raise ProtocolError(f"the run record {path} names no readable window") from exc
+        if classify_window(protocol, start, end) is WindowClass.IN_SAMPLE:
+            continue
+        try:
+            require_evidence_eligible(record, source=str(path), min_schema=EFFECTIVE_SCHEMA)
+        except EvidenceRefusedError as exc:
+            raise ProtocolError(
+                f"the run record {path} touched the out-of-sample window and is not evidence, "
+                f"so the guard cannot tell what it read: {exc}"
+            ) from exc
+        effective = record["effective"]
+        reads.add((candidate_digest(effective), candidate_arm(effective)))
+    return frozenset(reads)
 
 
 def _unique_entries(entries: Sequence[Entry]) -> None:

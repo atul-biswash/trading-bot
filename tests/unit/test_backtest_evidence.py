@@ -263,7 +263,7 @@ class TestARealRunWritesIt:
 
     async def test_an_accepted_verdict_makes_the_record_eligible(self, tmp_path: Path) -> None:
         result = await self.result(tmp_path, {**CODE, "verdict": "accepted"})
-        assert result.record["schema"] == RUN_RECORD_SCHEMA == 5
+        assert result.record["schema"] == RUN_RECORD_SCHEMA == 6
         assert result.record[EVIDENCE_KEY] is True
         require_evidence_eligible(result.record)
 

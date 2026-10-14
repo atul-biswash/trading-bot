@@ -118,8 +118,10 @@ _log = get_logger(__name__)
 #: ``regime_labels`` added (S3, R-AJ). 4: ``evidence_eligible`` added (R-AR); a record of a
 #: schema before 4 has no such key and is not evidence. 5: ``effective``, ``candidate_digest``
 #: and ``settings_digest`` added (R-BR); a record of schema 5 or later without them, or whose
-#: digests are not those of its ``effective`` block, is not evidence.
-RUN_RECORD_SCHEMA = 5
+#: digests are not those of its ``effective`` block, is not evidence. 6: ``protocol`` added (R-BT),
+#: the research-protocol guard's decision; a record of schema 6 or later whose ``protocol`` is not
+#: an object is not evidence.
+RUN_RECORD_SCHEMA = 6
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 _MILLISECOND = timedelta(milliseconds=1)
@@ -260,6 +262,9 @@ class BacktestSystem:
     regimes: RegimeTable | None
     #: The command-line overrides as given (R-BR), kept in the record's ``effective`` block.
     overrides: Mapping[str, object]
+    #: What the research-protocol guard decided for this run (R-BT), kept in the record's
+    #: ``protocol`` block; ``None`` for a caller that ran no guard, whose record is then no evidence.
+    protocol: Mapping[str, object] | None
     _state: dict[str, object]
     _tally: _BarTally
     _errors: _ErrorTally
@@ -346,6 +351,7 @@ async def backtest_system(
     code_facts: CodeFacts | None = None,
     regimes: RegimeTable | None = None,
     overrides: Mapping[str, object] | None = None,
+    protocol: Mapping[str, object] | None = None,
 ) -> AsyncIterator[BacktestSystem]:
     """Assemble the backtest, yield it, and tear it down.
 
@@ -361,6 +367,8 @@ async def backtest_system(
         per-regime breakdown, without them none.
     :param overrides: the command-line overrides as given (R-BR). ``settings`` is already the
         EFFECTIVE settings, so this is only recorded, in the ``effective`` block, for the reader.
+    :param protocol: the guard's decision as ``Decision.record`` returns it (R-BT), recorded in the
+        ``protocol`` block. A run given none records ``None`` and is not evidence from schema 6.
 
     :raises ConfigError: a requested symbol is not enabled, no pair is, a symbol is enabled
         on two timeframes, or a pair is quoted in an asset other than the base currency.
@@ -463,6 +471,7 @@ async def backtest_system(
                     equity=curve,
                     regimes=regimes,
                     overrides=dict(overrides or {}),
+                    protocol=None if protocol is None else dict(protocol),
                     _state={},
                     _tally=tally,
                     _errors=_ErrorTally(),
@@ -485,6 +494,7 @@ async def run_backtest(
     code_facts: CodeFacts | None = None,
     regimes: RegimeTable | None = None,
     overrides: Mapping[str, object] | None = None,
+    protocol: Mapping[str, object] | None = None,
 ) -> BacktestResult:
     """Build a system, run it once, tear it down, and return what it produced."""
     async with backtest_system(
@@ -495,6 +505,7 @@ async def run_backtest(
         code_facts=code_facts,
         regimes=regimes,
         overrides=overrides,
+        protocol=protocol,
     ) as system:
         return await system.run()
 
@@ -637,6 +648,7 @@ def _describe(
         "effective": effective,
         "candidate_digest": candidate_digest(effective),
         "settings_digest": settings_digest(effective),
+        "protocol": None if system.protocol is None else dict(system.protocol),
         "exchange_info": {
             symbol: {"environment": snap.environment, "sha256": snap.sha256}
             for symbol, snap in system.snapshots.items()

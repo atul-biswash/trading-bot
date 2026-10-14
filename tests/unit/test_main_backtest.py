@@ -11,14 +11,17 @@ import argparse
 import json
 import logging
 from collections.abc import Iterator
+from dataclasses import replace
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
+import trading_bot.backtesting.protocol as protocol_module
 import trading_bot.main as cli
 from tests.unit.backtest_world import WINDOW_BARS, at, build_world, make_settings, store_series
+from tests.unit.protocol_world import PROTOCOL
 from trading_bot.backtesting.engine import RUN_RECORD_SCHEMA
 from trading_bot.config.models import BacktestConfig
 from trading_bot.config.settings import Settings
@@ -31,6 +34,19 @@ from trading_bot.utils.provenance import InstallKind, Provenance
 def _no_logging_setup(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep ``main`` from replacing the root handlers ``caplog`` depends on."""
     monkeypatch.setattr(cli, "setup_logging", lambda _config: None)
+
+
+@pytest.fixture(autouse=True)
+def _in_sample_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Put the research protocol's boundary after the windows these tests replay (R-BT).
+
+    These tests replay March 2024, which the REAL protocol's boundary (2024-01-01) makes out of
+    sample, and a window that touches it is refused without a deployment clone and a committed
+    entry. They test the command, not the guard, so the guard sees a boundary in 2030 and an
+    in-sample window needs nothing; ``test_main_protocol.py`` tests the guard at the command.
+    """
+    late = replace(PROTOCOL, boundary=date(2030, 1, 1))
+    monkeypatch.setattr(protocol_module, "load_protocol", lambda *_a, **_k: late)
 
 
 def argv(tmp_path: Path, *rest: str) -> list[str]:
