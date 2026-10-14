@@ -345,9 +345,31 @@ class TestReadRun:
         assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.OTHER_ARM
 
     def test_a_run_the_guard_gave_no_variant_is_off_grid(self, tmp_path: Path) -> None:
-        block = {"window_class": "in_sample", "arm": "1.2"}
+        block = {"window_class": "in_sample", "protocol_sha256": PROTOCOL.sha256, "arm": "1.2"}
         got = sel.read_run(make_run(tmp_path, protocol=block), PROTOCOL, RULES)
         assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.OFF_GRID
+
+    def test_a_run_made_under_another_protocol_digest_is_never_a_point_run(
+        self, tmp_path: Path
+    ) -> None:
+        """PROTOCOL.md section 10: a run made before an amendment is not re-read under it."""
+        got = sel.read_run(make_run(tmp_path, protocol_sha="0" * 64), PROTOCOL, RULES)
+        assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.OTHER_PROTOCOL
+        assert "not re-read under it" in got.detail
+
+    def test_a_record_that_names_no_protocol_digest_is_not_one_either(self, tmp_path: Path) -> None:
+        block = {
+            "window_class": "in_sample",
+            "arm": "1.2",
+            "variant": {
+                "family": "sma_crossover",
+                "timeframe": "1h",
+                "filtered": False,
+                "params": {"fast_period": "10", "slow_period": "50"},
+            },
+        }
+        got = sel.read_run(make_run(tmp_path, protocol=block), PROTOCOL, RULES)
+        assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.OTHER_PROTOCOL
 
     def test_a_record_with_problems_is_skipped(self, tmp_path: Path) -> None:
         got = sel.read_run(make_run(tmp_path, problems=["error_log_records=2"]), PROTOCOL, RULES)

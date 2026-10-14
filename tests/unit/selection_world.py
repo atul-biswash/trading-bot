@@ -142,6 +142,7 @@ def make_run(
         "protocol",
         {
             "window_class": "in_sample",
+            "protocol_sha256": over.get("protocol_sha", PROTOCOL.sha256),
             "arm": over.get("arm", "1.2"),
             "variant": {
                 "family": variant.family,

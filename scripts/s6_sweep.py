@@ -26,8 +26,10 @@ with its process id, exit status and seconds, and an end line holding the whole 
 last run the report names every MISSING variant, every DUPLICATED one, every OFF-GRID run, every CONFLICT (two
 runs of a variant whose trade logs disagree) and every skipped directory.
 
-``--probe`` runs the first declared variant of each timeframe, serially, and stops (the timing probe: the
-runs are real in-sample evidence and count toward the 216). ``--dry-run`` prints the plan and runs nothing.
+``--probe`` runs the first declared variant of each FAMILY AND TIMEFRAME (six: the two strategies cost very
+different amounts a bar, so a probe of one strategy would not time the other), serially, and stops (the timing
+probe: the runs are real in-sample evidence and count toward the 216). ``--dry-run`` prints the plan and runs
+nothing.
 Exit status: 0 the ledger is complete with no conflict and no failed run; 1 it is not; 2 refused.
 """
 
@@ -318,9 +320,9 @@ def sweep(
     conflicted = {sel.variant_key(v) for v, _ in ledger.conflicts}
     todo = order_by_cost([v for v in ledger.missing if sel.variant_key(v) not in conflicted])
     if probe:
-        firsts: dict[str, Variant] = {}
+        firsts: dict[tuple[str, str], Variant] = {}
         for variant in protocol.variants():
-            firsts.setdefault(variant.timeframe, variant)
+            firsts.setdefault((variant.family, variant.timeframe), variant)
         wanted = {sel.variant_key(v) for v in firsts.values()}
         todo = [v for v in todo if sel.variant_key(v) in wanted]
     manifest.event(
@@ -475,7 +477,9 @@ def _parser() -> argparse.ArgumentParser:
         "--workers", type=int, default=1, help="parallel workers, after R-CH's check"
     )
     parser.add_argument(
-        "--probe", action="store_true", help="run the first variant of each timeframe, serially"
+        "--probe",
+        action="store_true",
+        help="run the first variant of each family and timeframe, serially",
     )
     parser.add_argument("--dry-run", action="store_true", help="print the plan and run nothing")
     return parser

@@ -62,6 +62,29 @@ MEDIUM_TEXT, MEDIUM = narrowed([10, 20], ["1h"])  # 4
 PROBE_TEXT, PROBE = narrowed([10], ["1h", "4h", "1d"])  # 6
 
 
+def two_families() -> tuple[str, Protocol]:
+    """sma_crossover and rsi, one grid point each, at 1h and 4h: 2 x 2 x 2 = 8 variants."""
+    families = [
+        {
+            "id": "sma_crossover",
+            "strategy": "sma_crossover",
+            "timeframes": ["1h", "4h"],
+            "grid": {"fast_period": [10], "slow_period": [50]},
+        },
+        {
+            "id": "rsi",
+            "strategy": "rsi",
+            "timeframes": ["1h", "4h"],
+            "grid": {"period": [14], "oversold": [30], "overbought": [70]},
+        },
+    ]
+    text = with_selection(lambda d: d.update(families=families))
+    return text, parse_protocol(text)
+
+
+BOTH_TEXT, BOTH = two_families()
+
+
 @pytest.fixture
 def clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     root = tmp_path / "clone"
@@ -74,9 +97,11 @@ def clone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 REAL_ARGV = s6.backtest_argv
 
 
-def fake_argv(variant: Variant) -> list[str]:
+def fake_argv(variant: Variant, protocol_sha: str = "0" * 64) -> list[str]:
+    """The sweep's command line with `-m trading_bot` replaced by the fake script, which records the
+    protocol digest it is told (the real command records the digest of the PROTOCOL.md it reads)."""
     real = REAL_ARGV(sys.executable, variant, RULES)
-    return [real[0], str(FAKE), *real[3:]]
+    return [real[0], str(FAKE), *real[3:], "--protocol-sha", protocol_sha]
 
 
 def run_sweep(
@@ -92,7 +117,7 @@ def run_sweep(
         python=sys.executable,
         workers=workers,
         probe=probe,
-        argv_for=fake_argv,
+        argv_for=lambda v: fake_argv(v, protocol.sha256),
         poll_s=0.02,
     )
 
@@ -379,6 +404,21 @@ class TestResumption:
         )
         assert events(clone)[0]["probe"] is True
 
+    def test_the_probe_takes_the_first_variant_of_each_family_and_timeframe_heaviest_first(
+        self, clone: Path
+    ) -> None:
+        """The two strategies cost very different amounts a bar, so a probe must time both."""
+        result = run_sweep(clone, BOTH, workers=4, probe=True)
+        launched = [e["variant"] for e in events(clone) if e["event"] == "launch"]
+        assert [(v["family"], v["timeframe"]) for v in launched] == [
+            ("rsi", "1h"),
+            ("sma_crossover", "1h"),
+            ("rsi", "4h"),
+            ("sma_crossover", "4h"),
+        ]
+        assert all(v["filtered"] is False for v in launched)
+        assert len(result.ledger.points) == 4 and result.exit_code == 1
+
 
 # --------------------------------------------------------------------------------------
 # The pool and the report
@@ -501,7 +541,9 @@ class TestTheCommand:
         self, clone: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         file = self.protocol_file(clone, SMALL_TEXT)
-        monkeypatch.setattr(s6, "backtest_argv", lambda python, v, rules: fake_argv(v))
+        monkeypatch.setattr(
+            s6, "backtest_argv", lambda python, v, rules: fake_argv(v, SMALL.sha256)
+        )
         code = s6.main(["--clone", str(clone), "--protocol", str(file)], poll_s=0.02)
         out = capsys.readouterr().out
         assert code == 0 and "S6 SWEEP LEDGER" in out and "  COMPLETE" in out

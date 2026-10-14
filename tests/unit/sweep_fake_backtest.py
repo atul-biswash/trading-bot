@@ -56,6 +56,9 @@ def main() -> int:
     parser.add_argument("--strategy", required=True)
     parser.add_argument("--timeframe", required=True)
     parser.add_argument("--param", action="append", default=[])
+    parser.add_argument(
+        "--protocol-sha", default="0" * 64
+    )  # not a real flag: the protocol digest to record
     args = parser.parse_args()
     backtests = Path(os.environ["FAKE_BACKTESTS"])
     modes = [m for m in os.environ.get("FAKE_MODE", "").split(",") if m]
@@ -118,6 +121,7 @@ def main() -> int:
         "settings_digest": settings_digest(effective),
         "protocol": {
             "window_class": "in_sample",
+            "protocol_sha256": args.protocol_sha,
             "arm": arm,
             "variant": {
                 "family": args.strategy,

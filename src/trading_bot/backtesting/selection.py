@@ -304,6 +304,7 @@ class SkipReason(str, Enum):
     OFF_GRID = "off_grid"
     UNREADABLE = "unreadable"
     NOT_SEALED = "not_sealed"
+    OTHER_PROTOCOL = "other_protocol"
 
 
 @dataclass(frozen=True)
@@ -348,6 +349,11 @@ def read_run(directory: Path, protocol: Protocol, rules: SelectionRules) -> Poin
     directory to ``<stamp>-<trade log digest>``; a process that stopped between the two (a power cut)
     leaves a complete-looking record in a directory that was never sealed. It is listed as
     ``NOT_SEALED`` and the variant is run again.
+
+    **A run made under another protocol digest is never a point run** (``OTHER_PROTOCOL``): PROTOCOL.md
+    section 10 says a run made before an amendment is not re-read under it, and the S7 gate refuses it
+    the same way. The consequence is operational: ``PROTOCOL.md`` must not change, by one byte, between
+    the sweep and the selection.
     """
     name = directory.name
     if name.endswith("-running"):
@@ -369,6 +375,13 @@ def read_run(directory: Path, protocol: Protocol, rules: SelectionRules) -> Poin
     if block.get("window_class") != "in_sample":
         return SkippedRun(
             name, SkipReason.NOT_IN_SAMPLE, f"window_class {block.get('window_class')!r}"
+        )
+    if block.get("protocol_sha256") != protocol.sha256:
+        return SkippedRun(
+            name,
+            SkipReason.OTHER_PROTOCOL,
+            f"made under protocol {block.get('protocol_sha256')!r}, and the protocol now is "
+            f"{protocol.sha256!r}; a run made before an amendment is not re-read under it",
         )
     window = _mapping(record, "window") or {}
     wanted = (rules.history_start.isoformat(), rules.boundary.isoformat())
