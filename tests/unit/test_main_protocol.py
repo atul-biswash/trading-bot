@@ -33,6 +33,7 @@ from trading_bot.backtesting.candidate import candidate_digest, effective_settin
 from trading_bot.backtesting.engine import RUN_RECORD_SCHEMA, run_backtest, select_pairs
 from trading_bot.backtesting.overrides import apply_overrides, build_overrides
 from trading_bot.backtesting.protocol import (
+    Entry,
     Refusal,
     WindowClass,
     check_run,
@@ -380,16 +381,24 @@ class TestTheCommittedBaselineEntry:
         block["costs"] = {**block["costs"], "stop_slippage_percent": arm}
         return block
 
+    def baseline_entry(self) -> Entry:
+        """S5's entry, selected by its id (R-CI): the directory also holds the candidates' entries."""
+        matching = [
+            entry
+            for entry in load_entries(REPO / "docs" / "research" / "entries")
+            if entry.id == "s5-baseline"
+        ]
+        assert len(matching) == 1
+        return matching[0]
+
     def test_the_entry_names_the_committed_configs_baseline_and_is_allowed_at_each_arm(
         self,
     ) -> None:
         """The entry's BINDING to the committed config's baseline, judged on the entry as it stood
         before the read: R-BY marked the committed entry ``read``, which the guard now refuses, so the
-        entries are reset to ``pending`` in memory. Every assertion below is the original one."""
-        committed = [
-            replace(entry, status="pending", oos=None)
-            for entry in load_entries(REPO / "docs" / "research" / "entries")
-        ]
+        entry is reset to ``pending`` in memory (ratified by R-CA). Every assertion below is the original
+        one; R-CI changed only where ``committed`` comes from (selected by id, not the whole directory)."""
+        committed = [replace(self.baseline_entry(), status="pending", oos=None)]
         assert [e.id for e in committed] == ["s5-baseline"]
         window = (PROTOCOL.history_start, PROTOCOL.history_end)
         for arm in ("0.05", "0.66", "1.2"):
@@ -409,7 +418,7 @@ class TestTheCommittedBaselineEntry:
 
     def test_the_entry_is_the_declared_baseline_and_is_read_with_its_three_records(self) -> None:
         """R-BY overturned this test's old ``entry.status == "pending" and entry.oos is None``."""
-        (entry,) = load_entries(REPO / "docs" / "research" / "entries")
+        entry = self.baseline_entry()
         assert entry.kind == "baseline" and entry.ref == "s5-baseline"
         assert entry.status == "read" and entry.oos is not None
         records = entry.oos["records"]
