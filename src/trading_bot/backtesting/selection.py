@@ -303,6 +303,7 @@ class SkipReason(str, Enum):
     OTHER_ARM = "other_arm"
     OFF_GRID = "off_grid"
     UNREADABLE = "unreadable"
+    NOT_SEALED = "not_sealed"
 
 
 @dataclass(frozen=True)
@@ -341,8 +342,20 @@ def read_run(directory: Path, protocol: Protocol, rules: SelectionRules) -> Poin
     :data:`MIN_RECORD_SCHEMA` or later, carries the guard's decision with a declared variant, was made in
     sample over exactly ``[history start, boundary)`` at the selection arm, has no problems, and holds
     exactly the trades it counts.
+
+    **A directory still named ``<stamp>-running`` is never a point run, even with a record inside it.**
+    The ``backtest`` command writes the record into ``<stamp>-running`` and only then renames the
+    directory to ``<stamp>-<trade log digest>``; a process that stopped between the two (a power cut)
+    leaves a complete-looking record in a directory that was never sealed. It is listed as
+    ``NOT_SEALED`` and the variant is run again.
     """
     name = directory.name
+    if name.endswith("-running"):
+        return SkippedRun(
+            name,
+            SkipReason.NOT_SEALED,
+            "the run directory was never renamed to its final name; the process stopped before sealing it",
+        )
     path = directory / RUN_RECORD_NAME
     try:
         record = load_eligible_record(path, min_schema=MIN_RECORD_SCHEMA)

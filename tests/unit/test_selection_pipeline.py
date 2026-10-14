@@ -290,6 +290,20 @@ class TestReadRun:
         got = sel.read_run(make_run(tmp_path, flag=False), PROTOCOL, RULES)
         assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.NOT_EVIDENCE
 
+    def test_a_directory_still_named_running_is_never_a_point_run_even_with_its_record(
+        self, tmp_path: Path
+    ) -> None:
+        """The command writes the record, THEN renames the directory: a power cut between leaves both."""
+        got = sel.read_run(make_run(tmp_path, "20260101T000000000000Z-running"), PROTOCOL, RULES)
+        assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.NOT_SEALED
+        assert "never renamed" in got.detail
+
+    def test_a_running_directory_with_no_record_is_not_sealed_either(self, tmp_path: Path) -> None:
+        unsealed = tmp_path / "20260101T000000000000Z-running"
+        unsealed.mkdir()
+        got = sel.read_run(unsealed, PROTOCOL, RULES)
+        assert isinstance(got, sel.SkippedRun) and got.reason is sel.SkipReason.NOT_SEALED
+
     def test_a_directory_with_no_record_is_skipped_as_not_evidence(self, tmp_path: Path) -> None:
         failed = tmp_path / "20261014T154834857585Z-failed"
         failed.mkdir()
