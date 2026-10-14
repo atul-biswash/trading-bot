@@ -37,6 +37,8 @@ from trading_bot.strategies.helpers import (
     crossed_above,
     crossed_below,
     last_two,
+    trend_allows_entry,
+    validate_trend_filter_period,
 )
 from trading_bot.strategies.registry import register_strategy
 
@@ -60,8 +62,21 @@ class RsiStrategy(BaseStrategy):
     decision rather than an accident inherited from here.
     """
 
-    def __init__(self, period: int = 14, oversold: float = 30.0, overbought: float = 70.0) -> None:
+    def __init__(
+        self,
+        period: int = 14,
+        oversold: float = 30.0,
+        overbought: float = 70.0,
+        trend_filter_period: int | None = None,
+    ) -> None:
         """Validate parameters eagerly so a bad ``config.yaml`` fails at startup.
+
+        ``trend_filter_period`` (R-BS, M5m P113) makes an oversold crossing a ``BUY`` only while
+        the bar's close is strictly above its SMA of that period (200 in the research protocol);
+        ``None``, the default, is the strategy as it always was. The filter gates the entry
+        and nothing else: the overbought crossing is a ``CLOSE`` whatever the trend says, so a
+        filter can never keep a position open. Buying weakness only inside an uptrend is what
+        the filter is for, and the crossing is not taken later if the trend turns up after it.
 
         Thresholds must lie **strictly** inside ``0..100``, not merely within it.
         RSI saturates at exactly ``0.0`` and ``100.0``, so ``oversold=0`` asks
@@ -79,7 +94,16 @@ class RsiStrategy(BaseStrategy):
             raise ValueError(
                 f"oversold must be < overbought, got oversold={oversold}, overbought={overbought}"
             )
-        super().__init__(period=period, oversold=oversold, overbought=overbought)
+        self.trend_filter_period = validate_trend_filter_period(trend_filter_period)
+        if self.trend_filter_period is None:
+            super().__init__(period=period, oversold=oversold, overbought=overbought)
+        else:
+            super().__init__(
+                period=period,
+                oversold=oversold,
+                overbought=overbought,
+                trend_filter_period=self.trend_filter_period,
+            )
         self.period = period
         self.oversold = oversold
         self.overbought = overbought
@@ -98,8 +122,14 @@ class RsiStrategy(BaseStrategy):
         1`` is exactly enough to ask "is RSI below 30 right now?", and reading
         that number as the warmup would silently produce a strategy that fires
         on the wrong condition.
+
+        **With a trend filter the warmup is the larger of that and ``trend_filter_period``**:
+        ``sma(n)`` needs ``n`` bars for its first value, and one value is all the filter reads.
         """
-        return self.period + 2
+        needed = self.period + 2
+        if self.trend_filter_period is None:
+            return needed
+        return max(needed, self.trend_filter_period)
 
     def generate_signal(
         self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
@@ -127,24 +157,34 @@ class RsiStrategy(BaseStrategy):
         else:
             return None
 
+        metadata: dict[str, str | int | float] = {
+            "strategy": self.name,
+            "period": self.period,
+            "rsi": current,
+            "prev_rsi": values[0],
+            "threshold": threshold,
+            "threshold_kind": label,
+            # 0..1: RSI travelled this fraction of the way from the threshold
+            # to saturation. Diagnostic only -- see the class docstring.
+            "threshold_distance": distance,
+        }
+        reason = (
+            f"{label}: RSI({self.period})={current:.2f} crossed {direction} "
+            f"{threshold:.2f} (from {values[0]:.2f})"
+        )
+        if self.trend_filter_period is not None and action is SignalAction.BUY:
+            allowed, trend = trend_allows_entry(close, self.trend_filter_period)
+            if not allowed or trend is None:
+                return None  # below its trend, or the trend is not measurable yet: no entry
+            metadata["trend_filter_period"] = self.trend_filter_period
+            metadata["trend_sma"] = trend
+            reason += f"; close above SMA({self.trend_filter_period})={trend:.8g}"
+
         return Signal(
             symbol=symbol,
             action=action,
             timestamp=last_candle.close_time,
             price=last_candle.close,
-            reason=(
-                f"{label}: RSI({self.period})={current:.2f} crossed {direction} "
-                f"{threshold:.2f} (from {values[0]:.2f})"
-            ),
-            metadata={
-                "strategy": self.name,
-                "period": self.period,
-                "rsi": current,
-                "prev_rsi": values[0],
-                "threshold": threshold,
-                "threshold_kind": label,
-                # 0..1: RSI travelled this fraction of the way from the threshold
-                # to saturation. Diagnostic only -- see the class docstring.
-                "threshold_distance": distance,
-            },
+            reason=reason,
+            metadata=metadata,
         )

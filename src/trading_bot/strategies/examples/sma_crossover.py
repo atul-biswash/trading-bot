@@ -48,6 +48,8 @@ from trading_bot.strategies.helpers import (
     crossed_above,
     crossed_below,
     last_two,
+    trend_allows_entry,
+    validate_trend_filter_period,
 )
 from trading_bot.strategies.registry import register_strategy
 
@@ -68,8 +70,21 @@ class SmaCrossoverStrategy(BaseStrategy):
     by is worse than shipping an honest constant.
     """
 
-    def __init__(self, fast_period: int = 20, slow_period: int = 50) -> None:
+    def __init__(
+        self,
+        fast_period: int = 20,
+        slow_period: int = 50,
+        trend_filter_period: int | None = None,
+    ) -> None:
         """Validate periods eagerly so a bad ``config.yaml`` fails at startup.
+
+        ``trend_filter_period`` (R-BS, M5m P113) makes a golden cross a ``BUY`` only while the
+        bar's close is strictly above its SMA of that period (200 in the research protocol);
+        ``None``, the default, is the strategy as it always was. The filter gates the entry
+        and nothing else: the death cross is a ``CLOSE`` whatever the trend says, because an
+        exit that a filter could suppress would trap the position it is meant to release.
+        Being stateless, a cross that happens below the trend is simply not taken, and is not
+        taken later when the trend turns up.
 
         Construction happens once per pair while the engine is being built, long
         before any money is at stake. Deferring these checks to the first
@@ -86,7 +101,15 @@ class SmaCrossoverStrategy(BaseStrategy):
                 "fast_period must be < slow_period, got "
                 f"fast_period={fast_period}, slow_period={slow_period}"
             )
-        super().__init__(fast_period=fast_period, slow_period=slow_period)
+        self.trend_filter_period = validate_trend_filter_period(trend_filter_period)
+        if self.trend_filter_period is None:
+            super().__init__(fast_period=fast_period, slow_period=slow_period)
+        else:
+            super().__init__(
+                fast_period=fast_period,
+                slow_period=slow_period,
+                trend_filter_period=self.trend_filter_period,
+            )
         self.fast_period = fast_period
         self.slow_period = slow_period
 
@@ -98,9 +121,14 @@ class SmaCrossoverStrategy(BaseStrategy):
         slow value sits at index ``slow_period - 1`` and the second at index
         ``slow_period``. Detecting a *transition* needs both, hence
         ``slow_period + 1`` bars. The fast SMA is ready strictly earlier and so
-        never binds.
+        never binds. **With a trend filter the warmup is the larger of that and
+        ``trend_filter_period``**: ``sma(n)`` needs ``n`` bars for its first value, and
+        one value is all the filter reads.
         """
-        return self.slow_period + 1
+        needed = self.slow_period + 1
+        if self.trend_filter_period is None:
+            return needed
+        return max(needed, self.trend_filter_period)
 
     def generate_signal(
         self, symbol: str, candles: pd.DataFrame, *, last_candle: Candle
@@ -129,22 +157,32 @@ class SmaCrossoverStrategy(BaseStrategy):
         else:
             return None
 
+        metadata: dict[str, str | int | float] = {
+            "strategy": self.name,
+            "fast_period": self.fast_period,
+            "slow_period": self.slow_period,
+            "fast_sma": fast[1],
+            "slow_sma": slow[1],
+            "prev_fast_sma": fast[0],
+            "prev_slow_sma": slow[0],
+        }
+        reason = (
+            f"{label}: SMA({self.fast_period})={fast[1]:.8g} crossed {direction} "
+            f"SMA({self.slow_period})={slow[1]:.8g}"
+        )
+        if self.trend_filter_period is not None and action is SignalAction.BUY:
+            allowed, trend = trend_allows_entry(close, self.trend_filter_period)
+            if not allowed or trend is None:
+                return None  # below its trend, or the trend is not measurable yet: no entry
+            metadata["trend_filter_period"] = self.trend_filter_period
+            metadata["trend_sma"] = trend
+            reason += f"; close above SMA({self.trend_filter_period})={trend:.8g}"
+
         return Signal(
             symbol=symbol,
             action=action,
             timestamp=last_candle.close_time,
             price=last_candle.close,
-            reason=(
-                f"{label}: SMA({self.fast_period})={fast[1]:.8g} crossed {direction} "
-                f"SMA({self.slow_period})={slow[1]:.8g}"
-            ),
-            metadata={
-                "strategy": self.name,
-                "fast_period": self.fast_period,
-                "slow_period": self.slow_period,
-                "fast_sma": fast[1],
-                "slow_sma": slow[1],
-                "prev_fast_sma": fast[0],
-                "prev_slow_sma": slow[0],
-            },
+            reason=reason,
+            metadata=metadata,
         )

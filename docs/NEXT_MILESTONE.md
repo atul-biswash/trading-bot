@@ -1382,6 +1382,12 @@ takes and the bot did not is a finding about one of them.
 > (`f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, the blob last committed as `f20e839`), so ANY edit to `config.yaml` makes the entry refuse and it must be re-made before S5 is run;
 > a test holds it to the committed config. **What survives:** every ruling R-BN to R-BT, the 216 variants, and C2a's door as written.
 
+> **ANNOTATED AT M5m P113 (C5): R-BS IS CARRIED OUT.** `sma_crossover` and `rsi` take an optional `trend_filter_period` (an integer of at least 2; `None`, the default, is the strategy as it was). With it a `BUY`
+> is emitted only while the bar's close is strictly above its `sma` of that period (200 in the protocol), a `CLOSE` is never filtered, and the strategy's warmup is the larger of its own and the period
+> (`strategies/helpers.py`: `validate_trend_filter_period`, `trend_allows_entry`). Being stateless, a cross or an oversold crossing that happens below the trend is not taken later when the trend turns up.
+> `tests/unit/test_trend_filter.py` builds all 216 declared variants through the registry, so the parameter the protocol declares is the one the strategies take. **What stops being true:** the prompt's
+> *"R-BS: C5"* is no longer pending. **What survives:** the filter's wording in `docs/research/PROTOCOL.md` section 5, which it implements as written, and S6's arming condition, which this does not fire.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

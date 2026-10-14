@@ -4,7 +4,9 @@ Every strategy faces the same three chores before it can form an opinion: pull
 the close series out of the frame, read the last two values of an indicator, and
 decide whether one series crossed another. Writing those three times invites
 three subtly different answers to "did it cross?" in software that trades money,
-so they live here once.
+so they live here once. A fourth chore, added for R-BS, is the optional trend filter an entry
+may be subject to (:func:`trend_allows_entry`), for the same reason: two strategies must not
+answer "is it above its trend?" two ways.
 
 All functions are pure -- Series and scalars in, plain Python values out.
 Nothing here imports the exchange, the engine, or :class:`~decimal.Decimal`:
@@ -19,11 +21,19 @@ from math import isnan
 from typing import TYPE_CHECKING
 
 from trading_bot.core.exceptions import DataError
+from trading_bot.indicators import sma
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import pandas as pd
 
-__all__ = ["close_series", "crossed_above", "crossed_below", "last_two"]
+__all__ = [
+    "close_series",
+    "crossed_above",
+    "crossed_below",
+    "last_two",
+    "trend_allows_entry",
+    "validate_trend_filter_period",
+]
 
 # The last two values of an indicator, oldest first: ``(previous, current)``.
 Pair = tuple[float, float]
@@ -101,3 +111,41 @@ def crossed_below(series: Pair, reference: Pair) -> bool:
     comparison is asymmetric.
     """
     return series[0] >= reference[0] and series[1] < reference[1]
+
+
+def validate_trend_filter_period(period: object) -> int | None:
+    """The trend filter's period, checked at construction; ``None`` means no filter.
+
+    R-BS (M5m P113): the trend filter is *close above SMA(200)*; the period is the strategy
+    parameter ``trend_filter_period``. It must be an integer of at least 2 -- ``bool`` is an
+    ``int`` subclass and ``True`` is not a period, and an ``SMA(1)`` is the close itself, which
+    the filter's strict comparison would refuse on every bar. A float is refused as the integer
+    periods are (``M5m-315``): ``200.0`` builds a window nothing can index.
+
+    :raises ValueError: it is not ``None`` and not an integer of at least 2.
+    """
+    if period is None:
+        return None
+    if isinstance(period, bool) or not isinstance(period, int):
+        raise ValueError(f"trend_filter_period must be an integer or None, got {period!r}")
+    if period < 2:
+        raise ValueError(f"trend_filter_period must be >= 2, got {period}")
+    return period
+
+
+def trend_allows_entry(close: pd.Series, period: int) -> tuple[bool, float | None]:
+    """Whether the last close is strictly above its SMA(``period``), and that SMA.
+
+    ``(False, None)`` while the SMA is still warming up or the last close is ``NaN``: a trend that
+    cannot be measured does not allow an entry, and "insufficient data is not an error"
+    (the indicator layer's rule), so this never raises. Equality does not allow an entry --
+    *above* is strict. Both numbers are market statistics from the ``float64`` frame; neither
+    is a price the order carries (``Signal.price`` comes from the candle).
+    """
+    if len(close) < period:
+        return False, None
+    average = float(sma(close, period).iloc[-1])
+    last = float(close.iloc[-1])
+    if isnan(average) or isnan(last):
+        return False, None
+    return last > average, average
