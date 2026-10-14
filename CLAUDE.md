@@ -2286,10 +2286,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  196 files already formatted
-mypy                                   Success: no issues found in 100 source files
-pytest                                 3788 passed, 4 skipped
-                                       (3791 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  199 files already formatted
+mypy                                   Success: no issues found in 101 source files
+pytest                                 3841 passed, 4 skipped
+                                       (3844 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2298,14 +2298,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `3791 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `3788 passed, 4 skipped` on a machine without them
+- `3844 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `3841 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 3788 and must not read it as a regression against a documented
-3791. Quote the count with its condition, never bare.
+runner will see 3841 and must not read it as a regression against a documented
+3844. Quote the count with its condition, never bare.
 
-Only the `3791` is measured here; `3788 passed, 4 skipped` is that run minus the
+Only the `3844` is measured here; `3841 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -2416,8 +2416,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 196 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 100 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 199 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 101 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all

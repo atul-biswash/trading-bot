@@ -79,6 +79,7 @@ __all__ = [
     "WindowClass",
     "check_run",
     "classify_window",
+    "declaration",
     "grid_point",
     "load_entries",
     "load_protocol",
@@ -306,12 +307,13 @@ def _unique(items: Sequence[str], what: str) -> tuple[str, ...]:
     return tuple(items)
 
 
-def parse_protocol(text: str) -> Protocol:
-    """The declaration between the markers of ``PROTOCOL.md``, validated.
+def declaration(text: str) -> Mapping[str, Any]:
+    """The JSON declaration between the markers of ``PROTOCOL.md``, as a mapping of its top level.
 
-    :raises ProtocolError: the markers or the JSON are absent or malformed, a required key is
-        missing or mistyped, the boundary is not strictly inside the history, the arms do not
-        contain the gate arm, a grid repeats a value, or a family or baseline id repeats.
+    Public so that the S6 tooling reads the blocks this module ignores (``selection``, ``s7``) from the
+    same markers rather than from a second parser.
+
+    :raises ProtocolError: the markers or the JSON are absent or malformed, or the schema is not ours.
     """
     if text.count(_BEGIN) != 1 or text.count(_END) != 1:
         raise _fail(f"does not have exactly one {_BEGIN} ... {_END} block")
@@ -326,6 +328,17 @@ def parse_protocol(text: str) -> Protocol:
     top = _mapping(data, "its top level")
     if top.get("protocol_schema") != _PROTOCOL_SCHEMA:
         raise _fail(f"is not protocol_schema {_PROTOCOL_SCHEMA}")
+    return top
+
+
+def parse_protocol(text: str) -> Protocol:
+    """The declaration between the markers of ``PROTOCOL.md``, validated.
+
+    :raises ProtocolError: the markers or the JSON are absent or malformed, a required key is
+        missing or mistyped, the boundary is not strictly inside the history, the arms do not
+        contain the gate arm, a grid repeats a value, or a family or baseline id repeats.
+    """
+    top = declaration(text)
 
     history = _mapping(top.get("history"), "history")
     start, end = _date(history, "start", "history"), _date(history, "end_exclusive", "history")
