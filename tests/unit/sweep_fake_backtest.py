@@ -10,7 +10,9 @@ so a launch costs a fraction of a second.
 (the trade-log digest depends on the process id and the clock, so two runs of one variant disagree),
 ``fail_after=K`` (once K sealed runs exist, leave ``<stamp>-failed`` with no record and exit 1),
 ``noseal`` (leave the record in ``<stamp>-running`` and exit 0: a power cut between the record and the rename)
-and ``crash=TEXT`` (exit 1 with no directory when TEXT is in the variant's label).
+``crash=TEXT`` (exit 1 with no directory when TEXT is in the variant's label) and ``crash_once=TEXT`` (the same, but
+only the FIRST time a label holding TEXT is launched: the stamp collision of P118, a worker lost that a later run
+recovers).
 """
 
 from __future__ import annotations
@@ -75,6 +77,13 @@ def main() -> int:
     for mode in modes:
         if mode.startswith("crash=") and mode[len("crash=") :] in label:
             return 1
+        if mode.startswith("crash_once=") and mode[len("crash_once=") :] in label:
+            marker = (
+                backtests / f".crashed-{label}"
+            )  # a file: the sweep and this fake only read directories
+            if not marker.exists():
+                marker.write_text("crashed once\n", encoding="ascii")
+                return 1
         if mode.startswith("fail_after="):
             sealed = [
                 p

@@ -397,6 +397,34 @@ class TestResumption:
         report = s6._report(result, MEDIUM)
         assert "FAILED" in report and "exit status 1" in report and "NOT COMPLETE" in report
 
+    def test_a_worker_lost_in_the_check_and_recovered_by_the_sweep_is_reported_and_complete(
+        self, clone: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P118's run 3 (M5m-444, M5m-445, R-CQ): the check's second worker died on a stamp collision, the sweep
+        ran that variant itself and the ledger read complete, yet the invocation said NOT COMPLETE and exited 1."""
+        monkeypatch.setenv("FAKE_MODE", "slow,crash_once=trend_filter_period200")
+        result = run_sweep(clone, SMALL, workers=2)
+        assert result.check.performed and result.check.parallel_allowed
+        assert result.ledger.complete and len(result.ledger.points) == 2
+        assert result.failed == () and result.exit_code == 0
+        assert [(f.phase, f.returncode) for f in result.recovered] == [("check-parallel", 1)]
+        report = s6._report(result, SMALL)
+        assert "LOST" in report and "check-parallel" in report and "exit status 1" in report
+        assert "RECOVERED" in report and "sealed record" in report
+        assert "  COMPLETE" in report and "NOT COMPLETE" not in report and "FAILED" not in report
+        end = [e for e in events(clone) if e["event"] == "sweep_end"][-1]
+        assert end["complete"] is True and end["failed"] == []
+        assert [r["phase"] for r in end["recovered"]] == ["check-parallel"]
+
+    def test_a_worker_lost_and_never_recovered_is_still_failed_and_not_complete(
+        self, clone: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("FAKE_MODE", "crash=trend_filter_period200")
+        result = run_sweep(clone, SMALL, workers=2)
+        assert result.recovered == () and len(result.failed) >= 1 and result.exit_code == 1
+        report = s6._report(result, SMALL)
+        assert "FAILED" in report and "NOT COMPLETE" in report and "RECOVERED" not in report
+
     def test_the_probe_runs_the_first_variant_of_each_timeframe_serially_and_stops(
         self, clone: Path
     ) -> None:
@@ -509,6 +537,19 @@ class TestTheReport:
         assert "MISSING" in text and "DUPLICATED" in text and "a, b" in text
         assert "OFF-GRID odd" in text and "SKIPPED later: not_sealed" in text
         assert "FAILED" in text and "exit status 3" in text and "NOT COMPLETE" in text
+
+    def test_a_recovered_loss_is_printed_as_lost_then_recovered_and_the_report_is_complete(
+        self,
+    ) -> None:
+        variants = list(SMALL.variants())
+        found = [point(v, bulk(3, 1), run=f"r{i}") for i, v in enumerate(variants)]
+        ledger = sel.reconcile(SMALL, found)
+        lost = (s6.Finished(variants[1], 99, 1, 1.4, "check-parallel"),)
+        result = s6.SweepResult(ledger, s6.Check(True, True, "equal"), (), 0, lost)
+        text = s6._report(result, SMALL)
+        assert "LOST" in text and "exit status 1 in check-parallel" in text
+        assert "RECOVERED" in text and "sealed record r1" in text
+        assert "  COMPLETE" in text and "FAILED" not in text and "NOT COMPLETE" not in text
 
     def test_a_clean_complete_ledger_says_complete(self) -> None:
         variants = list(SMALL.variants())

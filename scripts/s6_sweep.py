@@ -30,7 +30,14 @@ runs of a variant whose trade logs disagree) and every skipped directory.
 different amounts a bar, so a probe of one strategy would not time the other), serially, and stops (the timing
 probe: the runs are real in-sample evidence and count toward the 216). ``--dry-run`` prints the plan and runs
 nothing.
-Exit status: 0 the ledger is complete with no conflict and no failed run; 1 it is not; 2 refused.
+**A worker that was lost and whose variant was then recovered is reported and does not make the sweep incomplete
+(R-CQ).** The report prints ``LOST <variant>: exit status N in <phase>`` and ``RECOVERED <variant>: sealed record
+<run>`` for it, and ``COMPLETE`` follows when every variant has a sealed record and none conflicts. P118's rehearsal
+met it: R-CH's check started two workers together on Windows and one died on a working-directory stamp the other
+held; the sweep ran that variant itself, and the report still said NOT COMPLETE. A worker whose variant ends with no
+record is still ``FAILED``.
+Exit status: 0 every variant has a sealed record and none conflicts (a lost worker that was recovered is reported
+and does not count against it); 1 it is not, or a worker failed and its variant has no record; 2 refused.
 """
 
 from __future__ import annotations
@@ -155,6 +162,8 @@ class Finished:
     pid: int
     returncode: int
     seconds: float
+    #: The pool phase that launched it: ``check-serial``, ``check-parallel`` or ``sweep``.
+    phase: str = ""
 
 
 @dataclass
@@ -209,7 +218,7 @@ def run_pool(
                     still.append(item)
                     continue
                 seconds = round(time.monotonic() - item.started, 3)
-                finished.append(Finished(item.variant, item.process.pid, code, seconds))
+                finished.append(Finished(item.variant, item.process.pid, code, seconds, phase))
                 manifest.event(
                     "finish",
                     phase=phase,
@@ -273,8 +282,11 @@ class Check:
 class SweepResult:
     ledger: sel.Ledger
     check: Check
+    #: Workers that failed and whose variant has NO sealed record at the end.
     failed: tuple[Finished, ...]
     exit_code: int
+    #: Workers that failed and whose variant HAS a sealed record at the end (R-CQ): lost, then recovered.
+    recovered: tuple[Finished, ...] = ()
 
 
 def _ledger_rows(ledger: sel.Ledger, protocol: Any) -> list[dict[str, Any]]:
@@ -385,6 +397,10 @@ def sweep(
             if f.returncode != 0
         ]
     ledger = scan(backtests, protocol, rules)
+    # R-CQ: a lost worker whose variant ends with a sealed record was recovered (by a later run of this
+    # invocation); the loss is reported, and only a variant with no record keeps the sweep incomplete.
+    recovered = [f for f in failed if sel.variant_key(f.variant) in ledger.points]
+    failed = [f for f in failed if sel.variant_key(f.variant) not in ledger.points]
     complete = ledger.complete and not failed and not probe
     manifest.event(
         "sweep_end",
@@ -395,10 +411,21 @@ def sweep(
         conflicts=len(ledger.conflicts),
         skipped=[{"run": s.run, "reason": s.reason.value} for s in ledger.skipped],
         failed=[{"variant": _variant_json(f.variant), "returncode": f.returncode} for f in failed],
+        recovered=[
+            {
+                "variant": _variant_json(f.variant),
+                "returncode": f.returncode,
+                "phase": f.phase,
+                "run": ledger.points[sel.variant_key(f.variant)].run,
+            }
+            for f in recovered
+        ],
         complete=complete,
         ledger=_ledger_rows(ledger, protocol),
     )
-    return SweepResult(ledger, check, tuple(failed), 0 if complete else EXIT_INCOMPLETE)
+    return SweepResult(
+        ledger, check, tuple(failed), 0 if complete else EXIT_INCOMPLETE, tuple(recovered)
+    )
 
 
 def _parallel_check(
@@ -501,6 +528,12 @@ def _report(result: SweepResult, protocol: Any) -> str:
     for skipped in ledger.skipped:
         tag = "OFF-GRID" if skipped.reason is sel.SkipReason.OFF_GRID else "SKIPPED"
         lines.append(f"  {tag} {skipped.run}: {skipped.reason.value}: {skipped.detail}")
+    for finished in result.recovered:
+        key = sel.variant_key(finished.variant)
+        lines.append(
+            f"  LOST {key}: exit status {finished.returncode} in {finished.phase or 'a run'}"
+        )
+        lines.append(f"  RECOVERED {key}: sealed record {ledger.points[key].run}")
     for finished in result.failed:
         lines.append(
             f"  FAILED {sel.variant_key(finished.variant)}: exit status {finished.returncode}"
