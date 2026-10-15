@@ -1,14 +1,18 @@
-"""``scripts/s6_rehearsal.py``, first part: the narrowed protocol, the commands it builds, the records it reads.
+"""``scripts/s6_rehearsal.py``: the narrowed protocol, the commands it builds, the records it keeps, the order it runs in.
 
-The narrowed protocol is parsed by the REAL ``parse_protocol``, ``parse_rules`` and ``parse_gate_rules``, and
-the out-of-sample command line is compared with the sweep's own builder, so neither can drift from the code
-that reads it. The orchestration and its tests are the next commit's.
+The rehearsal itself drives real subprocesses for minutes, so these tests never run it. Three things are
+tested instead, each against the REAL readers: the narrowed protocol is parsed by the real ``parse_protocol``,
+``parse_rules`` and ``parse_gate_rules``; the out-of-sample command line is compared with the sweep's own
+builder; and the orchestration runs over ``FakeChain``, a scripted stand-in for the subprocess seam that
+writes the files each real command would write (a worktree, a junction, entries, run records) so that the
+order of the hops, the stop on a mismatch and the cleanup are judged on the same code the rehearsal runs.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import sys
 from datetime import date
 from pathlib import Path
@@ -304,3 +308,434 @@ class TestExpect:
             1, contains=("a",), absent=("b",), counts=(("c", 2),), empty=True
         ).describe()
         assert text == "exit 1; has 'a'; lacks 'b'; 2 x 'c'; no output"
+
+
+# --------------------------------------------------------------------------------------
+# The orchestration, over a scripted stand-in for the subprocess seam
+# --------------------------------------------------------------------------------------
+class FakeChain:
+    """What each real command would do, as far as the rehearsal can see: its output, its status and its files."""
+
+    def __init__(self, case: str, store: Path) -> None:
+        self.case = case
+        self.store = store
+        self.calls: list[tuple[tuple[str, ...], Path]] = []
+        self.overrides: dict[str, rh.Outcome] = {}
+        self.link_removable = True
+        self.damage_store = False
+        self.dirty = False
+        self.refusal_leaves_a_run = False
+        self.done: set[tuple[str, str]] = set()
+
+    @staticmethod
+    def ok(text: str = "") -> rh.Outcome:
+        return rh.Outcome(0, text, 0.0)
+
+    def names(self) -> list[str]:
+        return [" ".join(argv) for argv, _ in self.calls]
+
+    def __call__(self, argv: object, cwd: Path, env: object) -> rh.Outcome:
+        args = tuple(str(a) for a in argv)  # type: ignore[attr-defined]
+        self.calls.append((args, cwd))
+        text = " ".join(args)
+        for marker, outcome in self.overrides.items():
+            if marker in text:
+                return outcome
+        if "worktree add" in text:
+            tree = Path(args[-2])
+            (tree / "docs" / "research" / "entries").mkdir(parents=True)
+            return self.ok()
+        if "worktree remove" in text:
+            shutil.rmtree(args[-1])
+            if self.damage_store:
+                next(self.store.iterdir()).unlink()
+            return self.ok()
+        if "mklink" in text:
+            Path(args[-2]).mkdir(parents=True)
+            return self.ok("Junction created")
+        if args[:3] == ("cmd", "/c", "rmdir"):
+            if self.link_removable:
+                Path(args[-1]).rmdir()
+            return self.ok()
+        if args[:2] == ("git", "rev-parse"):
+            return self.ok(SHA + "\n")
+        if args[:3] == ("git", "status", "--porcelain"):
+            if self.dirty:
+                return self.ok(
+                    f"?? docs/research/selection.json\n?? docs/research/entries/{ENTRY_OFF}.json\n?? docs/research/entries/{ENTRY_ON}.json\n"
+                )
+            return self.ok()
+        if "commit" in args:
+            self.dirty = False
+            return self.ok("[detached HEAD] x")
+        if (
+            args[:2] == ("git", "add")
+            or args[1:3] == ("-m", "venv")
+            or args[1:4] == ("-m", "pip", "install")
+        ):
+            return self.ok()
+        if "trading_bot strategies" in text:
+            return self.ok(
+                f"event=boot_provenance verdict=accepted install_kind=vcs code_intact=true code_commit={SHA} "
+                "checkout_dirty=false commits_agree=true config_tracked=true\n"
+            )
+        if "s6_sweep.py" in text:
+            return self.ok(
+                "S6 SWEEP LEDGER\n  variants declared 2; with a sealed evidence-eligible record 2\n"
+                "  parallel check: the trade-log digests are equal\n  DUPLICATED k: a, b\n  COMPLETE\n"
+            )
+        if "s6_select.py" in text:
+            return self.select(args, cwd)
+        if "trading_bot backtest" in text:
+            return self.backtest(args, cwd)
+        if "s7_gate.py" in text:
+            return self.gate()
+        raise AssertionError(f"the fake does not know {text}")
+
+    def select(self, args: tuple[str, ...], cwd: Path) -> rh.Outcome:
+        report = (
+            "S6 SELECTION (x)\n  variants declared 2; with a run 2; duplicated 1; skipped 0\n"
+            "  cells with a candidate 2 of 2\n"
+        )
+        if "--out" not in args:
+            return self.ok(report)
+        entries = cwd / "docs" / "research" / "entries"
+        (cwd / "docs" / "research" / "selection.json").write_bytes(b"{}\n")
+        lines = [f"selection file docs/research/selection.json sha256 {'f' * 64} (3 bytes)"]
+        for entry_id, filtered in ((ENTRY_OFF, False), (ENTRY_ON, True)):
+            (entries / f"{entry_id}.json").write_bytes(
+                rh.entry_bytes(candidate(entry_id, filtered=filtered))
+            )
+            lines.append(f"entry docs/research/entries/{entry_id}.json")
+        self.dirty = True
+        return self.ok(report + "\n".join(lines) + "\n")
+
+    def backtest(self, args: tuple[str, ...], cwd: Path) -> rh.Outcome:
+        arm = args[args.index("--stop-slippage") + 1]
+        entry_id = ENTRY_ON if any("trend_filter_period" in a for a in args) else ENTRY_OFF
+        body = json.loads(
+            (cwd / "docs" / "research" / "entries" / f"{entry_id}.json").read_text("utf-8")
+        )
+        if body["status"] == "read":
+            return rh.Outcome(
+                1, f"[already_read] entry {entry_id!r} has been read out of sample already", 0.0
+            )
+        if (entry_id, arm) in self.done:
+            if self.refusal_leaves_a_run:
+                (cwd / "data" / "backtests" / "a-stray-run").mkdir()
+            return rh.Outcome(1, "[local_prior_read] a candidate is read once per arm.", 0.0)
+        self.done.add((entry_id, arm))
+        run = cwd / "data" / "backtests" / f"20250101T00000{len(self.done)}Z-{entry_id}-{arm}"
+        write_record(run, entry_id=entry_id, arm=arm)
+        return self.ok("done\n")
+
+    def gate(self) -> rh.Outcome:
+        if self.case == "pass":
+            rows = "".join(f"CANDIDATE {e}\n  S7: PASS\n" for e in (ENTRY_OFF, ENTRY_ON))
+            return self.ok(
+                "S7 DECISION GATE\n" + rows + "S7 SUMMARY: 2 of 2 candidates read PASS\n"
+            )
+        rows = "".join(
+            f"CANDIDATE {e}\n  NOT MET  trades: 7  (threshold >= 100)\n  S7: FAIL\n"
+            for e in (ENTRY_OFF, ENTRY_ON)
+        )
+        return self.ok("S7 DECISION GATE\n" + rows + "S7 SUMMARY: 0 of 2 candidates read PASS\n")
+
+
+@pytest.fixture
+def world(tmp_path: Path) -> tuple[Path, Path]:
+    store = tmp_path / "store"
+    store.mkdir()
+    for index in range(3):
+        (store / f"f{index}").write_bytes(b"x")
+    return tmp_path / "root", store
+
+
+def make(case: str, world: tuple[Path, Path]) -> tuple[rh.Rehearsal, FakeChain]:
+    root, store = world
+    chain = FakeChain(case, store)
+    config = rh.Config(
+        repo=REPO, root=root, store=store, python="python", start=START, boundary=BOUNDARY, end=END
+    )
+    return rh.Rehearsal(case, config, run=chain, echo=lambda _line: None), chain
+
+
+@pytest.mark.parametrize("case", rh.CASES)
+class TestTheCase:
+    def test_it_runs_every_hop_in_order_and_matches_every_prediction(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        rehearsal.cleanup()
+        names = [r.name for r in rehearsal.records]
+        assert all(r.matched for r in rehearsal.records)
+        assert names[0] == "worktree-add"
+        order = [
+            "install-by-commit",
+            "sweep",
+            "select-report",
+            "select-write",
+            "install-at-entries",
+            f"oos-{ENTRY_OFF}-0.05",
+            f"oos-{ENTRY_ON}-1.20",
+            "second-read-same-arm",
+            "install-at-read",
+            "read-after-read",
+            "s7-gate",
+            "junction-remove",
+            "worktree-remove",
+            "store-untouched",
+        ]
+        assert [names.index(n) for n in order] == sorted(names.index(n) for n in order)
+        assert names.count("sweep") == 1
+        assert sum(1 for n in names if n.startswith("oos-") and "records" not in n) == 6
+        assert len(chain.done) == 6
+
+    def test_the_junction_is_removed_by_itself_before_the_worktree(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        rehearsal.cleanup()
+        texts = chain.names()
+        first_rmdir = next(i for i, t in enumerate(texts) if t.startswith("cmd /c rmdir"))
+        remove = next(i for i, t in enumerate(texts) if "worktree remove" in t)
+        assert first_rmdir < remove
+        assert texts[first_rmdir].endswith(str(rehearsal.link))
+        assert not rehearsal.wt.exists()
+
+    def test_every_hop_is_kept_with_the_digest_of_its_output(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, _ = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        lines = [
+            json.loads(x) for x in (rehearsal.base / "hops.jsonl").read_text("ascii").splitlines()
+        ]
+        assert len(lines) == len(rehearsal.records)
+        for line in lines:
+            kept = (
+                rehearsal.base / "out" / f"{line['number']:02d}-{line['name']}.txt"
+            ).read_bytes()
+            assert line["output_sha256"] == hashlib.sha256(kept).hexdigest()
+            assert line["expected"] and line["matched"] is True
+            assert (line["kind"] == "command") == bool(line["argv"])
+
+    def test_the_entries_are_marked_read_and_the_gate_reads_them_back(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, _ = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        for entry_id in (ENTRY_OFF, ENTRY_ON):
+            path = rehearsal.wt / "docs" / "research" / "entries" / f"{entry_id}.json"
+            entry = parse_entry(path.read_text("utf-8"))
+            assert entry.status == "read"
+            assert sorted(entry.oos["records"]) == ["0.05", "0.66", "1.2"]  # type: ignore[index]
+
+    def test_a_hop_that_does_not_match_stops_the_case_and_keeps_the_worktree(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        chain.overrides["s6_sweep.py"] = rh.Outcome(0, "variants declared 2\n  NOT COMPLETE\n", 0.0)
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "sweep"
+        assert rehearsal.records[-1].matched is False
+        assert not any("s6_select.py" in t for t in chain.names())
+        assert rehearsal.wt.exists()
+
+    def test_a_junction_that_will_not_go_stops_the_cleanup_before_the_worktree_is_touched(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        chain.link_removable = False
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.cleanup()
+        assert caught.value.record.name == "junction-gone"
+        assert not any("worktree remove" in t for t in chain.names())
+        assert rehearsal.wt.exists()
+
+    def test_a_store_that_lost_a_file_is_a_mismatch(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        chain.damage_store = True
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.cleanup()
+        assert caught.value.record.name == "store-untouched"
+        assert "3 before, 2 after" in caught.value.record.detail
+
+    def test_the_gate_prediction_is_the_cases_own(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        wrong = (
+            "S7 SUMMARY: 0 of 2 candidates read PASS\n"
+            if case == "pass"
+            else "S7 SUMMARY: 2 of 2 candidates read PASS\n"
+        )
+        chain.overrides["s7_gate.py"] = rh.Outcome(0, "S7 DECISION GATE\n" + wrong, 0.0)
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "s7-gate"
+
+    def test_every_reinstall_forces_the_new_commit_over_the_old_one(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        # MEASURED at P118: a plain pip install of a new commit into a venv that holds the package keeps
+        # the OLD commit and exits 0, and the boot then refuses (commits_agree=false).
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        installs = [
+            args
+            for args, _ in chain.calls
+            if args[1:4] == ("-m", "pip", "install") and "@" in args[-1]
+        ]
+        assert len(installs) == 3  # after the narrowed protocol, the entries, and the read marking
+        for args in installs:
+            assert "--force-reinstall" in args and "--no-deps" in args
+            assert args[-1] == rh.worktree_url(rehearsal.wt, SHA)
+
+    def test_a_dirty_checkout_after_a_step_is_a_mismatch(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        chain.overrides["status --porcelain"] = rh.Outcome(0, "?? stray.txt\n", 0.0)
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "boot-after-narrowing-status"
+        assert "predicted none" in caught.value.record.detail
+
+    @pytest.mark.parametrize(
+        ("field", "wrong"),
+        [
+            ("verdict", "refused"),
+            ("install_kind", "editable"),
+            ("code_intact", "false"),
+            ("checkout_dirty", "true"),
+            ("commits_agree", "false"),
+            ("config_tracked", "false"),
+            ("code_commit", "b" * 40),
+        ],
+    )
+    def test_a_boot_that_is_not_accepted_in_any_field_is_a_mismatch(
+        self, case: str, field: str, wrong: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        good = {
+            "verdict": "accepted",
+            "install_kind": "vcs",
+            "code_intact": "true",
+            "code_commit": SHA,
+            "checkout_dirty": "false",
+            "commits_agree": "true",
+            "config_tracked": "true",
+        }
+        line = " ".join(f"{k}={wrong if k == field else v}" for k, v in good.items())
+        chain.overrides["trading_bot strategies"] = rh.Outcome(
+            0, f"event=boot_provenance {line}\n", 0.0
+        )
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "boot-after-narrowing-provenance"
+        assert field in caught.value.record.detail
+
+    def test_a_refused_second_read_that_leaves_a_run_behind_is_a_mismatch(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        chain.refusal_leaves_a_run = True
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "second-read-left-no-run"
+        assert "a-stray-run" in caught.value.record.detail
+
+
+class TestTheCommand:
+    def test_a_root_inside_the_repository_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        status = rh.main(
+            ["--root", str(REPO / "scratch_x"), "--store", str(store)], run=FakeChain("fail", store)
+        )
+        assert status == rh.EXIT_REFUSED
+        assert "outside the repository" in capsys.readouterr().err
+
+    def test_a_missing_store_is_refused(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        status = rh.main(
+            ["--root", str(tmp_path / "r"), "--store", str(tmp_path / "none")],
+            run=FakeChain("fail", tmp_path),
+        )
+        assert status == rh.EXIT_REFUSED
+        assert "is not a directory" in capsys.readouterr().err
+
+    def test_an_existing_worktree_is_refused_not_overwritten(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        (tmp_path / "r" / "fail" / "wt").mkdir(parents=True)
+        status = rh.main(
+            ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"],
+            run=FakeChain("fail", store),
+        )
+        assert status == rh.EXIT_REFUSED
+        assert "--clean-only" in capsys.readouterr().err
+
+    def test_both_cases_run_and_each_worktree_is_removed(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        (store / "f").write_bytes(b"x")
+        chain = FakeChain("pass", store)
+
+        def run(argv: object, cwd: Path, env: object) -> rh.Outcome:
+            case = "pass" if "pass" in Path(cwd).parts else "fail"
+            if case != chain.case and Path(cwd).is_relative_to(tmp_path / "r"):
+                chain.case = case
+                chain.done.clear()  # a second worktree is a second clone: its own records
+            return chain(argv, cwd, env)
+
+        status = rh.main(["--root", str(tmp_path / "r"), "--store", str(store)], run=run)
+        out = capsys.readouterr().out
+        assert status == 0
+        assert "[pass] DONE" in out and "[fail] DONE" in out
+        assert not (tmp_path / "r" / "pass" / "wt").exists()
+        assert not (tmp_path / "r" / "fail" / "wt").exists()
+
+    def test_a_mismatch_ends_the_command_with_status_one_and_keeps_the_worktree(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        chain.overrides["s6_sweep.py"] = rh.Outcome(2, "REFUSED", 0.0)
+        status = rh.main(
+            ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"], run=chain
+        )
+        assert status == rh.EXIT_MISMATCH
+        assert "STOPPED" in capsys.readouterr().out
+        assert (tmp_path / "r" / "fail" / "wt").exists()
+
+    def test_clean_only_removes_a_kept_worktree(self, tmp_path: Path) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        chain.overrides["s6_sweep.py"] = rh.Outcome(2, "REFUSED", 0.0)
+        root = tmp_path / "r"
+        rh.main(["--root", str(root), "--store", str(store), "--case", "fail"], run=chain)
+        del chain.overrides["s6_sweep.py"]
+        status = rh.main(
+            ["--root", str(root), "--store", str(store), "--case", "fail", "--clean-only"],
+            run=chain,
+        )
+        assert status == 0
+        assert not (root / "fail" / "wt").exists()

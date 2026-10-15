@@ -1583,6 +1583,12 @@ takes and the bot did not is a finding about one of them.
 > CHECK: 3 x N rows, every `window` `out_of_sample`, every `evidence` `True`, each (entry, arm) exactly once, and `git status --porcelain` empty. The table is the input the next step needs to mark the entries `read` with each
 > record's digest and to run `scripts/s7_gate.py`. Derived time, 1 to 2 hours serially. **Do not edit PROTOCOL.md, in any checkout, before S7.**
 
+> **ANNOTATED AT M5m P118 (C1b), BY THE OWNER'S RULING R-CL: THE REHEARSAL IS BUILT, AND HAS NOT BEEN RUN.** The P117 C8 block above says, under its owner's steps, *"**What is not built:** an end-to-end
+> rehearsal of the whole chain (`M5m-424`)"*. That sentence is false from this commit: `scripts/s6_rehearsal.py` (C1a `7f86953` holds its narrowed protocol and pure helpers, C1b its orchestration) drives the sweep,
+> the selection and the entry writing, the out-of-sample runs at all three arms, a refused second read, the entries marked read and the S7 gate, as real commands in a throwaway worktree outside the repository,
+> in a passing case and a failing one, and removes the junction before the worktree. **What is not true yet is that it has run:** the run, and every hop's result against its prediction, are P118's C2 and are
+> recorded in `docs/RUN_LEDGER.md`. **Owner steps O1 to O6 above stand as written until C3 corrects their install procedure;** nothing in this block changes a step. **What survives:** the three rules for every step.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
