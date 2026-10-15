@@ -5293,3 +5293,178 @@ The narrowed protocol's boundary did not stop the engine reading the REAL protoc
 ### The commits
 
 `7f86953` (C1a, the narrowed protocol and the pure helpers), `2f44ae2` (C1b, the orchestration), `62c21ae` (C2a, the label and the numbering), `93e98e7` (C2b, the stamp collision in `main.py`), `d198631` (C2c, `--window` and the refusal of a real-out-of-sample window), `da094f8` (C2d, the default window), and this section's commit (C3). Gates: C1a 4078, C1b 4120, C2a 4122, C2b 4124, C2c 4133, C2d 4133 passed and 1 skipped, ruff format 212, mypy 106, each credentialed and bare to a file (`gate_c1a.txt` `c87234487d6c25d7f6ccec0cff1f78ccdcd24eaa216efc7e1ad342697b557871`, `gate_c1b.txt` `bbd42e0a789751f5c8f7af3dc648181a4abb3128a960327ef10b83232ad6fe40`, `gate_c2a.txt` `cde12ffd098716afd72bffe10491f257baf0a3f8304ca120e54a52291042ab12`, `gate_c2b.txt` `190b9865c9ab88caf66f00accf1dca50e37d9fdb26dd25e7c28b8acbaa3ff0e8`, `gate_c2c.txt` `eafdedba0bc99ede8ffd316228b638264967af4b7c59000e78e8f59157508333`, `gate_c2d.txt` `4e3af8a8181b7509a4885ed44f3d17b5a6189389130ececdae443795e14c0888`). Surveys (every mutation predicted in a file first): C1b 12 mutations / 25 kills (`d4f8c5fa1e9b8802594ac5d8964189d92dff3e7fd7751d3a3c17262bc42f8c0a`), C2a 4 / 8 after one HALT (`985b06e48eec64a831d12bc483d4163d9bece8760db1cc7ec17152d9ff49d1fa`, then `45df92a348d5ed4cec477cb9e956aaeafea57cbd4d47e158497cf66264e9e6b7`), C2b 4 / 6 (`7927baa872505472efcab3edaea393f9c288e915bd29fc0d5c942c170f21cb7b`), C2c 5 / 19 (`9fcd209273df74247f66418a4358c8fae4e288c810955a62b1479e7ef0727982`), C2d 2 / 8 (`e4c769479d3ae9d94f6a8f6d94b0755832d8fe2505c1027619c20c720146446e`). Findings `M5m-431` to `M5m-452` were declared in those commits, and `M5m-453` onward in this one.
+
+## 53. M5m S6/S7: the rehearsal re-run with step O7 driven through the tool, at 365d767 (P119 C4, R-CP, R-CQ)
+
+Read on `2026-10-15` from files under `F:\trading bot\scratch\p119\` (outside the repository) and from the run directories of throwaway worktrees that no longer exist. **Nothing from the re-run is committed to `docs/research/`, `docs/research/PROTOCOL.md` was not edited by it (amendment 3 was C1, `a03d5c9`, before any run), no S6 record exists outside a throwaway worktree, the S4 and S5 clones were not touched, and no venue write was made.** **R-CN held: every window of this run lies before 2024-01-01** (in sample 2018-12-01 to 2020-01-01, out of sample the whole of 2020), and the script refuses any other. The canonical store held **1,126 files before and after**, counted by `find` before the run and by the script's own `store-untouched` hop at the end of each case (`1126 -> 1126`).
+
+The owner's rulings, verbatim. **R-CN:** *"No rehearsal, probe or test reads any bar at or after 2024-01-01T00:00Z, except an out-of-sample read under a committed entry. The rehearsal script refuses such a window."* **R-CO:** *"A junction is removed only with cmd /c rmdir. No recursive copy or delete (cp -r, rm -rf, Remove-Item -Recurse, Copy-Item -Recurse) is run on a directory that holds a junction, by hand or by script."* **R-CP:** *"Entries are marked read by scripts/s6_mark_read.py (owner step O7). It verifies each out-of-sample record through the evidence door and writes the three record digests into the entry; it refuses an entry already read, a record that fails the door, and a set other than exactly the three declared arms."* **R-CQ:** *"A sweep whose check lost a worker and then recovered the variant prints the loss and the recovery, and reports COMPLETE when every variant has a sealed record (M5m-445)."* R-CM is in `docs/research/PROTOCOL.md` amendment 3.
+
+### The halts, against their predictions
+
+Predictions were written to `predictions_halts.txt` (SHA-256 `38d792e283fffdcf9937e610b884e3415e8635e94e40c1ef6aedb0055a6572d7`) before any halt ran.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `7fec073`; the owner HAS pushed, so `origin/main` is `7fec073`, 0 ahead (else `9d6d519`, 7 ahead) | **WRONG, for the second prompt running** (`M5m-459`): `git ls-remote origin refs/heads/main` read `9d6d519`, the prompt's alternative |
+| H2, `git status --porcelain` | empty | read as predicted at the time; **its output was not kept in a file**, so no digest exists |
+| H3, the gate, bare, to a file | ruff clean, 212 files, mypy 106, pytest 4133 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `1f059bc05445ec0ef2b2fa29e50d1fb7755d0c8ed227e3f46205e823ad7fc4f2`) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 457, distinct 457, max 457, no duplicate, no gap, no cited-not-declared, blockless `934eb45`, exit 1 | read as predicted at the time; **its output was not kept in a file**. At this section's run the same command reads declared 475, distinct 475, max 475, no duplicate, no gap, no cited-not-declared, blockless `934eb45`, exit 1 (`findings_c4b.txt`, SHA-256 `0abf470505204752fc145a85d671c779912c29139ae0097b8332911d4f073cd6`) |
+
+### The commits before the run
+
+`a03d5c9` (C1: amendment 3, selection honouring R-CM), `4a8ec1a` (C2: `scripts/s6_mark_read.py` and `backtesting/readmark.py`), `13c780e` (C3: R-CQ in `scripts/s6_sweep.py`) and **`365d767` (C4a: the rehearsal drives O7 through the tool)**. The re-run is at `365d767`, committed and clean, with the gate green (4188 passed, 1 skipped; `gate_c4a.txt`, SHA-256 `788d78ccc7b99df115046483bae88c06c69024bbcbae138945cdefacc498cff0`).
+
+### The invocation
+
+`python -u scripts/s6_rehearsal.py --root F:\trading bot\scratch\p119\rehearsal --store F:\trading bot\store\mainnet-historical --label p119-final`, no `--window`, `--case both`, from the development checkout. Predictions: `predictions_c4b_run.txt` (SHA-256 `06c9fde70705eb12c20cbbd9c21d10eb1ea03943e6da65d796ba2045e4023f5e`), written before the run, with the hop count (56 a case) taken from the test double over the same script. Console output `rehearsal_p119_final.txt`, SHA-256 `99a883e493ff1e1cf690ff159dd9214fe48b9b22d7d89820d1df821512209a04`.
+
+**Result: 112 of 112 hops matched their predictions, 56 in each case, cleanup included. It stopped on nothing, on the first run from the start, with no seam fault.** `git worktree list` afterwards shows the development checkout and the survey worktree of C4a only (removed with this section's commit); both rehearsal worktrees were removed by the script, junction first.
+
+| Case | `hops.jsonl` SHA-256 | S7 SUMMARY |
+|---|---|---|
+| pass | `acb01db19c2e16e4ffe2bbfa62e3c0cbbf6f70d7d2a672214c2bba4f3a54a2dc` | `2 of 2 candidates read PASS` |
+| fail | `37d652810e1e54b10a66e3321d25ec8f816dfafbb9038856653770f69f47586b` | `0 of 2 candidates read PASS` |
+
+### What the re-run showed about step O7, which is its purpose
+
+**The tool met real records for the first time here and the double did not mislead.** Hop 33, `s6_mark_read.py --backtests data/backtests --dry-run`, read the six real out-of-sample records through the evidence door and printed, for each of the two entries, `entry <id>: would be marked read` and one line per arm of the form `arm 0.05  <run directory> record sha256 <digest>`, then `dry run: nothing was written`; exit 0, and `git status --porcelain` empty afterwards (hop 34). Hop 38, the same without `--dry-run`, exit 0, printed `marked read` for both and the closing `next: git add docs/research/entries; commit; push; rebuild the clone; scripts/s7_gate.py`; hop 39 shows exactly two lines, ` M docs/research/entries/s6-sma_crossover-4h-off.json` and ` M docs/research/entries/s6-sma_crossover-4h-on.json`; hop 41 read both entries back as `read` with a record at each of the three arms. After the commit and the reinstall at it (hop 44, 13.2 s) and an accepted boot (hops 45 to 47), **hop 48 ran the tool a second time and it exited 2 with `REFUSED: entry 's6-sma_crossover-4h-off' is already read (status 'read'); a candidate is read once`**, leaving the status clean (hop 49). The backtest command's own refusal of a read entry followed (hop 50: exit 1, `[already_read] entry 's6-sma_crossover-4h-off' has been read out of sample already (status 'read'); a candidate is read once.`), and neither refusal left a run directory.
+
+**The sweep (R-CQ).** In both cases hop 11 printed `variants declared 2; with a sealed evidence-eligible record 2`, `parallel check: the trade-log digests are equal`, exactly one `DUPLICATED` line (the check's probe variant) and `COMPLETE`, with **no `LOST`, `RECOVERED` or `FAILED` line**: the stamp collision was fixed at `93e98e7`, so the check lost no worker. **R-CQ's report path was therefore NOT exercised by this run** (`UNMEASURED` against a real lost worker); it is pinned by `tests/unit/test_s6_sweep.py` over a worker lost once (`crash_once`), which fails on the old script.
+
+**The selection** reported `cells with a candidate 2 of 2` and, in the narrowed protocol, `ruled ineligible by the owner (R-CM), still run and counted: 0`: the rehearsal's narrowing clears R-CM's list, because the two narrowed variants ARE the two the owner ruled ineligible and a rehearsal that honoured the ruling would have no candidate to read. R-CM's effect on a selection is pinned by `tests/unit/test_selection_ruling.py` and not by this run.
+
+**The gate figures are identical to `final2`'s (section 52), as predicted:** same data and same code paths, different run directories and digests. Pass case, gate arm 1.20, out of sample the whole of 2020:
+
+| Candidate | Trades | Return profit factor | USDT profit factor | Max drawdown (per bar) | Regime net P&L | Verdict |
+|---|---|---|---|---|---|---|
+| unfiltered | 53 | 1.035753 (2.270546 at 0.05, 1.493289 at 0.66) | 1.034942 | 0.004822 | rising -18.22, falling 0, sideways +23.16 | PASS |
+| filtered | 36 | 1.042873 (2.301779 at 0.05, 1.507719 at 0.66) | 1.042095 | 0.003593 | rising -16.64, falling 0, sideways +20.84 | PASS |
+
+Fail case (the real thresholds): both FAIL with `NOT MET` on both profit factors (against 1.3), on the trades (53 and 36 against 100) and on the regimes (1 of 3 against 2). The selection's in-sample cells were 57 trades at return profit factor 0.364063 and 22 trades at 0.473241, unchanged.
+
+**Per-hop record, pass case** (`hops.jsonl` SHA-256 `acb01db19c2e16e4ffe2bbfa62e3c0cbbf6f70d7d2a672214c2bba4f3a54a2dc`; every row matched its prediction; "-" is a check made by the script, not a command):
+
+| No. | Hop | Exit | Output SHA-256 | Seconds |
+|---|---|---|---|---|
+| 1 | `worktree-add` | 0 | `d463b0af786b9adaea5c22170e9d4fcc76072abe7eb9fe5f3845c05af2b4d1e2` | 0.2 |
+| 2 | `venv` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 7.2 |
+| 3 | `pip-requirements` | 0 | `7ab92d00f5f3912c95159ec91d366f4b0a709edcc4960a11596b2eee555abcf9` | 48.5 |
+| 4 | `junction` | 0 | `9faf89b257fd48d5001d068027c7951d91525a5f4b1c85daa933fa493f0adb88` | 0.0 |
+| 5 | `add-narrowed-protocol` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 6 | `commit-narrowed-protocol` | 0 | `1845e218069efe94d9e39e24d1ac3eae23b5a87118be41bb3a1cf750fab2e9ae` | 0.2 |
+| 7 | `install-by-commit` | 0 | `e556c5b23656b8a45110cc206cea22321fa0f51d1ce937936f6dbf1b28683ee7` | 27.8 |
+| 8 | `boot-after-narrowing` | 0 | `1bb4cfca053afc022206d3b9ecb4ff6085954323509992d87f05f698c0b5604a` | 4.6 |
+| 9 | `boot-after-narrowing-provenance` | - | `1bb4cfca053afc022206d3b9ecb4ff6085954323509992d87f05f698c0b5604a` | 0.0 |
+| 10 | `boot-after-narrowing-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 11 | `sweep` | 0 | `abde299b7dfe97558546d2f0d0c1894863c46fbbe40e76497c4b306d92ef52e3` | 24.9 |
+| 12 | `status-after-sweep` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 13 | `select-report` | 0 | `b2629abdd2f831eea86682769554a17caecde0a0430ee6136bb95674df751361` | 0.3 |
+| 14 | `select-has-candidates` | - | `b2629abdd2f831eea86682769554a17caecde0a0430ee6136bb95674df751361` | 0.0 |
+| 15 | `status-after-report` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 16 | `select-write` | 0 | `e060f173fb232c3adbe5911c3066d04c1de72cfe2083f5885c988a7f422941fd` | 0.2 |
+| 17 | `select-entries-match-report` | - | `e060f173fb232c3adbe5911c3066d04c1de72cfe2083f5885c988a7f422941fd` | 0.0 |
+| 18 | `status-lists-the-new-files` | 0 | `718e506bb213d6b0c0791ac7e91efd8ab6e74be6dc557b27c1fd117ca765cd86` | 0.0 |
+| 19 | `status-holds-only-the-new-files` | - | `718e506bb213d6b0c0791ac7e91efd8ab6e74be6dc557b27c1fd117ca765cd86` | 0.0 |
+| 20 | `add-selection` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 21 | `commit-selection` | 0 | `1aa9549566b7887902eaa227bdcffaf510d34857e98737b3969e88506e9595bb` | 0.3 |
+| 22 | `install-at-entries` | 0 | `1580e27460cb9d7606ebee966fb9d1cb3260d9601fd56e51b1e41f47d0d11ca3` | 12.6 |
+| 23 | `boot-at-entries` | 0 | `d3e51298e929354405fae1030e76c992bf6a61a726827b82ca5a8cabb922cc55` | 0.9 |
+| 24 | `boot-at-entries-provenance` | - | `d3e51298e929354405fae1030e76c992bf6a61a726827b82ca5a8cabb922cc55` | 0.0 |
+| 25 | `boot-at-entries-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 26 | `oos-s6-sma_crossover-4h-off-0.05` | 0 | `ccc5a9acc7b56e101bb9b9c13203796213e40b97c05899fc528cc2c97313044a` | 10.7 |
+| 27 | `oos-s6-sma_crossover-4h-off-0.66` | 0 | `a85e1f1b3ad178a0e93c214748dce1379c3b94a09f4129aaa1a9d11ccd1fdb3e` | 10.2 |
+| 28 | `oos-s6-sma_crossover-4h-off-1.20` | 0 | `4ad7035be4d2a38355a8edda2c766e3d6181be822b19f35f759b1b895176e8d3` | 10.1 |
+| 29 | `oos-s6-sma_crossover-4h-on-0.05` | 0 | `75d69be1574122762d75c3853b50065ba91d2c0661687690dc71fb7b5f587cab` | 10.1 |
+| 30 | `oos-s6-sma_crossover-4h-on-0.66` | 0 | `91a69ec8eb9fa698f97d9c5fb2b24463e3723e728f9535678a0bc1955056f287` | 10.2 |
+| 31 | `oos-s6-sma_crossover-4h-on-1.20` | 0 | `b86894df93b009bc4c8f830d10b49e538b7024eba4f5dd2f1e992004d0a34d9d` | 10.0 |
+| 32 | `status-after-oos` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 33 | `mark-read-dry-run` | 0 | `12c8672fa28a0db0dba32f55129e613ac46d1fa65d5e9c40124ea4844651748b` | 0.3 |
+| 34 | `status-after-dry-run` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 35 | `second-read-same-arm` | 1 | `c98540b9b0cf07f814250372a1efe86cd45db3f04567a6d66bc7bf01a50fc795` | 1.6 |
+| 36 | `second-read-left-no-run` | - | `641929ebca87dfd8ad6da8b367220f46238182a96f1b35c521f8a4e62b9b1a77` | 0.0 |
+| 37 | `status-after-refusal` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 38 | `mark-read` | 0 | `5e9315a1ae50a9808df286a177956ea36f1bebbe6fb5a0ff3b2a2be30de78966` | 0.3 |
+| 39 | `status-after-marking` | 0 | `aec441f9be760f7de9530ffad7dedeebb911e068abd111e2e04fcfadaebc860c` | 0.0 |
+| 40 | `status-holds-only-the-marked-entries` | - | `aec441f9be760f7de9530ffad7dedeebb911e068abd111e2e04fcfadaebc860c` | 0.0 |
+| 41 | `entries-are-read-with-the-declared-arms` | - | `8974dc5860c67d9751214d404bc6738c5e4aefc448c8df4fb4ec24313fb37021` | 0.0 |
+| 42 | `add-read` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 43 | `commit-read` | 0 | `d68b61aa6d360e96a5acc4f7ad72ef4a4518831530cdd569c9b164912aed69fd` | 0.2 |
+| 44 | `install-at-read` | 0 | `57648bf92ecbc6227f0dd7f0ff04ca349cf049491270cb448a0c10a0038dcac9` | 13.2 |
+| 45 | `boot-at-read` | 0 | `3c0b1a44ce89ada09fda36309a9dbcc508acd49dbd1b6195afab7b94a720515a` | 1.0 |
+| 46 | `boot-at-read-provenance` | - | `3c0b1a44ce89ada09fda36309a9dbcc508acd49dbd1b6195afab7b94a720515a` | 0.0 |
+| 47 | `boot-at-read-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 48 | `mark-read-again` | 2 | `b8f834f06777a92772edbb7eef9585d42ac05e571e9b4960b9ec03cf518049a6` | 0.3 |
+| 49 | `status-after-second-marking` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 50 | `read-after-read` | 1 | `a8f356a4c9d05fc9d5126d7a60bcddc2138faa3f76a84c007b907d507205698f` | 1.6 |
+| 51 | `read-after-read-left-no-run` | - | `641929ebca87dfd8ad6da8b367220f46238182a96f1b35c521f8a4e62b9b1a77` | 0.0 |
+| 52 | `s7-gate` | 0 | `185d123cf32d80a10190c4a153084bd1aec989de731665dc80ab52f538355e38` | 0.3 |
+| 53 | `junction-remove` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 54 | `junction-gone` | - | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 55 | `worktree-remove` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 1.8 |
+| 56 | `store-untouched` | - | `29eedcfc6ede3629c7bcb2b601fbefe3f8bed550701e1cb9def5c64bf59448d5` | 0.0 |
+
+**Per-hop record, fail case** (`hops.jsonl` SHA-256 `37d652810e1e54b10a66e3321d25ec8f816dfafbb9038856653770f69f47586b`):
+
+| No. | Hop | Exit | Output SHA-256 | Seconds |
+|---|---|---|---|---|
+| 1 | `worktree-add` | 0 | `d463b0af786b9adaea5c22170e9d4fcc76072abe7eb9fe5f3845c05af2b4d1e2` | 0.2 |
+| 2 | `venv` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 6.6 |
+| 3 | `pip-requirements` | 0 | `7ab92d00f5f3912c95159ec91d366f4b0a709edcc4960a11596b2eee555abcf9` | 43.0 |
+| 4 | `junction` | 0 | `0c6d60214eba6b8f6767cae3b36ad97f83958c7a4b31e5a793269cb7f134c286` | 0.0 |
+| 5 | `add-narrowed-protocol` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 6 | `commit-narrowed-protocol` | 0 | `3f757aaee7c5026de0aef7f7833b9c9e4ae8f0c64c987ad9ff30d9ff8512c3b2` | 0.2 |
+| 7 | `install-by-commit` | 0 | `6c445e73cd42fac4a3f059b563a0f7cc50d3035c15ba63dfca2edc93e5fc8f0d` | 13.8 |
+| 8 | `boot-after-narrowing` | 0 | `c194bd23e8506eb12ad96a44550488680a41718d4395ec23597ee157d5fa566c` | 5.1 |
+| 9 | `boot-after-narrowing-provenance` | - | `c194bd23e8506eb12ad96a44550488680a41718d4395ec23597ee157d5fa566c` | 0.0 |
+| 10 | `boot-after-narrowing-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 11 | `sweep` | 0 | `962b72709a3bcdf8466d4d94ffcbd5892f47bc41f19517cb7c7053c8c323ee6a` | 26.3 |
+| 12 | `status-after-sweep` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 13 | `select-report` | 0 | `833903279b485986f555aad4013d8b4513117c788558c10067ae7f2a3107e8cd` | 0.3 |
+| 14 | `select-has-candidates` | - | `833903279b485986f555aad4013d8b4513117c788558c10067ae7f2a3107e8cd` | 0.0 |
+| 15 | `status-after-report` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 16 | `select-write` | 0 | `43fbfbe57fa6364c0d9413b2b840772227d98ce6e16663738445317ae31e6b16` | 0.3 |
+| 17 | `select-entries-match-report` | - | `43fbfbe57fa6364c0d9413b2b840772227d98ce6e16663738445317ae31e6b16` | 0.0 |
+| 18 | `status-lists-the-new-files` | 0 | `718e506bb213d6b0c0791ac7e91efd8ab6e74be6dc557b27c1fd117ca765cd86` | 0.0 |
+| 19 | `status-holds-only-the-new-files` | - | `718e506bb213d6b0c0791ac7e91efd8ab6e74be6dc557b27c1fd117ca765cd86` | 0.0 |
+| 20 | `add-selection` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 21 | `commit-selection` | 0 | `d45fcc270d2635a7097caaeaf5701ed00ff3834031fd8d38de3b40618f798f1f` | 0.2 |
+| 22 | `install-at-entries` | 0 | `d5a1b0f90be90581e9060821c107f4d211e23cc0a9d6249295d256cd6e3df21f` | 13.0 |
+| 23 | `boot-at-entries` | 0 | `a2b5067f452c50b382fa8fca6b07caf8c06803bec9be973cff2aacc18fbc10ec` | 1.0 |
+| 24 | `boot-at-entries-provenance` | - | `a2b5067f452c50b382fa8fca6b07caf8c06803bec9be973cff2aacc18fbc10ec` | 0.0 |
+| 25 | `boot-at-entries-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 26 | `oos-s6-sma_crossover-4h-off-0.05` | 0 | `694a0c5c1a0d7bdb63fff1ec5a90b4baee9aa2d40e41390f3b4df6cb6798a282` | 10.9 |
+| 27 | `oos-s6-sma_crossover-4h-off-0.66` | 0 | `e062d6161f3188d1da394f6532371195e8b7827fc2413c55d81c591a32bcb713` | 10.7 |
+| 28 | `oos-s6-sma_crossover-4h-off-1.20` | 0 | `4d9487c695d26fd0bce1260a90ecc68ae67d4804a3ccc70b369e86dfc8f965f5` | 10.7 |
+| 29 | `oos-s6-sma_crossover-4h-on-0.05` | 0 | `c639317ff4bd5196a09f2a19264b9c44f382d7aa0908d4fc9fcfba82b0c604e5` | 10.7 |
+| 30 | `oos-s6-sma_crossover-4h-on-0.66` | 0 | `3538737afb00928c90f4fd3e00e99f1dd88f8fdb8a87859f57494744f673b829` | 10.8 |
+| 31 | `oos-s6-sma_crossover-4h-on-1.20` | 0 | `7596338f6798e232495a49aaa4ad5ee88be420a2f588644610ea0418a16961f8` | 10.8 |
+| 32 | `status-after-oos` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 33 | `mark-read-dry-run` | 0 | `9a192de1e085ac9da3e9e7358b95da9b97803aaae5df6c35f9aa56b68613ab6b` | 0.3 |
+| 34 | `status-after-dry-run` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 35 | `second-read-same-arm` | 1 | `edb1ed76c4b45069fe55bf8fb416596f2d93c12b65145b2e282e0314f7bf94b1` | 1.4 |
+| 36 | `second-read-left-no-run` | - | `f014c7d8ef70c896077a9e1f2dd28ef582d88764bac6840c4dbe27332d03e530` | 0.0 |
+| 37 | `status-after-refusal` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 38 | `mark-read` | 0 | `1b3646e137f736b47cd6aef59c8455fe0a7b744db9e7a6055233671e8ecb3f75` | 0.3 |
+| 39 | `status-after-marking` | 0 | `aec441f9be760f7de9530ffad7dedeebb911e068abd111e2e04fcfadaebc860c` | 0.0 |
+| 40 | `status-holds-only-the-marked-entries` | - | `aec441f9be760f7de9530ffad7dedeebb911e068abd111e2e04fcfadaebc860c` | 0.0 |
+| 41 | `entries-are-read-with-the-declared-arms` | - | `0da0bc7365335864d96abc9db8c883f4240bc2dec2a7541afd078c4668340103` | 0.0 |
+| 42 | `add-read` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.1 |
+| 43 | `commit-read` | 0 | `def45f459e013aa2d3287e0a9ec943d4ae3fcf78394aacafead8972eee062f03` | 0.2 |
+| 44 | `install-at-read` | 0 | `8684306317864f7329a7d1fb0d394cf964aa4555c177774ce2a51e790c894473` | 12.9 |
+| 45 | `boot-at-read` | 0 | `413babfc9acbad1ffe27de296b7e37bbd236905fa21543c649063a32fabf651e` | 1.0 |
+| 46 | `boot-at-read-provenance` | - | `413babfc9acbad1ffe27de296b7e37bbd236905fa21543c649063a32fabf651e` | 0.0 |
+| 47 | `boot-at-read-status` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 48 | `mark-read-again` | 2 | `b8f834f06777a92772edbb7eef9585d42ac05e571e9b4960b9ec03cf518049a6` | 0.3 |
+| 49 | `status-after-second-marking` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 50 | `read-after-read` | 1 | `f94a6d03fd17c451bad31cc5d93131ab22217c2419e9bf0ddd23e91c713dea7e` | 1.6 |
+| 51 | `read-after-read-left-no-run` | - | `f014c7d8ef70c896077a9e1f2dd28ef582d88764bac6840c4dbe27332d03e530` | 0.0 |
+| 52 | `s7-gate` | 0 | `e73e0df829340289f467018d00a9add07c8fe755e43a5aa6714fad8e63212094` | 0.3 |
+| 53 | `junction-remove` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 54 | `junction-gone` | - | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 0.0 |
+| 55 | `worktree-remove` | 0 | `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855` | 1.8 |
+| 56 | `store-untouched` | - | `29eedcfc6ede3629c7bcb2b601fbefe3f8bed550701e1cb9def5c64bf59448d5` | 0.0 |
+
+### What this re-run did NOT cover
+
+Everything section 52 lists still holds: a `git worktree` where the owner clones from GitHub (O1); the selection run inside the clone; one venv moved to the entries commit and then to the marking commit where the owner builds a NEW clone for O5 and reinstalls in the O5 clone for O7; 2 workers where O3 uses 8; 2 variants where S6 has 216, so no 1h run, no 12-cell selection with empty cells and no four-fold walk-forward. **None of the PowerShell of O1 to O7 and the gate was executed**; the rehearsal runs the same commands as argument arrays from Python (`docs/NEXT_MILESTONE.md`, the P119 C5 block, states exactly which lines were and were not run). **It also did not exercise `git push`**, which the owner runs in O7.
