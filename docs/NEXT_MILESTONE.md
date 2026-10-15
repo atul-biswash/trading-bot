@@ -1646,6 +1646,91 @@ takes and the bot did not is a finding about one of them.
 > refused with exit 2 and *"is already read"*. Five tests of the removed functions were removed with them (ruled-overturn authority, R-CP), the library's own tests being `tests/unit/test_s6_mark_read.py`. **What survives:**
 > the shape `gate.evaluate` reads, which `readmark.entry_bytes` now writes for the tool and for the rehearsal's test double alike.
 
+> **ANNOTATED AT M5m P119 (C5), BY THE OWNER'S RULINGS R-CM TO R-CQ: THE OWNER'S STEPS, O1 TO O7, IN ONE PLACE, WITH THEIR CHECKS.** The blocks above spread the steps over four annotations and left two sentences standing that are
+> false: *"Owner steps O1 to O6 above stand as written until C3 corrects their install procedure"* (C3 did, in the P118 block) and *"The step's PowerShell, its CHECK and its place between O6 and the gate are written at C5"*
+> (they are written here). **This block is the list to follow.** Where it says a step stands as written, the PowerShell is in the P117 C8 block above, unchanged; where it gives PowerShell, that is the text to use.
+>
+> **Four rulings change what the owner sees.** **R-CM:** the two variants `sma_crossover` 4h at 10/50, filter off and filter on, are ineligible for selection (they are still swept and counted in S7's 216), because their
+> 2024-01-01 to 2025-04-01 figures were seen (`docs/research/LOG.md` entry 5); the selection report prints `ruled ineligible by the owner (R-CM), still run and counted: 2`. **R-CN:** no rehearsal, probe or test reads any bar
+> at or after 2024-01-01T00:00Z except an out-of-sample read under a committed entry, and the rehearsal script refuses such a window; O6 is the only such read, by design. **R-CO:** a junction is removed only with
+> `cmd /c rmdir`, and no recursive copy or delete (`cp -r`, `rm -rf`, `Remove-Item -Recurse`, `Copy-Item -Recurse`) is run on a directory that holds a junction, by hand or by script: **to retire a clone, run
+> `cmd /c rmdir "$CLONE\data\historical"` first, and only then delete or rename the clone.** **R-CP:** entries are marked read by `scripts/s6_mark_read.py`, which is O7. **R-CQ:** a sweep whose check lost a worker and then
+> recovered the variant says so and still ends COMPLETE, which changes O3's CHECK.
+>
+> **The three rules for every step stand** (PROTOCOL.md unchanged by one byte; nothing untracked written into a clone; the S4 and S5 clones untouched). The second needs one clarification for O7: the tool rewrites tracked
+> entries, which `git status` shows as modified and not as untracked; O7 commits them at once.
+>
+> | Step | Runs in | PowerShell | CHECK (each its own command, none piped into a verdict) |
+> |---|---|---|---|
+> | O1 build the sweep clone | the new clone | the P118 C3 block's, with its two `pip` lines | as O1 above: `git rev-parse HEAD` prints `$SHA`; `git status --porcelain` prints nothing; the junction is a `Junction`; `Test-Path "$CLONE\data\historical\BTCUSDT\1h"` is `True`; `boot_provenance` shows `verdict=accepted`, `install_kind=vcs`, `code_intact=true`, `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true` |
+> | O2 the timing probe | the sweep clone | stands as written | as O2 above: `exit 1`, six `finish` lines with `exit 0`, `with a sealed evidence-eligible record 6` |
+> | O3 the sweep | the sweep clone | stands as written | **new, below** |
+> | O4 the selection and its entries | the development checkout | stands as written | as O4 above, and the report also reads `ruled ineligible by the owner (R-CM), still run and counted: 2` |
+> | O5 rebuild at the entries commit | a NEW clone | the P118 C3 block's O1 lines with `$SHA` the pushed entries commit | as O1, and the entries count equals N and PROTOCOL.md's hash equals the sweep clone's |
+> | O6 the out-of-sample reads | the O5 clone | stands as written | as O6 above: 3 x N rows, every `window` `out_of_sample`, every `evidence` `True`, `git status --porcelain` empty |
+> | O7 mark the entries read | the O5 clone | **below** | **below** |
+> | the gate | the O5 clone | **below** | **below** |
+>
+> **O3, the CHECK as R-CQ makes it.** Exit `0` and the line `  COMPLETE`; `variants declared 216; with a sealed evidence-eligible record 216`; `parallel check: the trade-log digests are equal`; no `MISSING`, `CONFLICT`, `FAILED` or
+> `NOT COMPLETE` line (a `DUPLICATED` line for the check's one variant is expected); then `git status --porcelain` prints nothing. **A `LOST <variant>: exit status N in <phase>` line followed by `RECOVERED <variant>: sealed record <run>`
+> for the same variant is NOT a stop**: it is a worker that died and whose variant the sweep then ran itself, and the report still ends `COMPLETE` with exit 0 (before R-CQ it ended `FAILED ... NOT COMPLETE` and exit 1
+> although every variant had a record, `M5m-445`). **A `LOST` with no `RECOVERED`, or any `FAILED` line, is a stop: report it.** Note the worker's exit status and phase from the `LOST` line.
+>
+> **O7. Mark the entries read, commit and push them, and rebuild the install at that commit.** Run in the O5 clone, after O6's CHECK, with that clone's own interpreter. The tool reads every record under `data\backtests`
+> through the evidence door, verifies each candidate's three out-of-sample records against its entry, and rewrites the entry `read`, all entries or none.
+>
+> ```powershell
+> Set-Location $CLONE
+> & $PY scripts\s6_mark_read.py --backtests data\backtests --dry-run
+> "exit $LASTEXITCODE"
+> git status --porcelain
+> ```
+>
+> CHECK: `exit 0`; one `entry <id>: would be marked read` line per candidate and three `record sha256` lines under each; `dry run: nothing was written`; and `git status --porcelain` prints nothing. A `REFUSED:` line (exit 2)
+> is a stop: it names the entry and the reason, and nothing was changed. Then, when satisfied:
+>
+> ```powershell
+> & $PY scripts\s6_mark_read.py --backtests data\backtests
+> "exit $LASTEXITCODE"
+> git status --porcelain
+> git add docs/research/entries
+> git commit -m "research: the S6 candidates' out-of-sample records, entries marked read"
+> git push origin HEAD:main
+> $SHA7 = git rev-parse HEAD
+> $SHA7
+> git ls-remote origin refs/heads/main
+> & $PY -m pip install --force-reinstall --no-deps "binance-trading-bot @ git+file:///F:/trading%20bot/backtest/$S@$SHA7"
+> & $PY -m trading_bot strategies 2>&1 | Select-String boot_provenance
+> ```
+>
+> CHECK: `exit 0`; `entry <id>: marked read` for every candidate and the closing `next: git add docs/research/entries; commit; ...` line; `git status --porcelain` before the `git add` lists exactly N lines, each
+> ` M docs/research/entries/s6-....json`, and nothing else; the last two push commands print the same SHA (`$SHA7` and the `refs/heads/main` line); the boot line shows `verdict=accepted`, `commits_agree=true`,
+> `checkout_dirty=false` and `code_commit=<$SHA7>`. **The `pip` line is not optional**: the install records the commit it was built from, and a clone whose HEAD moved to the marking commit while its install still names the
+> entries commit refuses to boot (`commits_agree=false`); `--force-reinstall` is required to move it (`M5m-438`). The tool run a second time now exits `2` with `is already read`, and that is correct: a candidate is read once.
+> `git push origin HEAD:main` is a fast-forward only if nothing else was pushed to `main` since O4; if it is refused, stop and report rather than force it.
+>
+> **The gate.** Still in the O5 clone, with the install at `$SHA7`:
+>
+> ```powershell
+> & $PY scripts\s7_gate.py --backtests data\backtests
+> "exit $LASTEXITCODE"
+> ```
+>
+> CHECK: `exit 0` (a FAIL verdict is an outcome and also exits 0; only a refusal exits 2); `S7 DECISION GATE`; `candidates read N; still pending 0`; per candidate its three arms with the gate arm marked, the five criteria
+> `MET` or `NOT MET`, and `S7: PASS` or `S7: FAIL`; and the last line `S7 SUMMARY: k of N candidates read PASS`. A refusal prints nothing on stdout and every refusal on stderr (exit 2); it is a stop. **Do not edit
+> PROTOCOL.md, in any checkout, before this has run and its output is saved.**
+>
+> **Which PowerShell has been executed, stated so it is not assumed.** NONE of the PowerShell of O1 to O7 and the gate has been executed as written end to end, by me or by the rehearsal, which runs the same commands as argument
+> arrays from Python. **Executed in PowerShell 5.1, against hand-written samples (P118, `docs/RUN_LEDGER.md` section 52):** O6's argument array and skip test, and O2's manifest line. **Executed as Python argument arrays by the rehearsal at HEAD, against
+> the real tools, with the real engine:** the `s6_sweep.py`, `s6_select.py`, `backtest`, `s6_mark_read.py` (dry run, marking and the refused second marking) and `s7_gate.py` commands of this block, section 53 of
+> `docs/RUN_LEDGER.md`. **Parsed, not run:** the three PowerShell blocks of this annotation (O7 dry run, O7 marking, the gate) were fed to PowerShell 5.1's own parser (`[System.Management.Automation.Language.Parser]::ParseInput`) and reported 0 errors in each; parsing is not running. **Never executed:** the `Set-Location`, `git clone`, `git checkout --detach`, `git push`, `git ls-remote`, `$SHA7` assignment, `Select-String` and `"exit $LASTEXITCODE"` lines of O1, O3 to O5 and O7
+> and the gate, and the `pip` line of O7 in PowerShell (it differs from the rehearsal's only in being run by hand). Every one is a plain call of a tool the rehearsal did run or a git command; **the first real use is the
+> owner's, and the CHECKs are there for that.**
+>
+> **What stops being true, by content.** The C2 block's *"The step's PowerShell, its CHECK and its place between O6 and the gate are written at C5"* is discharged here. The P118 C3 block's *"**Owner steps O1 to O6 above stand as
+> written until C3 corrects their install procedure**"* is past. O3's earlier CHECK, *"no `MISSING`, `CONFLICT` or `FAILED` line"*, is true as far as it goes and incomplete: a `LOST` and `RECOVERED` pair is the new, acceptable state.
+> **What survives:** O1's corrected install, O2, O4 to O6 as written, the three rules for every step, and the rule that O7 is between O6 and the gate.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
