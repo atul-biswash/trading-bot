@@ -20,9 +20,10 @@ candidate four winners and no loser.
 
 **The hops are real commands.** The sweep (``s6_sweep.py --workers 2``, R-CH's check included), the selection
 (``s6_select.py``, with and without ``--out``), every out-of-sample run (``python -m trading_bot backtest``
-built from the entry exactly as the owner's step O6 builds it), the refused second read and the gate
-(``s7_gate.py``) are subprocesses of the worktree's own interpreter. Only what no command does is done here: writing
-the narrowed protocol, committing it, and marking the entries ``read`` (no tool does that yet).
+built from the entry exactly as the owner's step O6 builds it), the refused second read, **step O7
+(``s6_mark_read.py``: a dry run, the marking, and a second marking that must be refused as already read, R-CP)**
+and the gate (``s7_gate.py``) are subprocesses of the worktree's own interpreter. Only what no command does is
+done here: writing the narrowed protocol and committing.
 
 **Every hop is recorded**: command, working directory, exit status, the SHA-256 of its combined output, its
 seconds, what was expected and whether it matched, one JSON line in ``hops.jsonl`` and the output itself in
@@ -37,7 +38,10 @@ meet them; the FAIL case leaves the real ones. Neither edits ``docs/research/PRO
 
 **Cleanup removes the junction first**, with ``cmd /c rmdir`` and by itself, and refuses to remove the
 worktree if the link is still there: ``git worktree remove`` would otherwise be a recursive delete that might
-follow the link into the canonical store. The store's file count is taken before and after.
+follow the link into the canonical store. The store's file count is taken before and after. **R-CO: no
+recursive copy or delete is run on a directory that holds a junction, by script**; a test scans this file for
+one (``shutil.rmtree``, ``copytree``, ``rm -rf``, ``Remove-Item``, ``Copy-Item``), and the only recursive removal
+here is ``git worktree remove``, reached only after the link is shown gone.
 
 Exit status: 0 every hop of every case matched; 1 a hop did not; 2 refused (a bad argument or location).
 """
@@ -62,7 +66,6 @@ from typing import Any, Final
 from trading_bot.backtesting import gate as gate_rules
 from trading_bot.backtesting import selection as sel
 from trading_bot.backtesting.candidate import canonical_number
-from trading_bot.backtesting.evidence import RUN_RECORD_NAME, load_eligible_record
 from trading_bot.backtesting.protocol import declaration, parse_protocol
 from trading_bot.core.exceptions import TradingBotError
 
@@ -72,9 +75,7 @@ __all__ = [
     "HopMismatchError",
     "Outcome",
     "Rehearsal",
-    "find_oos_records",
     "main",
-    "mark_read",
     "narrow_protocol",
     "oos_argv",
     "parse_boot_line",
@@ -201,57 +202,6 @@ def oos_argv(
     for name, value in variant["params"].items():
         argv += ["--param", f"{name}={value}"]
     return argv
-
-
-def entry_bytes(body: Mapping[str, Any]) -> bytes:
-    """An entry as ``s6_select.py`` writes one: indented JSON, ASCII, one trailing newline, LF."""
-    return (json.dumps(body, indent=2) + "\n").encode("ascii")
-
-
-def mark_read(entry: Mapping[str, Any], records: Mapping[str, tuple[str, str]]) -> dict[str, Any]:
-    """``entry`` marked ``read``, its ``oos.records`` holding, per arm, the run directory and ``run.json`` digest.
-
-    Nothing in the tree does this yet; the shape is the one ``gate.evaluate`` reads and
-    ``docs/research/entries/s5-baseline.json`` shows.
-    """
-    marked = dict(entry)
-    marked["status"] = "read"
-    marked["oos"] = {
-        "records": {
-            arm: {"run": run, "run_json_sha256": digest}
-            for arm, (run, digest) in sorted(records.items(), key=lambda item: Decimal(item[0]))
-        }
-    }
-    return marked
-
-
-def find_oos_records(backtests: Path, entry_id: str) -> dict[str, tuple[str, str]]:
-    """``{arm: (run directory, run.json SHA-256)}`` of every sealed out-of-sample record of ``entry_id``.
-
-    Every record is read through the evidence door (``tests/unit/test_backtest_evidence.py`` holds the census
-    that requires it), so a record that is not evidence stops the rehearsal rather than being skipped: the
-    gate would refuse it. Arms are written as the entry writes them (``canonical_number``). Two records of
-    one arm are returned as the later directory; the guard makes that unreachable, and the caller asserts
-    the count.
-
-    :raises trading_bot.backtesting.evidence.EvidenceRefusedError: a run directory's record is not evidence.
-    """
-    found: dict[str, tuple[str, str]] = {}
-    for directory in (
-        sorted(p for p in backtests.iterdir() if p.is_dir()) if backtests.is_dir() else []
-    ):
-        path = directory / RUN_RECORD_NAME
-        if not path.is_file():
-            continue
-        record = load_eligible_record(path, min_schema=gate_rules.MIN_RECORD_SCHEMA)
-        block = record.get("protocol")
-        if not isinstance(block, dict) or block.get("entry_id") != entry_id:
-            continue
-        if block.get("window_class") != "out_of_sample":
-            continue
-        arm = canonical_number(Decimal(str(block["arm"])))
-        found[arm] = (directory.name, hashlib.sha256(path.read_bytes()).hexdigest())
-    return found
 
 
 _PAIR: Final = re.compile(r"(\w+)=(\S+)")
@@ -672,15 +622,19 @@ class Rehearsal:
                     wt,
                     Expect(0),
                 )
-        for entry in self._entries():
-            found = find_oos_records(self.backtests, entry["id"])
-            self.check(
-                f"oos-records-{entry['id']}",
-                f"one sealed out-of-sample record at each of {list(arms)}",
-                None if sorted(found) == sorted(arms) else f"arms {sorted(found)}",
-                json.dumps(found, sort_keys=True),
-            )
         self.status_is_clean("status-after-oos")
+        self.hop(
+            "mark-read-dry-run",
+            self.mark_read_argv("--dry-run"),
+            wt,
+            Expect(
+                0,
+                contains=("would be marked read", "dry run: nothing was written"),
+                absent=("REFUSED",),
+                counts=(("record sha256", len(arms) * len(self._entry_ids)),),
+            ),
+        )
+        self.status_is_clean("status-after-dry-run")
         names = sorted(p.name for p in self.backtests.iterdir() if p.is_dir())
         first = self._entries()[0]
         self.hop(
@@ -698,16 +652,61 @@ class Rehearsal:
         )
         self.status_is_clean("status-after-refusal")
 
-    def mark_and_recheck(self) -> None:
+    def mark_read_argv(self, *rest: str) -> list[str]:
+        """Owner step O7 as the owner runs it: ``s6_mark_read.py`` over the clone's backtests."""
+        return [self.py, "scripts/s6_mark_read.py", "--backtests", "data/backtests", *rest]
+
+    def mark_and_recheck(self, arms: Sequence[str]) -> None:
         cfg, wt = self.config, self.wt
-        for entry in self._entries():
-            records = find_oos_records(self.backtests, entry["id"])
-            path = wt / "docs" / "research" / "entries" / f"{entry['id']}.json"
-            path.write_bytes(entry_bytes(mark_read(entry, records)))
-        self.check("entries-marked-read", "every entry rewritten with status read", None)
+        count = len(self._entry_ids)
+        self.hop(
+            "mark-read",
+            self.mark_read_argv(),
+            wt,
+            Expect(
+                0,
+                contains=("marked read", "next: git add"),
+                absent=("would be marked", "REFUSED"),
+                counts=(("record sha256", len(arms) * count),),
+            ),
+        )
+        listing = self.hop(
+            "status-after-marking",
+            ["git", "status", "--porcelain"],
+            wt,
+            Expect(0, contains=(" M docs/research/entries/",)),
+        )
+        lines = listing.output.splitlines()
+        self.check(
+            "status-holds-only-the-marked-entries",
+            f"{count} lines, all modified entries",
+            None
+            if len(lines) == count
+            and all(line.startswith(" M docs/research/entries/") for line in lines)
+            else "other lines",
+            listing.output,
+        )
+        wrong = [
+            entry["id"]
+            for entry in self._entries()
+            if entry["status"] != "read" or sorted(entry["oos"]["records"]) != sorted(arms)
+        ]
+        self.check(
+            "entries-are-read-with-the-declared-arms",
+            f"every entry read, with a record at each of {list(arms)}",
+            None if not wrong else f"not as expected: {wrong}",
+            json.dumps(self._entries(), sort_keys=True),
+        )
         self.commit("read", "docs/research", "rehearsal: entries marked read")
         self.reinstall("install-at-read")
         self.boot_accepted("boot-at-read")
+        self.hop(
+            "mark-read-again",
+            self.mark_read_argv(),
+            wt,
+            Expect(2, contains=("REFUSED", "is already read"), absent=("marked read",)),
+        )
+        self.status_is_clean("status-after-second-marking")
         names = sorted(p.name for p in self.backtests.iterdir() if p.is_dir())
         self.hop(
             "read-after-read",
@@ -766,7 +765,7 @@ class Rehearsal:
         self.setup(narrowed)
         self.sweep_and_select()
         self.out_of_sample(arms)
-        self.mark_and_recheck()
+        self.mark_and_recheck(arms)
         self.gate()
 
     def cleanup(self) -> None:

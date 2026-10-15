@@ -15,6 +15,7 @@ import json
 import shutil
 import sys
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -26,9 +27,9 @@ import s6_sweep
 
 from tests.unit.protocol_world import PROTOCOL_TEXT, REPO, effective
 from trading_bot.backtesting import gate as gate_mod
+from trading_bot.backtesting import readmark
 from trading_bot.backtesting import selection as sel
 from trading_bot.backtesting.candidate import candidate_digest, settings_digest
-from trading_bot.backtesting.evidence import EvidenceRefusedError
 from trading_bot.backtesting.protocol import ProtocolError, declaration, parse_entry, parse_protocol
 
 START, BOUNDARY, END = date(2023, 12, 1), date(2025, 1, 1), date(2025, 4, 1)
@@ -216,56 +217,28 @@ class TestCommandsAndRecords:
         assert on.count("--param") == 3
         assert "trend_filter_period=200" in on
 
-    def test_marking_an_entry_read_gives_the_shape_the_parser_and_the_gate_read(self) -> None:
-        entry = candidate(ENTRY_OFF, filtered=False)
-        records = {
-            "1.2": ("run-c", "c" * 64),
-            "0.05": ("run-a", "a" * 64),
-            "0.66": ("run-b", "b" * 64),
-        }
-        marked = rh.mark_read(entry, records)
-        parsed = parse_entry(rh.entry_bytes(marked).decode("ascii"))
-        assert (parsed.status, parsed.id) == ("read", ENTRY_OFF)
-        assert parsed.oos == {
-            "records": {
-                "0.05": {"run": "run-a", "run_json_sha256": "a" * 64},
-                "0.66": {"run": "run-b", "run_json_sha256": "b" * 64},
-                "1.2": {"run": "run-c", "run_json_sha256": "c" * 64},
-            }
-        }
-        assert list(parsed.oos["records"]) == ["0.05", "0.66", "1.2"]  # type: ignore[index]
-        assert entry["status"] == "pending"  # the input is not mutated
-        assert entry["oos"] is None
+    def test_owner_step_o7_is_the_tool_over_the_clones_backtests(self) -> None:
+        rehearsal, _ = make("fail", (Path("root"), Path("store")))
+        assert rehearsal.mark_read_argv() == [
+            rehearsal.py,
+            "scripts/s6_mark_read.py",
+            "--backtests",
+            "data/backtests",
+        ]
+        assert rehearsal.mark_read_argv("--dry-run")[-1] == "--dry-run"
 
-    def test_an_entry_is_written_the_way_the_selection_writes_one(self) -> None:
-        body = candidate(ENTRY_OFF, filtered=False)
-        data = rh.entry_bytes(body)
-        assert data == (json.dumps(body, indent=2) + "\n").encode("ascii")
-        assert b"\r" not in data
+    def test_the_rehearsal_holds_no_marking_code_of_its_own(self) -> None:
+        # R-CP: entries are marked read by the tool alone. The rehearsal used to carry its own copy.
+        for gone in ("mark_read", "entry_bytes", "find_oos_records"):
+            assert not hasattr(rh, gone)
 
-    def test_the_records_found_are_this_entrys_out_of_sample_ones_with_a_canonical_arm(
-        self, tmp_path: Path
-    ) -> None:
-        mine = write_record(tmp_path / "r1", entry_id=ENTRY_ON, arm="1.20")
-        write_record(tmp_path / "r2", entry_id=ENTRY_OFF, arm="1.2")
-        write_record(tmp_path / "r3", entry_id=ENTRY_ON, arm="0.05", window_class="in_sample")
-        (tmp_path / "r4").mkdir()  # a directory with no record: a run cut off, or still running
-        found = rh.find_oos_records(tmp_path, ENTRY_ON)
-        assert found == {"1.2": ("r1", hashlib.sha256(mine).hexdigest())}
-        assert rh.find_oos_records(tmp_path / "absent", ENTRY_ON) == {}
-
-    def test_a_record_that_is_not_evidence_stops_the_search_rather_than_being_skipped(
-        self, tmp_path: Path
-    ) -> None:
-        # The gate would refuse it, and skipping it would mark an entry read behind a record nobody judged.
-        write_record(tmp_path / "r1", entry_id=ENTRY_ON, arm="1.2", flag=False)
-        with pytest.raises(EvidenceRefusedError, match="evidence_eligible false"):
-            rh.find_oos_records(tmp_path, ENTRY_ON)
-
-    def test_a_record_of_an_old_schema_is_refused_too(self, tmp_path: Path) -> None:
-        write_record(tmp_path / "r1", entry_id=ENTRY_ON, arm="1.2", schema=5)
-        with pytest.raises(EvidenceRefusedError, match="needs schema 6"):
-            rh.find_oos_records(tmp_path, ENTRY_ON)
+    def test_the_script_runs_no_recursive_copy_or_delete(self) -> None:
+        """R-CO: no recursive copy or delete is run, by script, on a directory that holds a junction."""
+        source = (REPO / "scripts" / "s6_rehearsal.py").read_text("utf-8")
+        code = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("#"))
+        body = code.split('"""', 2)[2]  # past the module docstring, which names them to forbid them
+        for banned in ("shutil.rmtree", "copytree", "rm -rf", "Remove-Item", "Copy-Item", "cp -r"):
+            assert banned not in body
 
     def test_the_boot_line_is_read_by_its_fields(self) -> None:
         line = (
@@ -324,6 +297,8 @@ class FakeChain:
         self.link_removable = True
         self.damage_store = False
         self.dirty = False
+        self.marked = False
+        self.dry_run_writes = False
         self.refusal_leaves_a_run = False
         self.done: set[tuple[str, str]] = set()
 
@@ -360,6 +335,10 @@ class FakeChain:
         if args[:2] == ("git", "rev-parse"):
             return self.ok(SHA + "\n")
         if args[:3] == ("git", "status", "--porcelain"):
+            if self.marked:
+                return self.ok(
+                    f" M docs/research/entries/{ENTRY_OFF}.json\n M docs/research/entries/{ENTRY_ON}.json\n"
+                )
             if self.dirty:
                 return self.ok(
                     f"?? docs/research/selection.json\n?? docs/research/entries/{ENTRY_OFF}.json\n?? docs/research/entries/{ENTRY_ON}.json\n"
@@ -367,6 +346,7 @@ class FakeChain:
             return self.ok()
         if "commit" in args:
             self.dirty = False
+            self.marked = False
             return self.ok("[detached HEAD] x")
         if (
             args[:2] == ("git", "add")
@@ -388,6 +368,8 @@ class FakeChain:
             return self.select(args, cwd)
         if "trading_bot backtest" in text:
             return self.backtest(args, cwd)
+        if "s6_mark_read.py" in text:
+            return self.mark_read(args, cwd)
         if "s7_gate.py" in text:
             return self.gate()
         raise AssertionError(f"the fake does not know {text}")
@@ -404,7 +386,7 @@ class FakeChain:
         lines = [f"selection file docs/research/selection.json sha256 {'f' * 64} (3 bytes)"]
         for entry_id, filtered in ((ENTRY_OFF, False), (ENTRY_ON, True)):
             (entries / f"{entry_id}.json").write_bytes(
-                rh.entry_bytes(candidate(entry_id, filtered=filtered))
+                readmark.entry_bytes(candidate(entry_id, filtered=filtered))
             )
             lines.append(f"entry docs/research/entries/{entry_id}.json")
         self.dirty = True
@@ -428,6 +410,62 @@ class FakeChain:
         run = cwd / "data" / "backtests" / f"20250101T00000{len(self.done)}Z-{entry_id}-{arm}"
         write_record(run, entry_id=entry_id, arm=arm)
         return self.ok("done\n")
+
+    def mark_read(self, args: tuple[str, ...], cwd: Path) -> rh.Outcome:
+        """``s6_mark_read.py`` as the owner runs it: all or none, a second marking refused."""
+        dry = "--dry-run" in args
+        entries = cwd / "docs" / "research" / "entries"
+        paths = sorted(entries.glob("*.json"))
+        bodies = {p: json.loads(p.read_text("utf-8")) for p in paths}
+        for body in bodies.values():
+            if body["status"] != "pending":
+                return rh.Outcome(
+                    2,
+                    f"REFUSED: entry {body['id']!r} is already read (status {body['status']!r}); "
+                    "a candidate is read once\n",
+                    0.0,
+                )
+        lines: list[str] = []
+        for path, body in bodies.items():
+            records: dict[str, dict[str, str]] = {}
+            for run in sorted((cwd / "data" / "backtests").iterdir()):
+                data = (run / "run.json").read_bytes()
+                protocol = json.loads(data)["protocol"]
+                if (
+                    protocol["entry_id"] == body["id"]
+                    and protocol["window_class"] == "out_of_sample"
+                ):
+                    records[rh.canonical_number(Decimal(protocol["arm"]))] = {
+                        "run": run.name,
+                        "run_json_sha256": hashlib.sha256(data).hexdigest(),
+                    }
+            spelled = {rh.canonical_number(Decimal(a)): a for a in body["arms"]}
+            marked = dict(
+                body,
+                status="read",
+                oos={
+                    "records": {
+                        spelled[k]: v
+                        for k, v in sorted(records.items(), key=lambda kv: Decimal(kv[0]))
+                    }
+                },
+            )
+            lines.append(f"entry {body['id']}: {'would be marked' if dry else 'marked'} read")
+            lines += [
+                f"  arm {a:<5} {v['run']} record sha256 {v['run_json_sha256']}"
+                for a, v in marked["oos"]["records"].items()
+            ]
+            if not dry:
+                path.write_bytes(readmark.entry_bytes(marked))
+        if dry:
+            self.marked = self.dry_run_writes
+            lines.append("dry run: nothing was written")
+        else:
+            self.marked = True
+            lines.append(
+                "next: git add docs/research/entries; commit; push; rebuild the clone; scripts/s7_gate.py"
+            )
+        return self.ok("\n".join(lines) + "\n")
 
     def gate(self) -> rh.Outcome:
         if self.case == "pass":
@@ -479,8 +517,11 @@ class TestTheCase:
             "install-at-entries",
             f"oos-{ENTRY_OFF}-0.05",
             f"oos-{ENTRY_ON}-1.20",
+            "mark-read-dry-run",
             "second-read-same-arm",
+            "mark-read",
             "install-at-read",
+            "mark-read-again",
             "read-after-read",
             "s7-gate",
             "junction-remove",
@@ -642,6 +683,62 @@ class TestTheCase:
             rehearsal.go(PROTOCOL_TEXT)
         assert caught.value.record.name == "boot-after-narrowing-provenance"
         assert field in caught.value.record.detail
+
+    def test_the_tool_is_run_dry_first_then_for_real_then_refused_a_second_time(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        tool = [t for t in chain.names() if "s6_mark_read.py" in t]
+        assert [t.endswith("--dry-run") for t in tool] == [True, False, False]
+        assert all("--backtests data/backtests" in t for t in tool)
+        names = [r.name for r in rehearsal.records]
+        assert names.index("mark-read-dry-run") < names.index("mark-read")
+        assert names.index("install-at-read") < names.index("mark-read-again")
+        refusal = next(r for r in rehearsal.records if r.name == "mark-read-again")
+        assert refusal.returncode == 2
+        kept = (rehearsal.base / "out" / f"{refusal.number:02d}-{refusal.name}.txt").read_text(
+            "utf-8"
+        )
+        assert "is already read" in kept
+
+    def test_a_dry_run_that_leaves_the_checkout_modified_is_a_mismatch(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        chain.dry_run_writes = True
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "status-after-dry-run"
+
+    def test_a_marking_the_tool_refuses_stops_the_case(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        chain.overrides["s6_mark_read.py"] = rh.Outcome(
+            2, "REFUSED: a record fails the door\n", 0.0
+        )
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "mark-read-dry-run"
+
+    def test_a_second_marking_the_tool_accepts_is_a_mismatch(
+        self, case: str, world: tuple[Path, Path]
+    ) -> None:
+        rehearsal, chain = make(case, world)
+        original = chain.mark_read
+        calls: list[int] = []
+
+        def lenient(args: tuple[str, ...], cwd: Path) -> rh.Outcome:
+            calls.append(1)
+            if len(calls) == 3:
+                return rh.Outcome(0, "entry x: marked read\n", 0.0)
+            return original(args, cwd)
+
+        chain.mark_read = lenient  # type: ignore[method-assign]
+        with pytest.raises(rh.HopMismatchError) as caught:
+            rehearsal.go(PROTOCOL_TEXT)
+        assert caught.value.record.name == "mark-read-again"
 
     def test_a_refused_second_read_that_leaves_a_run_behind_is_a_mismatch(
         self, case: str, world: tuple[Path, Path]

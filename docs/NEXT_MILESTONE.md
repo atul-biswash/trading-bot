@@ -1640,6 +1640,12 @@ takes and the bot did not is a finding about one of them.
 > directories and `run.json` digests, all entries or none. It refuses an entry already read, a record that fails the door and a set other than the declared arms (27 tests; a survey of 14 mutations, 21 kills). **What survives:**
 > the P118 block's account of why a hand edit was a risk, and O1's correction. The step's PowerShell, its CHECK and its place between O6 and the gate are written at C5.
 
+> **ANNOTATED AT M5m P119 (C4a), BY THE OWNER'S RULING R-CP: THE REHEARSAL NO LONGER MARKS ENTRIES ITSELF.** The P118 C3 block says *"the rehearsal does it with `mark_read` and `find_oos_records` inside
+> `scripts/s6_rehearsal.py`"* and that *"the two functions above are its tested parts"*. Both are false from this commit: `mark_read`, `find_oos_records` and `entry_bytes` are removed from the rehearsal, and it drives
+> O7 as the owner does, through `scripts/s6_mark_read.py --backtests data/backtests`: a `--dry-run` hop (the checkout unmodified after it), the real marking hop, the commit and reinstall, and a second marking that must be
+> refused with exit 2 and *"is already read"*. Five tests of the removed functions were removed with them (ruled-overturn authority, R-CP), the library's own tests being `tests/unit/test_s6_mark_read.py`. **What survives:**
+> the shape `gate.evaluate` reads, which `readmark.entry_bytes` now writes for the tool and for the rehearsal's test double alike.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
