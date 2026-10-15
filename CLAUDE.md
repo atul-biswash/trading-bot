@@ -2288,10 +2288,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  212 files already formatted
+ruff format --check src tests scripts  213 files already formatted
 mypy                                   Success: no issues found in 106 source files
-pytest                                 4130 passed, 4 skipped
-                                       (4133 passed, 1 skipped with Testnet credentials)
+pytest                                 4149 passed, 4 skipped
+                                       (4152 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2300,14 +2300,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `4133 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `4130 passed, 4 skipped` on a machine without them
+- `4152 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `4149 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 4130 and must not read it as a regression against a documented
-4133. Quote the count with its condition, never bare.
+runner will see 4149 and must not read it as a regression against a documented
+4152. Quote the count with its condition, never bare.
 
-Only the `4133` is measured here; `4130 passed, 4 skipped` is that run minus the
+Only the `4152` is measured here; `4149 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -2418,7 +2418,7 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 212 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 213 |
 | `mypy` | `files = ["src/trading_bot", "scripts"]` | 106 |
 | `pytest` | `tests/` (`testpaths`) | — |
 

@@ -13,6 +13,9 @@ The owner's rulings, as they bind this module (``docs/research/PROTOCOL.md`` Ame
 * **R-CE** the runs read are those at the gate arm (1.20%) over exactly the in-sample window.
 * **R-CF** the walk-forward is a REPORT: four anchored folds, training on ``[2017-08-17, Y)`` and testing on
   calendar year ``Y``. It removes no candidate, adds none and ranks nothing.
+* **R-CM** (amendment 3) variants the owner ruled ineligible, read from the declaration's
+  ``ineligible_variants``, are never a candidate and never a walk-forward fold's pick. They are still run, reconciled
+  and counted: the denominator is unchanged.
 * **R-CG** all 216 variants are run. A selection over an incomplete sweep is REFUSED, not computed over what
   is there: a variant tried and not recorded is what makes a later pass meaningless.
 
@@ -98,8 +101,9 @@ SELECTION_SCHEMA: Final = 1
 _UTC: Final = timezone.utc
 _STATISTIC: Final = "return_profit_factor"
 _SELECTION_KEYS: Final = frozenset(
-    {"statistic", "arm", "ruin_max_drawdown", "tie_places", "walk_forward"}
+    {"statistic", "arm", "ruin_max_drawdown", "tie_places", "walk_forward", "ineligible_variants"}
 )
+_INELIGIBLE_KEYS: Final = frozenset({"family", "timeframe", "filtered", "params", "ruling"})
 _WALK_KEYS: Final = frozenset({"train_start", "test_years"})
 _TRADES_NAME: Final = "trades.csv"
 
@@ -128,6 +132,9 @@ class SelectionRules:
     test_years: tuple[int, ...]
     history_start: date
     boundary: date
+    #: Variants the OWNER RULED ineligible for selection (R-CM), by :func:`variant_key`. They are still run
+    #: and still counted in the variant denominator; they are never a candidate and never a fold's pick.
+    ineligible_variants: frozenset[VariantKey] = frozenset()
 
 
 def _refuse(message: str) -> SelectionRulesError:
@@ -223,7 +230,41 @@ def parse_rules(text: str) -> SelectionRules:
         test_years=years,
         history_start=protocol.history_start,
         boundary=protocol.boundary,
+        ineligible_variants=_ineligible_variants(block["ineligible_variants"], protocol),
     )
+
+
+def _ineligible_variants(raw: object, protocol: Protocol) -> frozenset[VariantKey]:
+    """The variants the owner ruled ineligible (R-CM), each checked to be a declared point of the grids."""
+    if not isinstance(raw, list):
+        raise _refuse("has ineligible_variants that is not a list")
+    declared = {variant_key(v) for v in protocol.variants()}
+    found: set[VariantKey] = set()
+    for item in raw:
+        if not isinstance(item, Mapping) or set(item) != _INELIGIBLE_KEYS:
+            raise _refuse(
+                f"has an ineligible variant that is not exactly {sorted(_INELIGIBLE_KEYS)}"
+            )
+        params, ruling = item["params"], item["ruling"]
+        if (
+            not isinstance(item["family"], str)
+            or not isinstance(item["timeframe"], str)
+            or not isinstance(item["filtered"], bool)
+            or not isinstance(params, Mapping)
+            or not all(isinstance(k, str) and isinstance(v, str) for k, v in params.items())
+            or not isinstance(ruling, str)
+            or not ruling
+        ):
+            raise _refuse("has an ineligible variant with a mistyped field")
+        key = variant_key(
+            Variant(item["family"], item["timeframe"], item["filtered"], dict(params))
+        )
+        if key not in declared:
+            raise _refuse(f"rules ineligible a variant that is not a declared point: {key}")
+        if key in found:
+            raise _refuse(f"rules the variant {key} ineligible twice")
+        found.add(key)
+    return frozenset(found)
 
 
 # --------------------------------------------------------------------------
@@ -523,6 +564,8 @@ class Ineligible(str, Enum):
     RUINED = "ruined"
     TOO_FEW_TRADES = "too_few_trades"
     NO_LOSING_TRADE = "no_losing_trade"
+    #: Ruled ineligible by the owner before any in-sample result existed (R-CM), whatever its figures.
+    RULED_INELIGIBLE = "ruled_ineligible"
 
 
 @dataclass(frozen=True)
@@ -554,6 +597,8 @@ def assess(point: PointRun, rules: SelectionRules) -> Assessment:
         reasons.append(Ineligible.TOO_FEW_TRADES)
     if statistic is None:
         reasons.append(Ineligible.NO_LOSING_TRADE)
+    if variant_key(point.variant) in rules.ineligible_variants:
+        reasons.append(Ineligible.RULED_INELIGIBLE)
     return Assessment(
         variant=point.variant,
         run=point.run,
@@ -646,6 +691,8 @@ def walk_forward(
         cutoff, end = _at(year), _at(year + 1)
         graded: list[tuple[PointRun, Decimal]] = []
         for point in points:
+            if variant_key(point.variant) in rules.ineligible_variants:
+                continue
             training = [t for t in point.trades if start <= t.entry_time < cutoff]
             statistic = return_profit_factor(training)
             ruined = (
@@ -825,6 +872,15 @@ def selection_document(selection: Selection) -> dict[str, Any]:
             "train_start": rules.train_start.isoformat(),
             "test_years": list(rules.test_years),
             "window": [rules.history_start.isoformat(), rules.boundary.isoformat()],
+            "ineligible_variants": [
+                {
+                    "family": family,
+                    "timeframe": timeframe,
+                    "filtered": filtered,
+                    "params": dict(params),
+                }
+                for family, timeframe, filtered, params in sorted(rules.ineligible_variants)
+            ],
         },
         "variants_declared": ledger.declared,
         "variants_with_a_run": len(ledger.points),
@@ -889,6 +945,7 @@ def render_report(selection: Selection) -> str:
         f"  variants declared {ledger.declared}; with a run {len(ledger.points)}; duplicated "
         f"{len(ledger.duplicates)}; skipped directories {len(ledger.skipped)}",
         f"  cells with a candidate {len(selection.candidates)} of {len(selection.cells)}",
+        f"  ruled ineligible by the owner (R-CM), still run and counted: {len(rules.ineligible_variants)}",
     ]
     for skipped in ledger.skipped:
         lines.append(f"  SKIPPED {skipped.run}: {skipped.reason.value}: {skipped.detail}")

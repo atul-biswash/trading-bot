@@ -14,7 +14,8 @@ overrule before the push** (nothing runs until it is pushed): the parameter grid
 entry file's shape (section 8). Each is marked DRAFTED where it appears. **Amendment 2 (section 10, P117)
 replaced the draft of the selection rule, the walk-forward report and the in-sample trade minimum
 (section 6) by the owner's rulings R-CB to R-CF, and added S7's two profit factors (section 7); R-CG
-runs and counts all 216 variants of section 5.**
+runs and counts all 216 variants of section 5. Amendment 3 (section 10, P119) rules two of the 216
+ineligible for selection (R-CM), and records R-CN to R-CQ.**
 
 ## 1. The history and the two windows (R-BP)
 
@@ -113,7 +114,11 @@ There are twelve **cells**: a family, a timeframe and a filter setting. For each
       the untradeable-equity floor of a 2% entry is at most 312.29 USDT over the stored history (P116),
       so no run within a 95% drawdown can have met it;
    b. **at least 250 in-sample trades (R-CD)**, the run's trade count, both pairs together;
-   c. its return profit factor is defined.
+   c. its return profit factor is defined;
+   d. **it is not ruled ineligible (R-CM, amendment 3):** the two variants `sma_crossover` at 4h with
+      `fast_period` 10 and `slow_period` 50, the trend filter off and on, are ineligible **whatever their
+      figures**. They are still run and still counted among the 216 (section 5); they are never a cell's
+      candidate and never a walk-forward fold's pick. The declaration's `ineligible_variants` holds them.
 4. **The cell's candidate is the eligible point with the highest return profit factor.** A tie to six
    decimal places goes to the point that comes first in the order `protocol.variants()` yields, which is
    the grids' declared order. A cell with no eligible point has no candidate; that is recorded in the
@@ -256,13 +261,33 @@ shaped S6's machinery. *What it does not change:* the families, grids, filter, b
 runs, the read-once guard and S5's baseline. No S6 run exists that it could affect. The S5 records carry
 the earlier protocol digest and are not re-read under this amendment.
 
+**Amendment 3 (P119 C1; sections 6, 10 and 11 and the declaration's `selection` block; before any S6 run).**
+The owner's rulings, verbatim:
+
+- R-CM: "The two variants the rehearsal read in the reserved window, sma_crossover at 4h at the 10/50 grid point with the trend filter off and on, are ineligible for selection. They are still swept and counted in S7's variant denominator. The research log records that their figures for 2024-01-01 to 2025-04-01 were seen, by what, and where. This is decided before any in-sample result exists and without regard to those figures."
+- R-CN: "No rehearsal, probe or test reads any bar at or after 2024-01-01T00:00Z, except an out-of-sample read under a committed entry. The rehearsal script refuses such a window."
+- R-CO: "A junction is removed only with cmd /c rmdir. No recursive copy or delete (cp -r, rm -rf, Remove-Item -Recurse, Copy-Item -Recurse) is run on a directory that holds a junction, by hand or by script."
+- R-CP: "Entries are marked read by scripts/s6_mark_read.py (owner step O7). It verifies each out-of-sample record through the evidence door and writes the three record digests into the entry; it refuses an entry already read, a record that fails the door, and a set other than exactly the three declared arms."
+- R-CQ: "A sweep whose check lost a worker and then recovered the variant prints the loss and the recovery, and reports COMPLETE when every variant has a sealed record (M5m-445)."
+
+*What it changes.* Section 6 step 3 gains condition d, and the declaration's `selection` block gains the key
+`ineligible_variants`, a list of the two variants of R-CM, each with its `ruling`; `scripts/s6_select.py` and
+`backtesting/selection.py` honour it, and refuse a block whose list names a point that is not declared or names
+one twice. The protocol's digest changes with this commit, and **this file does not change again until S7**.
+*What it does not change:* the families, grids (so the 216 and S7's denominator), filter, boundary, arms,
+costs, joint runs, the eligibility numbers 0.95 and 250, the read-once guard and S5's baseline. R-CN to R-CQ
+govern code, tools and the owner's steps, not this file, and are recorded here, as R-CA, R-CH and R-CI were, so
+that the protocol holds every ruling that shaped S6's machinery. The figures R-CM refers to are recorded in
+`docs/research/LOG.md` (Entry 5). No S6 run exists that this amendment could affect.
+
 ## 11. The machine-readable declaration
 
 `protocol.py` reads only what is between the markers, and of that only the keys it knows. The test
 `test_the_declaration_matches_the_tables` pins that its families give the 216 variants of section 5.
 The `selection` and `s7` blocks (amendment 2) are not read by `protocol.py`, which ignores them; the
 selection and gate modules of the S6 tooling (P117 C3 and C7) read them and refuse a block that is missing
-or mistyped.
+or mistyped. The `selection` block's `ineligible_variants` (amendment 3) is read by the selection module,
+which refuses a variant in it that is not a declared point.
 
 <!-- protocol-json:begin -->
 ```json
@@ -280,7 +305,13 @@ or mistyped.
     "arm": "1.20",
     "ruin_max_drawdown": "0.95",
     "tie_places": 6,
-    "walk_forward": {"train_start": "2017-08-17", "test_years": [2020, 2021, 2022, 2023]}
+    "walk_forward": {"train_start": "2017-08-17", "test_years": [2020, 2021, 2022, 2023]},
+    "ineligible_variants": [
+      {"family": "sma_crossover", "timeframe": "4h", "filtered": false,
+       "params": {"fast_period": "10", "slow_period": "50"}, "ruling": "R-CM"},
+      {"family": "sma_crossover", "timeframe": "4h", "filtered": true,
+       "params": {"fast_period": "10", "slow_period": "50", "trend_filter_period": "200"}, "ruling": "R-CM"}
+    ]
   },
   "s7": {
     "profit_factor_min": "1.3",

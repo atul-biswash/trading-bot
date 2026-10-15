@@ -65,6 +65,34 @@ No variant has been run and no candidate has been read. What changed, for a read
 | the owner's steps | O1 to O6, with a CHECK each, in `docs/NEXT_MILESTONE.md` (the P117 C8 block) |
 | status | **tooling built; no S6 run exists.** The baseline entry stays `read` (Entry 3) |
 
+## Entry 5 -- S6: two variants ruled ineligible, and the figures that were seen (P119 C1, R-CM to R-CQ, amendment 3)
+
+Recorded **before any S6 run exists**, and decided, in the owner's words, *"before any in-sample result exists and without regard to those figures"*.
+
+| | |
+|---|---|
+| the ruling (R-CM) | *"The two variants the rehearsal read in the reserved window, sma_crossover at 4h at the 10/50 grid point with the trend filter off and on, are ineligible for selection. They are still swept and counted in S7's variant denominator. The research log records that their figures for 2024-01-01 to 2025-04-01 were seen, by what, and where."* |
+| the two variants | `sma_crossover`, 4h, `fast_period` 10, `slow_period` 50, the trend filter off; and the same with `trend_filter_period` 200 (the filter on). Two of the 216; the other 214 are untouched |
+| what changed | `docs/research/PROTOCOL.md` amendment 3: section 6 step 3 condition d, and `selection.ineligible_variants` in the declaration. They are still run by the sweep and counted: the denominator is 216 |
+| seen by | **the implementer, an AI coding assistant (Claude), through the P118 rehearsal script `scripts/s6_rehearsal.py` and a scan script, and by nothing else.** Not the bot, not the owner's runs, not S5 |
+| seen where | **throwaway worktrees outside the repository** (`F:\trading bot\scratch\p118\rehearsal\`), removed with their records; the console outputs and per-hop logs are kept in `F:\trading bot\scratch\p118\`. The figures are in the message of commit `d198631` (`M5m-447`) and in `docs/RUN_LEDGER.md` section 52 |
+| over what | `2024-01-01` to `2025-04-01`, for those two variants only, in the **narrowed** protocol of the rehearsal, whose own boundary (2025-01-01) the engine took for the boundary; the real protocol's out-of-sample window starts 2024-01-01 |
+
+**What was seen, exactly.**
+
+| Read | Window | Arms | Figures |
+|---|---|---|---|
+| rehearsal run 1, the in-sample sweep of the narrowed protocol | `[2023-12-01, 2025-01-01)` | 1.20% | unfiltered: 61 trades, return profit factor 0.476882; filtered: 31 trades, 0.466729 (the selection report of that run) |
+| rehearsal run 1, out of sample | `[2025-01-01, 2025-04-01)` | 0.05, 0.66, 1.20% | unfiltered: 15 trades, return profit factor 0.6352 / 0.4233 / 0.2958, regime net -49.30 (sideways); filtered: 2 trades, profit factor 0 at all three, regime net -13.27 |
+| rehearsal run 2, out of sample | `[2024-01-01, 2024-04-01)` | 0.05, 0.66, 1.20% | unfiltered: 11 trades, 2.4008 / 1.5973 / 1.1151, regime net +3.19 (rising); filtered: 7 trades, 1.5623 / 1.0445 / 0.7313, regime net -5.76 |
+| the quarter scan, single quarters of 2024 | `2024-04-01` to `2025-01-01`, three quarters | 1.20% | net result, unfiltered / filtered: 2024 Q2 -40.43 / -16.24; 2024 Q3 -52.15 / -19.90; 2024 Q4 -27.48 / -13.87 (the scan's 2024 Q1 row, +3.19 / -5.76, repeats run 2) |
+
+**What was not seen.** Any bar or figure at or after `2025-04-01`; any other variant; the 0.05% and 0.66% arms for 2024 Q2 to Q4; the trade logs themselves (the figures above are the reports' totals). The S5 baseline's whole-history read (Entry 2) is a different configuration.
+
+**What follows from it, and what does not.** The two variants cannot be a candidate however they rank in-sample, so no candidate of S6 is one whose out-of-sample figures anyone had seen before its read. Their figures are not used to rule on any other variant, and the ruling was made without them. **A foreseen S7 verdict on a variant is a reason to rule it out of selection, which is what R-CM does; it is not a reason to change S7.** The rehearsal script refuses, from `d198631`, any window that ends after the real boundary (R-CN), and its default window is the year 2020.
+
+**The other four rulings of amendment 3** (R-CN to R-CQ) govern code, tools and the owner's steps and are recorded in `PROTOCOL.md` section 10.
+
 ## Candidate entries
 
 None yet. No variant has been run.

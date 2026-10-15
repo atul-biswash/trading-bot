@@ -125,7 +125,9 @@ def narrow_protocol(
     The families become ``sma_crossover`` at ``4h`` with ``fast_period`` 10 and ``slow_period`` 50 (two
     variants: the filter off and on); the history is ``[start, end)`` with ``boundary`` inside it; the
     selection's walk-forward trains from ``start`` and tests the calendar year before the boundary; the
-    minimum in-sample trades are ``min_trades``. In the ``pass`` case the ``s7`` block takes the lowest
+    minimum in-sample trades are ``min_trades``; the selection's ``ineligible_variants`` (R-CM) is emptied,
+    because the two variants it rules out are the very two this narrowing keeps, and a rehearsal's copy
+    of the protocol carries no ruling of S6's. In the ``pass`` case the ``s7`` block takes the lowest
     thresholds the rules admit; in the ``fail`` case it is the real block. Every other key, and all of the
     prose, is the real protocol's. The result is parsed by all three readers before it is returned.
 
@@ -151,6 +153,7 @@ def narrow_protocol(
         "train_start": start.isoformat(),
         "test_years": [boundary.year - 1],
     }
+    top["selection"]["ineligible_variants"] = []  # R-CM binds the real S6, not a rehearsal's copy
     top["families"] = [
         {
             "id": "sma_crossover",

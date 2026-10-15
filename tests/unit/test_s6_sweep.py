@@ -45,6 +45,12 @@ FAKE = Path(__file__).resolve().parent / "sweep_fake_backtest.py"
 UTC = timezone.utc
 
 
+def cut_to(declaration: dict[str, Any], families: list[dict[str, Any]]) -> None:
+    """Cut the declaration's families, and clear the R-CM list: it names real points that may no longer exist."""
+    declaration["families"] = families
+    declaration["selection"]["ineligible_variants"] = []
+
+
 def narrowed(fast: list[int], timeframes: list[str]) -> tuple[str, Protocol]:
     """The real protocol with its families cut to one sma_crossover grid of ``fast`` x slow 50."""
     family = {
@@ -53,7 +59,7 @@ def narrowed(fast: list[int], timeframes: list[str]) -> tuple[str, Protocol]:
         "timeframes": timeframes,
         "grid": {"fast_period": fast, "slow_period": [50]},
     }
-    text = with_selection(lambda d: d.update(families=[family]))
+    text = with_selection(lambda d: cut_to(d, [family]))
     return text, parse_protocol(text)
 
 
@@ -78,7 +84,7 @@ def two_families() -> tuple[str, Protocol]:
             "grid": {"period": [14], "oversold": [30], "overbought": [70]},
         },
     ]
-    text = with_selection(lambda d: d.update(families=families))
+    text = with_selection(lambda d: cut_to(d, families))
     return text, parse_protocol(text)
 
 
