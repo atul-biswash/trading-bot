@@ -731,6 +731,117 @@ class TestTheCommand:
             rh.main(["--root", str(tmp_path / "r"), "--store", str(store), "--clean-only"])
         assert caught.value.code == 2
 
+    def test_the_window_flag_sets_the_narrowed_protocol_and_the_out_of_sample_command(
+        self, tmp_path: Path
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"]
+        argv += ["--label", "L", "--keep", "--window", "2020-12-01", "2022-01-01", "2022-04-01"]
+        assert rh.main(argv, run=chain) == 0
+        written = (
+            tmp_path / "r" / "L" / "fail" / "wt" / "docs" / "research" / "PROTOCOL.md"
+        ).read_text("utf-8")
+        protocol = parse_protocol(written)
+        assert (protocol.history_start, protocol.boundary, protocol.history_end) == (
+            date(2020, 12, 1),
+            date(2022, 1, 1),
+            date(2022, 4, 1),
+        )
+        reads = [a for a, _ in chain.calls if "trading_bot" in a and "backtest" in a]
+        assert len(reads) == 8  # six reads, and the two the guard refuses
+        for args in reads:
+            assert args[args.index("--start") + 1] == "2022-01-01"
+            assert args[args.index("--end") + 1] == "2022-04-01"
+
+    def test_without_the_flag_the_windows_are_the_defaults(self, tmp_path: Path) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"]
+        assert rh.main([*argv, "--label", "L"], run=chain) == 0
+        reads = [a for a, _ in chain.calls if "trading_bot" in a and "backtest" in a]
+        assert {(a[a.index("--start") + 1], a[a.index("--end") + 1]) for a in reads} == {
+            ("2020-01-01", "2020-04-01")
+        }
+
+    def test_the_default_window_lies_wholly_inside_the_real_in_sample_period(self) -> None:
+        """P118's first windows were 2025 and 2024 quarters, which the REAL protocol reserves for S7
+        (M5m-447). The default must never be one again, whatever else is changed."""
+        real = parse_protocol(PROTOCOL_TEXT)
+        defaults = rh.Config(repo=REPO, root=Path("r"), store=Path("s"), python="python")
+        assert defaults.end <= real.boundary
+        assert real.history_start <= defaults.start < defaults.boundary < defaults.end
+        assert (
+            rh.window_refusal(
+                PROTOCOL_TEXT,
+                start=defaults.start,
+                boundary=defaults.boundary,
+                end=defaults.end,
+                cases=rh.CASES,
+            )
+            is None
+        )
+
+    def test_a_window_the_rules_cannot_use_is_refused_before_anything_runs(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--label", "L"]
+        status = rh.main([*argv, "--window", "2018-12-01", "2020-02-01", "2020-04-01"], run=chain)
+        assert status == rh.EXIT_REFUSED
+        assert "quarter starts" in capsys.readouterr().err
+        assert chain.calls == []
+        assert not (tmp_path / "r").exists()
+
+    @pytest.mark.parametrize(
+        "window",
+        [
+            (
+                "2023-12-01",
+                "2025-01-01",
+                "2025-04-01",
+            ),  # P118's first run: a quarter after the boundary
+            ("2022-12-01", "2024-01-01", "2024-04-01"),  # the quarter right after it
+            (
+                "2021-12-01",
+                "2023-01-01",
+                "2024-01-02",
+            ),  # one day over, and not even a quarter start
+        ],
+    )
+    def test_a_window_that_reaches_the_real_out_of_sample_period_is_refused_first(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], window: tuple[str, str, str]
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        chain = FakeChain("fail", store)
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--label", "L"]
+        assert rh.main([*argv, "--window", *window], run=chain) == rh.EXIT_REFUSED
+        assert "never the out-of-sample one" in capsys.readouterr().err
+        assert chain.calls == []
+        assert not (tmp_path / "r").exists()
+
+    def test_a_window_that_ends_exactly_at_the_real_boundary_is_allowed(
+        self, tmp_path: Path
+    ) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"]
+        argv += ["--label", "L", "--window", "2021-12-01", "2023-01-01", "2024-01-01"]
+        assert rh.main(argv, run=FakeChain("fail", store)) == 0
+
+    def test_a_window_that_is_not_dates_is_an_argument_error(self, tmp_path: Path) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--window", "a", "b", "c"]
+        with pytest.raises(SystemExit) as caught:
+            rh.main(argv)
+        assert caught.value.code == 2
+
     def test_both_cases_run_and_each_worktree_is_removed(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:

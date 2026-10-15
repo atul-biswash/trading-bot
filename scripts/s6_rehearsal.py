@@ -1,13 +1,19 @@
 """S6 rehearsal: drive the whole S6/S7 chain over a NARROWED protocol, with the real engine, in a throwaway worktree.
 
-``python scripts/s6_rehearsal.py --root DIR --store DIR [--case pass|fail|both] [--keep]``
+``python scripts/s6_rehearsal.py --root DIR --store DIR [--case pass|fail|both] [--window START BOUNDARY END]
+[--label NAME] [--keep | --clean-only]``
 
 R-CL: before any S6 run, the chain is rehearsed end to end -- sweep, selection, entry writing, the out-of-sample
 runs at all three arms, and the S7 gate, in both a passing and a failing case. This is that rehearsal. **It
 writes nothing under the repository it is run from and commits nothing to ``docs/research/``**: each case
 builds a detached worktree OUTSIDE the repository, at HEAD, with its own ``.venv`` and a NON-EDITABLE
 install by commit (the only shape the evidence door accepts), a junction to the canonical store, and a
-narrowed protocol written and committed INSIDE the worktree. Everything it records lives under ``--root``.
+narrowed protocol written and committed INSIDE the worktree. Everything it records lives under
+``<root>/<label>/<case>/``; a label already used is refused, so no invocation's evidence is overwritten.
+
+**It never reads the real protocol's out-of-sample period.** The narrowed variants are real grid points, so a
+window that reached past the REAL boundary (2024-01-01) would read, for them, the data S7 reserves. ``--window``
+may not end later than that boundary, and the default window is the 2020 first quarter, with 2019 in sample.
 
 **The hops are real commands.** The sweep (``s6_sweep.py --workers 2``, R-CH's check included), the selection
 (``s6_select.py``, with and without ``--out``), every out-of-sample run (``python -m trading_bot backtest``
@@ -16,8 +22,8 @@ built from the entry exactly as the owner's step O6 builds it), the refused seco
 the narrowed protocol, committing it, and marking the entries ``read`` (no tool does that yet).
 
 **Every hop is recorded**: command, working directory, exit status, the SHA-256 of its combined output, its
-seconds, what was expected and whether it matched, one JSON line in ``<root>/<case>/hops.jsonl`` and the
-output itself in ``<root>/<case>/out/``. A hop that does not match what was predicted STOPS the case: it is a
+seconds, what was expected and whether it matched, one JSON line in ``hops.jsonl`` and the output itself in
+``out/``. A hop that does not match what was predicted STOPS the case: it is a
 seam fault to diagnose, and the worktree is kept for the diagnosis (``--clean-only`` removes it).
 
 **The narrowing is a property of the windows, not of the machinery.** The in-sample window must span a calendar
@@ -55,6 +61,7 @@ from trading_bot.backtesting import selection as sel
 from trading_bot.backtesting.candidate import canonical_number
 from trading_bot.backtesting.evidence import RUN_RECORD_NAME, load_eligible_record
 from trading_bot.backtesting.protocol import declaration, parse_protocol
+from trading_bot.core.exceptions import TradingBotError
 
 __all__ = [
     "Config",
@@ -349,9 +356,9 @@ class Config:
     root: Path
     store: Path
     python: str
-    start: date = date(2023, 12, 1)
-    boundary: date = date(2025, 1, 1)
-    end: date = date(2025, 4, 1)
+    start: date = date(2018, 12, 1)
+    boundary: date = date(2020, 1, 1)
+    end: date = date(2020, 4, 1)
     keep: bool = False
     label: str = "run"
 
@@ -810,6 +817,16 @@ def _parser() -> argparse.ArgumentParser:
         "--keep", action="store_true", help="do not remove a case's worktree when it passes"
     )
     parser.add_argument(
+        "--window",
+        nargs=3,
+        type=date.fromisoformat,
+        metavar=("START", "BOUNDARY", "END"),
+        default=None,
+        help="the in-sample start, the boundary and the exclusive end, as ISO dates; the boundary and the "
+        "end are quarter starts, the boundary is 1 January, and the end is no later than the REAL "
+        "protocol's boundary (default: 2018-12-01 2020-01-01 2020-04-01)",
+    )
+    parser.add_argument(
         "--label",
         default=None,
         help="this invocation's directory under --root (default: the UTC time); a label already used is refused",
@@ -820,6 +837,34 @@ def _parser() -> argparse.ArgumentParser:
         help="remove the named case(s) worktree under --label and stop",
     )
     return parser
+
+
+def window_refusal(
+    protocol_text: str, *, start: date, boundary: date, end: date, cases: Sequence[str]
+) -> str | None:
+    """Why the windows cannot be used, or ``None``.
+
+    **A rehearsal never reads the real protocol's out-of-sample period.** The narrowed variants are real
+    grid points, and a window that reaches past the REAL boundary reads the data S7 reserves for them (P118's
+    first runs did, and its scan; M5m-447). So the end may not be later than the real boundary, whatever
+    the narrowed protocol's own boundary says. Otherwise each case's narrowing must be accepted by all three
+    readers.
+    """
+    try:
+        real_boundary = parse_protocol(protocol_text).boundary
+    except TradingBotError as exc:
+        return f"the real protocol cannot be read: {exc}"
+    if end > real_boundary:
+        return (
+            f"the window ends {end}, after the real protocol's boundary {real_boundary}: a rehearsal "
+            "reads only the real in-sample period and never the out-of-sample one"
+        )
+    for case in cases:
+        try:
+            narrow_protocol(protocol_text, start=start, boundary=boundary, end=end, case=case)
+        except (ValueError, TradingBotError) as exc:
+            return f"the window cannot be used for the {case} case: {exc}"
+    return None
 
 
 def _inside(path: Path, parent: Path) -> bool:
@@ -844,8 +889,26 @@ def main(argv: Sequence[str] | None = None, *, run: Run = real_run) -> int:
         print(f"REFUSED: the store {args.store} is not a directory", file=sys.stderr)
         return EXIT_REFUSED
     protocol_text = (repo / "docs" / "research" / "PROTOCOL.md").read_text(encoding="utf-8")
-    config = Config(repo, args.root, args.store, args.python, keep=args.keep, label=label)
+    start, boundary, end = args.window or (Config.start, Config.boundary, Config.end)
+    config = Config(
+        repo,
+        args.root,
+        args.store,
+        args.python,
+        start=start,
+        boundary=boundary,
+        end=end,
+        keep=args.keep,
+        label=label,
+    )
     cases = CASES if args.case == "both" else (args.case,)
+    if not args.clean_only:
+        refusal = window_refusal(
+            protocol_text, start=start, boundary=boundary, end=end, cases=cases
+        )
+        if refusal is not None:
+            print(f"REFUSED: {refusal}", file=sys.stderr)
+            return EXIT_REFUSED
     status = 0
     for case in cases:
         rehearsal = Rehearsal(case, config, run=run)
