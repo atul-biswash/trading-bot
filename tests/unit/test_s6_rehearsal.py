@@ -763,7 +763,7 @@ class TestTheCommand:
         assert rh.main([*argv, "--label", "L"], run=chain) == 0
         reads = [a for a, _ in chain.calls if "trading_bot" in a and "backtest" in a]
         assert {(a[a.index("--start") + 1], a[a.index("--end") + 1]) for a in reads} == {
-            ("2020-01-01", "2020-04-01")
+            ("2020-01-01", "2021-01-01")
         }
 
     def test_the_default_window_lies_wholly_inside_the_real_in_sample_period(self) -> None:

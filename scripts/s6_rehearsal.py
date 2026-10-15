@@ -13,7 +13,10 @@ narrowed protocol written and committed INSIDE the worktree. Everything it recor
 
 **It never reads the real protocol's out-of-sample period.** The narrowed variants are real grid points, so a
 window that reached past the REAL boundary (2024-01-01) would read, for them, the data S7 reserves. ``--window``
-may not end later than that boundary, and the default window is the 2020 first quarter, with 2019 in sample.
+may not end later than that boundary, and the default window is the year 2020 out of sample, with 2019 in
+sample. A year and not a quarter, because the pass case needs each candidate to have a losing trade (a profit
+factor with none is undefined and S7 fails closed on it) and a positive regime: 2020 Q1 alone gave the filtered
+candidate four winners and no loser.
 
 **The hops are real commands.** The sweep (``s6_sweep.py --workers 2``, R-CH's check included), the selection
 (``s6_select.py``, with and without ``--out``), every out-of-sample run (``python -m trading_bot backtest``
@@ -358,7 +361,7 @@ class Config:
     python: str
     start: date = date(2018, 12, 1)
     boundary: date = date(2020, 1, 1)
-    end: date = date(2020, 4, 1)
+    end: date = date(2021, 1, 1)
     keep: bool = False
     label: str = "run"
 
@@ -824,7 +827,7 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help="the in-sample start, the boundary and the exclusive end, as ISO dates; the boundary and the "
         "end are quarter starts, the boundary is 1 January, and the end is no later than the REAL "
-        "protocol's boundary (default: 2018-12-01 2020-01-01 2020-04-01)",
+        "protocol's boundary (default: 2018-12-01 2020-01-01 2021-01-01)",
     )
     parser.add_argument(
         "--label",
