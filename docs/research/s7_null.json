@@ -1,0 +1,383 @@
+{
+  "candidates": [
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 42899,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 0,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "1175.83",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-rsi-1h-off",
+      "expected_trades_by_regime": "1175.90",
+      "expected_trades_simple": "1180.82",
+      "in_sample_days": 2328,
+      "in_sample_trades": 2738,
+      "mean_return_percent": "-1.1610",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 42419,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "1175.74",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 42469,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "1180.80",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "variant": "rsi 1h filter off (overbought=70, oversold=30, period=7)"
+    },
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 0,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "339.98",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-rsi-1h-on",
+      "expected_trades_by_regime": "340.01",
+      "expected_trades_simple": "335.10",
+      "in_sample_days": 2328,
+      "in_sample_trades": 777,
+      "mean_return_percent": "-1.0975",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 996,
+          "profit_factor_usdt": 936,
+          "regimes": 48579,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "340.01",
+        "passes": 907,
+        "probability": "0.009070",
+        "standard_error": "0.000300"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 959,
+          "profit_factor_usdt": 898,
+          "regimes": 48426,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "335.06",
+        "passes": 880,
+        "probability": "0.008800",
+        "standard_error": "0.000295"
+      },
+      "variant": "rsi 1h filter on (overbought=70, oversold=30, period=7, trend_filter_period=200)"
+    },
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 0,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "362.55",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-rsi-4h-off",
+      "expected_trades_by_regime": "362.60",
+      "expected_trades_simple": "368.31",
+      "in_sample_days": 2328,
+      "in_sample_trades": 854,
+      "mean_return_percent": "-1.4427",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 891,
+          "profit_factor_usdt": 678,
+          "regimes": 45533,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "362.61",
+        "passes": 672,
+        "probability": "0.006720",
+        "standard_error": "0.000258"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 766,
+          "profit_factor_usdt": 591,
+          "regimes": 45530,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "368.28",
+        "passes": 586,
+        "probability": "0.005860",
+        "standard_error": "0.000241"
+      },
+      "variant": "rsi 4h filter off (overbought=70, oversold=30, period=7)"
+    },
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 0,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "296.95",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-sma_crossover-1h-off",
+      "expected_trades_by_regime": "296.92",
+      "expected_trades_simple": "294.13",
+      "in_sample_days": 2328,
+      "in_sample_trades": 682,
+      "mean_return_percent": "-0.9249",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 1770,
+          "profit_factor_usdt": 1823,
+          "regimes": 49724,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "297.00",
+        "passes": 1734,
+        "probability": "0.017340",
+        "standard_error": "0.000413"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 1795,
+          "profit_factor_usdt": 1826,
+          "regimes": 49880,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "294.19",
+        "passes": 1745,
+        "probability": "0.017450",
+        "standard_error": "0.000414"
+      },
+      "variant": "sma_crossover 1h filter off (fast_period=20, slow_period=100)"
+    },
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 33,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "206.76",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-sma_crossover-1h-on",
+      "expected_trades_by_regime": "206.81",
+      "expected_trades_simple": "202.27",
+      "in_sample_days": 2328,
+      "in_sample_trades": 469,
+      "mean_return_percent": "-0.8119",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 4381,
+          "profit_factor_usdt": 4583,
+          "regimes": 50318,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "206.85",
+        "passes": 4339,
+        "probability": "0.043390",
+        "standard_error": "0.000644"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 4522,
+          "profit_factor_usdt": 4773,
+          "regimes": 50208,
+          "trades": 100000
+        },
+        "draws": 100000,
+        "mean_trades": "202.34",
+        "passes": 4492,
+        "probability": "0.044920",
+        "standard_error": "0.000655"
+      },
+      "variant": "sma_crossover 1h filter on (fast_period=10, slow_period=100, trend_filter_period=200)"
+    },
+    {
+      "as_observed": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 0,
+          "profit_factor_usdt": 0,
+          "regimes": 5,
+          "trades": 99698
+        },
+        "draws": 100000,
+        "mean_trades": "129.82",
+        "passes": 0,
+        "probability": "0.000000",
+        "standard_error": "0.000000"
+      },
+      "entry_id": "s6-sma_crossover-4h-off",
+      "expected_trades_by_regime": "129.80",
+      "expected_trades_simple": "128.52",
+      "in_sample_days": 2328,
+      "in_sample_trades": 298,
+      "mean_return_percent": "-1.2783",
+      "primary": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 7760,
+          "profit_factor_usdt": 7575,
+          "regimes": 48301,
+          "trades": 99716
+        },
+        "draws": 100000,
+        "mean_trades": "129.78",
+        "passes": 7390,
+        "probability": "0.073900",
+        "standard_error": "0.000827"
+      },
+      "uniform_timing": {
+        "criteria_met": {
+          "drawdown": 100000,
+          "profit_factor_return": 7764,
+          "profit_factor_usdt": 7602,
+          "regimes": 48571,
+          "trades": 99595
+        },
+        "draws": 100000,
+        "mean_trades": "128.52",
+        "passes": 7391,
+        "probability": "0.073910",
+        "standard_error": "0.000827"
+      },
+      "variant": "sma_crossover 4h filter off (fast_period=30, slow_period=50)"
+    }
+  ],
+  "draws": 100000,
+  "family_wise": {
+    "independent": "0.143138",
+    "lower_bound": "0.073900",
+    "upper_bound": "0.150420"
+  },
+  "labels_sha256": "6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72",
+  "numpy": "2.5.1",
+  "oos_quarters": [
+    {
+      "quarter": "2024Q1",
+      "regime": "rising"
+    },
+    {
+      "quarter": "2024Q2",
+      "regime": "sideways"
+    },
+    {
+      "quarter": "2024Q3",
+      "regime": "sideways"
+    },
+    {
+      "quarter": "2024Q4",
+      "regime": "rising"
+    },
+    {
+      "quarter": "2025Q1",
+      "regime": "sideways"
+    },
+    {
+      "quarter": "2025Q2",
+      "regime": "rising"
+    },
+    {
+      "quarter": "2025Q3",
+      "regime": "sideways"
+    },
+    {
+      "quarter": "2025Q4",
+      "regime": "falling"
+    },
+    {
+      "quarter": "2026Q1",
+      "regime": "falling"
+    },
+    {
+      "quarter": "2026Q2",
+      "regime": "sideways"
+    },
+    {
+      "quarter": "2026Q3",
+      "regime": "rising"
+    }
+  ],
+  "oos_regime_counts": {
+    "falling": 2,
+    "rising": 4,
+    "sideways": 5
+  },
+  "protocol_sha256": "fc11efaeb28902d455f82cf9cc9a1d1b3a286fb1bdd680750ced435738e34547",
+  "s7_null_schema": 1,
+  "seed": 20261015,
+  "thresholds": {
+    "max_drawdown_max": "0.20",
+    "profit_factor_min": "1.3",
+    "regimes_positive_min": 2,
+    "trades_min": 100
+  },
+  "window": {
+    "days": 1004,
+    "end": "2026-10-01",
+    "start": "2024-01-01"
+  }
+}

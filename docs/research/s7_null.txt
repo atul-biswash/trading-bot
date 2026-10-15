@@ -1,0 +1,62 @@
+S7 NULL CHECK (R-CS): the chance that a strategy with no edge passes S7
+  protocol sha256 fc11efaeb28902d455f82cf9cc9a1d1b3a286fb1bdd680750ced435738e34547; regime labels sha256 6f78922b649c3a6592776721b20dacf80d34067506ce49e700c53d0b683c0e72
+  draws 100000 a candidate, seed 20261015, numpy 2.5.1
+  window 2024-01-01 to 2026-10-01: 1004 days, 11 complete quarters, regimes rising 4, falling 2, sideways 5
+  thresholds: profit_factor_min 1.3, trades_min 100, max_drawdown_max 0.20, regimes_positive_min 2
+  method: see the docstring of scripts/s7_null.py; the null demeans each candidate's own in-sample returns
+
+CANDIDATE s6-rsi-1h-off  rsi 1h filter off (overbought=70, oversold=30, period=7)
+  in-sample trades 2738 over 2328 days; mean return per trade -1.1610 percent (removed by the null)
+  expected out-of-sample trades: 1180.82 by the plain rate, 1175.90 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.000000  (standard error 0.000000, 0 of 100000 draws, mean 1175.74 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0000, profit_factor_usdt 0.0000, trades 1.0000, drawdown 1.0000, regimes 0.4242
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.000000
+
+CANDIDATE s6-rsi-1h-on  rsi 1h filter on (overbought=70, oversold=30, period=7, trend_filter_period=200)
+  in-sample trades 777 over 2328 days; mean return per trade -1.0975 percent (removed by the null)
+  expected out-of-sample trades: 335.10 by the plain rate, 340.01 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.009070  (standard error 0.000300, 907 of 100000 draws, mean 340.01 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0100, profit_factor_usdt 0.0094, trades 1.0000, drawdown 1.0000, regimes 0.4858
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.008800
+
+CANDIDATE s6-rsi-4h-off  rsi 4h filter off (overbought=70, oversold=30, period=7)
+  in-sample trades 854 over 2328 days; mean return per trade -1.4427 percent (removed by the null)
+  expected out-of-sample trades: 368.31 by the plain rate, 362.60 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.006720  (standard error 0.000258, 672 of 100000 draws, mean 362.61 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0089, profit_factor_usdt 0.0068, trades 1.0000, drawdown 1.0000, regimes 0.4553
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.005860
+
+CANDIDATE s6-sma_crossover-1h-off  sma_crossover 1h filter off (fast_period=20, slow_period=100)
+  in-sample trades 682 over 2328 days; mean return per trade -0.9249 percent (removed by the null)
+  expected out-of-sample trades: 294.13 by the plain rate, 296.92 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.017340  (standard error 0.000413, 1734 of 100000 draws, mean 297.00 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0177, profit_factor_usdt 0.0182, trades 1.0000, drawdown 1.0000, regimes 0.4972
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.017450
+
+CANDIDATE s6-sma_crossover-1h-on  sma_crossover 1h filter on (fast_period=10, slow_period=100, trend_filter_period=200)
+  in-sample trades 469 over 2328 days; mean return per trade -0.8119 percent (removed by the null)
+  expected out-of-sample trades: 202.27 by the plain rate, 206.81 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.043390  (standard error 0.000644, 4339 of 100000 draws, mean 206.85 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0438, profit_factor_usdt 0.0458, trades 1.0000, drawdown 1.0000, regimes 0.5032
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.044920
+
+CANDIDATE s6-sma_crossover-4h-off  sma_crossover 4h filter off (fast_period=30, slow_period=50)
+  in-sample trades 298 over 2328 days; mean return per trade -1.2783 percent (removed by the null)
+  expected out-of-sample trades: 128.52 by the plain rate, 129.80 by the regime rates
+  NO-EDGE PASS PROBABILITY 0.073900  (standard error 0.000827, 7390 of 100000 draws, mean 129.78 trades)
+  each test alone, share of draws meeting it: profit_factor_return 0.0776, profit_factor_usdt 0.0757, trades 0.9972, drawdown 1.0000, regimes 0.4830
+  sensitivity, in-sample mean return kept (as observed): 0.000000
+  sensitivity, one trade rate for every quarter: 0.073910
+
+FAMILY-WISE over 6 candidates (the null model, primary):
+  at least one passes, if independent: 0.143138
+  whatever the dependence, between 0.073900 and 0.150420
+  the candidates share a market and their trades overlap, so they are not independent;
+  the truth lies between the bounds and the independent figure is above it for positively dependent candidates.
+  This informs the reading of S7's result and does not gate it (R-CS).
+document docs\research\s7_null.json (10260 bytes)

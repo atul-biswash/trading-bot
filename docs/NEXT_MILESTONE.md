@@ -1807,6 +1807,15 @@ takes and the bot did not is a finding about one of them.
 > entries directory (read in `scripts/s6_mark_read.py`, `os.replace` on `<entries>/<name>.tmp`); and the report-only `s6_select.py` was run from the development tree over the sweep clone's records in Step 1c. **UNPINNED,
 > and flagged:** no test asserts that the marking tool or the gate leaves the `--backtests` tree byte-identical; R-CR rests on the code reading as it does.
 
+> **ANNOTATED AT M5m P120 (C4), BY THE OWNER'S RULING R-CS: THE NULL CHECK IS COMPUTED, AND IT IS READ BEFORE O6.** `scripts/s7_null.py` (commit `s7_null`, method stated in its message) ran over the six pending
+> candidate entries with the sweep clone's records: `docs/research/s7_null.txt` and `docs/research/s7_null.json` (100,000 draws a candidate, seed 20261015). **Read the text file before O6; it informs the reading of S7's
+> result and gates nothing (R-CS).** What it says, as numbers: a strategy with exactly zero expected return per trade, net of costs, built from each candidate's own in-sample trades, passes all of S7's tests with probability
+> **0.0000 (`rsi` 1h off), 0.0091 (`rsi` 1h on), 0.0067 (`rsi` 4h off), 0.0173 (`sma_crossover` 1h off), 0.0434 (`sma_crossover` 1h on) and 0.0739 (`sma_crossover` 4h off)**; the chance that AT LEAST ONE of the six passes is
+> **0.143 if they were independent and lies between 0.074 and 0.150 whatever their dependence**. The candidates' own in-sample mean returns are negative (-0.81 to -1.44 percent a trade), and with that kept the pass
+> probability is 0.0000 for all six. So a FAIL at S7 is the expected result, and **a PASS by one candidate would carry a false-positive chance of up to about one in seven even for a strategy with no edge at all**, which
+> is the reading R-CS asks for. The approximations (exchangeable trades, a trade-close equity path, no dependence between candidates) are in the script's docstring and its commit message; the null is the most generous one
+> and the drawdown test never binds. **What this changes in the steps above:** nothing is added to O5 to O7 or the gate except that the owner reads `docs/research/s7_null.txt` between O5 and O6.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
