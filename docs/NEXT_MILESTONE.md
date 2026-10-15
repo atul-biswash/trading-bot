@@ -1731,6 +1731,82 @@ takes and the bot did not is a finding about one of them.
 > written until C3 corrects their install procedure**"* is past. O3's earlier CHECK, *"no `MISSING`, `CONFLICT` or `FAILED` line"*, is true as far as it goes and incomplete: a `LOST` and `RECOVERED` pair is the new, acceptable state.
 > **What survives:** O1's corrected install, O2, O4 to O6 as written, the three rules for every step, and the rule that O7 is between O6 and the gate.
 
+> **ANNOTATED AT M5m P120 (C1), BY THE OWNER'S RULINGS R-CR, R-CS AND R-CT: THE SWEEP IS DONE, O7 AND THE GATE MOVE TO THE DEVELOPMENT TREE, AND A NULL CHECK COMES BEFORE O6.** The rulings, verbatim.
+> **R-CR:** *"O7 and the S7 gate run from the development tree, reading the clones' run records by path, as O4 does. No commit is made and nothing is pushed from any clone. O5 still builds a clone at the entries
+> commit, because the guard reads the committed entry there."* **R-CS:** *"Before any out-of-sample read, the chance that a strategy with no edge passes all four S7 tests is computed for the actual candidate
+> count, by a committed script whose method is stated in its commit. It informs the reading of S7's result and does not gate it."* **R-CT:** *"The S4 restart of 2026-10-15 is recorded under R-BN: pid 5224, booted
+> 2026-10-15T11:16:55Z, the open ETHUSDT position restored from order list 99221 and reconciled active from the first pass at 11:18:00Z."*
+>
+> **What happened.** O1 to O3 were carried out by the owner in `F:\trading bot\backtest\cf474214a539` (HEAD `cf474214a539035736e1cec4414d422ab9a378f6`): the probe, then the sweep, 216 sealed evidence-eligible records
+> in sample, one per declared variant, two duplicate pairs with equal trade-log digests and four unsealed `-running` directories from a sweep the owner interrupted and restarted, in **2:30:49.8 wall** (the 8-worker segment
+> 2:10:00). `docs/RUN_LEDGER.md` section 54 holds every figure, the probe timings, the per-bar cost of the sweep and the report-only selection (6 of 12 cells with a candidate); section 55 holds the S4 restart of R-CT.
+> **Every candidate's in-sample return profit factor is under 0.52, against S7's 1.3** (section 54), so a FAIL at S7 is the expected result and the null check below is for reading it.
+>
+> **What stops being true, by content, in the P119 C5 block above.** (1) Its table's **O7** row, *"Runs in: the O5 clone"*, and its **gate** row, and the whole of its **O7** and **gate** paragraphs: they run in the O5 clone,
+> `git commit` and `git push origin HEAD:main` there, reinstall that clone at the marking commit and boot-check it. Under R-CR **none of that happens**: nothing is committed or pushed from a clone, so no reinstall and no
+> boot check follow, and `M5m-483`'s concern (a push from a detached clone) is moot. (2) Its sentence *"The second needs one clarification for O7: the tool rewrites tracked entries, which `git status` shows as
+> modified"*, which was about the clone: the tool now rewrites the development tree's entries. (3) Its list of PowerShell *"Never executed"*, which names O7's `git push` and `pip` lines. **What survives:** the three rules
+> for every step; R-CM to R-CQ as the block states them; O1's corrected install; O2 to O4 and O6 as written; O3's CHECK as R-CQ makes it; and the statement of which PowerShell has run (still none, as written, end to end).
+>
+> **O5 stands, and one thing is added to it.** Build the clone at the SHA O4 pushed, exactly as the P118 C3 block's O1 lines do, with `$SHA` that SHA. It is the only clone the out-of-sample reads use, and under R-CR it is
+> **never committed to, pushed from, reinstalled in or written to by hand**: its `data\backtests` is read by path from the development tree. **O5's CHECK:** `git rev-parse HEAD` prints `$SHA`;
+> `git status --porcelain` prints nothing; `data\historical` is a `Junction`; `(Get-ChildItem "$CLONE\docs\research\entries" -Filter 's6-*.json').Count` equals N (6 on the report-only selection of section 54);
+> `(Get-FileHash docs\research\PROTOCOL.md).Hash` there equals the sweep clone's and the development tree's; and the `boot_provenance` line shows `verdict=accepted`, `install_kind=vcs`, `code_intact=true`,
+> `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true`. **O6 stands as written** and runs in that clone. **O6's CHECK:** 3 x N rows in the table it writes, every `window` `out_of_sample`, every
+> `evidence` `True`, each (entry, arm) exactly once, and `git status --porcelain` empty in the clone. Derived time, about 35 minutes (section 54).
+>
+> **O7. Mark the entries read, in the development tree.** After O6's CHECK. `$CLONE` is the O5 clone, `$DEV` the development tree.
+>
+> ```powershell
+> $DEV   = 'F:\trading bot\files\binance-trading-bot\binance-trading-bot'
+> $PYDEV = "$DEV\.venv\Scripts\python.exe"
+> Set-Location $DEV
+> git status --porcelain
+> & $PYDEV scripts\s6_mark_read.py --backtests "$CLONE\data\backtests" --dry-run
+> "exit $LASTEXITCODE"
+> git status --porcelain
+> ```
+>
+> CHECK: the first `git status --porcelain` prints nothing (the tree is clean and at, or beyond, the pushed entries commit); `exit 0`; one `entry <id>: would be marked read` line per candidate and three `record sha256`
+> lines under each; `dry run: nothing was written`; and the second status prints nothing. A `REFUSED:` line (exit 2) is a stop: it names the entry and the reason, and nothing was changed. Then, when satisfied:
+>
+> ```powershell
+> & $PYDEV scripts\s6_mark_read.py --backtests "$CLONE\data\backtests"
+> "exit $LASTEXITCODE"
+> git status --porcelain
+> & $PYDEV scripts\check.py
+> git add docs/research/entries
+> git commit -m "research: the S6 candidates' out-of-sample records, entries marked read"
+> git push
+> git rev-parse HEAD
+> git ls-remote origin refs/heads/main
+> git -C $CLONE status --porcelain
+> ```
+>
+> CHECK: `exit 0`; `entry <id>: marked read` for every candidate and the closing `next: git add ...` line; `git status --porcelain` before the `git add` lists exactly N lines, each ` M docs/research/entries/s6-....json`,
+> and nothing else; the gate is green; the next two commands print the same SHA; and **the last command prints nothing, which is R-CR's check that the clone was not touched**. The tool run a second time now exits `2`
+> with `is already read`, and that is correct. `git push` is a fast-forward only if nothing else reached `main` since O4; if it is refused, stop and report rather than force it.
+>
+> **The gate.** In the development tree, after the marking commit is pushed:
+>
+> ```powershell
+> Set-Location $DEV
+> $gate = & $PYDEV scripts\s7_gate.py --backtests "$CLONE\data\backtests"
+> "exit $LASTEXITCODE"
+> $gate | Set-Content 'F:\trading bot\scratch\s7_gate_out.txt' -Encoding ascii
+> $gate
+> ```
+>
+> CHECK: `exit 0` (a FAIL verdict is an outcome and also exits 0; only a refusal exits 2); `S7 DECISION GATE`; `candidates read N; still pending 0`; per candidate its three arms with the gate arm marked, the five criteria
+> `MET` or `NOT MET`, and `S7: PASS` or `S7: FAIL`; and the last line `S7 SUMMARY: k of N candidates read PASS`. A refusal prints nothing on stdout and every refusal on stderr (exit 2); it is a stop. The gate reads the
+> entries from the development tree and the records from the clone by path; the clone's protocol and the tree's are byte-identical (SHA-256 `fc11efaeb28902d455f82cf9cc9a1d1b3a286fb1bdd680750ced435738e34547`), which
+> is O4's comparison. **Do not edit PROTOCOL.md, in any checkout, before this has run and its output is saved.**
+>
+> **`s6_mark_read.py` and `s7_gate.py` already did what R-CR needs**, so no code changes for it (P120 C2, declared and skipped): both take the records from `--backtests DIR` and the protocol and entries from
+> `--protocol` and `--entries-dir`, which default to `docs/research/` under the working directory. `tests/unit/test_s7_gate.py` builds the entries and the records in separate trees; the marking tool writes only to the
+> entries directory (read in `scripts/s6_mark_read.py`, `os.replace` on `<entries>/<name>.tmp`); and the report-only `s6_select.py` was run from the development tree over the sweep clone's records in Step 1c. **UNPINNED,
+> and flagged:** no test asserts that the marking tool or the gate leaves the `--backtests` tree byte-identical; R-CR rests on the code reading as it does.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

@@ -5468,3 +5468,110 @@ Fail case (the real thresholds): both FAIL with `NOT MET` on both profit factors
 ### What this re-run did NOT cover
 
 Everything section 52 lists still holds: a `git worktree` where the owner clones from GitHub (O1); the selection run inside the clone; one venv moved to the entries commit and then to the marking commit where the owner builds a NEW clone for O5 and reinstalls in the O5 clone for O7; 2 workers where O3 uses 8; 2 variants where S6 has 216, so no 1h run, no 12-cell selection with empty cells and no four-fold walk-forward. **None of the PowerShell of O1 to O7 and the gate was executed**; the rehearsal runs the same commands as argument arrays from Python (`docs/NEXT_MILESTONE.md`, the P119 C5 block, states exactly which lines were and were not run). **It also did not exercise `git push`**, which the owner runs in O7.
+
+## 54. M5m S6: the sweep, O1 to O3, as its manifest and records show it, the report-only selection, and the null of R-CM's two variants (P120 Step 1, R-CR, R-CS)
+
+Read on `2026-10-15` from files under `F:\trading bot\scratch\p120\` (outside the repository), from the sweep clone `F:\trading bot\backtest\cf474214a539` **read only** (it was read with the development tree's interpreter and `-B`, so no bytecode was written there; its `git status --porcelain` read empty before and after, and no file outside `.git`, `.venv` and the `data\historical` junction is newer than its manifest, by `find -newer`; `git status` may refresh `.git/index`, which this section does not claim otherwise), and from the development tree. The S4 clone was copied in share mode (section 55) and not otherwise touched; the S5 clone was not read. No venue write was made and `docs/research/PROTOCOL.md` was not edited.
+
+The owner's rulings, verbatim. **R-CR:** *"O7 and the S7 gate run from the development tree, reading the clones' run records by path, as O4 does. No commit is made and nothing is pushed from any clone. O5 still builds a clone at the entries commit, because the guard reads the committed entry there."* **R-CS:** *"Before any out-of-sample read, the chance that a strategy with no edge passes all four S7 tests is computed for the actual candidate count, by a committed script whose method is stated in its commit. It informs the reading of S7's result and does not gate it."* **R-CT:** *"The S4 restart of 2026-10-15 is recorded under R-BN: pid 5224, booted 2026-10-15T11:16:55Z, the open ETHUSDT position restored from order list 99221 and reconciled active from the first pass at 11:18:00Z."*
+
+### The halts, against their predictions
+
+Predictions were written to `predictions_halts.txt` (SHA-256 `224725f6ede1ae7f0fe7135f036f45ed53e8e9f2dfe0a3c7b99411e945a483ee`) before any halt ran, each halt its own invocation.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | both `cf47421` | as predicted: HEAD `cf47421`, `git ls-remote origin refs/heads/main` `cf474214a539035736e1cec4414d422ab9a378f6` |
+| H2, `git status --porcelain` | empty in the development tree and in the sweep clone | as predicted, 0 lines in each; the clone's HEAD is `cf474214a539035736e1cec4414d422ab9a378f6` |
+| H3, the gate, bare, to a file | 216 files, mypy 108, 4188 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `d0ba49b615bc80bcec866e15ac61c3127da7b885c035ab7540087efa5cd561ac`; 369.11 s) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 484, distinct 484, max 484, no duplicate, no gap, no cited-not-declared, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `73c803d1fc2c0ed011a91703dc8fa266bd2f09a5a354636a50fa180360b8cca3`) |
+| H5, the sweep's records | the prompt's figures; I added a possible third duplicate pair (the check's variant) | the prompt's figures, and **my third pair did not occur**: 222 directories; 4 ending `-running`; 218 sealed; 216 points, 216 distinct variant keys, 0 missing, 0 conflicts; **2 duplicate pairs, each with one trade-log digest** (`sma_crossover` 1d 10/100: `20261015T111115663748Z-9d84a0843e63` and `...111125362814Z-...`; `sma_crossover` 1d 20/50: `...111354871030Z-530c03a09f23` and `...111405404034Z-...`); 4 skipped, all `not_sealed`, none holding a `run.json`; the points hold 57,581 trades in all (`h5_out.txt`, SHA-256 `9c294f48ea08ea707bf555bd8e00924011378ebf43d55db7f72cab59a22f06fe`) |
+
+### O1, as far as a read-only look shows it
+
+HEAD `cf474214a539035736e1cec4414d422ab9a378f6` (committer date `2026-10-15T16:39:11+06:00`), the checkout clean, `data\historical` a `Junction` to `F:\trading bot\store\mainnet-historical`, the venv's `version = 3.12.10`, and `docs/research/PROTOCOL.md` byte-identical to the development tree's (SHA-256 `fc11efaeb28902d455f82cf9cc9a1d1b3a286fb1bdd680750ced435738e34547` in both), which is O4's comparison. The clone has no `s6-*.json` entry, as it must not at this point. **Not re-run, because it would write into the clone:** the `boot_provenance` check of O1.
+
+### O2 and O3, from the manifest
+
+`data\s6_sweep_manifest.jsonl`, SHA-256 `88b5c8d0c3534ed69c4d8223c5e7a590d28a177a1c75ccd23cb7eea3ba385515`: 448 events, 222 `launch` and 218 `finish`, every `finish` with `returncode` 0, no `FAILED`, no worker lost and recovered. Predictions: `predictions_step1.txt` (SHA-256 `b80409fdefd385c063e0d53bbfcc4dce8a696a14a9cde231899eadcd96faa65d`), written before the manifest was analysed (`manifest_1b.py`, output SHA-256 `7e5269c31d8956fe79d30ee520a3fc83fe1bb8c0e1b35a8b969139287c8aa575`).
+
+| Segment | From (UTC) | To | Length | What it was |
+|---|---|---|---|---|
+| 0 | 10:52:59.9 | 11:08:28.4 | 0:15:28.5 | O2, `--probe`: six serial runs, `sweep_end complete false` |
+| gap | | | 0:02:46.0 | |
+| 1 | 11:11:14.4 | 11:13:48.2 | 0:02:33.9 | O3 at `workers 4`, `to_run 210`; R-CH's check at 11:11:34.4 (digests equal, variant `sma_crossover` 1d 10/100); **`interrupted` at 11:13:48.2, four workers terminated (pids 13096, 8324, 11504, 11560)** |
+| gap | | | 0:00:05.4 | |
+| 2 | 11:13:53.6 | 13:23:53.4 | 2:09:59.8 | O3 at `workers 8`, `to_run 208`, `with_a_run 8`; the check again at 11:14:18.1 (digests equal, variant `sma_crossover` 1d 20/50); `sweep_end complete true`, `duplicates 2`, `failed []` |
+
+**Wall time, first start to last finish: 2:30:49.8** (the first `launch` event to the last `finish`; the last event, `sweep_end`, is 3.8 s later). The owner's derived figure for O3 was 1.3 to 2 hours at 8 workers; the 8-worker segment was 2:10:00. The four terminated workers are the four `-running` directories, stamped within 40 ms of one another at 11:11:35.9Z; they never reached a `finish`, and their variants were run again by segment 2. **Worker time:** 63,087.4 s in all (17.52 h), of which 206 finishes at 8 workers were 17.25 h in a 2.167 h segment, an average of 7.96 workers running: the pool was full throughout.
+
+**O2's six probe runs (one worker, serial), with the owner's bar counts (1h 111,394; 4h 27,900; 1d 4,656):**
+
+| Variant (first of its family and timeframe) | Seconds | ms a bar |
+|---|---|---|
+| `rsi` 1h | 455.0 | 4.08 |
+| `rsi` 4h | 105.6 | 3.78 |
+| `rsi` 1d | 18.6 | 4.00 |
+| `sma_crossover` 1h | 274.5 | 2.46 |
+| `sma_crossover` 4h | 64.1 | 2.30 |
+| `sma_crossover` 1d | 10.0 | 2.15 |
+
+These are the figures the owner's probe measured (`sma_crossover` 2.15 to 2.46, `rsi` 3.78 to 4.08 ms a bar), to the digit. **The per-bar cost of the full sweep at 8 workers**, medians with the range in brackets, seconds and then ms a bar, and the ratio of the median to the probe's figure for the same family and timeframe:
+
+| Family, timeframe | n | Seconds, median [min, max] | ms a bar, median [min, max] | Ratio to the probe |
+|---|---|---|---|---|
+| `sma_crossover` 1h | 17 | 533.0 [513.9, 559.7] | 4.78 [4.61, 5.02] | 1.94 |
+| `sma_crossover` 4h | 17 | 128.6 [124.9, 131.6] | 4.61 [4.48, 4.72] | 2.00 |
+| `sma_crossover` 1d | 13 | 18.1 [13.2, 18.5] | 3.90 [2.83, 3.98] | 1.81 (boot-dominated) |
+| `rsi` 1h | 53 | 743.3 [677.7, 795.0] | 6.67 [6.08, 7.14] | 1.63 |
+| `rsi` 4h | 53 | 188.2 [178.8, 194.3] | 6.74 [6.41, 6.97] | 1.78 |
+| `rsi` 1d | 53 | 27.9 [26.1, 30.2] | 5.99 [5.61, 6.48] | 1.50 (boot-dominated) |
+
+**Against the predictions.** The wall time (2.0 to 2.8 h predicted) and the `rsi` ratios (1.0 to 2.0 predicted) held. The `sma_crossover` ratios were predicted at 2.0 or under and the maxima exceed it slightly (5.02 against 2.46 is 2.04; 4h 4.72 against 2.30 is 2.05): a small miss at the top of the range, not at the median. **Eight workers cost about twice the probe's time per bar for `sma_crossover` and 1.6 to 1.8 times for `rsi`**, so the 3.3 GB the owner reported available was not the binding term (REASONED: no worker failed, and the pool stayed full), and contention is the likelier cost. Peak memory was not recorded.
+
+**A derived time for O6, UNMEASURED:** O6 runs three arms for each candidate over 2024-01-01 to 2026-10-01, about 48,200 1h bars and 12,050 4h bars across both pairs. At the probe's serial rates, the six candidates of the selection below come to about 118 s (`sma_crossover` 1h), 196 s (`rsi` 1h), 28 s (`sma_crossover` 4h) and 45 s (`rsi` 4h) a run, so 2 x 3 x 118 + 2 x 3 x 196 + 3 x 28 + 3 x 45 is about 2,100 s, **about 35 minutes plus the 3 s boot of 18 runs**.
+
+### Step 1c: the report-only selection over the sweep clone's records
+
+`python scripts/s6_select.py --backtests "F:\trading bot\backtest\cf474214a539\data\backtests"` from the development tree, writing nothing (output `select_report.txt`, SHA-256 `0a92e6ff4f63f787b7a2e030287d66e3849bf0463b74c20a6d5879beb19ebef6`, 3.9 s): **`variants declared 216; with a run 216; duplicated 2; skipped directories 4`**. So each duplicate pair counts as one run (the first by directory name stands, and the digests are equal, so either gives the same trades) and the four `-running` directories are listed `SKIPPED ... not_sealed` and are never read as a point. No duplicate decides a selection; the prediction held.
+
+**Cells with a candidate: 6 of 12.** Predicted before the run (`predictions_c3.txt`, SHA-256 `b333a967a1bc77f932e9717768192ccfbfa9ee7a9cc83f6ce445e5b5bd2a6206`): 7, range 6 to 8. It is inside the range and one under the point. The six: `sma_crossover` 1h filter off and on, `sma_crossover` 4h filter off, `rsi` 1h filter off and on, `rsi` 4h filter off. The six without one are the four 1d cells, `sma_crossover` 4h filter on and `rsi` 4h filter on.
+
+**Every candidate loses money in sample, and by a wide margin.** The selection statistic is the return profit factor at the 1.20 arm, and the six candidates' are 0.482, 0.516, 0.387, 0.413, 0.426 and 0.359 (USDT profit factors 0.482, 0.518, 0.386, 0.410, 0.426 and 0.355), on 682, 469, 298, 2,738, 777 and 854 trades. **No eligible point of any cell has a statistic at or above 1, because each candidate is the maximum of its cell's eligible points and the six cells without a candidate have none; and every cell's walk-forward reads `folds with a forward return PF above 1: 0 of 4`.** S7 asks for 1.3 on both profit factors. This is data, not a fault, and it is recorded here before any out-of-sample read.
+
+**R-CM's two variants are not selected, and the ruling changed one cell** (`rcm_show.py`, output SHA-256 `ebf2546577786d0d8ee64d59ef593196f3c71ec83bf9854554e45135c3eedf52`, which re-runs the selection with and without the ruling):
+
+| Variant | Trades | Return PF | Max drawdown | Reasons with R-CM | Reasons without it |
+|---|---|---|---|---|---|
+| `sma_crossover` 4h 10/50, filter off | 358 | 0.439566 | 0.0771 | `ruled_ineligible` | none |
+| `sma_crossover` 4h 10/50, filter on (200) | 172 | 0.483397 | 0.0357 | `too_few_trades`, `ruled_ineligible` | `too_few_trades` |
+
+**Without the ruling the `sma_crossover` 4h filter-off cell would have picked 10/50 (0.4396); with it, 30/50 (0.3872), a lower statistic.** The other five candidate cells are the same either way, no ruled variant is a candidate or any fold's pick, and the filtered 4h variant was ineligible for too few trades whatever the ruling. So the ruling removed no cell and moved one candidate, as predicted.
+
+### What this section does not cover
+
+The memory of 8 workers; the clone's `boot_provenance` (it would write); and any statement about S4 or S5, which are in section 55 and in the earlier sections.
+
+**Annotation (P120 C1): a sentence of section 53 is no longer a description of the owner's procedure.** Section 53's last paragraph says the rehearsal differed from the owner's steps in *"one venv moved to the entries commit and then to the marking commit where the owner builds a NEW clone for O5 and reinstalls in the O5 clone for O7"*. That was O7 as `docs/NEXT_MILESTONE.md` wrote it at P119 C5. Under R-CR (above) nothing is committed, pushed or reinstalled in a clone, and O7 and the gate run in the development tree; the P120 C1 block in that file says so. Section 53 stands as the record of what the rehearsal ran.
+
+## 55. M5m S4: the restart of 2026-10-15, pid 5224 (P120 Step 1a, R-CT, R-BN)
+
+Recorded at P120, after the fact, from a share-mode copy of the S4 log taken between `2026-10-15T14:02:01Z` (its last line) and `14:04:42Z` (`F:\trading bot\deploy\45547f107715\logs\trading_bot.log`, 915,555 bytes, SHA-256 `fc47a9c0ab95e9b2984152783eec3b8aece271cee27f7d1b32b1015e6d7ae767`, 3,862 lines by `splitlines`). The S4 clone was only read. An observation log, so this section only adds. R-CT, verbatim: *"The S4 restart of 2026-10-15 is recorded under R-BN: pid 5224, booted 2026-10-15T11:16:55Z, the open ETHUSDT position restored from order list 99221 and reconciled active from the first pass at 11:18:00Z."* Predictions: `predictions_step1.txt`, section 1a.
+
+| Fact | Value |
+|---|---|
+| the previous process | pid `25352` (booted `2026-10-14T06:34:32Z`, section 49). **Its last line is `2026-10-15T08:23:00Z`, a `reconciliation_pass` (`positions=1 ... states="active=1"`).** There is no `engine_stopped` line and no shutdown marker: pid 16076's `Trading engine stopped event=engine_stopped clean_shutdown=True` at `2026-10-12T04:17:43Z` is the only one in the log |
+| the line before the restart | `2026-10-15T08:21:02Z`, pid 25352 booked the BTCUSDT close (`quote_total=1892.12781030 quote_total_source=venue entry_quote_total=1887.91278610 realised=4.21502420 fee=0E-8 fee_asset=USDT fills=2`, `order_id=2890963`), leaving one position, the ETHUSDT one placed at `08:10:01Z` (`order_list_id=99221`, `quantity=0.79710000 entry=2371.40000000 stop_loss=2323.98000000`) |
+| the down span | **last line of pid 25352 `08:23:00Z` to first line of pid 5224 `11:16:54Z`: 2:53:54.** By the frozen `scripts/s4_compare.py` `down_intervals` (imported, not edited; `run_down_intervals.py`, output SHA-256 `d52c92b046445108625faaf780b144bed9140d143eeed5c8d7955798f258852c`): **`2026-10-15T08:23:00+00:00` to `2026-10-15T11:18:00+00:00`, 175.00 minutes**, the second end being the first reconciliation pass of pid 5224. Adjacent lines 3706 and 3707 of the copy are those two, so no line of any pid lies between |
+| how it stopped | **UNMEASURED beyond the machine's own record.** The bot wrote no stop marker. The Windows System log shows `Kernel-Power` 41, *"The system has rebooted without cleanly shutting down first"*, and `EventLog` 6008, *"The previous system shutdown at 1:52:34 PM on 10/15/2026 was unexpected"*, both at `2026-10-15T10:22:31Z` to `10:22:52Z` with the OS booting at `10:22:31Z`; `BugcheckCode` 0, `SleepInProgress` 0. The machine's time zone is UTC+6, so the 6008's *1:52:34 PM* is `07:52:34Z`, which the bot's own lines up to `08:23:00Z` contradict: it is a periodically written last-alive stamp and not the instant of the stop, and it is used here only for *unexpected*. The bot ended with an unclean reboot of the machine at some time after `08:23:00Z`; **the next reconciliation pass was due at about `08:24:00Z` and there is none, so the stop lies between `08:23:00Z` and about `08:24:00Z`** (argued from the presence of the passes, one a minute, on both sides) |
+| the OS and pid 5224 | the OS booted at `10:22:31Z`; pid 5224 wrote its first line 54 minutes later |
+| pid / first line | `5224`, `2026-10-15T11:16:54Z` (the banner); `boot_provenance` at `11:16:55Z` |
+| verdict | `accepted`, `install_kind=vcs`, `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776` (the S4 clone's commit, the same as every earlier pid in the log), `code_intact=true` over 77 files |
+| composition root | ready at `11:17:10Z`, 2 pairs, **92623.52676550 USDT free**, 514 assets excluded from equity (the pre-existing warning) |
+| the restore | `11:17:10Z`, `ETHUSDT: restored the open position from the store, UNKNOWN until reconciled event=boot_position_restored symbol=ETHUSDT source=position list_client_order_id=tb1-ETHUSDT-1792051799999-0-L order_list_id=99221 entry_fill_price=2369.03 entry_quote_total=1888.35...`; then `Boot resolved 1 restored record(s): 1 restored, 0 booked, 0 held, 0 dropped, 0 gone event=boot_positions_resolved records=1 pending_placements=0 restored=1 booked=0 held=0 dropped=0 gone=0` |
+| engine | started at `11:17:11Z`: BTCUSDT/1m, ETHUSDT/5m (499 candles seeded each) |
+| the first pass | **`2026-10-15T11:18:00Z`, `Reconciled 1 position(s) event=reconciliation_pass positions=1 calls=1 queries=2 states="active=1"`**, and `active=1` on every pass the copy holds to `14:02:01Z` |
+
+**Against the prediction.** The boot, the restore, the first pass at `11:18:00Z` and `active=1` were predicted and held. **The down span was not**: it was predicted under ten minutes, and it is 2:53:54 (175.00 minutes by the frozen function), with no shutdown marker, because the machine itself went down uncleanly. The position was open at the venue throughout, under the order list placed at `08:10:01Z`; it rested protected for the whole span and was found `active` by the first pass after the restart. Nothing in S4's comparison is edited (R-BN): the frozen `down_intervals` excludes this interval from both sides.
+
+Every restart of S4 recorded so far, for the owner's count: pids 27460, 27176, 16076, 22304, 3444, 25352 and now 5224, the six intervals between them being those in the frozen function's output (0.23, 49.72, 902.30, 6.57, 1451.20 and 175.00 minutes).
