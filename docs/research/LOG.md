@@ -93,6 +93,39 @@ Recorded **before any S6 run exists**, and decided, in the owner's words, *"befo
 
 **The other four rulings of amendment 3** (R-CN to R-CQ) govern code, tools and the owner's steps and are recorded in `PROTOCOL.md` section 10.
 
+## Entry 6 -- S6 and S7: the sweep, the selection, and S7 recorded as FAIL without an out-of-sample read (P121 C3, R-CU, R-CV, R-CW)
+
+The sweep ran, the selection was made, and the owner ruled the decision. The rulings, verbatim. **R-CU:** *"The S6 selection is committed in a line-per-record format, so every commit stays within the 1,500-line ceiling. The change alters no pick: the selection is re-run, and its picks and their record digests are shown identical to P120's report-only run."* **R-CV:** *"No out-of-sample read is made. Every selected candidate loses in sample on the gate arm (per-trade-return profit factor 0.359 to 0.516; no walk-forward fold above 1), and with its own mean each has a null pass probability of 0.0000 (docs/research/s7_null.txt). S7 is recorded as FAIL without reading the reserved window, which stays unread for later research. This ruling can only produce a FAIL. No entry is committed, since entries exist only to bind a read."* **R-CW:** *"M5m closes after S4 ends. S4's result is recorded beside S7's. If S4 fails, the FAIL stands, with the backtester's calibration recorded as unconfirmed."*
+
+| | |
+|---|---|
+| the sweep | all 216 variants run in sample over `[2017-08-17, 2024-01-01)` at the 1.20% arm: 216 sealed evidence-eligible records, one per declared variant, 2 duplicate pairs with equal trade-log digests (counted once), 4 unsealed directories never read; 2 hours 30 minutes 49.8 seconds wall (`docs/RUN_LEDGER.md` section 54) |
+| the selection | `docs/research/selection.jsonl`, SHA-256 `586fcfd6f30e844290c547742c56110ad37654b020e22c7f11a2a4cd02fbad89`, 235 lines, JSON Lines (R-CU), written unedited by `scripts/s6_select.py` and committed with **no entry**. Its picks and every record digest are identical to P120's report-only run |
+| cells with a candidate | **6 of 12**: `sma_crossover` 1h off and on, `sma_crossover` 4h off, `rsi` 1h off and on, `rsi` 4h off. The four 1d cells and the two filtered 4h cells have no eligible point |
+| R-CM | neither ruled variant is a pick or a fold's pick. Without the ruling `sma_crossover` 4h filter off would have picked 10/50 (0.4396) and with it picks 30/50 (0.3872) |
+| the decision | **S7: FAIL, recorded by R-CV without reading the reserved window.** The ruling can only produce a FAIL |
+
+**The six candidates, in sample, on the gate arm (1.20%).** Profit factors are the sum of positive over the absolute sum of negative, from per-trade returns and in USDT. The walk-forward is a report (R-CF): four anchored folds, 2020 to 2023, each tested on its own calendar year. The null column is `docs/research/s7_null.txt`: the chance that a strategy with exactly zero expected return per trade, net of costs, built from the candidate's own in-sample trades, passes all of S7; with the candidate's own mean kept it is 0.000000 for all six.
+
+| Candidate | Trades | Return PF | USDT PF | Max drawdown (per bar) | Folds above 1 | Null pass probability |
+|---|---|---|---|---|---|---|
+| `sma_crossover` 1h off (20/100) | 682 | 0.4815 | 0.4823 | 0.1192 | 0 of 4 | 0.017340 |
+| `sma_crossover` 1h on (10/100, filter 200) | 469 | 0.5156 | 0.5178 | 0.0757 | 0 of 4 | 0.043390 |
+| `sma_crossover` 4h off (30/50) | 298 | 0.3871 | 0.3864 | 0.0739 | 0 of 4 | 0.073900 |
+| `rsi` 1h off (70/30, period 7) | 2738 | 0.4126 | 0.4103 | 0.4710 | 0 of 4 | 0.000000 |
+| `rsi` 1h on (70/30, period 7, filter 200) | 777 | 0.4261 | 0.4258 | 0.1584 | 0 of 4 | 0.009070 |
+| `rsi` 4h off (70/30, period 7) | 854 | 0.3594 | 0.3553 | 0.2188 | 0 of 4 | 0.006720 |
+
+The walk-forward folds, forward trades and return profit factor: `sma_crossover` 1h off 2020 135 / 0.6422, 2021 93 / 0.4298, 2022 103 / 0.4168, 2023 125 / 0.3912; `sma_crossover` 1h on 2020 no eligible point in training, 2021 111 / 0.3035, 2022 81 / 0.4852, 2023 90 / 0.3573; `sma_crossover` 4h off no eligible point in training in any fold; `rsi` 1h off 359 / 0.4517, 524 / 0.3992, 485 / 0.3867, 334 / 0.5297; `rsi` 1h on 129 / 0.5192, 151 / 0.3574, 115 / 0.4087, 120 / 0.4681; `rsi` 4h off 108 / 0.4592, 153 / 0.4055, 164 / 0.3697, 103 / 0.4216. **At least one of the six passes S7 under the null with probability 0.143 if they were independent, between 0.074 and 0.150 whatever their dependence** (R-CS; it informs a reading and gates nothing).
+
+**The reserved window, `[2024-01-01, 2026-10-01)`, is UNREAD for every variant except two cases.** (1) The two variants R-CM names, `sma_crossover` 4h at 10/50 with the trend filter off and on: their figures for `2024-01-01` to `2025-04-01` were seen, as Entry 5 records exactly. (2) S5's baseline configuration, `sma_crossover` 20/50 on BTCUSDT 1m and ETHUSDT 5m, which is not one of the 216 variants and which read the whole history, the window included (Entries 1 to 3). **Evidence for the rest, MEASURED on the sweep clone's records at P120 and P121:** all 218 sealed run directories are in-sample point runs (the selection counts 216 points, 2 duplicates and 4 unsealed directories, and lists no `not_in_sample` run), so no out-of-sample run record of any variant exists there; the null check used the window's dates and the committed quarter labels and read no bar and no record (R-CN). The other candidates' windows therefore remain unread and available to later research.
+
+**What this entry does not say.** It does not say a candidate was tested out of sample and failed: none was read. It says the in-sample evidence, with a zero-edge null that is generous to the candidates, put S7's pass chance at 0.0000 to 0.0739 a candidate, and the owner ruled the gate not worth spending the window on. The count of candidates actually read out of sample is 0, and the denominator of any later multiple-testing judgement stays the 216 variants.
+
+**S4, beside it (R-CW).** S4's run is still going at this entry and M5m closes after it ends. By R-AY it stops at the first UTC midnight that is at least T0 plus 21 days with at least 150 bookings, capped at T0 plus 35 days; if T0 is the first boot's `boot_provenance` instant (`2026-10-10T05:58:02Z`, pid 27460, DERIVED and not confirmed here) the earliest stop is `2026-11-01T00:00:00Z` and the cap is `2026-11-14T05:58:02Z`. If S4 fails, the FAIL stands and the backtester's calibration is recorded as unconfirmed.
+
 ## Candidate entries
 
 None yet. No variant has been run.
+
+> Annotated at P121 (C3): the sentence above was true when written and has been false since the sweep ran. All 216 variants have been run in sample (Entry 6), a selection was made, and **no candidate entry exists or will be committed**: R-CV rules that entries exist only to bind a read, and no read is made. This section therefore stays empty by ruling and not because nothing has run.

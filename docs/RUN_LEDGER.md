@@ -5575,3 +5575,57 @@ Recorded at P120, after the fact, from a share-mode copy of the S4 log taken bet
 **Against the prediction.** The boot, the restore, the first pass at `11:18:00Z` and `active=1` were predicted and held. **The down span was not**: it was predicted under ten minutes, and it is 2:53:54 (175.00 minutes by the frozen function), with no shutdown marker, because the machine itself went down uncleanly. The position was open at the venue throughout, under the order list placed at `08:10:01Z`; it rested protected for the whole span and was found `active` by the first pass after the restart. Nothing in S4's comparison is edited (R-BN): the frozen `down_intervals` excludes this interval from both sides.
 
 Every restart of S4 recorded so far, for the owner's count: pids 27460, 27176, 16076, 22304, 3444, 25352 and now 5224, the six intervals between them being those in the frozen function's output (0.23, 49.72, 902.30, 6.57, 1451.20 and 175.00 minutes).
+
+## 56. M5m S6/S7: the selection in the line-per-record format, S7 recorded as FAIL without a read, and the S4 restart corrected (P121, R-CU, R-CV, R-CW)
+
+Read on `2026-10-15` from files under `F:\trading bot\scratch\p121\` (outside the repository), from the sweep clone `F:\trading bot\backtest\cf474214a539` (**read only**, as at P120), and from the committed files. An observation log, so this section only adds. No venue write was made, the S4 clone was not read at P121 (its restart facts are P120's section 55), and `docs/research/PROTOCOL.md` was not edited. The owner's rulings R-CU, R-CV and R-CW are quoted verbatim in `docs/research/LOG.md` Entry 6 and in `docs/NEXT_MILESTONE.md` (the P121 C3 block).
+
+### The halts, against their predictions
+
+Predictions: `predictions_halts.txt`, SHA-256 `5fc8f742c2ed8984998a69022b7e203f057669cc37829457fadd21ead3a0f344`, written before any halt ran, each halt its own invocation.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `b5f7547`; the owner HAS pushed, so `origin/main` `b5f7547` too (the alternative: `cf47421`, 3 ahead) | **WRONG, for the fourth prompt running** (`M5m-504`): HEAD `b5f7547`, `git ls-remote origin refs/heads/main` read `cf474214a539035736e1cec4414d422ab9a378f6`, the three P120 commits unpushed |
+| H2, `git status --porcelain` | the seven untracked files of P120's C3 and nothing else | as predicted: `selection.json` and six `s6-*.json` entries, nothing else |
+| H3, the gate, bare, to a file | 218 files, mypy 109, 4234 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `68e88a458d53be4ca45fbf50f4ae76fb66e6fd6fb968dd5a05770e79781f5a56`) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 500, distinct 500, max 500, no duplicate, no gap, no cited-not-declared, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `d74211f3eea97813c3506a61d3de40ef1024169f9a6f2d108b944e4956e3dc06`) |
+
+The seven untracked files were then deleted from the working tree (they had never been committed); copies are in `F:\trading bot\scratch\p121\p120_selection\`, `selection.json` with SHA-256 `aa44b4f0148353748577b16caf6e6c8a0319beb68f47b89a1a4b1411da9fc912`.
+
+### R-CU: the same picks in a different format
+
+`scripts/s6_select.py` was re-run over the sweep clone's records into the scratch directory and compared with P120's output by `compare_selection.py` (output `compare_out.txt`, SHA-256 `d5eaa2d37da2a74077d0b3b083303cc236ae3e73d4c17c09a9602c4b6bc871e1`; commit `2e00dcc`):
+
+| Check | Result |
+|---|---|
+| the printed report against P120's report-only text | identical, 118 lines |
+| the 235 records against `selection_lines()` of P120's document with `selection_schema` 2 | identical; only the schema number differs from P120's file |
+| the 6 picks, each with its run directory, record SHA-256 and candidate digest | identical (listed in the message of `2e00dcc`) |
+| the 216 variants' record digests | identical |
+| the file | 134,915 bytes, 235 lines, longest line 2,483 bytes, SHA-256 `586fcfd6f30e844290c547742c56110ad37654b020e22c7f11a2a4cd02fbad89` |
+
+Predictions `predictions_c1.txt` (SHA-256 `7958a80b2af5e4cd70787d0efcb4392b757056549369586c7e9fea3abb926b8d`): 235 lines, 110 to 150 KB, longest line under 3,000 bytes, report and records identical: all held. The tool's survey: `survey_c1_out.txt`, SHA-256 `8aa8ddeb47798b7f0a7b21d39e163f1556da55c0c72f2a93e4155968905ea1f8`, 10 mutations, 14 kills against 13 predicted. `2e00dcc` is the format and `bdd95e4` is the file, committed unedited as `docs/research/selection.jsonl`, with no entry (R-CV). Both gates read 4244 passed and 1 skipped (`gate_c1.txt` SHA-256 `ef935439bdc33bc49d27660ebd236baa88b29669960e09b0b0458f351157cd4b`, `gate_c2.txt` SHA-256 `cab4539038b8dff79f5d65b84ca2ab7c5d6e9a2b13a2beeecf5d828ddafcb6be`).
+
+### S7 recorded as FAIL, and what the record rests on
+
+R-CV rules S7 a FAIL without reading the reserved window. The record is in `docs/research/LOG.md` Entry 6 with the six candidates' in-sample figures (return profit factor 0.359 to 0.516, USDT profit factor 0.355 to 0.518, 298 to 2,738 trades, per-bar drawdown 0.074 to 0.471), their walk-forward folds (0 of 4 above 1 for every candidate; two candidates have folds with no eligible point in training) and their null pass probabilities (0.0000 to 0.0739; family-wise 0.143 if independent, 0.074 to 0.150 whatever the dependence), all from the committed `selection.jsonl` and `s7_null.json`.
+
+**The reserved window is unread for every variant except two cases.** The two variants R-CM names (Entry 5 records exactly what was seen, to `2025-04-01`) and S5's baseline configuration, which is not one of the 216 and read the whole history (Entries 1 to 3). **Evidence:** in the sweep clone all 218 sealed directories are in-sample point runs and the selection lists no run as `not_in_sample`; no out-of-sample record of any of the 216 variants exists in it. **UNMEASURED:** the other clones' records were not re-read at P121; the claim for them rests on the owner's rulings and on the ledger's earlier sections, which record a read of the real reserved window only for the two variants of R-CM (section 52) and for S5's baseline (sections 50 and earlier).
+
+### The owner's steps O5 to O7 and the gate: not taken
+
+O5 (the clone at the entries commit), O6 (the out-of-sample reads), O7 (marking the entries read) and the gate (`s7_gate.py`) were never run: no entry is committed, no clone was built at an entries commit, and no out-of-sample record exists. `docs/NEXT_MILESTONE.md` annotates the steps as not taken by R-CV.
+
+### The S4 restart of 2026-10-15, corrected to the measurement (P120 Step 1a)
+
+R-CT's wording, *"pid 5224, booted 2026-10-15T11:16:55Z, the open ETHUSDT position restored from order list 99221 and reconciled active from the first pass at 11:18:00Z"*, is the owner's and stands as the ruling. Its *"booted ... 11:16:55Z"* is the `boot_provenance` line; the measurement from the share-mode copy of the S4 log (section 55, SHA-256 `fc47a9c0ab95e9b2984152783eec3b8aece271cee27f7d1b32b1015e6d7ae767`) is:
+
+| Fact | Measured |
+|---|---|
+| the previous process | pid `25352`; its last line `2026-10-15T08:23:00Z`, a `reconciliation_pass`; no stop marker |
+| why it stopped | the machine rebooted without cleanly shutting down (Windows System log, `Kernel-Power` 41 and `EventLog` 6008, OS boot at `2026-10-15T10:22:31Z`); the cause of the reboot is not measured |
+| pid 5224 | first line `2026-10-15T11:16:54Z` (the banner), `boot_provenance` at `11:16:55Z`, restore at `11:17:10Z`, first pass `11:18:00Z` with `active=1` |
+| the down span | `08:23:00Z` to `11:16:54Z`, 2:53:54; 175.00 minutes by the frozen `down_intervals` |
+
+Section 55 already carries this; the correction is to the shorthand, which gave the provenance instant as the boot and omitted the previous stop.

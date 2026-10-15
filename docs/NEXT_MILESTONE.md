@@ -1816,6 +1816,33 @@ takes and the bot did not is a finding about one of them.
 > is the reading R-CS asks for. The approximations (exchangeable trades, a trade-close equity path, no dependence between candidates) are in the script's docstring and its commit message; the null is the most generous one
 > and the drawdown test never binds. **What this changes in the steps above:** nothing is added to O5 to O7 or the gate except that the owner reads `docs/research/s7_null.txt` between O5 and O6.
 
+> **ANNOTATED AT M5m P121 (C3), BY THE OWNER'S RULINGS R-CU, R-CV AND R-CW: THE SELECTION IS COMMITTED, S7 IS RECORDED AS FAIL WITHOUT AN OUT-OF-SAMPLE READ, AND O5 TO O7 AND THE GATE ARE NOT TAKEN.** The rulings, verbatim.
+> **R-CU:** *"The S6 selection is committed in a line-per-record format, so every commit stays within the 1,500-line ceiling. The change alters no pick: the selection is re-run, and its picks and their record digests are shown
+> identical to P120's report-only run."* **R-CV:** *"No out-of-sample read is made. Every selected candidate loses in sample on the gate arm (per-trade-return profit factor 0.359 to 0.516; no walk-forward fold above 1), and with
+> its own mean each has a null pass probability of 0.0000 (docs/research/s7_null.txt). S7 is recorded as FAIL without reading the reserved window, which stays unread for later research. This ruling can only produce a FAIL. No entry
+> is committed, since entries exist only to bind a read."* **R-CW:** *"M5m closes after S4 ends. S4's result is recorded beside S7's. If S4 fails, the FAIL stands, with the backtester's calibration recorded as unconfirmed."*
+>
+> **What was done.** `scripts/s6_select.py` writes the selection as JSON Lines (`2e00dcc`), 235 lines for the real sweep, and its report and its 235 records are identical to P120's but for the schema number; `docs/research/selection.jsonl`
+> (`bdd95e4`, SHA-256 `586fcfd6f30e844290c547742c56110ad37654b020e22c7f11a2a4cd02fbad89`) is committed unedited, with no entry. `docs/research/LOG.md` Entry 6 records the decision, the six candidates' in-sample figures and walk-forward
+> folds, their null probabilities, and that **the reserved window is unread for every variant except the two R-CM names and S5's baseline configuration**; `docs/RUN_LEDGER.md` section 56 holds the halts, the comparison and the evidence.
+> **S7: FAIL, by R-CV.** It can only be a FAIL, and it is a FAIL by ruling and not by a measurement of the window.
+>
+> **What stops being true, by content.**
+> 1. **O4** of the P117 C8 block writes `docs\research\selection.json` and, with `--entries-dir`, the pending entries, and the P120 C1 block's O7 text assumes entries to mark. The file is `docs/research/selection.jsonl` (JSON Lines)
+>    and **no entry is written or committed** (R-CV). O4's second command is not to be run with `--entries-dir`.
+> 2. **O5, O6, O7 and the gate** (the P117 C8 block, as corrected by the P118 C3 and P120 C1 blocks) **are NOT TAKEN**: no clone is built at an entries commit, no out-of-sample run is made, no entry is marked read, `scripts/s7_gate.py` is
+>    not run on any candidate. The P120 C1 block's table rows and paragraphs for them stand as a description of what would have been run, and the P120 C4 block's *"the owner reads `docs/research/s7_null.txt` between O5 and O6"* has no
+>    step to sit between. The P120 C4 block's *"a FAIL at S7 is the expected result"* is now the recorded result.
+> 3. **S6's step 6** of PROTOCOL.md (a pending entry per candidate, pushed before any read) is not carried out because no read follows; PROTOCOL.md is not edited. `docs/research/LOG.md`'s *"Candidate entries: None yet"* is annotated there.
+>
+> **The S4 restart of 2026-10-15, corrected to the measurement (P120 1a).** R-CT is quoted in the P120 C1 block verbatim and stands as the owner's ruling. Its *"booted 2026-10-15T11:16:55Z"* is pid 5224's `boot_provenance` line; the measurement is:
+> the previous process, pid 25352, wrote its **last line at `2026-10-15T08:23:00Z`** with no stop marker; **the machine rebooted unexpectedly** (OS boot at `10:22:31Z`, `Kernel-Power` 41); pid 5224's **first line is at `11:16:54Z`**, its
+> provenance line at `11:16:55Z`; the down span is 2:53:54 (175.00 minutes by the frozen `down_intervals`). The block's wording stays; `docs/RUN_LEDGER.md` sections 55 and 56 carry the measurement.
+>
+> **What M5m waits for (R-CW).** S4's run, which stops by R-AY at the first UTC midnight at least T0 plus 21 days with at least 150 bookings, capped at T0 plus 35 days; if T0 is the first boot's provenance instant (`2026-10-10T05:58:02Z`, pid 27460,
+> DERIVED here and not confirmed) the earliest stop is `2026-11-01T00:00:00Z` and the cap `2026-11-14T05:58:02Z`. S4's result is then recorded beside S7's; if S4 fails, the FAIL stands with the backtester's calibration recorded as unconfirmed.
+> **What survives:** every ruling R-BN to R-CT, the 216 variants, O1 to O3 as carried out, the null check, and the three rules for every step.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
