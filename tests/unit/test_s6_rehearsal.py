@@ -676,18 +676,60 @@ class TestTheCommand:
         assert status == rh.EXIT_REFUSED
         assert "is not a directory" in capsys.readouterr().err
 
-    def test_an_existing_worktree_is_refused_not_overwritten(
+    def test_a_label_that_has_been_used_is_refused_and_its_evidence_is_left_alone(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
         store = tmp_path / "s"
         store.mkdir()
-        (tmp_path / "r" / "fail" / "wt").mkdir(parents=True)
+        used = tmp_path / "r" / "L" / "fail"
+        (used / "wt").mkdir(parents=True)
+        (used / "hops.jsonl").write_bytes(b"an earlier run's record\n")
+        chain = FakeChain("fail", store)
         status = rh.main(
-            ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"],
-            run=FakeChain("fail", store),
+            [
+                "--root",
+                str(tmp_path / "r"),
+                "--store",
+                str(store),
+                "--case",
+                "fail",
+                "--label",
+                "L",
+            ],
+            run=chain,
         )
         assert status == rh.EXIT_REFUSED
-        assert "--clean-only" in capsys.readouterr().err
+        assert "never overwritten" in capsys.readouterr().err
+        assert (used / "hops.jsonl").read_bytes() == b"an earlier run's record\n"
+        assert chain.calls == []
+
+    def test_two_invocations_under_two_labels_keep_two_sets_of_evidence(
+        self, tmp_path: Path
+    ) -> None:
+        # The real --clean-only of P118 numbered its hops from 1 and overwrote the first run's output files.
+        store = tmp_path / "s"
+        store.mkdir()
+        (store / "f").write_bytes(b"x")
+        root = tmp_path / "r"
+        chain = FakeChain("fail", store)
+        for label in ("first", "second"):
+            chain.done.clear()
+            argv = ["--root", str(root), "--store", str(store), "--case", "fail", "--label", label]
+            assert rh.main(argv, run=chain) == 0
+        first = (root / "first" / "fail" / "hops.jsonl").read_bytes()
+        second = (root / "second" / "fail" / "hops.jsonl").read_bytes()
+        assert first and second
+        assert len(first.splitlines()) == len(second.splitlines())
+        assert sorted(p.name for p in (root / "first" / "fail" / "out").iterdir()) == sorted(
+            p.name for p in (root / "second" / "fail" / "out").iterdir()
+        )
+
+    def test_clean_only_cannot_be_run_without_the_label_it_cleans(self, tmp_path: Path) -> None:
+        store = tmp_path / "s"
+        store.mkdir()
+        with pytest.raises(SystemExit) as caught:
+            rh.main(["--root", str(tmp_path / "r"), "--store", str(store), "--clean-only"])
+        assert caught.value.code == 2
 
     def test_both_cases_run_and_each_worktree_is_removed(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -704,12 +746,15 @@ class TestTheCommand:
                 chain.done.clear()  # a second worktree is a second clone: its own records
             return chain(argv, cwd, env)
 
-        status = rh.main(["--root", str(tmp_path / "r"), "--store", str(store)], run=run)
+        argv = ["--root", str(tmp_path / "r"), "--store", str(store), "--label", "L"]
+        status = rh.main(argv, run=run)
         out = capsys.readouterr().out
         assert status == 0
         assert "[pass] DONE" in out and "[fail] DONE" in out
-        assert not (tmp_path / "r" / "pass" / "wt").exists()
-        assert not (tmp_path / "r" / "fail" / "wt").exists()
+        assert not (tmp_path / "r" / "L" / "pass" / "wt").exists()
+        assert not (tmp_path / "r" / "L" / "fail" / "wt").exists()
+        assert (tmp_path / "r" / "L" / "pass" / "hops.jsonl").is_file()
+        assert (tmp_path / "r" / "L" / "fail" / "hops.jsonl").is_file()
 
     def test_a_mismatch_ends_the_command_with_status_one_and_keeps_the_worktree(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
@@ -719,11 +764,21 @@ class TestTheCommand:
         chain = FakeChain("fail", store)
         chain.overrides["s6_sweep.py"] = rh.Outcome(2, "REFUSED", 0.0)
         status = rh.main(
-            ["--root", str(tmp_path / "r"), "--store", str(store), "--case", "fail"], run=chain
+            [
+                "--root",
+                str(tmp_path / "r"),
+                "--store",
+                str(store),
+                "--case",
+                "fail",
+                "--label",
+                "L",
+            ],
+            run=chain,
         )
         assert status == rh.EXIT_MISMATCH
         assert "STOPPED" in capsys.readouterr().out
-        assert (tmp_path / "r" / "fail" / "wt").exists()
+        assert (tmp_path / "r" / "L" / "fail" / "wt").exists()
 
     def test_clean_only_removes_a_kept_worktree(self, tmp_path: Path) -> None:
         store = tmp_path / "s"
@@ -731,11 +786,21 @@ class TestTheCommand:
         chain = FakeChain("fail", store)
         chain.overrides["s6_sweep.py"] = rh.Outcome(2, "REFUSED", 0.0)
         root = tmp_path / "r"
-        rh.main(["--root", str(root), "--store", str(store), "--case", "fail"], run=chain)
+        common = ["--root", str(root), "--store", str(store), "--case", "fail", "--label", "L"]
+        rh.main(common, run=chain)
         del chain.overrides["s6_sweep.py"]
-        status = rh.main(
-            ["--root", str(root), "--store", str(store), "--case", "fail", "--clean-only"],
-            run=chain,
-        )
+        kept = (root / "L" / "fail" / "hops.jsonl").read_bytes()
+        out = root / "L" / "fail" / "out"
+        outputs = {p.name: p.read_bytes() for p in out.iterdir()}
+        status = rh.main([*common, "--clean-only"], run=chain)
         assert status == 0
-        assert not (root / "fail" / "wt").exists()
+        assert not (root / "L" / "fail" / "wt").exists()
+        # The real --clean-only of P118 numbered its hops from 1, so its numbers repeated the run's first four
+        # (nothing was overwritten: the files are named by number AND hop). The cleanup's hops go on AFTER the
+        # run's: one sequence 1..N with none repeated, the run's lines and files untouched.
+        log = (root / "L" / "fail" / "hops.jsonl").read_bytes()
+        assert log.startswith(kept)
+        numbers = [json.loads(line)["number"] for line in log.splitlines()]
+        assert numbers == list(range(1, len(numbers) + 1))
+        assert {p.name: p.read_bytes() for p in out.iterdir() if p.name in outputs} == outputs
+        assert len(list(out.iterdir())) == len(outputs) + 4

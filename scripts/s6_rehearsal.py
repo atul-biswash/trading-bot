@@ -45,7 +45,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Final
@@ -353,6 +353,7 @@ class Config:
     boundary: date = date(2025, 1, 1)
     end: date = date(2025, 4, 1)
     keep: bool = False
+    label: str = "run"
 
 
 def _environment() -> dict[str, str]:
@@ -383,11 +384,17 @@ class Rehearsal:
     records: list[HopRecord] = field(default_factory=list, init=False)
     _entry_ids: list[str] = field(default_factory=list, init=False)
     _store_before: int | None = field(default=None, init=False)
+    _earlier: int = field(default=0, init=False)
+
+    def __post_init__(self) -> None:
+        """Number this object's hops after those already kept for the case (a ``--clean-only`` follows a run)."""
+        log = self.base / "hops.jsonl"
+        self._earlier = len(log.read_bytes().splitlines()) if log.is_file() else 0
 
     # ---- locations ----------------------------------------------------
     @property
     def base(self) -> Path:
-        return self.config.root / self.case
+        return self.config.root / self.config.label / self.case
 
     @property
     def wt(self) -> Path:
@@ -429,7 +436,7 @@ class Rehearsal:
         problem = expect.mismatch(outcome)
         record = HopRecord(
             case=self.case,
-            number=len(self.records) + 1,
+            number=self._earlier + len(self.records) + 1,
             name=name,
             kind="command",
             argv=tuple(str(a) for a in argv),
@@ -448,7 +455,7 @@ class Rehearsal:
         """Record a check that no command makes; ``problem`` is ``None`` when the prediction held."""
         record = HopRecord(
             case=self.case,
-            number=len(self.records) + 1,
+            number=self._earlier + len(self.records) + 1,
             name=name,
             kind="check",
             argv=(),
@@ -803,7 +810,14 @@ def _parser() -> argparse.ArgumentParser:
         "--keep", action="store_true", help="do not remove a case's worktree when it passes"
     )
     parser.add_argument(
-        "--clean-only", action="store_true", help="remove the named case(s) worktree and stop"
+        "--label",
+        default=None,
+        help="this invocation's directory under --root (default: the UTC time); a label already used is refused",
+    )
+    parser.add_argument(
+        "--clean-only",
+        action="store_true",
+        help="remove the named case(s) worktree under --label and stop",
     )
     return parser
 
@@ -817,7 +831,11 @@ def _inside(path: Path, parent: Path) -> bool:
 
 
 def main(argv: Sequence[str] | None = None, *, run: Run = real_run) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.clean_only and args.label is None:
+        parser.error("--clean-only needs the --label of the invocation whose worktree it removes")
+    label: str = args.label or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     repo: Path = args.repo
     if _inside(args.root, repo) or _inside(repo, args.root):
         print("REFUSED: --root must be outside the repository and not contain it", file=sys.stderr)
@@ -826,7 +844,7 @@ def main(argv: Sequence[str] | None = None, *, run: Run = real_run) -> int:
         print(f"REFUSED: the store {args.store} is not a directory", file=sys.stderr)
         return EXIT_REFUSED
     protocol_text = (repo / "docs" / "research" / "PROTOCOL.md").read_text(encoding="utf-8")
-    config = Config(repo, args.root, args.store, args.python, keep=args.keep)
+    config = Config(repo, args.root, args.store, args.python, keep=args.keep, label=label)
     cases = CASES if args.case == "both" else (args.case,)
     status = 0
     for case in cases:
@@ -834,8 +852,12 @@ def main(argv: Sequence[str] | None = None, *, run: Run = real_run) -> int:
         if args.clean_only:
             rehearsal.cleanup()
             continue
-        if rehearsal.wt.exists():
-            print(f"REFUSED: {rehearsal.wt} exists; run --clean-only first", file=sys.stderr)
+        if rehearsal.base.exists():
+            print(
+                f"REFUSED: {rehearsal.base} exists; an invocation's evidence is never overwritten, "
+                "so use another --label (or --clean-only with this one)",
+                file=sys.stderr,
+            )
             return EXIT_REFUSED
         try:
             rehearsal.go(protocol_text)
