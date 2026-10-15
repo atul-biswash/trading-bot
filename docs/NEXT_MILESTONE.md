@@ -1634,6 +1634,12 @@ takes and the bot did not is a finding about one of them.
 > are in the commit message of `d198631` and in section 52. The records are gone and the script now refuses any window that ends after the real boundary. **What stops being true:** the C1b annotation just above, *"THE REHEARSAL IS BUILT,
 > AND HAS NOT BEEN RUN"*, which was true when written; and O1's install lines. **What survives:** O2 to O6 as written, the three rules for every step, and the open question of what to do about the disclosure.
 
+> **ANNOTATED AT M5m P119 (C2), BY THE OWNER'S RULING R-CP: O7 IS BUILT.** The P118 C3 block above says *"**O7 IS NOT WRITTEN, because no command does it**"* and *"**Recommended before S7: a `scripts/s6_mark_read.py`** ...
+> It is not built here."* Both are false from this commit: `scripts/s6_mark_read.py` (library: `backtesting/readmark.py`) reads every `run.json` under `--backtests` through the evidence door, verifies each candidate
+> entry's three out-of-sample records against it (candidate digest, protocol digest, exactly the declared out-of-sample window, one record at each declared arm and no other), and writes the entry `read` with the three run
+> directories and `run.json` digests, all entries or none. It refuses an entry already read, a record that fails the door and a set other than the declared arms (27 tests; a survey of 14 mutations, 21 kills). **What survives:**
+> the P118 block's account of why a hand edit was a risk, and O1's correction. The step's PowerShell, its CHECK and its place between O6 and the gate are written at C5.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

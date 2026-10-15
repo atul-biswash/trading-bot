@@ -283,10 +283,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  213 files already formatted
-mypy                                   Success: no issues found in 106 source files
-pytest                                 4149 passed, 4 skipped
-                                       (4152 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  216 files already formatted
+mypy                                   Success: no issues found in 108 source files
+pytest                                 4176 passed, 4 skipped
+                                       (4179 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -295,9 +295,9 @@ pytest                                 4149 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `4149 passed, 4 skipped` on a machine without
-  them and `4152 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 4149 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `4176 passed, 4 skipped` on a machine without
+  them and `4179 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 4176 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -398,7 +398,7 @@ src/trading_bot/
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
                  · simulated_executor · regimes · evidence · candidate · overrides · protocol
-                 · selection · gate
+                 · selection · gate · readmark
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
@@ -413,7 +413,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · normalize_ledger_exponents.py · trade_census.py
                  · regime_labels.py
                  · record_testnet_klines.py (+ recorder_task.xml)
-                 · s4_compare.py · s5_report.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
+                 · s4_compare.py · s5_report.py · s6_mark_read.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
                  · s7_gate.py
 tests/           unit/ · integration/
 ```
