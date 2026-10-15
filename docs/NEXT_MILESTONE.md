@@ -1589,6 +1589,51 @@ takes and the bot did not is a finding about one of them.
 > in a passing case and a failing one, and removes the junction before the worktree. **What is not true yet is that it has run:** the run, and every hop's result against its prediction, are P118's C2 and are
 > recorded in `docs/RUN_LEDGER.md`. **Owner steps O1 to O6 above stand as written until C3 corrects their install procedure;** nothing in this block changes a step. **What survives:** the three rules for every step.
 
+> **ANNOTATED AT M5m P118 (C3), BY THE OWNER'S RULINGS R-CK AND R-CL: THE REHEARSAL HAS RUN, O1 IS CORRECTED, AND O7 IS NOT WRITTEN.** `scripts/s6_rehearsal.py` at `da094f8` ran the whole chain, sweep, selection,
+> entry writing, the six out-of-sample runs, a refused second read, the entries marked read, a refused read of a read entry and the S7 gate, in a throwaway worktree, **in a passing case (S7 SUMMARY 2 of 2) and a failing case (0 of 2):
+> 102 of 102 hops matched their predictions** (51 each, cleanup included). `docs/RUN_LEDGER.md` section 52 holds every hop with its output digest, every invocation (nine, five of them stopped on data and one on a fault), the
+> findings and the disclosure. **Two faults were found and fixed, each in its own commit with a test that fails on the old code:** `93e98e7` (two `backtest` workers started together could read one working-directory stamp and the
+> loser died; O3's check and workers were exposed to it) and `62c21ae` (the script's own hop numbering). **The clone every step builds must therefore be at a commit that contains `93e98e7`**, as the pushed commit carrying this
+> block does. **Nothing in `docs/research/PROTOCOL.md` had to change.**
+>
+> **O1, corrected.** The block above installs with `pip install -c <constraints from the S5 clone's freeze>`, which is the P86 variant (`M5l-172`) and not the procedure the S4 and S5 clones were built with. The rehearsal ran the
+> procedure below, hop for hop (a venv, the pinned requirements, then the package alone by commit, non-editable, with spaces as `%20`), and it is the one to use. Replace O1's `$S5PY` line, its `pip freeze` line and its `pip install -c` line
+> with the two `pip` lines here; every other line of O1 and every CHECK stands.
+>
+> ```powershell
+> $SHA    = '<the 40-hex SHA of the pushed commit that carries this block>'
+> $S      = $SHA.Substring(0, 12)
+> $CLONE  = "F:\trading bot\backtest\$S"
+> $PYTHON = "$env:LOCALAPPDATA\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
+> git clone https://github.com/atul-biswash/trading-bot.git $CLONE
+> git -C $CLONE checkout --detach $SHA
+> & $PYTHON -m venv "$CLONE\.venv"
+> $PY = "$CLONE\.venv\Scripts\python.exe"
+> & $PY -m pip install -r "$CLONE\requirements.txt"
+> & $PY -m pip install --force-reinstall --no-deps "binance-trading-bot @ git+file:///F:/trading%20bot/backtest/$S@$SHA"
+> cmd /c mklink /J "$CLONE\data\historical" "F:\trading bot\store\mainnet-historical"
+> Set-Location $CLONE
+> ```
+>
+> `--no-deps` leaves the pins as `requirements.txt` made them. `--force-reinstall` is harmless in a new venv and is REQUIRED to move a venv that already holds the package to another commit: a plain `pip install` of a new commit
+> there exits 0 and keeps the old one, and the boot then refuses (`M5m-438`). O5 builds a NEW clone and venv and does not need it, but the same two lines are right there too.
+>
+> **What the rehearsal did and did not run.** It ran, as subprocesses of the worktree's own interpreter: the venv, both `pip` lines, the junction (`cmd /c mklink /J`), the boot check, `s6_sweep.py --workers 2` (R-CH's check included),
+> `s6_select.py` with and without `--out --entries-dir`, the out-of-sample `backtest` of every (entry, arm), the two refusals and `s7_gate.py`. **It did not run any of O1 to O6's PowerShell** and it differs from the steps in five
+> ways, listed in section 52: a `git worktree` for the clone; the selection run inside the clone where O4 runs it from the development checkout against `$CLONE\data\backtests`; one venv moved to the entries commit where O5 builds a new
+> clone; 2 workers where O3 uses 8; and a protocol of 2 variants where S6 has 216. After it, the glue of **O6** (the entries read with `ConvertFrom-Json`, the argument array, the skip test, the table) and of **O2** (the manifest read
+> line by line) was run in PowerShell 5.1 against hand-written sample entries, records and manifest lines: O6's argument array equals the rehearsal's command line for the same entry, the skip test skips arm `1.2` when asked for
+> `1.20`, and O2's line prints. `M5m-426`'s statement that the glue is untested therefore stands for O1, O3, O4 and O5 and is closed for those two.
+>
+> **O7 IS NOT WRITTEN, because no command does it.** After O6 the entries must be marked `read` (`status` `read`, and `oos.records` holding, per arm, `{"run": <directory>, "run_json_sha256": <digest>}`), committed, pushed, a clone
+> rebuilt at that commit, and `scripts/s7_gate.py --backtests data\backtests` run there. Nothing marks an entry: the rehearsal does it with `mark_read` and `find_oos_records` inside `scripts/s6_rehearsal.py`, in the shape `gate.evaluate`
+> reads and `docs/research/entries/s5-baseline.json` shows. By hand it is editing JSON files, and a typo is caught only by the gate's digest check after the commit. **Recommended before S7: a `scripts/s6_mark_read.py`** that reads
+> `data/backtests` through the evidence door, refuses unless each entry has exactly one record at each declared arm, and writes the entries; the two functions above are its tested parts. It is not built here.
+>
+> **The disclosure (`M5m-447`) is the owner's to rule.** The rehearsal's first runs and a window scan read 2024-01-01 to 2025-04-01 for the two variants `sma_crossover` 4h 10/50, filter off and on, which are real grid points; the figures
+> are in the commit message of `d198631` and in section 52. The records are gone and the script now refuses any window that ends after the real boundary. **What stops being true:** the C1b annotation just above, *"THE REHEARSAL IS BUILT,
+> AND HAS NOT BEEN RUN"*, which was true when written; and O1's install lines. **What survives:** O2 to O6 as written, the three rules for every step, and the open question of what to do about the disclosure.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
