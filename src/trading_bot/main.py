@@ -25,6 +25,7 @@ import contextlib
 import logging
 import signal
 import sys
+import time
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
@@ -263,6 +264,37 @@ def _resolve_window(
 
 BACKTEST_LOG_NAME = "backtest.log"
 
+#: How many times a run reads the clock for a free working-directory name before it gives up.
+_RUN_CLAIM_ATTEMPTS = 1000
+
+
+def _claim_run_directory(base: Path) -> tuple[str, Path]:
+    """Create this run's ``<stamp>-running`` directory under ``base``; return the stamp and the directory.
+
+    The stamp is read in microseconds, so two runs of one history started within a second do not name one
+    directory. But the clock TICKS more coarsely than that (on Windows by as much as about 15 ms), so two
+    runs started together, as the S6 sweep's parallel workers are, can read the SAME stamp. ``mkdir`` is
+    atomic: exactly one of them wins, and the loser reads the clock again and takes a later stamp. Before this
+    the loser died on ``FileExistsError`` after its research-protocol guard and its regime-label load had
+    run, and left no record (the rehearsal of P118 met it in R-CH's own parallel check).
+
+    :raises FileExistsError: no name was free after ``_RUN_CLAIM_ATTEMPTS`` reads of the clock.
+    """
+    base.mkdir(parents=True, exist_ok=True)
+    for _ in range(_RUN_CLAIM_ATTEMPTS):
+        stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
+        working = base / f"{stamp}-running"
+        try:
+            working.mkdir()
+        except FileExistsError:
+            time.sleep(0.001)
+            continue
+        return stamp, working
+    raise FileExistsError(
+        f"no free run directory name under {base} after {_RUN_CLAIM_ATTEMPTS} reads of the clock"
+    )
+
+
 #: The committed quarterly regime labels (R-AI), relative to the launch directory.
 REGIME_LABELS_PATH = Path("docs") / "REGIME_LABELS.json"
 
@@ -411,11 +443,7 @@ def _cmd_backtest(
         decision["entry_id"],
     )
     regimes = _load_regimes(log)  # likewise: a label file that does not verify refuses here
-    # Microseconds, so two runs of one history started within a second do not name one directory.
-    stamp = utc_now().strftime("%Y%m%dT%H%M%S%fZ")
-    working = base / f"{stamp}-running"
-    base.mkdir(parents=True, exist_ok=True)
-    working.mkdir()
+    stamp, working = _claim_run_directory(base)
     run_log.open(working / BACKTEST_LOG_NAME)
     try:
         result = asyncio.run(

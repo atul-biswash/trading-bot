@@ -213,6 +213,47 @@ class TestTheCommand:
         assert first.name != second.name
         assert (first / "trades.csv").read_bytes() == (second / "trades.csv").read_bytes()
 
+    def test_a_run_that_reads_a_stamp_a_peer_holds_takes_a_later_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The clock ticks more coarsely than a microsecond (on Windows by up to about 15 ms), so two
+        runs started together, as the sweep's parallel workers are, can read ONE stamp. P118's
+        rehearsal met it: the second worker of R-CH's check died on ``FileExistsError`` after its
+        guard had run. A peer in flight is made by hand: its ``-running`` directory exists for the
+        stamp the clock yields twice, and the run must take the later one and leave the peer alone."""
+        base = tmp_path / "backtests"
+        peer = base / "20261008T120000000001Z-running"
+        peer.mkdir(parents=True)
+        instants = iter(
+            datetime(2026, 10, 8, 12, 0, 0, microsecond, tzinfo=timezone.utc)
+            for microsecond in (1, 1, 2)
+        )
+        monkeypatch.setattr(cli, "utc_now", lambda: next(instants))
+        build_world(tmp_path)
+        try:
+            code = cli.main(argv(tmp_path, "--start", "2024-03-12", "--end", "2024-03-16"))
+        except FileExistsError as exc:
+            pytest.fail(f"the run died on its peer's directory: {exc}")
+        assert code == 0
+        names = sorted(p.name for p in base.iterdir())
+        assert names[0] == peer.name
+        assert list(peer.iterdir()) == []
+        assert len(names) == 2, names
+        assert names[1].startswith("20261008T120000000002Z-")
+
+    def test_a_clock_that_never_moves_exhausts_the_attempts_and_leaves_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        base = tmp_path / "backtests"
+        peer = base / "20261008T120000000001Z-running"
+        peer.mkdir(parents=True)
+        frozen = datetime(2026, 10, 8, 12, 0, 0, 1, tzinfo=timezone.utc)
+        monkeypatch.setattr(cli, "utc_now", lambda: frozen)
+        monkeypatch.setattr(cli, "_RUN_CLAIM_ATTEMPTS", 3)
+        with pytest.raises(FileExistsError, match="after 3 reads of the clock"):
+            cli._claim_run_directory(base)
+        assert [p.name for p in base.iterdir()] == [peer.name]
+
 
 def provenance(*, accepted: bool) -> Provenance:
     """A verdict built by hand, as ``test_main.py`` builds one: accepted or refused."""
