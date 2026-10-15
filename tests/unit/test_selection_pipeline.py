@@ -19,6 +19,7 @@ from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -406,7 +407,7 @@ class TestTheOutput:
 
     def test_the_file_states_what_was_declared_what_ran_and_what_each_cell_chose(self) -> None:
         doc = sel.selection_document(self.selection())
-        assert doc["selection_schema"] == sel.SELECTION_SCHEMA == 1
+        assert doc["selection_schema"] == sel.SELECTION_SCHEMA == 2
         assert doc["protocol_sha256"] == PROTOCOL.sha256
         assert (
             doc["variants_declared"],
@@ -422,12 +423,102 @@ class TestTheOutput:
         assert first["assessments"][0]["ineligible"] == [] and first["points"] == 9
 
     def test_numbers_are_exact_text_and_never_floats(self) -> None:
-        text = sel.selection_bytes(sel.selection_document(self.selection())).decode("ascii")
-        loaded = json.loads(text)
-        assert loaded["cells"][0]["candidate"]["return_profit_factor"] == str(
+        data = sel.selection_bytes(sel.selection_document(self.selection()))
+        cells = [r for r in sel.selection_records(data) if r["record"] == "cell"]
+        assert cells[0]["candidate"]["return_profit_factor"] == str(
             sel.return_profit_factor(bulk(300, 50))
         )
-        assert loaded["cells"][0]["candidate"]["max_drawdown"] == "0.5"
+        assert cells[0]["candidate"]["max_drawdown"] == "0.5"
+
+    def file(self) -> tuple[bytes, dict[str, Any], list[dict[str, Any]]]:
+        document = sel.selection_document(self.selection())
+        data = sel.selection_bytes(document)
+        return data, document, sel.selection_records(data)
+
+    def test_the_file_is_one_record_a_line_and_a_line_per_variant_and_per_cell(self) -> None:
+        """R-CU: 216 variants and 12 cells are 229 lines and a header, not 5,549 lines, and a commit of it fits."""
+        data, document, records = self.file()
+        lines = data.decode("ascii").split("\n")[:-1]
+        extra = len(document["duplicates"]) + len(document["skipped"])
+        assert len(lines) == len(records) == 1 + 216 + 12 + extra
+        assert len(lines) < 1500
+        kinds = [r["record"] for r in records]
+        assert kinds[0] == "header" and kinds.count("header") == 1
+        assert (kinds.count("variant"), kinds.count("cell")) == (216, 12)
+        assert all(
+            line == json.dumps(json.loads(line), sort_keys=True, ensure_ascii=True)
+            for line in lines
+        )
+
+    def test_each_cells_variants_come_before_its_pick_and_carry_its_id(self) -> None:
+        _, document, records = self.file()
+        order: list[tuple[str, str]] = []
+        for record in records[1:]:
+            if record["record"] in ("variant", "cell"):
+                order.append((str(record["record"]), str(record["entry_id"])))
+        expected: list[tuple[str, str]] = []
+        for cell in document["cells"]:
+            expected += [("variant", cell["entry_id"])] * len(cell["assessments"])
+            expected.append(("cell", cell["entry_id"]))
+        assert order == expected
+
+    def test_no_record_drops_or_invents_a_figure_of_the_document(self) -> None:
+        """The change alters no pick: every digest and statistic of the document is in the file, unchanged."""
+        _, document, records = self.file()
+        header = records[0]
+        assert {k: v for k, v in header.items() if k != "record"} == {
+            k: v for k, v in document.items() if k not in ("cells", "duplicates", "skipped")
+        }
+        variants = [r for r in records if r["record"] == "variant"]
+        want = [
+            {"record": "variant", "entry_id": cell["entry_id"], **point}
+            for cell in document["cells"]
+            for point in cell["assessments"]
+        ]
+        assert variants == want
+        picks = [r for r in records if r["record"] == "cell"]
+        assert picks == [
+            {"record": "cell", **{k: v for k, v in cell.items() if k != "assessments"}}
+            for cell in document["cells"]
+        ]
+        assert all("assessments" not in p for p in picks)
+
+    def test_duplicates_and_skipped_directories_are_records_of_their_own(self) -> None:
+        found: list[sel.PointRun | sel.SkippedRun] = [
+            point(v, bulk(300, 100), run=f"r{i:03d}") for i, v in enumerate(PROTOCOL.variants())
+        ]
+        found.append(sel.SkippedRun("x-running", sel.SkipReason.NOT_SEALED, "never sealed"))
+        found.append(point(next(iter(PROTOCOL.variants())), bulk(300, 100), run="r999"))
+        selection = sel.select(PROTOCOL, RULES, sel.reconcile(PROTOCOL, found))
+        records = sel.selection_records(sel.selection_bytes(sel.selection_document(selection)))
+        assert [r["record"] for r in records[-2:]] == ["duplicate", "skipped"]
+        assert records[-1]["run"] == "x-running" and records[-1]["reason"] == "not_sealed"
+        assert records[-2]["runs"] == ["r000", "r999"]
+
+    @pytest.mark.parametrize(
+        ("data", "why"),
+        [
+            (b'{"record": "header"}', "line feed"),
+            (b'{"record": "header"}\n\n', "Expecting value"),
+            (b"[1]\n", "line 1 is not a record"),
+            (b'{"x": 1}\n', "line 1 is not a record"),
+            (b'{"record": "header"}\n{"record": 3}\n', "line 2 is not a record"),
+            ('{"record": "h", "x": "é"}\n'.encode(), "ascii"),
+        ],
+        ids=[
+            "no_line_feed",
+            "blank_line",
+            "not_an_object",
+            "no_kind",
+            "kind_not_text",
+            "non_ascii",
+        ],
+    )
+    def test_a_file_that_is_not_records_is_refused_with_its_line(
+        self, data: bytes, why: str
+    ) -> None:
+        with pytest.raises(ValueError, match=why):
+            sel.selection_records(data)
 
     def test_a_candidate_entry_is_one_the_guard_parses_and_binds_to_the_runs_digest(self) -> None:
         selection = self.selection()

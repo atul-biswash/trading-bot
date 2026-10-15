@@ -13,7 +13,9 @@ missing variant, or two runs of one variant whose trade logs disagree, is a refu
 **What it writes, and only when asked.**
 
 * ``--out FILE`` writes the SELECTION FILE: the chosen point per cell with its evidence, every point's
-  figures and reasons, the walk-forward report and the skipped directories. It is created exclusively and
+  figures and reasons, the walk-forward report and the skipped directories, as JSON LINES, one record a line
+  (R-CU: a line per variant and a line per cell, so that the file commits within the 1,500-line ceiling, and
+  changes no pick). It is created exclusively and
   refuses to overwrite, so a selection already made cannot be silently remade. The owner commits it
   UNEDITED with its SHA-256 (PROTOCOL.md section 6 step 6), which this script prints.
 * ``--entries-dir DIR`` (with ``--out``) writes one PENDING entry per candidate, bound to the candidate by

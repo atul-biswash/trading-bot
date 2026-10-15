@@ -27,6 +27,7 @@ import s6_select
 from tests.unit.protocol_world import PROTOCOL, REPO
 from tests.unit.selection_world import at, make_run
 from trading_bot.backtesting.protocol import PROTOCOL_PATH, load_entries
+from trading_bot.backtesting.selection import selection_records
 
 PROTOCOL_FILE = REPO / PROTOCOL_PATH
 BEST_INDEX = 3
@@ -108,14 +109,17 @@ class TestTheSelectionFile:
         digest = hashlib.sha256(data).hexdigest()
         assert f"selection file {target} sha256 {digest} ({len(data)} bytes)" in printed
         assert data.endswith(b"}\n") and b"\r" not in data and all(b < 128 for b in data)
-        loaded = json.loads(data)
+        records = selection_records(data)
+        loaded, cells = records[0], [r for r in records if r["record"] == "cell"]
+        assert loaded["record"] == "header"
         assert (loaded["variants_declared"], loaded["variants_with_a_run"]) == (216, 216)
-        assert loaded["cells_with_a_candidate"] == 12 and len(loaded["cells"]) == 12
-        assert loaded["cells"][0]["candidate"]["variant"]["params"] == {
+        assert loaded["cells_with_a_candidate"] == 12 and len(cells) == 12
+        assert len(data.splitlines()) == len(records) < 1500  # R-CU: a line a record
+        assert cells[0]["candidate"]["variant"]["params"] == {
             "fast_period": "20",
             "slow_period": "50",
         }
-        assert loaded["cells"][0]["candidate"]["return_profit_factor"] == "12"
+        assert cells[0]["candidate"]["return_profit_factor"] == "12"
         assert loaded["protocol_sha256"] == PROTOCOL.sha256
 
     def test_two_runs_of_the_command_write_identical_bytes(
@@ -266,7 +270,8 @@ class TestWhatIsListedAndDoesNotBlock:
         assert "SKIPPED 20261014T154834857585Z-failed: not_evidence" in out
         assert "SKIPPED info-arm: other_arm" in out and "SKIPPED oos: not_in_sample" in out
         assert "notes.txt" not in out
-        skipped = {s["run"]: s["reason"] for s in json.loads(target.read_bytes())["skipped"]}
+        listed = [r for r in selection_records(target.read_bytes()) if r["record"] == "skipped"]
+        skipped = {s["run"]: s["reason"] for s in listed}
         assert skipped == {
             "20261014T154834857585Z-failed": "not_evidence",
             "info-arm": "other_arm",
@@ -289,7 +294,8 @@ class TestWhatIsListedAndDoesNotBlock:
         )
         assert code == 0
         assert "cells with a candidate 0 of 12" in capsys.readouterr().out
-        assert json.loads((tmp_path / "s.json").read_bytes())["cells_with_a_candidate"] == 0
+        header = selection_records((tmp_path / "s.json").read_bytes())[0]
+        assert header["cells_with_a_candidate"] == 0
         assert list(entries.iterdir()) == []
 
     def test_a_variant_run_twice_with_the_same_trade_log_is_listed_as_a_duplicate(
@@ -300,7 +306,8 @@ class TestWhatIsListedAndDoesNotBlock:
             run("--backtests", light, "--protocol", PROTOCOL_FILE, "--out", tmp_path / "s.json")
             == 0
         )
-        duplicates = json.loads((tmp_path / "s.json").read_bytes())["duplicates"]
+        records = selection_records((tmp_path / "s.json").read_bytes())
+        duplicates = [r for r in records if r["record"] == "duplicate"]
         assert len(duplicates) == 1
         assert duplicates[0]["runs"] == ["00-again", "20260101T000000000000Z-000000000000"]
 

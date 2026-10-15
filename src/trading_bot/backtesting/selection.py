@@ -89,14 +89,17 @@ __all__ = [
     "select",
     "selection_bytes",
     "selection_document",
+    "selection_lines",
+    "selection_records",
     "variant_key",
     "walk_forward",
 ]
 
 #: The run-record schema the selection accepts: the first one that carries the guard's decision.
 MIN_RECORD_SCHEMA: Final = 6
-#: The schema of the selection file this module writes.
-SELECTION_SCHEMA: Final = 1
+#: The schema of the selection file this module writes: 2 is JSON Lines, one record a line (R-CU); 1 was one
+#: indented JSON document, whose 5,549 lines could not be committed within the 1,500-line ceiling.
+SELECTION_SCHEMA: Final = 2
 
 _UTC: Final = timezone.utc
 _STATISTIC: Final = "return_profit_factor"
@@ -895,11 +898,55 @@ def selection_document(selection: Selection) -> dict[str, Any]:
     }
 
 
+_NOT_RECORDS: Final = frozenset({"cells", "duplicates", "skipped"})
+
+
+def selection_lines(document: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The document as the records of the file, in file order (R-CU).
+
+    A ``header`` record (everything in the document but the three lists); then, for each cell, one ``variant``
+    record per point (its run, the record's SHA-256 and its statistics, tagged with the cell's ``entry_id``) and
+    one ``cell`` record (the pick, the counts and the walk-forward); then one ``duplicate`` record per variant
+    run twice and one ``skipped`` record per directory not read. Nothing is dropped and nothing is added but the
+    ``record`` kind and the ``entry_id`` on a ``variant``: the picks and every digest are the document's.
+    """
+    records: list[dict[str, Any]] = [
+        {"record": "header", **{k: v for k, v in document.items() if k not in _NOT_RECORDS}}
+    ]
+    for cell in document["cells"]:
+        for point in cell["assessments"]:
+            records.append({"record": "variant", "entry_id": cell["entry_id"], **point})
+        pick = {k: v for k, v in cell.items() if k != "assessments"}
+        records.append({"record": "cell", **pick})
+    records.extend({"record": "duplicate", **item} for item in document["duplicates"])
+    records.extend({"record": "skipped", **item} for item in document["skipped"])
+    return records
+
+
 def selection_bytes(document: Mapping[str, Any]) -> bytes:
-    """The file's exact bytes: sorted keys, two-space indent, ASCII, one trailing LF."""
-    return (json.dumps(document, indent=2, sort_keys=True, ensure_ascii=True) + "\n").encode(
-        "ascii"
-    )
+    """The file's exact bytes: JSON Lines, one record a line, sorted keys, ASCII, LF after every line (R-CU)."""
+    return "".join(
+        json.dumps(record, sort_keys=True, ensure_ascii=True) + "\n"
+        for record in selection_lines(document)
+    ).encode("ascii")
+
+
+def selection_records(data: bytes) -> list[dict[str, Any]]:
+    """The records of a selection file, read back.
+
+    :raises ValueError: the bytes are not ASCII, do not end with a line feed, or hold a line that is not a JSON
+        object carrying a ``record`` kind.
+    """
+    text = data.decode("ascii")
+    if not text.endswith("\n"):
+        raise ValueError("a selection file ends with a line feed")
+    records: list[dict[str, Any]] = []
+    for number, line in enumerate(text[:-1].split("\n"), start=1):
+        record = json.loads(line)
+        if not isinstance(record, dict) or not isinstance(record.get("record"), str):
+            raise ValueError(f"line {number} is not a record")
+        records.append(record)
+    return records
 
 
 def candidate_entry(
