@@ -6,6 +6,10 @@ figure is held against, and `scripts/s4_compare.py` prints figures and no verdic
 `2026-10-10T06:05:20Z` (`docs/RUN_LEDGER.md` section 43, corrected at section 57) and only procedures already measured
 on this machine, **and where a command has not been, it is marked N below and listed in the table at the end.**
 
+**ANNOTATED AT P124 (C2).** Appendix A was executed (RUN_LEDGER section 62). Every sentence below that says a command "has
+never been executed", or marks it N, was true at P123 and is false for the commands the table at the end now marks E;
+the table is the authority. The cap is ruled (R-DD) and the store checker is tracked (R-DE): both are corrected in place.
+
 R-DB, verbatim: *"The S4 stop is done from docs/S4_STOP_RUNBOOK.md: stopping the bot, the final freeze and recorder run,
 the store frozen from the recorder clone by hash, the backtest clone built outside deploy\ with no .env, the backtest of
 [W, M) through config.s4.yaml, and the frozen comparison, each step with its CHECK, using T0 2026-10-10T06:05:20Z and
@@ -257,11 +261,17 @@ backtest needs none); `(Get-FileHash "$BT\config.s4.yaml" -Algorithm SHA256).Has
 (the digest in the pre-registration, section 6, any case); and
 
 ```powershell
-& $PY -m trading_bot strategies 2>&1 | Select-String boot_provenance
+& $PY -m trading_bot strategies > "$OUT\boot_strategies.txt"
+Select-String -Path "$OUT\boot_strategies.txt" -Pattern 'verdict|install_kind|code_intact|code_commit|checkout_dirty|commits_agree|config_tracked'
 ```
 
-shows one line with `verdict=accepted`, `install_kind=vcs`, `code_intact=true`, `code_commit=<$SHA>`,
-`checkout_dirty=false`, `commits_agree=true` and `config_tracked=true`.
+shows `verdict=accepted`, `install_kind=vcs`, `code_intact=true`, `code_commit=<$SHA>`, `checkout_dirty=false`,
+`commits_agree=true` and `config_tracked=true`. **Corrected at P124 (Appendix A executed this step):** the first form of
+this CHECK, `... 2>&1 | Select-String boot_provenance`, printed only `Startup provenance accepted event=boot_provenance`:
+the console wraps the record at its width, so the fields sit on the following physical lines, and a commit hash can be
+split across two of them. The file keeps them in order; read them there. The rehearsal's boot read `verdict=accepted`,
+`install_kind=vcs`, `code_intact=true` over 77 files, the S4 commit, `checkout_dirty=false`, `commits_agree=true`,
+`config_tracked=true`.
 
 **Step 6b, after step 5** (the junction's target must exist and be the frozen copy):
 
@@ -382,7 +392,7 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 
 | Step | Commands | Status | Evidence or what is missing |
 |---|---|---|---|
-| 0 | the assignments, `New-Item` | N (trivial) | |
+| 0 | the assignments, `New-Item` | E | section 62 (the rehearsal's variables and directory) |
 | 1 | `s4_daily.py` | E | section 58 |
 | 2 | Ctrl+C; the process list; `check_testnet.py` | E / E / E | sections 46, 25 to 26; `CLAUDE.md` C38; sections 40, 46 |
 | 2 | `[DateTime]::UtcNow` | N | |
@@ -391,18 +401,22 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 3 | `Select-String -Pattern 'event=engine_stopped ...'` over a capture | R | section 21 (`Select-String` for the same line) |
 | 4 | the recorder run by hand, `--verify-only` | E | sections 37, 40, 43 |
 | 4 | the recorder run *after* a stop, `(Get-ScheduledTask).State` | N | |
-| 5 | `robocopy /E /COPY:DAT` | R | section 48 (mainnet store) |
+| 5 | `robocopy /E /COPY:DAT` | E | sections 48 (mainnet store) and 62 (the recorder's Testnet store, from PowerShell; not from Git Bash, `M5m-554`) |
 | 5 | `scripts\store_check.py` on a Testnet store | E | section 61 (a copy of the recorder's store: exit 0, equal to the P113 script's output) |
-| 5 | `--verify-only --root <frozen copy>` | R | section 40 (the recorder's own root) |
-| 5 | the digest comparison and the `Select-String` over the two outputs | N | |
-| 6a | `git clone`, `checkout --detach`, `venv`, `pip install -c`, the boot check, at `45547f1` | R | the sweep clone's build (other SHA); sections 21, 26, 52 |
-| 6a | `pip freeze` from the sweep clone as constraints | R | O1 used the S5 clone's |
-| 6b | `mklink /J` to the frozen Testnet store; `LinkType` | R | section 48 |
-| 7 | `trading_bot --config config.s4.yaml backtest --start --end` from a clone with a vcs install | N | section 40 (dev tree, ineligible); sections 50 to 54 (other config and store) |
+| 5 | `--verify-only --root <frozen copy>` | E | section 62 (a copy of the store, run from the backtest clone: 0 problems in all four series) |
+| 5 | the digest comparison and the `Select-String` over the two outputs | E | section 62 |
+| 6a | `git clone`, `checkout --detach`, `venv`, `pip install -c`, the boot check, at `45547f1` | E | section 62 (every command exit 0; the boot `accepted`; the boot CHECK was corrected, see step 6) |
+| 6a | `pip freeze` from the sweep clone as constraints | E | section 62 (38 lines) |
+| 6b | `mklink /J` to the frozen Testnet store; `LinkType` | R | section 48; NOT executed by Appendix A, which copied the store in and held no junction (R-DF) |
+| 7 | `trading_bot --config config.s4.yaml backtest --start --end` from a clone with a vcs install | E | section 62 (one day, exit 0 in 7 s, `evidence_eligible` true) |
 | 8 | `trade_census.py` over a capture | E | section 58 |
-| 8 | `s4_compare.py` on real inputs | N | tests only (section 39) |
+| 8 | `s4_compare.py` on real inputs | E | section 62 (a one-day window, exit 0; the figures are exploratory) |
 | 9 | `s4_explore.py` on the final capture | N | one run on a copy, section 60 |
 
+**ANNOTATED AT P124 (C2), BY APPENDIX A'S EXECUTION (RUN_LEDGER section 62): both were executed over the whole day
+2026-10-11 and ran to exit 0; the rows above that read E now were N or R at P123.** What the sentence below says was
+true when written. The rows still N or R are the ones Appendix A could not execute: the stop itself, a stopped or
+rotated log, the recorder run after a stop, the final store, the junction and `s4_explore.py` on the final capture.
 **Not executed anywhere: step 7's eligible backtest of the Testnet store and step 8's `s4_compare.py` on real inputs.**
 They are the two places the stop can first fail. Appendix A exists to run them while there is still time to correct
 a command, not a result.

@@ -5976,3 +5976,127 @@ The tracked script was formatted after the first mainnet run had started, so the
 with the manifest's; and s8 (the exit status ignores "extra") killed 0 where 1 was predicted, because the store's own `verify` also flags an unlisted month, so "extra" was redundant in that test. The test now gives the checker a
 `verify` that finds nothing. `predictions_c1_rerun.txt` (SHA-256 `302bc23d0915d8304c874521816045bb581afac576b4c20e51c71c92f1e6d37f`) records the amended predictions before the re-run, which killed 23 of 23 predicted over 11 mutations
 (`survey_c1_out.txt`, SHA-256 `57a0a65347b3eaa678202846303998592f5ff8ebaa1c616c9bfa7eae5a1c8724`). Not mutated: dropping "missing" from the exit status, which is unobservable because a listed-but-absent month is also a mismatch.
+
+## 62. M5m S4: Appendix A of the stop runbook, executed over the whole day 2026-10-11 (P124 C2, R-DF)
+
+An observation log, so this section only adds. R-DF, quoted verbatim in `docs/NEXT_MILESTONE.md`'s P124 C1 block, orders the rehearsal. **Every figure of the comparison below is EXPLORATORY under the ratified CHOSEN line 5, was
+produced to run the procedure and not to measure S4, and decides nothing.** The S4 clone `F:\trading bot\deploy\45547f107715` was read only through `scripts/s4_daily.py`'s share-mode freeze; the recorder clone's store was read
+(copied) and not written; no venue call was made. The window is `[2026-10-11T00:00:00Z, 2026-10-12T00:00:00Z)`, `$M` = `2026-10-12`, one whole day inside `[W, now)` with no restart of the S4 bot in it.
+
+### Every step, its command, its exit code, and its prediction
+
+`predictions_c2.txt`, SHA-256 `49c8796047aeb39cc09160cea189f35ec25a9fad366621c5644d359cd736e00b`, written before step 1. The clone was `F:\trading bot\scratch\p124\bt45547f107715`. Commands were run from PowerShell as the runbook
+gives them, stdout to files under `F:\trading bot\scratch\p124\c2\` where the runbook redirects.
+
+| # | Runbook step | Command (abridged) | Predicted | Observed |
+|---|---|---|---|---|
+| 1 | 6a | `git clone https://github.com/atul-biswash/trading-bot.git $BT` | exit 0 | exit 0 (`Test-Path $BT` False before) |
+| 2 | 6a | `git -C $BT checkout --detach 45547f10771543b41db42e1cbcb8b5a0a9cf1776` | exit 0, `rev-parse` the SHA, status empty | exit 0; `rev-parse HEAD` `45547f10771543b41db42e1cbcb8b5a0a9cf1776`; `status --porcelain` empty |
+| 3 | 6a | `python -m venv "$BT\.venv"` (the WindowsApps Python 3.12) | exit 0 | exit 0 |
+| 4 | 6a | `pip freeze` of the sweep clone's venv, minus the bot, to a constraints file | exit 0, about 60 lines | exit 0, **38 lines** (a miss: the pins are fewer than I guessed) |
+| 5 | 6a | `pip install -c <constraints> "binance-trading-bot @ git+file:///F:/trading%20bot/scratch/p124/bt45547f107715@<SHA>"` | exit 0, under 5 minutes | exit 0 (`pip_install.txt`, SHA-256 `816d34288c464b307a9e674fc9f0da92797892dfa7240d4c4d4f516a74e231eb`; not timed); `Successfully built binance-trading-bot`, 39 packages installed |
+| 5 | 6a CHECKS | `python --version`; `Test-Path .env`; `Get-FileHash config.s4.yaml`; `git status --porcelain` | `3.12.10`; False; `0F170BAE...2594`; empty | `Python 3.12.10`; False; `0F170BAEFB7B41C87D9F3BC5220A484CE9FA20B0A62758E15CB485E9B0712594`; empty |
+| 6 | 6a boot | `python -m trading_bot strategies` | one `boot_provenance` line, `accepted`, `vcs`, intact, commit equal, clean, agree, tracked | **as predicted, but the CHECK as the runbook wrote it could not show it:** `... 2>&1 \| Select-String boot_provenance` printed only `Startup provenance accepted event=boot_provenance`, the console wrapping the record at its width. Redirected to a file (`boot_strategies.txt`, SHA-256 `cae0719c21e650867135ee7380cea056c1b61963d9a29adf0d9ccc100a4a786b`) it reads `verdict=accepted refusal_reasons=none unknown_reasons=none install_kind=vcs code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776 code_intact=true code_files_checked=77 checkout_dirty=false dirty_count=0 dirty_paths=none commits_agree=true ... config_tracked=true`. The runbook's step 6 is corrected (`M5m-560`) |
+| 7 | 5 / 6b | `robocopy $RSTORE "$BT\data\historical_testnet" /E /COPY:DAT` (a COPY, no junction: R-DF) | exit 1, 17 files | exit 1; 17 of 17 files copied, 9 dirs, 2.89 MB, 0 failed |
+| 7 | 5 | tracked `store_check.py` on the source and on the copy | both exit 0; inventory digests equal; 0 problems | both exit 0; `inventory sha256` **`87628ed360fd88b91376e648f06b9d6328bd3dbe3d34b12e60928a4b28c1eb2f` on both**; the two inventory files equal by `Get-FileHash` (`AA575482CD4074FD5362391A394A876634899CB606933061003A2CF2F2944B88`); 4 manifests, 0 mismatched, 0 missing or extra, 0 verify problems, 2 snapshots 0 mismatched (`store_check_recorder.txt` `b1a470279d53ef55110a3966773ae2d465c2c377c13f657d0bafb454a1a82f29`, `store_check_copy.txt` `6cbac938aaa91c1a0dcba28a4b5562762475100b93615c8c65878e7999eab9ac`) |
+| 7 | 5 | `record_testnet_klines.py --root data\historical_testnet --verify-only` from the clone | exit 0 | exit 0: BTCUSDT 1m and ETHUSDT 1m 12,693 bars, both 5m 2,539 bars, `2026-10-07T10:32Z..2026-10-16T06:04Z` (1m) and `10:30Z..06:00Z` (5m), 0 gaps, 0 problems; `git status --porcelain` empty; `data\historical_testnet` is a plain directory (`LinkType` empty) |
+| 8 | 7 | `python -m trading_bot --config config.s4.yaml backtest --start 2026-10-11 --end 2026-10-12` | exit 0, under 5 minutes, one run directory with three files, `"evidence_eligible": true`, status clean, 12 to 24 trades | **exit 0 in 7 s**; one run directory `20261016T104047945768Z-e00274595855` holding `backtest.log` (26,769 bytes), `run.json` (12,724) and `trades.csv` (6,915); `"evidence_eligible": true,`; `git status --porcelain` empty; 19 trade rows; nothing on the console |
+| 9 | 3 | `scripts\s4_daily.py` | exit 0, a new capture | exit 0; capture `104103Z-capture.log`, 1,122,775 bytes, SHA-256 `0f14f8223b4396179fab44dd0d4d09cec57a5a21b6d1e35492ee0db852112957`; 88 bookings since T0 (predicted 90 to 100: a miss low; the log had grown by 4) |
+| 10 | 8 | `trade_census.py` over the capture; `s4_compare.py --run $RUN --capture $CAPTURE --window-start ...T00:00:00Z --window-end ...T00:00:00Z --store "$BT\data\historical_testnet"` | exit 0 and 0; no verdict | **exit 0 and 0**; the census: 90 placements, 88 bookings, 0 anomalies, 88 of 88 matched, 2 placements never booked (`trade_census.txt` `68d9b7d1eaa4a5c679e39d5641b3ecaaa8a3e6be729e86ee9722b6d5d123e587`); the compare below (`s4_compare.txt` `8311279bd03e4154ab98d07475b2dbca3399f8a11f0a962a78eb0638232f30a2`) |
+| 11 | removal | a reparse-point scan of the clone; `Remove-Item -Recurse -Force $BT` | no junction; exit ok; `Test-Path` False | the scan listed **no reparse point**; `data\` holds `backtests`, `historical_testnet` and `.gitkeep`, none a link; the delete printed no error; `Test-Path $BT` False; `git worktree list` shows the main worktree only |
+
+### The day's figures, EXPLORATORY (`s4_compare.txt`, verbatim)
+
+```
+==========================================================================
+S4 COMPARISON -- figures only
+==========================================================================
+  window (entry bar open) : [2026-10-11T00:00:00+00:00, 2026-10-12T00:00:00+00:00)
+  capture sha256          : 0f14f8223b4396179fab44dd0d4d09cec57a5a21b6d1e35492ee0db852112957
+  run.json sha256         : a86a123dcc3c76438ae43d217be6b62188d0503a6874c598ed26e0af456808d6
+  trades.csv sha256       : 855f7ffe00df06814fb9c7803bca3bc80febe3fda39646f6ed6b27f5c371c222
+  record schema           : 4
+  recorded series         : F:\trading bot\scratch\p124\bt45547f107715\data\historical_testnet
+
+ELIGIBILITY (R-AR)
+  backtest run record     : evidence_eligible true
+  live boot line       8   : pid 27460 verdict accepted (refusal reasons none)
+  live boot line      16   : pid 27176 verdict accepted (refusal reasons none)
+  live boot line      24   : pid 16076 verdict accepted (refusal reasons none)
+  live boot line    1966   : pid 22304 verdict accepted (refusal reasons none)
+  live boot line    2734   : pid 3444 verdict accepted (refusal reasons none)
+  live boot line    2746   : pid 25352 verdict accepted (refusal reasons none)
+  live boot line    3714   : pid 5224 verdict accepted (refusal reasons none)
+
+R-C FIGURES
+  live entries booked          : 18
+  backtest entries             : 19
+  reproduced on symbol and bar : 16 of 18 = 88.89%
+  live per-trade mean (n=18)  : -0.1013%  95% interval [-0.5228%, 0.3201%]
+  backtest per-trade mean (n=19) : -0.3804%  position against that interval: inside
+  trade counts                 : 19 against 18, difference 1 = 5.56% of live
+  live bookings with no placement (not keyable): 0
+
+LIVE ONLY (2)
+  ETHUSDT entry bar 2026-10-11T23:30:00+00:00 qty 0.74770000 exit SL at 2448.828043332887521733315501 realised -65.29810400
+  BTCUSDT entry bar 2026-10-11T23:52:00+00:00 qty 0.02263000 exit CLOSE at 83854 realised 1.71648550
+
+BACKTEST ONLY (3)
+  BTCUSDT entry bar 2026-10-11T04:32:00+00:00 price 82990.134330000000 exit close at 83032.482990000000 realised 0.97063128720000000000
+  BTCUSDT entry bar 2026-10-11T13:37:00+00:00 price 83133.105780000000 exit close at 83052.462995000000 realised -1.84430049295000000000
+  BTCUSDT entry bar 2026-10-11T16:21:00+00:00 price 83860.129110000000 exit stop_loss at 81237.31200000000 realised -59.45926388370000000000
+
+BOT DOWNTIME (R-AP)
+  pid 27460 -> pid 27176: 2026-10-10T05:58:02+00:00 to 2026-10-10T05:58:16+00:00
+  pid 27176 -> pid 16076: 2026-10-10T05:58:17+00:00 to 2026-10-10T06:48:00+00:00
+  pid 16076 -> pid 22304: 2026-10-12T04:17:43+00:00 to 2026-10-12T19:20:01+00:00
+  pid 22304 -> pid 3444: 2026-10-13T06:54:01+00:00 to 2026-10-13T07:00:35+00:00
+  pid 3444 -> pid 25352: 2026-10-13T07:00:48+00:00 to 2026-10-14T07:12:00+00:00
+  pid 25352 -> pid 5224: 2026-10-15T08:23:00+00:00 to 2026-10-15T11:18:00+00:00
+  excluded on both sides (0): signal bar closed in or within 2 bars after an interval
+
+LIVE PLACEMENTS WITH NO BOOKING IN THE CAPTURE (0) -- R-BA, reported
+
+DISAGREEMENTS (6), one cause each from the closed list
+  recorded-gap          : 0
+  bar differs           : 0
+  exact-decimal tie     : 0
+  window-edge           : 0
+  risk refusal differs  : 1
+  fok-unfilled          : 0
+  fill-model            : 3
+  unexplained           : 2
+  [fill-model] live only ETHUSDT signal bar 2026-10-11T23:29:59.999000+00:00: the backtest dispatched and did not fill
+  [fill-model] live only BTCUSDT signal bar 2026-10-11T23:51:59.999000+00:00: the backtest dispatched and did not fill
+  [unexplained] backtest only BTCUSDT signal bar 2026-10-11T04:31:59.999000+00:00: no recorded input explains it
+  [unexplained] backtest only BTCUSDT signal bar 2026-10-11T13:36:59.999000+00:00: no recorded input explains it
+  [risk refusal differs] backtest only BTCUSDT signal bar 2026-10-11T16:20:59.999000+00:00: the live bot refused at committed_risk_unknown; the backtest filled
+  [fill-model] different exit BTCUSDT signal bar 2026-10-11T15:29:59.999000+00:00: live CLOSE at 83948.56, backtest stop_loss at 80610.84096000000
+```
+
+Against the predictions: live entries booked **18** (predicted 16 to 18), backtest entries **19** (12 to 24), reproduced **88.89%** (30% to 90%, near its top), downtime exclusions **0**, exit 0, no verdict line. Read against the pre-registration's
+section 7 only to show what the arithmetic looks like, and NOT as S4's result: the count difference, 1 = 5.56% of live, is inside 10%; the backtest mean is inside the live interval; the reproduction is above 80%; two disagreements are
+`unexplained` (which section 7 says decide nothing but leave a FAIL undiagnosed). One day with 18 trades is a sample on which none of that is a finding about the backtester.
+
+### What the rehearsal found about the procedure (the point of it)
+
+1. **The step 6 boot CHECK could not show what it claimed** (step 6 above): corrected in the runbook, `M5m-560`.
+2. **Everything else ran as written**: the clone, the constraints from the sweep clone's venv, the non-editable install by commit, the boot `accepted` at `45547f1`, the copy and its hash comparison, `--verify-only`, an eligible backtest of
+   `config.s4.yaml` in 7 seconds (about 2.5 minutes for 21 days, derived), the freeze, the census and `s4_compare.py`.
+3. **The run record did not outlive the clone**: R-DF orders the clone removed, and the run directory was inside it. Its `run.json` and `trades.csv` digests are above and in `s4_compare.txt`, and the figures are in this section, but the
+   files are gone. For the stop itself the runbook's step 7 keeps the run in the backtest clone, which step 9 says to record and which is NOT removed by the runbook (`M5m-561`).
+4. The step 5 `robocopy` was run from PowerShell; from Git Bash it fails (`M5m-554`).
+
+### Digests (SHA-256; under `F:\trading bot\scratch\p124\` unless named)
+
+| File | SHA-256 |
+|---|---|
+| `predictions_c2.txt` | `49c8796047aeb39cc09160cea189f35ec25a9fad366621c5644d359cd736e00b` |
+| `pip_install.txt` | `816d34288c464b307a9e674fc9f0da92797892dfa7240d4c4d4f516a74e231eb` |
+| `boot_strategies.txt` | `cae0719c21e650867135ee7380cea056c1b61963d9a29adf0d9ccc100a4a786b` |
+| `c2\s4_daily_freeze.txt` | `a0fae8d0e366bbd40d5666e2cf45b12deec6836c915363b4388bc36a04f5b578` |
+| `F:\trading bot\scratch\s4\2026-10-16\104103Z-capture.log` | `0f14f8223b4396179fab44dd0d4d09cec57a5a21b6d1e35492ee0db852112957` |
+| `c2\trade_census.txt` | `68d9b7d1eaa4a5c679e39d5641b3ecaaa8a3e6be729e86ee9722b6d5d123e587` |
+| `c2\s4_compare.txt` | `8311279bd03e4154ab98d07475b2dbca3399f8a11f0a962a78eb0638232f30a2` |
+| `c2\inventory_recorder.jsonl` and `c2\inventory_copy.jsonl` | `aa575482cd4074fd5362391a394a876634899cb606933061003a2cf2f2944b88` (both) |
+| the backtest's `run.json` / `trades.csv` (deleted with the clone) | `a86a123dcc3c76438ae43d217be6b62188d0503a6874c598ed26e0af456808d6` / `855f7ffe00df06814fb9c7803bca3bc80febe3fda39646f6ed6b27f5c371c222` |
