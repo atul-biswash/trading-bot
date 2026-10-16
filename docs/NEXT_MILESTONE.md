@@ -1877,6 +1877,19 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every ruling R-BN to R-CZ, the pre-registration, and S4 as the thing M5m waits for.
 
+> **ANNOTATED AT M5m P124 (C1). Three rulings of the project owner, verbatim.** **R-DD:** *"If S4 reaches its cap, M is 2026-11-14T00:00:00Z, the last UTC midnight at or before the cap. Bookings after M are outside the comparison window. This is ruled before any S4 result exists (M5m-538)."*
+> **R-DE:** *"The store checker used by the S4 stop is a tracked, tested script under scripts/. The runbook names it and its digest; nothing in an evidence procedure runs from scratch."*
+> **R-DF:** *"The runbook's Appendix A is executed now, over one whole day inside [W, now): a backtest clone of 45547f1 built outside deploy\ with no .env and a vcs install; the Testnet store copied in from the recorder clone, equal by hash; an evidence-eligible backtest of config.s4.yaml over that day; and s4_compare.py over the day against a frozen capture. Its figures are exploratory under the ratified CHOSEN line 5, are recorded, and decide nothing. The clone is removed afterwards, and it holds no junction."*
+>
+> **Where each is carried out.** R-DD: `docs/S4_STOP_RUNBOOK.md` step 1 and its facts table (this commit). R-DE: `scripts/store_check.py` and `tests/unit/test_store_check.py` (this commit), with the runbook's step 5 naming the script and its SHA-256; `docs/RUN_LEDGER.md` section 61 shows its output and inventory file byte-equal to the scratch script's on the mainnet store and on a copy of the recorder's Testnet store. R-DF: C2 of P124 (`docs/RUN_LEDGER.md` section 62).
+>
+> **What stops being true, by content.**
+> 1. **`M5m-538` is DISCHARGED by R-DD.** The P123 C1 block's *"**Step 1's cap case is UNRULED.** ... The runbook stops there and asks; it does not choose `2026-11-14`"* (item 3) and its *"**CARRIED (`M5m-538`, declared at P123 C1).** The arming condition, whoever first reaches step 1 of `docs/S4_STOP_RUNBOOK.md` with the cap ... nearer than the next stop midnight: the owner rules what `M` is at the cap before any backtest of that run"* are true of the tree as it stood at `78e6304` and are false of it now: the owner ruled it, before any S4 result, as `2026-11-14T00:00:00Z`. The condition stands in the file as a record and is not armed.
+> 2. **The P123 C1 block's item 4**, *"The frozen-store tool is in the scratch area, not the repository: `F:\trading bot\scratch\p113\store_check.py` ... measured on the mainnet store only"*, is false of the tree: the tool is `scripts/store_check.py`. It has been run on a Testnet store: on a copy of the recorder's, it exits 0, prints `NO MANIFEST` for the three intervals that store does not hold, and equals the scratch script's output byte for byte.
+> 3. **`RUN_LEDGER.md` section 59's "Instruments"** paragraph (*"`F:\trading bot\scratch\p113\store_check.py` has SHA-256 ... It has not been run on one"*) is a record of what P123 read and stands; section 61 supersedes it.
+>
+> **What survives:** every ruling R-BN to R-DC, the pre-registration, S4 as the thing M5m waits for, and the runbook's other steps.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

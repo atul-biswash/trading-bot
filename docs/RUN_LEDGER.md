@@ -5932,3 +5932,47 @@ resume, and that pass came 37 minutes after the bot had begun trading (the corre
 | `c3_s4_daily.txt` | `fb37084eff5c23dad2bfd16254edc8893b79ad1a972c467ea817a64cbcd5915f` |
 | `c3_explore.txt` | `c1407f3c0a0a541fb7b4667c99b8ab4dfcd51bf2e541b110d5f3f1e8694800fe` |
 | `F:\trading bot\scratch\s4\2026-10-16\065214Z-capture.log` | `3cde3e026c372ca7e90fbb1753f762f48c85fc627ef66ca4cd72a8945c2a2c7d` |
+
+## 61. M5m S4: P124's halts, and the tracked store checker shown equal to the scratch one (P124 C1, R-DD, R-DE)
+
+An observation log, so this section only adds. The rulings are quoted verbatim in `docs/NEXT_MILESTONE.md`'s P124 C1 block.
+
+### Halts
+
+`predictions_halts.txt`, SHA-256 `dd67475b0e512b3f66cf05c6b5e061d187bbe4c1ecad93902ec721b00ab7cf91`, written before any halt ran.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `66bfc9b`; `origin/main` `66bfc9b` if pushed, else `f9c06a4` and 8 ahead | HEAD `66bfc9b4a9126cd0898d2e75b35629d299ae1ade`, `origin/main` **`ac07c444b088618db45faca6af07b0925aae429a`**: neither branch of the prediction. The owner pushed through P122's last commit and not P123's three, so HEAD is 3 ahead (`M5m-553`) |
+| H2, `git status --porcelain` | empty | empty |
+| H3, the gate, bare, to a file | 224 files, mypy 111, 4342 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `949446632e230e6a6e1b683c6a707a1e77a2bbdd19444e3132146d39f67781b4`; 280.89 s) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 552, gapless, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `81c9239832a7dcb701e3d16e5d27218789a043719a802974fadff291d69562df`) |
+
+### `scripts/store_check.py` against the P113 scratch script
+
+The tracked script is `scripts/store_check.py`, SHA-256 `fbba98e583362058b732df05e2d77343f29a945f30006b47d0ca920e21a18241`, tested by `tests/unit/test_store_check.py` (SHA-256
+`817dbc750c9bdcccc84435f2820b17743abdde8ea0db45e2dce2416d61204995`, 20 tests). The scratch script is `F:\trading bot\scratch\p113\store_check.py`, SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592`, unchanged
+since section 48. Both were run with the development venv's interpreter on the same root, each with its own inventory file, stdout redirected to a file (`cmp` is the instrument; the SHA-256 is of the file):
+
+| Root | Exit (scratch, tracked) | stdout, both | inventory file, both |
+|---|---|---|---|
+| `F:\trading bot\store\mainnet-historical` (the frozen mainnet store: 1,126 files, 1,100 CSV months, 1,150,169,679 bytes) | 0, 0 | `cmp` equal; `070795048548af4a08e99c2e30bfafd2ee995d557ccc145f789d2a5becb4d46a` | `cmp` equal; `2e152a5d9527d705d7c8e1c42070894fd31d477aff5e0b87631ff89263248018` |
+| `F:\trading bot\scratch\p124\testnet_copy`, a `robocopy /E /COPY:DAT` copy of the recorder's `data\historical_testnet` taken at about `10:22Z` (17 files, 4 CSV months, 3,040,820 bytes) | 0, 0 | `cmp` equal; `43fc38755e865a3f9c620424cb705e0ad1f7af18f083e62a16b0405c22a160bf` | `cmp` equal; `aa575482cd4074fd5362391a394a876634899cb606933061003a2cf2f2944b88` |
+
+Both outputs carry the same facts as before. **Mainnet:** `inventory sha256` `6167e1693a486e6666686cda6cd5082d41320dd39af74bac88bbb64c81a3e116` and the inventory file `2e152a52...8018`, **the two figures section 48 recorded**, so the frozen
+store is as it was on 2026-10-14; 10 manifests, 0 mismatched, 0 missing or extra, 0 verify problems, 4 snapshots checked and 0 mismatched. **Testnet copy:** `inventory sha256`
+`87628ed360fd88b91376e648f06b9d6328bd3dbe3d34b12e60928a4b28c1eb2f`; `NO MANIFEST` for `BTCUSDT` and `ETHUSDT` at `1h`, `4h` and `1d` (six lines); 4 manifests; rows `BTCUSDT 1m` 12,693 and `ETHUSDT 5m` 2,539; 0 mismatched, 0 missing or extra;
+0 verify problems; 2 snapshots checked, 0 mismatched. **So the question section 48 left open is answered: on a Testnet-shaped store the checker exits 0.**
+
+**A first attempt compared two empty outputs and proved nothing** (`M5m-554`). Run from Git Bash, `robocopy ... /E ...` was rewritten to `E:/` by the shell's path conversion (`ERROR : Invalid Parameter #3 : "E:/"`, exit 16, nothing copied), and the two
+scripts then agreed about an empty directory (`files (no _zips) : 0`). The copy was redone from PowerShell, where it copied 17 files (exit 1, files copied), and the comparison above is of that. Any `robocopy` line of the runbook is for PowerShell.
+
+The tracked script was formatted after the first mainnet run had started, so the first tracked mainnet output was made from pre-format bytes; both runs were repeated on the final bytes (`fbba98e5...8241`) and the figures above are of those.
+
+### The survey of the tracked script
+
+`predictions_c1.txt`, SHA-256 `127fc8b0cd9e5b210a5c0a5593743b60ecaebe7fdb25f5105975a29128d7523d`, written before the survey. **The first run halted** (`survey_c1_out_halted_at_s8.txt`, SHA-256
+`9fddbc75d1d69abda988d9d07cbf0d4aa1391be243405a881bfa5ca1b6f1f207`): mutation s3 (the hash updates with the first 1000 bytes of each block) killed 7 where 1 was predicted, because the script compares its own hash of every month file
+with the manifest's; and s8 (the exit status ignores "extra") killed 0 where 1 was predicted, because the store's own `verify` also flags an unlisted month, so "extra" was redundant in that test. The test now gives the checker a
+`verify` that finds nothing. `predictions_c1_rerun.txt` (SHA-256 `302bc23d0915d8304c874521816045bb581afac576b4c20e51c71c92f1e6d37f`) records the amended predictions before the re-run, which killed 23 of 23 predicted over 11 mutations
+(`survey_c1_out.txt`, SHA-256 `57a0a65347b3eaa678202846303998592f5ff8ebaa1c616c9bfa7eae5a1c8724`). Not mutated: dropping "missing" from the exit status, which is unobservable because a listed-but-absent month is also a mismatch.

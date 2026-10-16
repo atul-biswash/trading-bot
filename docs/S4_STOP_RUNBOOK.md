@@ -33,7 +33,7 @@ only procedures already measured on this machine."*
 | `W` | `2026-10-11`, the first UTC midnight at or after `T0` | S4 pre-registration section 4 |
 | `M` | the stop midnight, a UTC date, **set by the owner** in step 1 | S4 pre-registration section 3 (R-AY) |
 | earliest `M` | `2026-11-01` (the first UTC midnight at or after `T0` + 21 days) | derived, RUN_LEDGER section 43 |
-| cap | `2026-11-14T06:05:20Z` (`T0` + 35 days) | derived; **the cap case is UNRULED, see step 1** |
+| cap | `2026-11-14T06:05:20Z` (`T0` + 35 days); at the cap `M` is `2026-11-14T00:00:00Z` (R-DD) | derived; ruled at P124, see step 1 |
 | S4 commit | `45547f10771543b41db42e1cbcb8b5a0a9cf1776` | the run's `boot_provenance` line |
 | frozen scripts | `s4_compare.py` `b8afa603...af08`, `trade_census.py` `926bdd46...d9bb`, `config.s4.yaml` `0f170bae...2594` | pre-registration section 9; the same bytes at `HEAD` and at `45547f1` (P123) |
 
@@ -78,11 +78,14 @@ bookings so far : yes` and `next UTC midnight` is the date you set in `$M`. If i
 repeat this step the next day; `bookings >= 150 now` can turn from `no` to `yes` during the day, and bookings only
 increase, so a `yes` at the evening stands at the midnight.
 
-**THE CAP IS NOT A MIDNIGHT, AND THE CASE IS UNRULED.** R-AY caps the run at `2026-11-14T06:05:20Z`, "evaluated if at
-least 100 bookings exist and otherwise NOT MEASURED". The comparison window is `[W, M)` with `M` a whole UTC midnight
-(pre-registration section 4), and at the cap there is no stop midnight. **If the cap is reached before step 1 reads
-`yes`, stop this runbook and ask the owner what `M` is** (the last whole midnight before the cap, `2026-11-14`, is the
-obvious reading and is NOT ruled). Nothing below chooses it.
+**THE CAP, AS R-DD RULES IT.** R-AY caps the run at `2026-11-14T06:05:20Z`, "evaluated if at least 100 bookings exist
+and otherwise NOT MEASURED", and the comparison window is `[W, M)` with `M` a whole UTC midnight (pre-registration
+section 4). R-DD, verbatim: *"If S4 reaches its cap, M is 2026-11-14T00:00:00Z, the last UTC midnight at or before the
+cap. Bookings after M are outside the comparison window. This is ruled before any S4 result exists (M5m-538)."* So if
+the cap is reached before step 1 reads `yes`, set `$M = '2026-11-14'`, stop the bot AT THE CAP
+(`2026-11-14T06:05:20Z`, not at `M`), and run the steps with that `$M`: the bookings made between `M` and the stop are
+in the log and outside the window, and the backtest ends at `M`. S4 is then evaluated only if at least 100 bookings
+exist, and is otherwise NOT MEASURED (R-AY); step 9's arithmetic says which.
 
 ## Step 2. Stop the bot, gracefully, at `M`
 
@@ -185,26 +188,26 @@ the same command); the `Select-String` over the report; reading `.State`.
 
 ## Step 5. Freeze the store from the recorder clone, by hash
 
-**Measured:** the copy and verification of a store: RUN_LEDGER section 48 (`robocopy /E /COPY:DAT`, then
-`F:\trading bot\scratch\p113\store_check.py`, SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592`,
-run on the source and on the copy; its two inventory digests equal). **That was the MAINNET store.** The tool reads
-the manifests of the five mainnet intervals, so on this store it prints `NO MANIFEST` for `1h`, `4h` and `1d` and goes
-on; whether its exit status is 0 on a Testnet store has not been seen. The script is in the scratch area, not the
-repository: confirm its digest first.
+**Measured:** the copy and verification of a store: RUN_LEDGER section 48 (`robocopy /E /COPY:DAT`, then the P113 checker,
+run on the source and on the copy; its two inventory digests equal), on the MAINNET store. The checker is now
+`scripts\store_check.py`, tracked and tested (R-DE), SHA-256 `fbba98e583362058b732df05e2d77343f29a945f30006b47d0ca920e21a18241`, with the behaviour of the P113 scratch script
+(SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592`): RUN_LEDGER section 61 shows the two outputs
+and inventory files byte-equal on the mainnet store and on a copy of the recorder's Testnet store, where it exits 0 and
+prints `NO MANIFEST` for the `1h`, `4h` and `1d` series it does not hold. Nothing in this step runs from scratch.
 
 ```powershell
-(Get-FileHash 'F:\trading bot\scratch\p113\store_check.py' -Algorithm SHA256).Hash
+(Get-FileHash "$DEV\scripts\store_check.py" -Algorithm SHA256).Hash
 robocopy $RSTORE $FROZEN /E /COPY:DAT
 "exit $LASTEXITCODE"
-& $DEVPY 'F:\trading bot\scratch\p113\store_check.py' $RSTORE "$OUT\inventory_recorder.jsonl" > "$OUT\store_check_recorder.txt"
+& $DEVPY "$DEV\scripts\store_check.py" $RSTORE "$OUT\inventory_recorder.jsonl" > "$OUT\store_check_recorder.txt"
 "exit $LASTEXITCODE"
-& $DEVPY 'F:\trading bot\scratch\p113\store_check.py' $FROZEN "$OUT\inventory_frozen.jsonl" > "$OUT\store_check_frozen.txt"
+& $DEVPY "$DEV\scripts\store_check.py" $FROZEN "$OUT\inventory_frozen.jsonl" > "$OUT\store_check_frozen.txt"
 "exit $LASTEXITCODE"
 (Get-FileHash "$OUT\inventory_recorder.jsonl" -Algorithm SHA256).Hash -eq (Get-FileHash "$OUT\inventory_frozen.jsonl" -Algorithm SHA256).Hash
 Select-String -Path "$OUT\store_check_recorder.txt","$OUT\store_check_frozen.txt" -Pattern 'inventory sha256|verify problems|mismatched|missing / extra|snapshots checked'
 ```
 
-CHECK: the first line prints `2A5B5530F525B69485F13141DB1D73692760CB418203D1BE4C7DEFA581827592` (the digest above, any case);
+CHECK: the first line prints `FBBA98E583362058B732DF05E2D77343F29A945F30006B47D0CA920E21A18241` (the digest above, any case);
 `robocopy` prints an exit code below 8 (0 or 1 are the clean ones; Microsoft's own table, not measured here); both
 `store_check` runs print `exit 0`; the comparison prints `True`; the `Select-String` shows, for the two files, equal
 `inventory sha256` lines, `verify problems      : 0`, `mismatched vs manifest: 0`, `missing / extra csv  : 0 / 0`
@@ -219,9 +222,8 @@ Set-Location $RCLONE
 CHECK: `exit 0` (the script's docstring: with `--verify-only` it checks the store and makes no network request). Then, optionally and by the owner (R-BQ's ACL for the mainnet store is not part of R-DB and is not
 given here), the copy can be made write-protected the way section 48 did for the mainnet store.
 
-Never executed: `store_check.py` on a Testnet store; `robocopy` of this store (the same switches as section 48, a
-different source); the `Select-String` over the two outputs; `--verify-only` with `--root` pointing outside a clone;
-the exit status of `store_check.py` here.
+Never executed: `robocopy` of the FINAL store (the same switches as section 48 and as P124's copy of the recorder's
+store, section 61); the `Select-String` over the two outputs; `--verify-only` with `--root` pointing outside a clone.
 
 ## Step 6. The backtest clone, outside `deploy\`, with no `.env`
 
@@ -390,7 +392,7 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 4 | the recorder run by hand, `--verify-only` | E | sections 37, 40, 43 |
 | 4 | the recorder run *after* a stop, `(Get-ScheduledTask).State` | N | |
 | 5 | `robocopy /E /COPY:DAT` | R | section 48 (mainnet store) |
-| 5 | `store_check.py` on a Testnet store | R | section 48 (mainnet store) |
+| 5 | `scripts\store_check.py` on a Testnet store | E | section 61 (a copy of the recorder's store: exit 0, equal to the P113 script's output) |
 | 5 | `--verify-only --root <frozen copy>` | R | section 40 (the recorder's own root) |
 | 5 | the digest comparison and the `Select-String` over the two outputs | N | |
 | 6a | `git clone`, `checkout --detach`, `venv`, `pip install -c`, the boot check, at `45547f1` | R | the sweep clone's build (other SHA); sections 21, 26, 52 |
