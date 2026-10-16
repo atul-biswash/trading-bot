@@ -5669,3 +5669,111 @@ Both are annotated (the NEXT_MILESTONE block and a note at the end of LOG.md). T
 ### What this prompt builds
 
 `scripts/s4_daily.py` (R-CZ) is C3, and its first run against the live S4 run is C4, whose output and digests are recorded in a section of their own.
+
+## 58. M5m S4: the first run of scripts/s4_daily.py against the live run, 2026-10-16T06:10:03Z (P122 C4, R-CZ)
+
+An observation log, so this section adds and annotates nothing above it. The tool is `scripts/s4_daily.py` (C3a `8bd39b4`, C3b `fd79692`; section 57 called its commit C3, and it landed as two because the script with its tests passed 1,500 lines); it was run once, from the repository root, with the development
+venv's interpreter, against the S4 clone `F:\trading bot\deploy\45547f107715` (pid 5224, running since `2026-10-15T11:16:55Z`).
+
+### The command, and the one the owner runs daily
+
+```
+.venv\Scripts\python.exe scripts\s4_daily.py
+```
+
+Run from `F:\trading bot\files\binance-trading-bot\binance-trading-bot`. It takes no argument, writes under `F:\trading bot\scratch\s4\<UTC date>\` and prints the report. Exit status 0 for a report, 2 for a refusal
+(a destination inside a clone, a missing log directory, a rerun in the same second).
+
+### Predictions
+
+`predictions_c4.txt`, SHA-256 `ea359eb9665e2c08bdaf9205e94bf7ee8d83b9e1a48cd05ba4df3ecb9a3eb4fc`, written before the first run.
+
+| Figure | Predicted | Observed |
+|---|---|---|
+| exit status | 0 | 0, and nothing on stderr |
+| files frozen | one: `trading_bot.log` (the bot has not rotated); the capture byte-equal to it | one file, 1,076,545 bytes, `daa6f508de83aa8cdcd7f4c916e2caa34a78f05d62f395beb97c4c123af35007`; `cmp` shows the capture byte-equal to the frozen log; no file outside the capture and no changed-set warning |
+| bot process | last pid 5224, alive, launcher `[3444]` | as predicted |
+| the log's last line | 0 to 2 minutes 59 seconds old | `2026-10-16T06:10:00Z`, 3 seconds before now |
+| recorder task | last run `2026-10-16T06:05:0xZ`, result 0, next run `12:05:00Z`, 0 missed | last run `06:05:01Z`, result 0, next run `12:05:00Z`, missed runs 0 |
+| newest bars | the 1m series open `06:04:00Z`, the 5m series `06:00:00Z`, four series in the order BTC 1m, BTC 5m, ETH 1m, ETH 5m | as predicted, each closed 5 min 03 s before now |
+| boots at or after T0 | 5, all run boots; 16076, 22304, 3444, 25352, 5224 at the instants of the baseline; the strategies boots 27460 and 27176 not listed | as predicted; all `verdict=accepted`; a clean stop marker for 16076 only |
+| T0 from the log | `2026-10-10T06:05:20Z`, pid 16076, equal to the ruled T0 | as predicted |
+| bookings since T0 | 83 to 87, anomalies 0, none before T0, raw count equal to the census | **84** (79 `close_booked`, 5 `exit_booked`, 0 `boot_exit_booked`), anomalies 0, none before T0, none unzoned, raw 84 |
+| stop arithmetic | about 6.0 days, 83 to 87 against 150, earliest stop `2026-11-01T00:00:00Z`, cap `2026-11-14T06:05:20Z`, every condition "no" | 6d 00h 04m 43s (6.003 d), 84 against 150 (short by 66), earliest stop `2026-11-01T00:00:00Z`, cap `2026-11-14T06:05:20Z`, next midnight `2026-10-17T00:00:00Z`, every condition "no" |
+
+Every figure fell inside its prediction. Two facts the prediction did not state: pid 22304's last line is
+`2026-10-13T06:54:01Z` (no stop marker), and the booking split is 79 and 5 (the baseline copy of 05:27Z held 78 and 5, so one close booked in the 43 minutes since).
+
+### The report, verbatim
+
+```
+s4_daily  now 2026-10-16T06:10:03Z  T0 2026-10-10T06:05:20Z  clone F:\trading bot\deploy\45547f107715
+
+== freeze (R-BM) ==
+directory  : F:\trading bot\scratch\s4\2026-10-16
+  daa6f508de83aa8cdcd7f4c916e2caa34a78f05d62f395beb97c4c123af35007     1076545  trading_bot.log  ->  061003Z-trading_bot.log
+capture    : 061003Z-capture.log  1076545 bytes
+capture sha256 : daa6f508de83aa8cdcd7f4c916e2caa34a78f05d62f395beb97c4c123af35007
+
+== bot process ==
+last pid in the log : 5224
+that pid alive as a '-m trading_bot run' process : yes
+launcher pids for this clone : [3444]
+log's last line : 2026-10-16T06:10:00Z (capture line 4683), 0d 00h 00m 03s before now
+
+== recorder ==
+task tb-recorder: last run 2026-10-16T06:05:01Z, last result 0 (extended, or already current), next run 2026-10-16T12:05:00Z, missed runs 0
+  BTCUSDT 1m: newest bar opens 2026-10-16T06:04:00Z, closed 0d 00h 05m 03s before now
+  BTCUSDT 5m: newest bar opens 2026-10-16T06:00:00Z, closed 0d 00h 05m 03s before now
+  ETHUSDT 1m: newest bar opens 2026-10-16T06:04:00Z, closed 0d 00h 05m 03s before now
+  ETHUSDT 5m: newest bar opens 2026-10-16T06:00:00Z, closed 0d 00h 05m 03s before now
+
+== boots since T0 ==
+T0 from the log (first run boot) : 2026-10-10T06:05:20Z  pid 16076  = the ruled T0
+boots at or after T0 : 5 (5 run)
+  2026-10-10T06:05:20Z  pid 16076  verdict=accepted  run boot  last line 2026-10-12T04:17:43Z  clean stop marker yes
+  2026-10-12T19:17:36Z  pid 22304  verdict=accepted  run boot  last line 2026-10-13T06:54:01Z  clean stop marker no
+  2026-10-13T07:00:36Z  pid 3444  verdict=accepted  run boot  last line 2026-10-13T07:00:48Z  clean stop marker no
+  2026-10-14T06:34:33Z  pid 25352  verdict=accepted  run boot  last line 2026-10-15T08:23:00Z  clean stop marker no
+  2026-10-15T11:16:55Z  pid 5224  verdict=accepted  run boot  last line 2026-10-16T06:10:00Z  clean stop marker no
+
+== bookings since T0 (scripts/trade_census.py over the capture) ==
+bookings since T0 : 84
+  close_booked : 79
+  exit_booked : 5
+booking event lines since T0 (raw count of the three events) : 84
+bookings before T0 : 0   unzoned stamps : 0
+census anomalies : 0
+
+== stop rule arithmetic (R-AY), not a verdict ==
+days since T0 : 6d 00h 04m 43s  (6.003 d)
+bookings since T0 : 84 against 150  (short by 66)
+earliest stop : 2026-11-01T00:00:00Z  (first UTC midnight at or after T0 + 21 d)
+cap : 2026-11-14T06:05:20Z  (T0 + 35 d; evaluated at the cap if at least 100 bookings)
+next UTC midnight : 2026-10-17T00:00:00Z
+bookings >= 150 now : no
+now at or after the earliest stop : no
+next UTC midnight at or after the earliest stop : no
+both conditions met at the next UTC midnight on the bookings so far : no
+now at or after the cap : no
+bookings >= 100 now (the cap's floor) : no
+```
+
+### Digests, and the cross-check
+
+Under `F:\trading bot\scratch\s4\2026-10-16\`, each name carrying the invocation's time (`061003Z`):
+
+| file | SHA-256 |
+|---|---|
+| `061003Z-trading_bot.log` (the frozen copy) | `daa6f508de83aa8cdcd7f4c916e2caa34a78f05d62f395beb97c4c123af35007` |
+| `061003Z-capture.log` (the capture) | `daa6f508de83aa8cdcd7f4c916e2caa34a78f05d62f395beb97c4c123af35007` |
+| `061003Z-SHA256SUMS.txt` | lists the two lines above; 198 bytes |
+| `061003Z-report.txt` (the report, LF) | `dc2f76fc1af5f4ac40a5b8a9959de48e3425cb6dc128aef31b0382a663a02c9d` |
+| `scratch\p122\c4_run.txt` (the console output, CRLF from the redirect) | `59f353f50584788889530aead27804a897abfb14bcd359b38b39484d65afd436` |
+
+`scripts/trade_census.py` over the capture (`scratch\p122\c4_census.txt`, SHA-256 `bdadc472d93f4408dd2410c79df4831e213b80a5f219c3b6d60c9766dd173361`): exit 0, 4,683 lines, 86 placements, **84 bookings**, 0 anomalies, 84 of 84
+matched to a placement, 2 placements never booked, no quantity differing from its placement. The census's 84 equals the report's 84 and the raw count of the three events.
+
+The S4 clone was read and nothing in it written: the log by a read of its bytes, the process list and the task by two read-only queries, the recorder store by reading its newest CSV; the only files created are
+under `scratch\s4`. After the run the clone's `logs` directory still has the mtime `2026-10-14 12:33:40 +0600` it had before it and the same four entries (`.bot.lock` at `2026-10-15 17:17:06`, `.gitkeep`,
+`release.log` at `2026-10-14 12:33:40`, and `trading_bot.log`, the bot's own), so no file was created or removed there (a read of the directory, taken after the run and compared with the listing taken at the start of P122). The bot's own log shows its pass at 06:10:00Z, three seconds before the tool's "now".
