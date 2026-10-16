@@ -1903,6 +1903,18 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every ruling R-BN to R-DF, the pre-registration, and the runbook's other steps.
 
+> **ANNOTATED AT M5m P126 (C1, C2). Two rulings of the project owner, verbatim.** **R-DI:** *"test_testnet_provider_seeds_history_and_extends_it_live asserts what holds on both paths: after the first live candle, the buffer's last bar equals the stream's closed bar, whether it was appended or replaced in place. An identical replacement is correct behaviour (M5m-571). The test keeps its subject."* **R-DJ:** *"Every program whose output the S4 runbook writes with Out-File -Encoding ascii is shown to print only ASCII: by a static check of its output text, and by one run in the runbook's form, with the file's bytes checked for anything outside ASCII and for a '?' that the program did not print."*
+>
+> **Where each is carried out.** R-DI: C1, `7ec055f`, under the ruled-overturn authority (the old and new assertion are quoted in its message); the assertion is one function, `tests/integration/live_bar.py`, shown on fabricated frames by `tests/unit/test_integration_live_bar.py`. R-DJ: C2, RUN_LEDGER section 64, for `s4_daily.py`, `s4_compare.py`, `check_testnet.py` and the boot line (R-DH's `trade_census.py`, `store_check.py` and `s4_explore.py` are section 63's).
+>
+> **What stops being true, by content.**
+> 1. **The runbook's table rows** *"`s4_daily.py` piped to `Out-File -Encoding ascii` | N"* and *"the same pipe for `s4_compare.py`, `check_testnet.py` and the boot command | N | only the form is new; their outputs are ASCII"* are E, with section 64. The second said the outputs are ASCII and no run had shown it.
+> 2. **The runbook's step 6 boot CHECK** did not say from which directory the boot is run; run from the development tree it prints `verdict=refused`. `Set-Location $BT` now precedes it (`M5m-578`).
+> 3. **`RUN_LEDGER.md` section 63's last paragraph** (*"Not run in the new form, because only the form is new and their outputs are ASCII"*) is a record and stands; section 64 ran them.
+> 4. **`M5m-571`'s reading of the integration test as wrong** is discharged by R-DI: the replacement path asserted a difference that correct behaviour need not produce.
+>
+> **What survives:** every ruling R-BN to R-DI, the pre-registration, and the runbook's other steps. **Open, carried:** no program can be shown unable to print a non-ASCII character, because paths, OS and exception text and the venue's asset names are text the source cannot bound (`M5m-579`); none printed one.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather

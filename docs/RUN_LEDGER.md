@@ -6183,3 +6183,96 @@ Rows changed: `s4_daily.py with a redirect` (E) becomes `s4_daily.py piped to Ou
 | `step8a_test.ps1` | `f3a7ae8815e4ff5f9115d57d213c72ea46179257f46dd473e1cd224d4f5a7079` |
 | `archive_test2\SHA256SUMS-run.txt` | `0fd92f7f18476c3f10fa5155bb3fa942fe2c8f9018f125af47739b97e9a5cf57` |
 | `archive_test2\SHA256SUMS-captures.txt` | `2a8acff6399569cf441ad324d77365c04d02095fa181e6abcb32904c817b4806` |
+
+## 64. M5m S4: P126's halts and R-DJ, every program whose output the runbook writes with `Out-File -Encoding ascii` shown to print only ASCII (P126 C2)
+
+An observation log, so this section only adds. The rulings R-DI and R-DJ are quoted verbatim in `docs/NEXT_MILESTONE.md`'s P126 block. Nothing here wrote to the venue, to a deployment or recorder clone, to the S4 backtest clone or to
+`F:\trading bot\evidence`. R-DJ's runs used the Appendix A rehearsal clone `F:\trading bot\scratch\p126\bt45547f107715` (built at `45547f1`, `pip install -c`, exit 0; `pip_install.txt`, SHA-256
+`5e06d552aad9c40e0331c547554f70af58b5552dcc3fe6ccd227a81b60479811`), the development tree, a fixture and the Testnet read-only. The one side effect is that `s4_daily.py` froze the live log twice more under `scratch\s4\2026-10-16` (a
+read of the deployment clone's log in share mode, written to scratch; the runbook's step 3 does the same).
+
+### Halts
+
+`predictions_halts.txt`, SHA-256 `7c8b97f309c8cd77c9f32e1eb58f987194290700f7f6252385d5224e7aa01a7e`, written before any halt ran.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `df82ebe`; `origin/main` `df82ebe` if pushed, else `cef23c7` and 1 ahead | the else-branch: `origin/main` `cef23c7`, HEAD `df82ebe`, 1 ahead (the owner had not pushed P125's commit) |
+| H2, `git status --porcelain` | empty | empty |
+| H3, the gate, bare, to a file | 226 files, mypy 112, 4362 passed and 1 skipped, exit 0; the integration flake recurring about 1 run in 6 | as predicted and no flake (`gate_h3.txt`, SHA-256 `1dc3308e1c0c478515698c89b9e58982ce79fd43d1de9894d3043b6136680f7a`; 268.61 s) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 571, gapless, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `570718b45204f7ad143a222b71cc78c16a3f37933e8069e083a349a118044f9c`) |
+
+C1 (R-DI) is its own commit and its message holds its measurements; this section is C2's.
+
+### The static check: the text each program can print, read from its source
+
+`static_ascii.py` (SHA-256 `b8506ba0c1dbb326534bb541e1dde9c1164007635217145118ce690b67ca6ab7`) parses each source with `ast` and checks every string constant that is not a docstring, f-string literal parts included, for a character above 127 and for a `?`.
+Its output is `static_ascii_out.txt` (SHA-256 `8d59c00df8616c35ec9a8cdca2f0109d48f9b4ec414712bd3f189ab20bd390b8`). Predictions: `predictions_c2.txt`, SHA-256 `96e1e51db226f83d2fc8f9de75963e4f1021e6355fdf0cc9aebad49fc9bf4a66`.
+
+| Program (with the modules whose text it prints) | String constants outside docstrings | Non-ASCII constants | `?` constants |
+|---|---|---|---|
+| `s4_daily.py` (+ `run_census.py`, `trade_census.py`) | 247 + 63 + 222 | **0** | the two regexes at `trade_census.py:85, 86` and the label `LEG/?` at `trade_census.py:593` |
+| `s4_compare.py` (+ the same, + `backtesting/evidence.py`) | 294 + 63 + 222 + 43 | **0** | one regex at `s4_compare.py:459`, and the same three |
+| `check_testnet.py` | 142 | **0** | none |
+| the boot (`main.py`, `provenance.py`, `logger.py`, `registry.py`), at the tree and at `45547f1` | 92 / 71 + 144 + 33 + 10 | **0** at both | none |
+| `trade_census.py`, `store_check.py`, `s4_explore.py` (R-DH's other three) | 222; 70; 110 (+ the modules above) | **0** | the same regexes, and `s4_explore.py:67` |
+
+A `?` is printed only as `LEG/?`, the label `trade_census.py` gives a booking whose leg it cannot name; the regexes are never printed. Non-ASCII characters exist in `main.py` (2), `registry.py` (1) and `check_testnet.py` (1) but only inside
+comments or docstrings, which the static check excludes and which are not output.
+
+**What the static check does NOT cover, named so it is not read as covered:** dynamic text. The boot line prints `module_file`, `checkout_root`, `config_path` and `dirty_paths`, which are filesystem paths; `check_testnet.py` prints the venue's
+asset names; the refusal paths print exception and OS error text. Any of these would carry a non-ASCII character if the path, the venue's name or the OS message did. None did here (below), and this machine's paths in the runbook are ASCII, but
+no run can show a program unable to print one. That is the finding (`M5m-579`).
+
+### The runs, each in the runbook's exact form
+
+The form: `<command> | Out-File -Encoding ascii <file>` from Windows PowerShell 5.1, with `$LASTEXITCODE` read at once. The first set is `c2\`, the second (`c2b\`, run afterwards to record the exit status the first set did not keep)
+is `rerun_exit.ps1` (SHA-256 `6f95193c42d6394b20faa4c1b8c097bde1714beab0da142f43fa3a986a33ac87`), with `exits.txt` (SHA-256 `b7c8c219c1fd6d6d4300e8187f4f61c6a3ae8c39b98f698c422b8d4e5a52e345`). The bytes are checked by `check_bytes.py`
+(SHA-256 `de5179c615c3d4099fb650c0479cbee97d4e5eebdf325f0cd378ccef69646ed4`): bytes above 127, a byte order mark, the count of `?`, and the line-ending shape; and where a raw UTF-8 capture of the same command exists (the same command with
+Python's stdout forced to UTF-8 and read as bytes, so nothing converted it), the `?` count of the file against the raw text's, so a `?` the pipe made would show as file `?` above raw `?`.
+
+| Program, form | Exit | Bytes | Above 127 | BOM | `?` | Raw capture |
+|---|---|---|---|---|---|---|
+| the boot, `Set-Location $BT` then `& $PY -m trading_bot strategies \| Out-File ...` (`c2\boot_from_clone.txt`, SHA-256 `60a43b8d70e6a4b687279762f9ac62399de1fe186d0e2ff95b45ed86714b4661`) | 0 | 2,401 | 0 | no | 0 | raw (`boot_from_clone_raw_utf8.txt`, SHA-256 `597b779ea061ee4183464e96b001f8bc5c0587805e8052f94bf6f59b0d625ea6`): 0 non-ASCII, 0 `?`, 2,401 characters |
+| `s4_compare.py` through its real command line over a fixture (`c2\s4_compare_fixture.txt`, SHA-256 `9adce1637cf4f53056a608147e91b212e50bbddb6cecd7d088d8f2d1228fe0f3`) | 0 | 2,151 | 0 | no | 0 | **byte-identical** to the raw UTF-8 capture (same SHA-256), and to the second run's file; equal line for line |
+| `check_testnet.py --symbol BTCUSDT --candidates BTCUSDT,ETHUSDT`, read only (`c2\check_testnet_after_stop.txt`, SHA-256 `153765dd63b77a5049ded34955562c7274c0ec314a96721ad5334c809d21717d`) | 0 | 3,061 | 0 | no | 0 | raw (SHA-256 `5120f8be146835695f33eb25cb2ac79f2c37269b6d96d70116f52d15ab30c71e`): 0 non-ASCII, 0 `?`, 3,061 characters |
+| `s4_daily.py` (`c2\s4_daily_final.txt`, SHA-256 `3f49cf7b407ebddcac9c31754d0e908223afb26975b5b13ecac03f62c5a936a0`) | 0 | 2,793 | 0 | no | 0 | none taken (its text includes the time of the run) |
+| the second set, `c2b\`: the boot, `s4_compare.py`, `s4_daily.py`, `check_testnet.py` | 0, 0, 0, 0 | 2,401; 2,151; 2,793; 3,061 | 0 each | no | 0 each | `s4_compare.txt` SHA-256 `9adce1637cf4f53056a608147e91b212e50bbddb6cecd7d088d8f2d1228fe0f3`, the first set's again; the others differ in a timestamp only and have the first set's sizes |
+
+Every file is CRLF throughout (the pipe's line ending; 32, 46, 55 and 50 lines for the four), as section 63 found for the other three programs. The fixture is `make_fixture.py` (SHA-256 `76c427e088c208c81105a9bf790b87995bd42b99f39117a84a9dea76e3b3045a`):
+a capture (`fixture\live.log`, SHA-256 `948fe74cbf028d5c4663b4c1a0b52616ab5b0691ed25710fcccdab8c95ac2403`) and a run directory (`run.json` SHA-256 `b4be1194d0815230b1376d759ce4facde890a81f536356e97123145b619e02b6`, `trades.csv` SHA-256
+`660637e5275f21a94d6227df34d647abec119e5d6b3248b6ae37f1b5a3e5639e`) in the shapes `tests/unit/test_s4_compare.py` builds, and the Testnet store copy of P124 as `--store`. **Nothing in it is S4 data**; its comparison prints one `[unexplained]` disagreement
+and one excluded entry because it was built to.
+
+**The negative control, so a clean result could have been otherwise.** A native command printing `caf` and an e-acute, piped to `Out-File -Encoding ascii`, gave the bytes `63 61 66 3F 20 6F 6B 0D 0A` (`caf? ok`, `c2\control_nonascii.txt`, SHA-256
+`f6d931df2f54a542d401cb973f9c82a43022798eee322825b958608f500c099e`), while its UTF-8 capture held `63 61 66 C3 A9 ...` (`control_nonascii_raw_utf8.txt`, SHA-256 `f725395bead49e38b7bf844fe91972d828aaaa942d8696b6a06939efaf151c67`). So the pipe does turn a
+non-ASCII character into `?`, the check above would have counted it as a `?` above the raw capture's, and the zeros are a measurement.
+
+### A defect the runs found: the boot is read from the clone
+
+The runbook's step 6 CHECK ran the boot without saying from which directory. The boot reads the LAUNCH directory's config and checkout. Run from the development tree with the clone's interpreter (`c2\boot_from_dev.txt`, SHA-256
+`3c458612c9a31c44f15ec851e5e5bdc9c49b8121ee687be36a34621dfdad88c8`) it printed `verdict=refused`, `refusal_reasons=checkout_dirty=true;...;commits_agree=false;...`, `checkout_root` the DEVELOPMENT tree, `checkout_commit` `df82ebe` against `code_commit`
+`45547f1`, `dirty_count=5` and the development tree's `config_path`. I had predicted exactly this (a different `config_path` and `checkout_root` and a verdict that is not `accepted`). Run from the clone it printed `verdict=accepted`, `install_kind=vcs`,
+`code_intact=true` over 77 files. Corrected in the runbook: `Set-Location $BT` precedes the boot line, with a note (`M5m-578`). Both files hold only ASCII bytes and no `?`.
+
+### Prediction against observation
+
+| Prediction (`predictions_c2.txt`) | Observed |
+|---|---|
+| R1 the boot from the clone: exit 0, 0 above 127, 0 `?`, accepted over 77 files; from the development tree a different verdict | as predicted, both |
+| R2 `s4_daily.py`: exit 0, 0 above 127, 0 `?` | as predicted |
+| R3 `s4_compare.py` over a fixture: exit 0, 0 above 127, 0 `?`, equal to the raw capture | as predicted; byte-identical, not only line for line |
+| R4 `check_testnet.py`: exit 0, **about 516 asset lines**, 0 above 127, 0 `?`, raw counts 0 and 0 | exit 0, 0, 0 and raw 0 and 0 as predicted; **the line count was wrong**: the output is 55 lines, with 27 `free=` lines, because the program prints a bounded listing of 517 non-zero balances (`balances: 517 asset(s) with a non-zero balance`) and not one line per asset. A wrong figure in the prediction, not in the result |
+| the gate for C2: 228 files, mypy 112, 4373 passed and 1 skipped, exit 0; numstat about 130 | recorded in the commit message |
+
+### What this shows, and what it does not
+
+For the four programs the runbook pipes into `Out-File -Encoding ascii` and not covered by section 63, on these inputs: every output file is pure ASCII, has no byte order mark and no `?`, and equals the raw UTF-8 text where one was taken; every command exited 0; and the
+static check finds no non-ASCII character in any string a program prints. The runbook's table rows for these are E.
+It does **not** show that a different input cannot print one: a path, an exception message, an asset name or an OS error is text the programs echo and the source cannot bound. The practical bound is that the runbook's paths, the clone's, the venue's
+current asset names and this machine's messages are ASCII. If an S4 output ever shows a `?` where text was expected, compare it with a raw capture as `check_bytes.py` does before reading the file as evidence. No frozen file was changed.
+
+### Digests of this section's other files
+
+`static_ascii.py`, `check_bytes.py`, `make_fixture.py`, `rerun_exit.ps1` and `runbook_edit.py` (SHA-256 `a66a485d36dfe9e286e1435357fff74dc1acfeec8f0bd2278a0c55f109791968`) are under `F:\trading bot\scratch\p126\`; `runbook_edit.py` is the script that edited the runbook (four
+sites, one asserted match each, LF kept).

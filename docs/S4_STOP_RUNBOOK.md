@@ -276,6 +276,7 @@ backtest needs none); `(Get-FileHash "$BT\config.s4.yaml" -Algorithm SHA256).Has
 (the digest in the pre-registration, section 6, any case); and
 
 ```powershell
+Set-Location $BT
 & $PY -m trading_bot strategies | Out-File -Encoding ascii "$OUT\boot_strategies.txt"
 Select-String -Path "$OUT\boot_strategies.txt" -Pattern 'verdict|install_kind|code_intact|code_commit|checkout_dirty|commits_agree|config_tracked'
 ```
@@ -287,6 +288,11 @@ the console wraps the record at its width, so the fields sit on the following ph
 split across two of them. The file keeps them in order; read them there. The rehearsal's boot read `verdict=accepted`,
 `install_kind=vcs`, `code_intact=true` over 77 files, the S4 commit, `checkout_dirty=false`, `commits_agree=true`,
 `config_tracked=true`.
+
+**Corrected at P126 (R-DJ ran this step):** the boot reads the LAUNCH directory's config and checkout, so it is run from
+`$BT`, which `Set-Location $BT` above does. Run from the development tree with this clone's interpreter it printed
+`verdict=refused` (`checkout_dirty=true`, `commits_agree=false`: the development tree's checkout, not the clone's), and a CHECK
+read there would have looked like a failed install. RUN_LEDGER section 64.
 
 **Step 6b, after step 5** (the junction's target must exist and be the frozen copy):
 
@@ -455,7 +461,7 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 1 | `s4_daily.py` | E | section 58 |
 | 2 | Ctrl+C; the process list; `check_testnet.py` | E / E / E | sections 46, 25 to 26; `CLAUDE.md` C38; sections 40, 46 |
 | 2 | `[DateTime]::UtcNow` | N | |
-| 3 | `s4_daily.py` piped to `Out-File -Encoding ascii` | N | section 58 ran it with a `>` redirect; only the pipe is new (R-DH) |
+| 3 | `s4_daily.py` piped to `Out-File -Encoding ascii` | E | section 64 (exit 0, 2,793 bytes, none above 127, no `?`; it froze one more log set under `scratch\s4`) |
 | 3 | freezing a stopped bot's log, or a rotated one | N | `M5m-534` |
 | 3 | `Select-String -Pattern 'event=engine_stopped ...'` over a capture | R | section 21 (`Select-String` for the same line) |
 | 4 | the recorder run by hand, `--verify-only` | E | sections 37, 40, 43 |
@@ -470,7 +476,8 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 7 | `trading_bot --config config.s4.yaml backtest --start --end` from a clone with a vcs install | E | section 62 (one day, exit 0 in 7 s, `evidence_eligible` true) |
 | 8 | `trade_census.py` over a capture | E | section 58 |
 | 8 | `\| Out-File -Encoding ascii` in place of `>` for `trade_census.py`, `store_check.py` and `s4_explore.py` | E | section 63 (each output equal, line for line, to the earlier output of the same command on the same input; no byte order mark; the exit status kept, including a forced exit 3) |
-| 8 | the same pipe for `s4_compare.py`, `check_testnet.py` and the boot command | N | only the form is new; their outputs are ASCII |
+| 6 | `Set-Location $BT`, then the boot command piped to `Out-File -Encoding ascii` | E | section 64 (from the backtest clone: exit 0, `verdict=accepted`; from the development tree: `verdict=refused`, the defect corrected in step 6) |
+| 8 | the same pipe for `s4_compare.py` (over a fixture, through its real command line) and `check_testnet.py` (read only) | E | section 64 (exit 0 each; none above 127, no `?`; `s4_compare.py`'s file equals the raw UTF-8 text line for line; a `caf\u00e9` control became `caf?`) |
 | 8a | `robocopy /E /COPY:DAT` of a run directory and of `scratch\s4` to an archive, and the SHA-256 comparison with `Compare-Object` | E | section 63 (stand-ins; a changed byte was reported) |
 | 8a | the step on the S4 backtest's run directory and the final captures | N | the evidence does not exist yet |
 | 8 | `s4_compare.py` on real inputs | E | section 62 (a one-day window, exit 0; the figures are exploratory) |
