@@ -5777,3 +5777,36 @@ matched to a placement, 2 placements never booked, no quantity differing from it
 The S4 clone was read and nothing in it written: the log by a read of its bytes, the process list and the task by two read-only queries, the recorder store by reading its newest CSV; the only files created are
 under `scratch\s4`. After the run the clone's `logs` directory still has the mtime `2026-10-14 12:33:40 +0600` it had before it and the same four entries (`.bot.lock` at `2026-10-15 17:17:06`, `.gitkeep`,
 `release.log` at `2026-10-14 12:33:40`, and `trading_bot.log`, the bot's own), so no file was created or removed there (a read of the directory, taken after the run and compared with the listing taken at the start of P122). The bot's own log shows its pass at 06:10:00Z, three seconds before the tool's "now".
+
+## 59. M5m S4: P123's halts, and the facts the stop runbook rests on (P123 C1, R-DB, R-DC)
+
+An observation log, so this section only adds. The runbook is `docs/S4_STOP_RUNBOOK.md`; the rulings are quoted verbatim in `docs/NEXT_MILESTONE.md`'s P123 C1 block.
+
+### Halts
+
+`predictions_halts.txt`, SHA-256 `5bb0d87048e03a86738d106e495e94345eadef799e1ca410dbb145c6fc72b631`, written BEFORE any halt ran (P122's H1 was not, and `M5m-513` recorded it).
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `ac07c44`; `origin/main` `ac07c44` if pushed, else `f9c06a4` and 5 ahead | HEAD `ac07c444b088618db45faca6af07b0925aae429a`, `origin/main` `f9c06a40671536a24df8d3a67ba59657125561d3`: the owner has not pushed, and HEAD is 5 ahead (the prompt's own alternative) |
+| H2, `git status --porcelain` | empty | empty |
+| H3, the gate, bare, to a file | 222 files, mypy 110, 4311 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `f52cd55901d42a00399207db367cd5137380816be34b48ffee8c21feec8a00db`; 4311 passed, 1 skipped in 262.31 s) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 535, gapless, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `247b7dcd7c13d23d2641dc0120f6ca736ebe08cacb34b2f9686f10d54369222a`) |
+
+### The S4 commit against `HEAD`, which decides where the backtest clone is built
+
+MEASURED with `git show <rev>:<path> | sha256sum` and `git diff --stat 45547f1 HEAD -- src`. At `45547f1` and at `HEAD` these are byte-identical (the first 16 hex): `scripts/s4_compare.py` `b8afa603f3b52687`,
+`scripts/trade_census.py` `926bdd4674d7fe9f`, `scripts/run_census.py` `e8ce9d55e39183ac`, `config.s4.yaml` `0f170baefb7b41c8`, `config.yaml` `f9e0d73743667c19`, `docs/S4_PREREGISTRATION.md` `49e4fdbba55a5f40`.
+`src/` is NOT: 13 files, 3,524 insertions and 53 deletions (`backtesting/candidate.py`, `engine.py`, `evidence.py`, `gate.py`, `overrides.py`, `protocol.py`, `readmark.py`, `selection.py`, `config/settings.py`, `main.py` and the
+two strategies and their helpers), among them `478a746` (the research-protocol guard and schema 6) and `79ae42f` (the trend filter). So the backtest clone is built at `45547f10771543b41db42e1cbcb8b5a0a9cf1776`.
+
+### What no run has executed (the runbook's table, in brief)
+
+`grep -n -- '--config' docs/RUN_LEDGER.md` finds no line: no run record names the `--config config.s4.yaml backtest` invocation, and the only backtest of that config is section 40's one-day smoke from the development tree
+(`evidence_eligible` false). No ledger section runs `scripts/s4_compare.py --run`. So an eligible backtest of the Testnet store from a vcs clone, and `s4_compare.py` on real inputs, have never been executed
+(`M5m-539`). The build of a backtest clone at `45547f1`, `store_check.py` on a Testnet store, and the stop of a bot whose log has rotated are executed in related forms only.
+
+### Instruments
+
+`F:\trading bot\scratch\p113\store_check.py` has SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592` today, equal to section 48's. It tolerates a store with only two intervals (it prints `NO MANIFEST` and continues) by
+reading its source; it has not been run on one.

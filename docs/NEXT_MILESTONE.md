@@ -1862,6 +1862,21 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every ruling R-BN to R-CW, S7 recorded as FAIL, the selection, and S4 as the thing M5m waits for.
 
+> **ANNOTATED AT M5m P123 (C1). Two rulings of the project owner, verbatim.** **R-DB:** *"The S4 stop is done from docs/S4_STOP_RUNBOOK.md: stopping the bot, the final freeze and recorder run, the store frozen from the recorder clone by hash, the backtest clone built outside deploy\ with no .env, the backtest of [W, M) through config.s4.yaml, and the frozen comparison, each step with its CHECK, using T0 2026-10-10T06:05:20Z and only procedures already measured on this machine."*
+> **R-DC:** *"scripts/s4_explore.py computes, for a frozen capture, the excluded intervals under the frozen down_intervals and under a corrected rule (from each process's last record to the next process's first closed candle), and the entries each would exclude. Its output is exploratory under the ratified CHOSEN line 5 and never replaces s4_compare.py's result."*
+>
+> **Where each is carried out.** R-DB: `docs/S4_STOP_RUNBOOK.md` (this commit): nine steps and a rehearsal appendix, every PowerShell line one line, each step naming the run that measured its procedure and the commands that no run has executed, with a table of all of them at the end. R-DC: `scripts/s4_explore.py` is C2 of P123 and its first run on a fresh copy of the S4 log is C3. `docs/S4_PREREGISTRATION.md` and `scripts/s4_compare.py` are not edited.
+>
+> **What the runbook found, by content.**
+> 1. **The backtest clone must be at `45547f1`, not `HEAD`.** `git diff --stat 45547f1 HEAD -- src` is 13 files, 3,524 insertions and 53 deletions (the research-protocol guard, run-record schema 6, the trend filter), while `scripts/s4_compare.py`, `scripts/trade_census.py`, `scripts/run_census.py`, `config.yaml`, `config.s4.yaml` and the pre-registration are byte-identical at both. R-AO runs the backtest from the live run's commit.
+> 2. **Two things have never been executed and are where the stop can first fail:** an eligible backtest of `config.s4.yaml` over the recorded Testnet store from a clone with a vcs install (the only run of `config.s4.yaml` was section 40's one-day smoke from the development tree, `evidence_eligible` false), and `scripts/s4_compare.py` on real inputs (its tests and mutation survey are its only runs). The runbook's Appendix A is the owner's way to run both while there is time.
+> 3. **Step 1's cap case is UNRULED.** The comparison window is `[W, M)` with `M` a whole UTC midnight (pre-registration section 4) and the cap `2026-11-14T06:05:20Z` is not one. The runbook stops there and asks; it does not choose `2026-11-14`.
+> 4. **The frozen-store tool is in the scratch area, not the repository:** `F:\trading bot\scratch\p113\store_check.py`, SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592`, measured on the mainnet store only.
+>
+> **CARRIED (`M5m-538`, declared at P123 C1).** *Arming condition:* **whoever first reaches step 1 of `docs/S4_STOP_RUNBOOK.md` with the cap `2026-11-14T06:05:20Z` nearer than the next stop midnight: the owner rules what `M` is at the cap before any backtest of that run.**
+>
+> **What survives:** every ruling R-BN to R-CZ, the pre-registration, and S4 as the thing M5m waits for.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
