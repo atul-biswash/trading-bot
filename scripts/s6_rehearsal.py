@@ -569,7 +569,7 @@ class Rehearsal:
                 "--backtests",
                 "data/backtests",
                 "--out",
-                "docs/research/selection.json",
+                "docs/research/selection.jsonl",
                 "--entries-dir",
                 "docs/research/entries",
             ],
@@ -591,7 +591,7 @@ class Rehearsal:
             "status-lists-the-new-files",
             ["git", "status", "--porcelain"],
             wt,
-            Expect(0, contains=("docs/research/selection.json",)),
+            Expect(0, contains=("docs/research/selection.jsonl",)),
         )
         self.check(
             "status-holds-only-the-new-files",

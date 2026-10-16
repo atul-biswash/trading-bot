@@ -102,7 +102,7 @@ class TestTheSelectionFile:
     def test_it_is_written_with_its_digest_printed_and_holds_the_choice(
         self, heavy: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        target = tmp_path / "selection.json"
+        target = tmp_path / "selection.jsonl"
         assert run("--backtests", heavy, "--protocol", PROTOCOL_FILE, "--out", target) == 0
         data = target.read_bytes()
         printed = capsys.readouterr().out
@@ -132,7 +132,7 @@ class TestTheSelectionFile:
     def test_it_will_not_overwrite_an_existing_selection_file(
         self, heavy: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
     ) -> None:
-        target = tmp_path / "selection.json"
+        target = tmp_path / "selection.jsonl"
         target.write_bytes(b"made earlier\n")
         entries = tmp_path / "entries"
         code = run(
@@ -153,7 +153,7 @@ class TestTheEntries:
     def test_one_pending_entry_per_candidate_bound_by_the_runs_digest(
         self, heavy: Path, tmp_path: Path
     ) -> None:
-        target, entries = tmp_path / "selection.json", tmp_path / "entries"
+        target, entries = tmp_path / "selection.jsonl", tmp_path / "entries"
         code = run(
             "--backtests",
             heavy,

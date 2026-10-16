@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import sys
 from datetime import date
@@ -300,6 +301,7 @@ class FakeChain:
         self.marked = False
         self.dry_run_writes = False
         self.refusal_leaves_a_run = False
+        self.selection_out = "docs/research/selection.jsonl"
         self.done: set[tuple[str, str]] = set()
 
     @staticmethod
@@ -341,7 +343,7 @@ class FakeChain:
                 )
             if self.dirty:
                 return self.ok(
-                    f"?? docs/research/selection.json\n?? docs/research/entries/{ENTRY_OFF}.json\n?? docs/research/entries/{ENTRY_ON}.json\n"
+                    f"?? {self.selection_out}\n?? docs/research/entries/{ENTRY_OFF}.json\n?? docs/research/entries/{ENTRY_ON}.json\n"
                 )
             return self.ok()
         if "commit" in args:
@@ -382,8 +384,9 @@ class FakeChain:
         if "--out" not in args:
             return self.ok(report)
         entries = cwd / "docs" / "research" / "entries"
-        (cwd / "docs" / "research" / "selection.json").write_bytes(b"{}\n")
-        lines = [f"selection file docs/research/selection.json sha256 {'f' * 64} (3 bytes)"]
+        self.selection_out = args[args.index("--out") + 1]
+        (cwd / self.selection_out).write_bytes(b"{}\n")
+        lines = [f"selection file {self.selection_out} sha256 {'f' * 64} (3 bytes)"]
         for entry_id, filtered in ((ENTRY_OFF, False), (ENTRY_ON, True)):
             (entries / f"{entry_id}.json").write_bytes(
                 readmark.entry_bytes(candidate(entry_id, filtered=filtered))
@@ -532,6 +535,19 @@ class TestTheCase:
         assert names.count("sweep") == 1
         assert sum(1 for n in names if n.startswith("oos-") and "records" not in n) == 6
         assert len(chain.done) == 6
+
+    def test_the_selection_file_is_named_jsonl(self, case: str, world: tuple[Path, Path]) -> None:
+        # R-CY (P122): the tool writes JSON Lines, and the rehearsal named the file selection.json at two sites.
+        # The status hop's prediction is read from the hop's own record, because "selection.json" is a substring
+        # of "selection.jsonl": a prediction that kept the old name would still match the listing, and only the
+        # recorded prediction text tells the two apart. No recorded call names the old file as a whole word.
+        rehearsal, chain = make(case, world)
+        rehearsal.go(PROTOCOL_TEXT)
+        written = next(r for r in rehearsal.records if r.name == "select-write")
+        assert written.argv[written.argv.index("--out") + 1] == "docs/research/selection.jsonl"
+        listing = next(r for r in rehearsal.records if r.name == "status-lists-the-new-files")
+        assert "docs/research/selection.jsonl" in listing.expected
+        assert not [t for t in chain.names() if re.search(r"selection\.json\b", t)]
 
     def test_the_junction_is_removed_by_itself_before_the_worktree(
         self, case: str, world: tuple[Path, Path]
