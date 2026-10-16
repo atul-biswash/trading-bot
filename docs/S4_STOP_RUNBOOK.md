@@ -24,6 +24,13 @@ only procedures already measured on this machine."*
 - **CHECK:** what the step prints or what a command returns when the step is right. Each CHECK is its own command,
   and none is piped into a verdict (`CLAUDE.md`, the pipe rule). **Stop and report if a CHECK does not hold.**
 - Every PowerShell line below is ONE line, complete on its own: paste it as it stands.
+- **Every line that writes a file a script later reads uses an explicit ASCII encoding (R-DH):** `| Out-File -Encoding ascii <file>`
+  (or `Set-Content -Encoding ascii`), never the `>` redirect of Windows PowerShell 5.1, which writes a byte order mark or UTF-16
+  (`M5m-563`). The pipe goes into a file, not into a verdict, and `$LASTEXITCODE` still holds the program's own exit status
+  (measured, RUN_LEDGER section 63). One cost: a character that is not ASCII in a program's output would be written as `?`, and
+  every output these programs print is ASCII. The only `>` left in a command block is the angle brackets of a placeholder.
+- **Before any clone is removed after the stop, step 8a archives the evidence (R-DG).** No step of this runbook removes a clone,
+  and the S4 backtest clone is kept until M5m closes.
 - Everything the steps write goes under `F:\trading bot\scratch\s4stop\<M>\` or the frozen store named in step 5,
   never into a clone. **Nothing in the S4 clone `F:\trading bot\deploy\45547f107715` is opened for writing, and no
   step runs any program of it** (its log is read only through `scripts\s4_daily.py`'s share-mode copy).
@@ -106,7 +113,7 @@ press **Ctrl+C once** in the window the S4 `run` is in. Do not close the window 
 [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')
 Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'python' } | Select-Object ProcessId,CommandLine | Format-List
 Set-Location $DEV
-& $DEVPY scripts\check_testnet.py --symbol BTCUSDT --candidates BTCUSDT,ETHUSDT > "$OUT\check_testnet_after_stop.txt"
+& $DEVPY scripts\check_testnet.py --symbol BTCUSDT --candidates BTCUSDT,ETHUSDT | Out-File -Encoding ascii "$OUT\check_testnet_after_stop.txt"
 "exit $LASTEXITCODE"
 ```
 
@@ -126,7 +133,7 @@ writes the capture (the rotated files oldest first, then the active file) with i
 
 ```powershell
 Set-Location $DEV
-& $DEVPY scripts\s4_daily.py > "$OUT\s4_daily_final.txt"
+& $DEVPY scripts\s4_daily.py | Out-File -Encoding ascii "$OUT\s4_daily_final.txt"
 "exit $LASTEXITCODE"
 Get-Content "$OUT\s4_daily_final.txt" | Select-String -Pattern 'capture|alive|last line'
 ```
@@ -177,7 +184,7 @@ also re-freezes the (unchanging) log:
 
 ```powershell
 Set-Location $DEV
-& $DEVPY scripts\s4_daily.py > "$OUT\s4_daily_after_recorder.txt"
+& $DEVPY scripts\s4_daily.py | Out-File -Encoding ascii "$OUT\s4_daily_after_recorder.txt"
 "exit $LASTEXITCODE"
 Get-Content "$OUT\s4_daily_after_recorder.txt" | Select-String -Pattern 'newest bar|capture sha256'
 ```
@@ -203,9 +210,9 @@ prints `NO MANIFEST` for the `1h`, `4h` and `1d` series it does not hold. Nothin
 (Get-FileHash "$DEV\scripts\store_check.py" -Algorithm SHA256).Hash
 robocopy $RSTORE $FROZEN /E /COPY:DAT
 "exit $LASTEXITCODE"
-& $DEVPY "$DEV\scripts\store_check.py" $RSTORE "$OUT\inventory_recorder.jsonl" > "$OUT\store_check_recorder.txt"
+& $DEVPY "$DEV\scripts\store_check.py" $RSTORE "$OUT\inventory_recorder.jsonl" | Out-File -Encoding ascii "$OUT\store_check_recorder.txt"
 "exit $LASTEXITCODE"
-& $DEVPY "$DEV\scripts\store_check.py" $FROZEN "$OUT\inventory_frozen.jsonl" > "$OUT\store_check_frozen.txt"
+& $DEVPY "$DEV\scripts\store_check.py" $FROZEN "$OUT\inventory_frozen.jsonl" | Out-File -Encoding ascii "$OUT\store_check_frozen.txt"
 "exit $LASTEXITCODE"
 (Get-FileHash "$OUT\inventory_recorder.jsonl" -Algorithm SHA256).Hash -eq (Get-FileHash "$OUT\inventory_frozen.jsonl" -Algorithm SHA256).Hash
 Select-String -Path "$OUT\store_check_recorder.txt","$OUT\store_check_frozen.txt" -Pattern 'inventory sha256|verify problems|mismatched|missing / extra|snapshots checked'
@@ -236,9 +243,17 @@ commit with the constraints of an existing venv, and a junction to a frozen stor
 `F:\trading bot\backtest\cf474214a539` (`docs/NEXT_MILESTONE.md`, the P117 C8 block, O1, executed by the owner;
 RUN_LEDGER sections 52 to 54 read its records), the earlier deployment builds of sections 21 and 26 (the same
 `pip install -c` form, `M5l-172`), and the junction through `cmd /c mklink /J`, section 48. **That was at other SHAs. At
-`45547f1` this build has never been executed.** The clone is at the S4 commit because R-AO runs the backtest from the
+`45547f1` this build was executed once, by P124's Appendix A (RUN_LEDGER section 62), and every command exited 0.** The clone is at the S4 commit because R-AO runs the backtest from the
 same commit as the live run: the code of `45547f1` has no research-protocol guard and a different run-record schema
 from `HEAD`, and `scripts\s4_compare.py` and `scripts\trade_census.py` are byte-identical at both.
+
+**THE INSTALL PROCEDURE (R-DH).** `pip install -c <constraints> "binance-trading-bot @ git+file:///<clone>@<SHA>"`: a NON-EDITABLE
+install by commit, built by pip from its own fresh clone of the pinned commit, into the clone's own venv, with the constraints file
+written by `pip freeze` of the sweep clone's venv (minus the bot) in ASCII. **Measured by RUN_LEDGER section 62** (its steps 4 and 5:
+38 constraint lines, `pip install` exit 0, `Successfully built binance-trading-bot`, 39 packages installed, and the boot `accepted`
+with `install_kind=vcs` and `code_intact=true` over 77 files), and in the same form at other SHAs by sections 21, 26 and 52
+(`M5l-172`). An editable install (`pip install -e`) is never the procedure: the boot would read `install_kind=editable` and the
+record would be ineligible, as section 40's smoke run was.
 
 **Step 6a can be done now, before the stop** (about 10 to 20 minutes; the network is needed for `pip` only):
 
@@ -261,7 +276,7 @@ backtest needs none); `(Get-FileHash "$BT\config.s4.yaml" -Algorithm SHA256).Has
 (the digest in the pre-registration, section 6, any case); and
 
 ```powershell
-& $PY -m trading_bot strategies > "$OUT\boot_strategies.txt"
+& $PY -m trading_bot strategies | Out-File -Encoding ascii "$OUT\boot_strategies.txt"
 Select-String -Path "$OUT\boot_strategies.txt" -Pattern 'verdict|install_kind|code_intact|code_commit|checkout_dirty|commits_agree|config_tracked'
 ```
 
@@ -285,10 +300,9 @@ git -C $BT status --porcelain
 CHECK: `Junction`; `True`; and the last prints nothing (`data/` is ignored by git, so the junction leaves the checkout
 clean, which the run record's eligibility requires). Do not copy anything else into the clone.
 
-Never executed: every command of 6a at `45547f1` (executed at other SHAs); `& $SWEEPPY -B -m pip freeze` against the sweep
-clone's venv as the constraints source for this build (O1 used the S5 clone's, `67b7563de683`); the `LinkType` read
-(section 48 checked the junction with Python's `is_junction`); `git -C <clone> status --porcelain` is the P118 rehearsal's
-form.
+Never executed: step 6b (the junction and its `LinkType` read: section 48 checked a junction with Python's `is_junction`, and
+Appendix A copied the store in instead, R-DF). Every command of 6a was executed at `45547f1` by section 62, including the
+sweep clone's venv as the constraints source (O1 had used the S5 clone's, `67b7563de683`).
 
 ## Step 7. The backtest of `[W, M)` through `config.s4.yaml`
 
@@ -335,9 +349,9 @@ Testnet store existed to give it.
 
 ```powershell
 Set-Location $BT
-& $PY scripts\trade_census.py $CAPTURE > "$OUT\trade_census.txt"
+& $PY scripts\trade_census.py $CAPTURE | Out-File -Encoding ascii "$OUT\trade_census.txt"
 "exit $LASTEXITCODE"
-& $PY scripts\s4_compare.py --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" --store $FROZEN > "$OUT\s4_compare.txt"
+& $PY scripts\s4_compare.py --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" --store $FROZEN | Out-File -Encoding ascii "$OUT\s4_compare.txt"
 "exit $LASTEXITCODE"
 ```
 
@@ -350,11 +364,56 @@ The acceptance tests are the pre-registration's section 7 (A gross mean, B count
 owner to those figures; this runbook does not apply them. **Do not edit `scripts\s4_compare.py` or the pre-registration**
 (R-BN): any other reading of the downtime is exploratory under the ratified CHOSEN line 5, and step 9 is where it lives.
 
+## Step 8a. Archive the evidence, before ANY clone is removed (R-DG)
+
+R-DG, verbatim: *"Before any clone is removed after the S4 stop, the S4 backtest's run directory and the frozen captures are copied
+to F:\trading bot\evidence\s4\, outside every clone, and shown equal by SHA-256. The S4 backtest clone is kept until M5m closes."*
+
+**Why:** the rehearsal's removal deleted its run directory with the clone (RUN_LEDGER section 62, `M5m-561`); the digests survived
+and the files did not. **What is copied:** the S4 backtest's run directory (`backtest.log`, `run.json`, `trades.csv`) and EVERY frozen
+capture, which is the whole of `F:\trading bot\scratch\s4` (each daily freeze: its log files, its capture, its sums and its report;
+step 3's final capture is in it). The frozen store (`$FROZEN`) and the step outputs (`$OUT`) are already outside every clone and are
+not copied. **Measured:** `robocopy /E /COPY:DAT` for a directory, sections 48 and 62; the SHA-256 comparison below, RUN_LEDGER
+section 63, on stand-ins (a sweep clone's run directory and the 16 files of `scratch\s4`), with a negative control: a byte added to a
+copied file was reported by `Compare-Object`.
+
+```powershell
+$ARCH = 'F:\trading bot\evidence\s4'
+$RUNNAME = Split-Path $RUN -Leaf
+Test-Path "$ARCH\run\$RUNNAME"
+robocopy $RUN "$ARCH\run\$RUNNAME" /E /COPY:DAT
+"exit $LASTEXITCODE"
+robocopy 'F:\trading bot\scratch\s4' "$ARCH\captures" /E /COPY:DAT
+"exit $LASTEXITCODE"
+$A = Get-ChildItem $RUN -Recurse -File | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.FullName.Substring($RUN.Length) } | Sort-Object
+$B = Get-ChildItem "$ARCH\run\$RUNNAME" -Recurse -File | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.FullName.Substring("$ARCH\run\$RUNNAME".Length) } | Sort-Object
+"run files: $($A.Count) / $($B.Count)"
+Compare-Object $A $B
+$A | Out-File -Encoding ascii "$ARCH\SHA256SUMS-run.txt"
+$CA = Get-ChildItem 'F:\trading bot\scratch\s4' -Recurse -File | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.FullName.Substring('F:\trading bot\scratch\s4'.Length) } | Sort-Object
+$CB = Get-ChildItem "$ARCH\captures" -Recurse -File | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash, $_.FullName.Substring("$ARCH\captures".Length) } | Sort-Object
+"capture files: $($CA.Count) / $($CB.Count)"
+Compare-Object $CA $CB
+$CA | Out-File -Encoding ascii "$ARCH\SHA256SUMS-captures.txt"
+```
+
+CHECK, each its own command: the `Test-Path` line prints `False` (the archive is written once and merged into nothing); both `robocopy`
+exits are below 8 (0 and 1 are the clean ones; the rehearsal read 1, files copied); each `files:` line prints two equal counts, and the
+run directory's is 3; **each `Compare-Object` prints NOTHING** (a difference prints the two hashes with `=>` and `<=`); the two
+`SHA256SUMS-*.txt` files exist. **If a comparison prints a row, copy again and compare again before anything is removed; if it
+still prints one, stop and report.** Then record in step 9 the digests of the two `SHA256SUMS-*.txt` files
+(`(Get-FileHash "$ARCH\SHA256SUMS-run.txt" -Algorithm SHA256).Hash`). The archive directory is not written to again.
+**The S4 backtest clone is NOT removed by this runbook and is kept until M5m closes (R-DG);** every other clone's removal (the
+retired deployment clones, a rehearsal's clone) comes after this step, never before it.
+
+Never executed: the step on the S4 backtest's run directory and the final captures, which do not exist yet.
+
 ## Step 9. Record, and the exploratory downtime analysis
 
 **Record in `docs/RUN_LEDGER.md`** (a new section, nothing above it edited): the stop instant, the capture and its
 digest, the recorder's final bars, the frozen store's inventory digest, the backtest clone's boot line, the run
-directory, `run.json`'s and `trades.csv`'s digests, the two output files' digests, and the arithmetic below.
+directory, `run.json`'s and `trades.csv`'s digests, the two output files' digests, the archive's two `SHA256SUMS-*.txt` digests
+(step 8a), and the arithmetic below.
 
 **The comparable-count arithmetic (R-AZ's 100).** From `s4_compare.txt`: `N_live` is the live bookings with an entry in
 `[W, M)` after the downtime exclusions, listed apart in its diagnosis. Compute: *the census's bookings with an entry in
@@ -369,7 +428,7 @@ exclude. It reads the capture and writes nothing but its output. It is explorato
 
 ```powershell
 Set-Location $DEV
-& $DEVPY scripts\s4_explore.py $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" > "$OUT\s4_explore.txt"
+& $DEVPY scripts\s4_explore.py $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" | Out-File -Encoding ascii "$OUT\s4_explore.txt"
 "exit $LASTEXITCODE"
 ```
 
@@ -396,7 +455,7 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 1 | `s4_daily.py` | E | section 58 |
 | 2 | Ctrl+C; the process list; `check_testnet.py` | E / E / E | sections 46, 25 to 26; `CLAUDE.md` C38; sections 40, 46 |
 | 2 | `[DateTime]::UtcNow` | N | |
-| 3 | `s4_daily.py` with a redirect | E | section 58 |
+| 3 | `s4_daily.py` piped to `Out-File -Encoding ascii` | N | section 58 ran it with a `>` redirect; only the pipe is new (R-DH) |
 | 3 | freezing a stopped bot's log, or a rotated one | N | `M5m-534` |
 | 3 | `Select-String -Pattern 'event=engine_stopped ...'` over a capture | R | section 21 (`Select-String` for the same line) |
 | 4 | the recorder run by hand, `--verify-only` | E | sections 37, 40, 43 |
@@ -410,6 +469,10 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 6b | `mklink /J` to the frozen Testnet store; `LinkType` | R | section 48; NOT executed by Appendix A, which copied the store in and held no junction (R-DF) |
 | 7 | `trading_bot --config config.s4.yaml backtest --start --end` from a clone with a vcs install | E | section 62 (one day, exit 0 in 7 s, `evidence_eligible` true) |
 | 8 | `trade_census.py` over a capture | E | section 58 |
+| 8 | `\| Out-File -Encoding ascii` in place of `>` for `trade_census.py`, `store_check.py` and `s4_explore.py` | E | section 63 (each output equal, line for line, to the earlier output of the same command on the same input; no byte order mark; the exit status kept, including a forced exit 3) |
+| 8 | the same pipe for `s4_compare.py`, `check_testnet.py` and the boot command | N | only the form is new; their outputs are ASCII |
+| 8a | `robocopy /E /COPY:DAT` of a run directory and of `scratch\s4` to an archive, and the SHA-256 comparison with `Compare-Object` | E | section 63 (stand-ins; a changed byte was reported) |
+| 8a | the step on the S4 backtest's run directory and the final captures | N | the evidence does not exist yet |
 | 8 | `s4_compare.py` on real inputs | E | section 62 (a one-day window, exit 0; the figures are exploratory) |
 | 9 | `s4_explore.py` on the final capture | N | one run on a copy, section 60 |
 

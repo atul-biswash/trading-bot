@@ -6100,3 +6100,86 @@ section 7 only to show what the arithmetic looks like, and NOT as S4's result: t
 | `c2\s4_compare.txt` | `8311279bd03e4154ab98d07475b2dbca3399f8a11f0a962a78eb0638232f30a2` |
 | `c2\inventory_recorder.jsonl` and `c2\inventory_copy.jsonl` | `aa575482cd4074fd5362391a394a876634899cb606933061003a2cf2f2944b88` (both) |
 | the backtest's `run.json` / `trades.csv` (deleted with the clone) | `a86a123dcc3c76438ae43d217be6b62188d0503a6874c598ed26e0af456808d6` / `855f7ffe00df06814fb9c7803bca3bc80febe3fda39646f6ed6b27f5c371c222` |
+
+## 63. M5m S4: P125's halts, the runbook's redirects converted (R-DH) and the evidence-archive step tested (R-DG) (P125 C1)
+
+An observation log, so this section only adds. The rulings are quoted verbatim in `docs/NEXT_MILESTONE.md`'s P125 C1 block. Nothing here wrote to a clone, to the venue or to `F:\trading bot\evidence`; every test below
+ran on stand-ins under `F:\trading bot\scratch\p125\` and read, never wrote, the inputs.
+
+### Halts
+
+`predictions_halts.txt`, SHA-256 `570998a37a0a68443559d0d24a10d6a2a717638676838f2f358e4674c90ed2f2`, written before any halt ran.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | HEAD `cef23c7`; `origin/main` `cef23c7` if pushed, else `ac07c44` and 5 ahead | **both `cef23c7acc3c32cd6875539a4eb165d77a569621`**: the owner has pushed (the first H1 this milestone predicted right) |
+| H2, `git status --porcelain` | empty | empty |
+| H3, the gate, bare, to a file | 226 files, mypy 112, 4362 passed and 1 skipped, exit 0 | as predicted (`gate_h3.txt`, SHA-256 `9d893d626ab1d0d5dba168f7aadf50129fbb05ab31f1ed6025ad3a567506ab19`; 268.98 s) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 564, gapless, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `a91c5915884fc2f70909ab356d61ca50375f9e2a7653e0eb5a73d8dbfe7c446c`) |
+
+### Every `>` in the runbook's command blocks, kept or converted
+
+Found by reading each ```` ```powershell ```` block of `docs/S4_STOP_RUNBOOK.md` at `cef23c7` for the character `>` (a Python scan of the blocks, not a grep of the file, so prose is out of it). Ten lines held one; nine were redirects, and **every one
+of the nine is converted**, because every one writes a file that a later step reads (a `Select-String`, a ledger digest, a comparison, or a person reading it back into the record), and the rule is the owner's. Line numbers are at `cef23c7`:
+
+| Line | Command | Output file | Verdict |
+|---|---|---|---|
+| 109 | `check_testnet.py ... > "$OUT\check_testnet_after_stop.txt"` | read into the ledger | **converted** to `\| Out-File -Encoding ascii` |
+| 129 | `s4_daily.py > "$OUT\s4_daily_final.txt"` | read by the `Select-String` on the next lines | **converted** |
+| 180 | `s4_daily.py > "$OUT\s4_daily_after_recorder.txt"` | read by a `Select-String` | **converted** |
+| 206 | `store_check.py ... > "$OUT\store_check_recorder.txt"` | read by a `Select-String` | **converted** |
+| 208 | `store_check.py ... > "$OUT\store_check_frozen.txt"` | read by the same `Select-String` | **converted** |
+| 264 | `trading_bot strategies > "$OUT\boot_strategies.txt"` | read by a `Select-String` | **converted** |
+| 338 | `trade_census.py > "$OUT\trade_census.txt"` | read into the ledger | **converted** |
+| 340 | `s4_compare.py ... > "$OUT\s4_compare.txt"` | read by the owner and by the ledger | **converted** |
+| 372 | `s4_explore.py ... > "$OUT\s4_explore.txt"` | read into the ledger | **converted** |
+| 137 | `$CAPTURE = '...\<the UTC date>\<HHMMSS>Z-capture.log'` | none | **kept: the angle brackets are a placeholder, not a redirect** |
+
+Also kept, with the reason: the one `Set-Content "$env:TEMP\s4_constraints.txt" -Encoding ascii` (step 6) is already an explicit ASCII write and needs no change; the `2>&1` that appears in the step 6 correction is prose describing a form no longer used; the files the scripts
+write themselves (`store_check.py`'s and `s4_daily.py`'s outputs) are written by Python with explicit encodings. After the edit the same scan finds one `>` in a command block, line 144's placeholder, and eleven `Out-File -Encoding ascii` lines: the nine conversions and the two
+`SHA256SUMS-*.txt` manifests of step 8a.
+
+### The conversion, measured
+
+Run from PowerShell with the development venv's interpreter, `... | Out-File -Encoding ascii <file>` (the `\|` form the runbook now holds), then the files read as bytes (`cmp_outputs.py`, `cmp_outputs2.py`):
+
+| Command, on | The earlier output it is compared with | Result |
+|---|---|---|
+| `trade_census.py` over `104103Z-capture.log` | P124's `>` output (`c2\trade_census.txt`: begins `EF BB BF`, 3 non-ASCII bytes) | the new file has **0 non-ASCII bytes, no byte order mark, 168 lines, the longest 165 characters (not wrapped), and equals the old file line for line**; `Set-Content -Encoding ascii` gives the same bytes as `Out-File` (SHA-256 `a2fd21fe40c1013fb1061bac3081356e16be7888a0b9d978ebda272d4f0be01e` for both) |
+| `store_check.py` over the Testnet copy | P124's `out_testnet_tracked.txt` | **byte-identical** (`43fc38755e865a3f9c620424cb705e0ad1f7af18f083e62a16b0405c22a160bf`) |
+| `s4_explore.py` over `065214Z-capture.log` | P123's `c3_explore.txt` | **byte-identical** (`c1407f3c0a0a541fb7b4667c99b8ab4dfcd51bf2e541b110d5f3f1e8694800fe`), 50 lines, the longest 194 characters |
+| a native command that prints `x` and exits 3, piped to `Out-File` | the exit status | `$LASTEXITCODE` reads **3** after the pipe, the file holds `x` and a line ending (3 bytes) |
+
+Not run in the new form, because only the form is new and their outputs are ASCII: `s4_daily.py` (it also freezes the log), `s4_compare.py` (its run directory was removed at P124), `check_testnet.py` (a venue read) and the boot command (it needs a clone). The runbook's table says so.
+
+### The archive step (R-DG), tested
+
+The command block of step 8a was extracted from the runbook by `extract_8a.py` (SHA-256 `f3a7ae8815e4ff5f9115d57d213c72ea46179257f46dd473e1cd224d4f5a7079` for the script it wrote, `step8a_test.ps1`), with only its first line replaced
+(`$ARCH` pointed at `F:\trading bot\scratch\p125\archive_test2` instead of `F:\trading bot\evidence\s4`) and two stand-in lines prepended (`$RUN` a sweep clone's run directory, `20261016...fe368b366f84`, 3 files); the other 16 lines ran **verbatim**,
+with `powershell -File`. Result: `Test-Path` printed `False`; both `robocopy` exits were 1 (files copied); `run files: 3 / 3` and `capture files: 16 / 16`; **both `Compare-Object` printed nothing**; the manifests exist, ASCII with no byte order mark
+(`SHA256SUMS-run.txt` `0fd92f7f18476c3f10fa5155bb3fa942fe2c8f9018f125af47739b97e9a5cf57`, `SHA256SUMS-captures.txt` `2a8acff6399569cf441ad324d77365c04d02095fa181e6abcb32904c817b4806`). A first test of the same commands in a different directory (`archive_test`)
+then **had a byte added to a copied `trades.csv`, and `Compare-Object` printed both hashes with `=>` and `<=`** (the negative control). `F:\trading bot\evidence` was not created or written.
+
+### The install procedure (R-DH)
+
+Named in step 6: `pip install -c <constraints> "binance-trading-bot @ git+file:///<clone>@<SHA>"`, non-editable, with the constraints written by `pip freeze` of the sweep clone's venv in ASCII; measured by section 62 (its steps 4 and 5) and, at other SHAs, by sections 21, 26 and 52.
+
+### The runbook's status table
+
+Rows changed: `s4_daily.py with a redirect` (E) becomes `s4_daily.py piped to Out-File -Encoding ascii` (N: only the pipe is new). Rows added: the `Out-File` pipe for `trade_census.py`, `store_check.py` and `s4_explore.py` (E, this section); the same pipe for `s4_compare.py`,
+`check_testnet.py` and the boot (N); step 8a's `robocopy` and `Compare-Object` on stand-ins (E, this section); step 8a on the S4 evidence (N: it does not exist yet).
+
+### Digests (SHA-256; under `F:\trading bot\scratch\p125\`)
+
+| File | SHA-256 |
+|---|---|
+| `predictions_halts.txt` | `570998a37a0a68443559d0d24a10d6a2a717638676838f2f358e4674c90ed2f2` |
+| `gate_h3.txt` | `9d893d626ab1d0d5dba168f7aadf50129fbb05ab31f1ed6025ad3a567506ab19` |
+| `findings_h4.txt` | `a91c5915884fc2f70909ab356d61ca50375f9e2a7653e0eb5a73d8dbfe7c446c` |
+| `t\census_ascii.txt` and `t\census_setcontent.txt` | `a2fd21fe40c1013fb1061bac3081356e16be7888a0b9d978ebda272d4f0be01e` (both) |
+| `t\store_check_ascii.txt` | `43fc38755e865a3f9c620424cb705e0ad1f7af18f083e62a16b0405c22a160bf` |
+| `t\explore_ascii.txt` | `c1407f3c0a0a541fb7b4667c99b8ab4dfcd51bf2e541b110d5f3f1e8694800fe` |
+| `t\exit3.txt` | `b35e09fa2ced9ebcad9d16336fb961146fe34bfbebc562679da85f8a314c9dca` |
+| `step8a_test.ps1` | `f3a7ae8815e4ff5f9115d57d213c72ea46179257f46dd473e1cd224d4f5a7079` |
+| `archive_test2\SHA256SUMS-run.txt` | `0fd92f7f18476c3f10fa5155bb3fa942fe2c8f9018f125af47739b97e9a5cf57` |
+| `archive_test2\SHA256SUMS-captures.txt` | `2a8acff6399569cf441ad324d77365c04d02095fa181e6abcb32904c817b4806` |

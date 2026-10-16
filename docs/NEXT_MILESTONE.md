@@ -1890,6 +1890,19 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every ruling R-BN to R-DC, the pre-registration, S4 as the thing M5m waits for, and the runbook's other steps.
 
+> **ANNOTATED AT M5m P125 (C1). Two rulings of the project owner, verbatim.** **R-DG:** *"Before any clone is removed after the S4 stop, the S4 backtest's run directory and the frozen captures are copied to F:\trading bot\evidence\s4\, outside every clone, and shown equal by SHA-256. The S4 backtest clone is kept until M5m closes."*
+> **R-DH:** *"Every runbook line that writes a file a script later reads uses an explicit ASCII encoding (Out-File -Encoding ascii or Set-Content -Encoding ascii), never the > redirect of Windows PowerShell 5.1 (M5m-563). The runbook names its install procedure and the run that measured it."*
+>
+> **Where each is carried out.** R-DG: `docs/S4_STOP_RUNBOOK.md` step 8a (new), with its CHECK, before any removal; the runbook removes no clone, and the S4 backtest clone is kept until M5m closes. R-DH: nine `>` redirects in the runbook, every one of them into a file a later step reads, are now `| Out-File -Encoding ascii` (the list, by line, is in the commit message and in `docs/RUN_LEDGER.md` section 63); step 6 names the install procedure, `pip install -c <constraints> "binance-trading-bot @ git+file:///<clone>@<SHA>"`, and `docs/RUN_LEDGER.md` section 62 as the run that measured it. `docs/RUN_LEDGER.md` section 63 records the tests of both on stand-ins.
+>
+> **What stops being true, by content.**
+> 1. **The P124 C2 commit's `M5m-561`** (*"The stop's runbook keeps the backtest clone, so the same loss does not happen there unless it is removed"*) was a hope the tree did not hold: nothing archived the run directory. Step 8a does, and R-DG keeps the clone.
+> 2. **The runbook's step 6 sentence** *"At `45547f1` this build has never been executed"* was annotated at P124 by the table and is now corrected in place; **its `Never executed` paragraph** for 6a is corrected to name only step 6b.
+> 3. **The runbook's `s4_daily.py with a redirect | E | section 58` row** described a `>` form; the command is now a pipe into `Out-File`, and the row says only the pipe is new.
+> 4. **`RUN_LEDGER.md` section 62's finding (c)** (*"PowerShell's > wrote the compare and census outputs with a UTF-8 byte order mark"*) is a record and stands; R-DH is its remedy.
+>
+> **What survives:** every ruling R-BN to R-DF, the pre-registration, and the runbook's other steps.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
