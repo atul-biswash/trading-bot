@@ -21,6 +21,7 @@ import pandas as pd
 import pytest
 
 from tests.integration.credentials import HAS_CREDENTIALS, SKIP_REASON
+from tests.integration.live_bar import assert_last_bar_is_the_live_candle
 from trading_bot.config.settings import get_settings
 from trading_bot.core.enums import TradingMode
 from trading_bot.core.models import Candle
@@ -100,19 +101,20 @@ async def test_testnet_provider_seeds_history_and_extends_it_live(
         assert extended.index.is_unique
 
         if growth == 0:
-            # Replacement path. "Grew by 0" is also what a provider that silently
-            # *dropped* the bar would produce, so prove the replacement actually
-            # replaced: the final row must differ from the one seeding left, and
-            # must equal the candle just delivered.
+            # Replacement path: the bar replaced is the one the seed ended on.
             assert extended.index[-1] == seeded.index[-1], "replaced a different bar"
-            assert not extended.iloc[-1].equals(seeded.iloc[-1]), (
-                "buffer length unchanged and the last row is identical -- the "
-                "re-delivered bar was dropped rather than replacing the seeded one"
-            )
-            assert extended["close"].iloc[-1] == pytest.approx(float(live.close))
         else:
             # Append path: a genuinely new bar, beyond everything seeded.
             assert extended.index[-1] > seeded.index[-1]
             assert extended.iloc[:-1].equals(seeded), "appending disturbed the seeded rows"
+
+        # What holds on BOTH paths (R-DI, M5m-571): the buffer's last bar IS the stream's
+        # closed bar. "Grew by 0" is also what a provider that silently *dropped* the bar
+        # would produce, and that is caught here whenever it matters: the seed's last row
+        # then differs from the delivered candle. An IDENTICAL replacement (the REST seed
+        # was fetched after the bar closed, so it already held the final values) is correct
+        # behaviour, and an earlier assertion that the row must differ from the seeded one
+        # failed on exactly that. See tests/integration/live_bar.py.
+        assert_last_bar_is_the_live_candle(extended, live)
     finally:
         await provider.stop()
