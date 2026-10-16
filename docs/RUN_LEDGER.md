@@ -5629,3 +5629,43 @@ R-CT's wording, *"pid 5224, booted 2026-10-15T11:16:55Z, the open ETHUSDT positi
 | the down span | `08:23:00Z` to `11:16:54Z`, 2:53:54; 175.00 minutes by the frozen `down_intervals` |
 
 Section 55 already carries this; the correction is to the shorthand, which gave the provenance instant as the boot and omitted the previous stop.
+
+## 57. M5m S4 and S6: T0 corrected, the selection file's name, and the daily check (P122, R-CX, R-CY, R-CZ)
+
+An observation log, so this section adds and annotates nothing above it. The rulings are quoted verbatim in `docs/NEXT_MILESTONE.md`'s P122 C1 block (R-CX, R-CY, R-CZ).
+
+### Halts
+
+`predictions_halts.txt`, SHA-256 `390540a87a9446d73475f382856178cee65005ba9cd242b29044cf14fceed775`. **It records a lapse (`M5m-513`):** H1 was run in the same invocation that made the scratch directory, before the file existed, so H1's
+prediction is not independent of its observation. H2 to H4 were predicted before they ran.
+
+| Halt | Predicted | Observed |
+|---|---|---|
+| H1, HEAD and `origin/main` | `f9c06a4` for HEAD; `origin/main` `f9c06a4` if pushed, else `cf47421` and 6 ahead (the prompt's own) | HEAD `f9c06a40671536a24df8d3a67ba59657125561d3`, `origin/main` the same: the owner has pushed (NOT independent, see above) |
+| H2, `git status --porcelain` | empty | empty |
+| H3, the gate, bare, to a file | 218 files, mypy 109, 4244 passed and 1 skipped, exit 0 | as predicted: 4244 passed, 1 skipped in 326.59 s, 339.5 s total (`gate_h3.txt`, SHA-256 `b502e2e59a40648aaefcee58148d19a8d3c5014925641c77705f94830dbdee5a`) |
+| H4, `check_findings.py milestone/M5l..HEAD M5m` | declared 512, distinct 512, max 512, no duplicate, no gap, no cited-not-declared, blockless `934eb45`, exit 1 | as predicted (`findings_h4.txt`, SHA-256 `2c8d469a46bbc0a3d95eb655215880db026fc4079192597d5f1110ed66b2cc91`) |
+
+### T0, measured (`M5m-514`)
+
+The S4 clone's log was copied by a share-mode read (the writer still has the file open) to `F:\trading bot\scratch\p122\explore\trading_bot.log`: 1,068,775 bytes, 4,646 CR bytes (the log is CRLF), SHA-256 `53b1b2e6a73c6595e0a66f2e91de00fae3edd069664dac0ef7545d63c4b6cf08`.
+
+| instrument | result |
+|---|---|
+| `event=boot_provenance` lines | 7: pids 27460 (`2026-10-10T05:58:02Z`), 27176 (`05:58:17Z`), 16076 (`06:05:20Z`), 22304 (`2026-10-12T19:17:36Z`), 3444 (`2026-10-13T07:00:36Z`), 25352 (`2026-10-14T06:34:33Z`), 5224 (`2026-10-15T11:16:55Z`), all `verdict=accepted` |
+| lines `Starting in TESTNET mode` (the line `_cmd_run` logs and `_cmd_strategies` does not) | 5: pids 16076, 22304, 3444, 25352, 5224; **none for 27460 or 27176** (a Python count over the bytes of lines carrying `pid=27460 `, `pid=27176 ` and `pid=16076 `: 0, 0, 1) |
+| the first run boot | pid 16076, `2026-10-10T06:05:20Z` = **T0** (R-AY, the ratified CHOSEN line 1; R-CX) |
+| the cap | T0 + 35 days = `2026-11-14T06:05:20Z` |
+| the earliest stop | the first UTC midnight at or after T0 + 21 days (`2026-10-31T06:05:20Z`) = `2026-11-01T00:00:00Z` |
+
+So `docs/NEXT_MILESTONE.md`'s P121 C3 block and `docs/research/LOG.md` Entry 6 were wrong to derive T0 as `2026-10-10T05:58:02Z`: that is the `strategies` verification boot. The earliest stop they gave was right and the cap was 7 minutes 18 seconds early.
+Both are annotated (the NEXT_MILESTONE block and a note at the end of LOG.md). The pid 3444 boot at `2026-10-13T07:00:36Z` logged an `ERROR` at `07:00:48Z` that a restored record cannot be resolved at boot, so the bot refused; it is a run boot by the instrument above (it logged `Starting in TESTNET mode`) and is listed as one.
+
+### The selection file's name (R-CY, `M5m-515`)
+
+`git grep -n -E "selection\.json\b"` over the tracked tree, before this prompt's commits: `docs/NEXT_MILESTONE.md` 4 lines (three in the P117 C8 block's O4, one in the P121 C3 block, which names the old name on purpose), `docs/RUN_LEDGER.md` 2 lines (section 56), `scripts/s6_rehearsal.py` 2,
+`tests/unit/test_s6_rehearsal.py` 3, `tests/unit/test_s6_select.py` 3. **`docs/research/PROTOCOL.md`, `CLAUDE.md` and `README.md` hold none.** The documents are annotated (NEXT_MILESTONE's O4 commands, by the P122 C1 block; the two ledger lines are records and stand); the script and its tests are C2.
+
+### What this prompt builds
+
+`scripts/s4_daily.py` (R-CZ) is C3, and its first run against the live S4 run is C4, whose output and digests are recorded in a section of their own.

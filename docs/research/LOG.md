@@ -129,3 +129,5 @@ The walk-forward folds, forward trades and return profit factor: `sma_crossover`
 None yet. No variant has been run.
 
 > Annotated at P121 (C3): the sentence above was true when written and has been false since the sweep ran. All 216 variants have been run in sample (Entry 6), a selection was made, and **no candidate entry exists or will be committed**: R-CV rules that entries exist only to bind a read, and no read is made. This section therefore stays empty by ruling and not because nothing has run.
+
+> Annotated at P122 (C1, R-CX): Entry 6's S4 paragraph derives T0 as `2026-10-10T05:58:02Z` (pid 27460) and the cap as `2026-11-14T05:58:02Z`, "DERIVED and not confirmed here". Both are wrong. That instant is pid 27460's `strategies` verification boot, which does not start the clock. T0 is `2026-10-10T06:05:20Z`, the first `boot_provenance` line logged by a `run` (pid 16076), and the cap is `2026-11-14T06:05:20Z`; the earliest stop, `2026-11-01T00:00:00Z`, was right. R-CX is the owner's ruling and `docs/RUN_LEDGER.md` section 57 holds the measurement.

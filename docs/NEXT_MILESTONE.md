@@ -1843,6 +1843,25 @@ takes and the bot did not is a finding about one of them.
 > DERIVED here and not confirmed) the earliest stop is `2026-11-01T00:00:00Z` and the cap `2026-11-14T05:58:02Z`. S4's result is then recorded beside S7's; if S4 fails, the FAIL stands with the backtester's calibration recorded as unconfirmed.
 > **What survives:** every ruling R-BN to R-CT, the 216 variants, O1 to O3 as carried out, the null check, and the three rules for every step.
 
+> **ANNOTATED AT M5m P122 (C1). Three rulings of the project owner, verbatim.** **R-CX:** *"T0 is 2026-10-10T06:05:20Z, the first boot_provenance line logged by run (R-AY and the ratified CHOSEN line 1). 2026-10-10T05:58:02Z was a strategies verification boot. The earliest stop is 2026-11-01T00:00:00Z and the cap is 2026-11-14T06:05:20Z. P121's statement of T0 is annotated."*
+> **R-CY:** *"Every reference to selection.json in scripts and documents is corrected to selection.jsonl, or annotated as superseded where it is a record."* **R-CZ:** *"scripts/s4_daily.py is the owner's daily check for the rest of S4. It is read only, except for freezing log copies outside every clone. It reports, without a verdict: whether the bot process is alive and how old the log's last line is; the recorder task's last result and the newest stored bar per series; every boot since T0 with its pid; the bookings since T0 from a frozen copy through trade_census.py; and the stop rule's arithmetic (days since T0, bookings against 150, earliest stop, cap). It freezes every trading_bot.log* file with its SHA-256 under F:\trading bot\scratch\s4\<UTC date>\ (R-BM)."*
+>
+> **What stops being true, by content.**
+> 1. **The P121 C3 block's** *"if T0 is the first boot's provenance instant (`2026-10-10T05:58:02Z`, pid 27460, DERIVED here and not confirmed) the earliest stop is `2026-11-01T00:00:00Z` and the cap `2026-11-14T05:58:02Z`"* **is false of T0 and of the cap, and the earliest stop it names is right.**
+>    `2026-10-10T05:58:02Z` is pid 27460's `strategies` verification boot, which `docs/S4_PREREGISTRATION.md` section 3 says does not start the clock; T0 is `2026-10-10T06:05:20Z`, the `run` boot of pid 16076, and the cap is `2026-11-14T06:05:20Z`.
+>    MEASURED on a share-mode copy of the S4 clone's log (1,068,775 bytes, SHA-256 `53b1b2e6a73c6595e0a66f2e91de00fae3edd069664dac0ef7545d63c4b6cf08`, copied at P122, the log being still written): `Starting in TESTNET mode`, the line only `run` logs, follows the `boot_provenance` of pid 16076 and of no earlier pid; pids 27460 and 27176 log a banner and a provenance line and nothing of a run.
+>    The P112 C1 block above states T0 correctly, and was right throughout. The same sentence is in `docs/research/LOG.md` Entry 6, annotated there by a note at the end of that file.
+> 2. **The P117 C8 block's O4 commands** (`--out docs\research\selection.json`, `git add docs/research/selection.json docs/research/entries`, and the CHECK line naming `selection.json`) name a file that the tool no longer writes: it writes JSON Lines, and the file is `docs/research/selection.jsonl` (`2e00dcc`, `bdd95e4`).
+>    The block is a record of what O4 would have run, and O4 is NOT TAKEN beyond the selection itself (R-CV, the P121 C3 block); it is annotated here rather than edited. Two mentions of the old name in `docs/RUN_LEDGER.md` section 56 (its H2 row and the note on the seven deleted files) are records of the file as P120 wrote it and stand.
+>    `scripts/s6_rehearsal.py` hard-coded the old name in two places; that is C2 of this prompt.
+>
+> **The daily check.** `scripts/s4_daily.py` (C3 of this prompt) is the owner's, and its first run against the live S4 run is C4. `docs/RUN_LEDGER.md` section 57 holds this prompt's halts and corrections.
+>
+> **CARRIED (`M5m-510`, declared at P121 C3 and carried here as an item with its arming condition).** PROTOCOL.md section 6 step 6 (*"The freeze"*: a pending entry per candidate, pushed before the candidate's first out-of-sample read) describes a step that R-CV leaves uncarried, so the protocol's own text no longer
+> describes what is done. PROTOCOL.md is not edited here and the owner may want it amended. *Arming condition:* **whoever next makes an out-of-sample read of the reserved window, or edits `docs/research/PROTOCOL.md`: the owner is asked first whether section 6 step 6 stands, is amended, or is superseded for that read.**
+>
+> **What survives:** every ruling R-BN to R-CW, S7 recorded as FAIL, the selection, and S4 as the thing M5m waits for.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
