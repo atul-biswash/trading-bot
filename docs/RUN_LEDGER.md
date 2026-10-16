@@ -5810,3 +5810,125 @@ two strategies and their helpers), among them `478a746` (the research-protocol g
 
 `F:\trading bot\scratch\p113\store_check.py` has SHA-256 `2a5b5530f525b69485f13141db1d73692760cb418203d1be4c7defa581827592` today, equal to section 48's. It tolerates a store with only two intervals (it prints `NO MANIFEST` and continues) by
 reading its source; it has not been run on one.
+
+## 60. M5m S4: the first run of scripts/s4_explore.py on a fresh copy of the S4 log, and the comparable-count arithmetic (P123 C3, R-DC)
+
+An observation log, so this section only adds. The tool is `scripts/s4_explore.py` (`d05e8cb`); its output is **exploratory under the ratified CHOSEN line 5 and never replaces `scripts/s4_compare.py`'s result**
+(R-DC). The S4 clone was read through `scripts/s4_daily.py`'s share-mode freeze and nothing in it was written; the run is still going (pid 5224), so there is no `M` and the window is whole days up to the last
+midnight before the copy.
+
+### The copy and the command
+
+`scripts/s4_daily.py` at `2026-10-16T06:52:14Z` (exit 0, nothing on stderr; `c3_s4_daily.txt`, SHA-256 `fb37084eff5c23dad2bfd16254edc8893b79ad1a972c467ea817a64cbcd5915f`) froze the log to
+`F:\trading bot\scratch\s4\2026-10-16\065214Z-trading_bot.log`, 1,083,342 bytes, 4,717 lines, SHA-256 **`3cde3e026c372ca7e90fbb1753f762f48c85fc627ef66ca4cd72a8945c2a2c7d`**, byte-identical to the capture
+(`065214Z-capture.log`, the same digest); its last line is `2026-10-16T06:51:01Z`. (The directory also holds a freeze at `061946Z`, which this prompt did not make.) Then:
+
+```
+.venv\Scripts\python.exe scripts\s4_explore.py "F:\trading bot\scratch\s4\2026-10-16\065214Z-capture.log" --window-start 2026-10-11T00:00:00Z --window-end 2026-10-16T00:00:00Z
+```
+
+Exit 0, nothing on stderr (`c3_explore.txt`, SHA-256 `c1407f3c0a0a541fb7b4667c99b8ab4dfcd51bf2e541b110d5f3f1e8694800fe`, CRLF from the redirect; `065214Z-capture.log` unchanged by it). The header's `sha256` equals the freeze's.
+
+### Predictions against the output
+
+`predictions_c3.txt`, SHA-256 `03ed3832883178ddf3801c800e247a8a55a919c3f9638183945d62c772231b85`, written before the run.
+
+| Figure | Predicted | Observed |
+|---|---|---|
+| processes; trading processes | 7; 4 (16076, 22304, 25352, 5224) | 7; 4, with first closed candles `2026-10-10T06:06:00Z`, `2026-10-12T19:18:00Z`, `2026-10-14T06:35:00Z`, `2026-10-15T11:18:00Z`, exactly as predicted |
+| frozen rule, intervals | 6: 0:00:14, 0:49:43, 15:02:18, 0:06:34, 24:11:12, 2:55:00 | **6, the same six to the second** |
+| **frozen rule, total excluded time** | 43:05:01; 42:15:04 inside the window | **43:05:01; 42:15:04** |
+| corrected rule, intervals | 3: 15:00:17, 23:40:59 (the refused boot 3444 inside it), 2:55:00 | **3, the same three to the second** |
+| **corrected rule, total excluded time** | 41:36:16, all inside the window | **41:36:16, all inside** |
+| entries whose entry bar opens in the window | 57 (range 57 to 59) | **58** (0 bookings with no matched placement) |
+| **entries excluded, frozen rule** | 2: BTCUSDT signals closing `10-12T19:18:59.999` and `10-14T07:10:59.999` | **2, those two** |
+| **entries excluded, corrected rule** | 1: the `10-12T19:18:59.999` entry | **1, that one** |
+| both / only frozen / only corrected | 1 / 1 / 0 | 1 / 1 / 0 |
+| bookings made in the window (booking time) | 57 (16 + 6 + 1 + 15 + 19 by date) | **57** |
+| bookings minus excluded; against 100 | frozen 55, corrected 56, below 100 | **55 and 56, below 100** |
+| entries minus excluded; against 100 | frozen 55 to 57, corrected 56 to 58, below 100 | **56 and 57, below 100** |
+
+Every interval and every count was predicted to the second and the unit; the one miss is the entries figure, **58 against a point estimate of 57** (inside the stated 57 to 59): the baseline's 59 placements in the
+window and "2 never booked" in the whole capture left it open which side of the window those two fell.
+
+### The output, verbatim
+
+```
+==========================================================================
+EXPLORATORY (the ratified CHOSEN line 5): never replaces scripts/s4_compare.py's result
+==========================================================================
+  capture : F:\trading bot\scratch\s4\2026-10-16\065214Z-capture.log
+  bytes   : 1083342
+  lines   : 4717
+  sha256  : 3cde3e026c372ca7e90fbb1753f762f48c85fc627ef66ca4cd72a8945c2a2c7d
+  window  : [2026-10-11T00:00:00Z, 2026-10-16T00:00:00Z)
+
+PROCESSES (7), ordered by first line
+  pid 27460  first 2026-10-10T05:58:02Z  last 2026-10-10T05:58:02Z  engine started none (not a trading process)  first pass none  first closed candle none  clean stop no
+  pid 27176  first 2026-10-10T05:58:16Z  last 2026-10-10T05:58:17Z  engine started none (not a trading process)  first pass none  first closed candle none  clean stop no
+  pid 16076  first 2026-10-10T06:05:20Z  last 2026-10-12T04:17:43Z  engine started 2026-10-10T06:05:24Z  first pass 2026-10-10T06:48:00Z  first closed candle 2026-10-10T06:06:00Z  clean stop yes
+  pid 22304  first 2026-10-12T19:17:35Z  last 2026-10-13T06:54:01Z  engine started 2026-10-12T19:17:49Z  first pass 2026-10-12T19:20:01Z  first closed candle 2026-10-12T19:18:00Z  clean stop no
+  pid 3444   first 2026-10-13T07:00:35Z  last 2026-10-13T07:00:48Z  engine started none (not a trading process)  first pass none  first closed candle none  clean stop no
+  pid 25352  first 2026-10-14T06:34:32Z  last 2026-10-15T08:23:00Z  engine started 2026-10-14T06:34:37Z  first pass 2026-10-14T07:12:00Z  first closed candle 2026-10-14T06:35:00Z  clean stop no
+  pid 5224   first 2026-10-15T11:16:54Z  last 2026-10-16T06:51:01Z  engine started 2026-10-15T11:17:11Z  first pass 2026-10-15T11:18:00Z  first closed candle 2026-10-15T11:18:00Z  clean stop no
+
+EXCLUDED INTERVALS
+frozen rule (down_intervals, imported): 6 interval(s), total 43:05:01, inside the window 42:15:04
+  2026-10-10T05:58:02Z -> 2026-10-10T05:58:16Z  0:00:14  pid 27460 -> pid 27176
+  2026-10-10T05:58:17Z -> 2026-10-10T06:48:00Z  0:49:43  pid 27176 -> pid 16076
+  2026-10-12T04:17:43Z -> 2026-10-12T19:20:01Z  15:02:18  pid 16076 -> pid 22304
+  2026-10-13T06:54:01Z -> 2026-10-13T07:00:35Z  0:06:34  pid 22304 -> pid 3444
+  2026-10-13T07:00:48Z -> 2026-10-14T07:12:00Z  24:11:12  pid 3444 -> pid 25352
+  2026-10-15T08:23:00Z -> 2026-10-15T11:18:00Z  2:55:00  pid 25352 -> pid 5224
+corrected rule (R-DC): 3 interval(s), total 41:36:16, inside the window 41:36:16
+  2026-10-12T04:17:43Z -> 2026-10-12T19:18:00Z  15:00:17  pid 16076 -> pid 22304
+  2026-10-13T06:54:01Z -> 2026-10-14T06:35:00Z  23:40:59  pid 22304 -> pid 25352
+  2026-10-15T08:23:00Z -> 2026-10-15T11:18:00Z  2:55:00  pid 25352 -> pid 5224
+
+ENTRIES whose entry bar opens in the window: 58 (bookings with no matched placement: 0)
+  excluded under the frozen rule    : 2, kept 56
+  excluded under the corrected rule : 1, kept 57
+  excluded under both               : 1
+  only under the frozen rule        : 1
+  only under the corrected rule     : 0
+  (each rule adds the 2 bars after an interval; the live side only)
+    BTCUSDT  signal bar closes 2026-10-12T19:18:59Z  excluded under: frozen and corrected
+    BTCUSDT  signal bar closes 2026-10-14T07:10:59Z  excluded under: frozen
+
+COUNT ARITHMETIC against R-AZ's floor of 100 (facts, not a verdict)
+  bookings made in the window (booking time)  : 57
+  entries in the window                       : 58
+  frozen rule: excluded 2
+    bookings in the window - excluded       : 55  (below 100)
+    entries in the window - excluded        : 56  (below 100)
+  corrected rule: excluded 1
+    bookings in the window - excluded       : 56  (below 100)
+    entries in the window - excluded        : 57  (below 100)
+```
+
+### The comparable-count arithmetic, beside R-AZ's 100
+
+The S4 run is still going and `M` is not set, so every count here is to a date and none is a result. Bookings by booking time on the frozen capture (`grep` over `065214Z-capture.log` for the three booking events): 19 on
+`2026-10-10` (before `W`), **57 in `[2026-10-11, 2026-10-16)`**, 8 on `2026-10-16` so far; 84 in all, which equals `s4_daily.py`'s and `trade_census.py`'s count. So bookings since `W` to the copy are 84 - 19 = **65**.
+
+| Count | Frozen rule | Corrected rule |
+|---|---|---|
+| bookings in `[W, 2026-10-16)` | 57 | 57 |
+| minus entries excluded in the window | 2 | 1 |
+| **comparable bookings in the whole days** | **55** | **56** |
+| bookings since `W` to the copy (65) minus the same excluded entries | **63** | **64** |
+| against R-AZ's 100 | below by 45 and 37 | below by 44 and 36 |
+
+R-AZ's floor of 100 is the figure under which a reset or the cap leaves S4 NOT MEASURED; **neither has occurred**, and the stop is R-AY's (the first UTC midnight at least 21 days after `T0` with at least 150 bookings), not
+the floor's. At the rate the capture shows, 65 bookings in 5.286 days since `W` (12.3 a day), the comparable count would pass 100 in about 3 days if nothing changed (REASONED; one rate, and the entries to be excluded can
+only grow). The two excluded entries are both inside the whole-day window; the second (`10-14T07:10:59`) is excluded by the frozen rule only because it takes the first `reconciliation_pass` of the restarted bot as its
+resume, and that pass came 37 minutes after the bot had begun trading (the corrected rule resumes at the first closed candle, `06:35:00`).
+
+### Digests (SHA-256)
+
+| File (under `F:\trading bot\scratch\p123\` unless named) | SHA-256 |
+|---|---|
+| `predictions_c3.txt` | `03ed3832883178ddf3801c800e247a8a55a919c3f9638183945d62c772231b85` |
+| `c3_s4_daily.txt` | `fb37084eff5c23dad2bfd16254edc8893b79ad1a972c467ea817a64cbcd5915f` |
+| `c3_explore.txt` | `c1407f3c0a0a541fb7b4667c99b8ab4dfcd51bf2e541b110d5f3f1e8694800fe` |
+| `F:\trading bot\scratch\s4\2026-10-16\065214Z-capture.log` | `3cde3e026c372ca7e90fbb1753f762f48c85fc627ef66ca4cd72a8945c2a2c7d` |
