@@ -6323,3 +6323,51 @@ The executing session adds the predictions for the measurements of step 3, with 
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. Items (b) and (c) are the two where the prompt and the executing session differ, and the section that records the measurements (section 66) states which of the two was right.
+
+## 66. M5m S4: the clean stop of pid 14600 at 2026-10-23T08:05:33Z, the latch on order 5431129, and what P128 measured (P128 C3)
+
+An observation log, so this section only adds. The rulings (R-DK to R-DN), the owner's three answers and the full measurements are in `docs/S4_CORRECTION_P128.md` (commit `b3d4f8b`); the predictions are in section 65 (commit `7f63985`). This section records the events themselves. **No restart is recorded here**: R-DN says one is recorded in a later prompt, after it has happened, and none is recorded in the capture below. Every citation of a capture line is by timestamp, not by line number (`M5m-582`).
+
+The capture is `F:\trading bot\scratch\s4\2026-10-23\184839Z-capture.log`, 3,874,511 bytes, SHA-256 `c8fc92ad14babb4569e080b273ca3bd338208d58acb2a21394d076155419a0dc`, the owner's `s4_daily.py` freeze of 2026-10-23T18:48:39Z.
+
+### The stop
+
+| When (UTC) | Process | Line |
+|---|---|---|
+| `2026-10-23T08:05:30Z` | pid 14600 | `Received SIGINT; shutting down gracefully` (`trading_bot.main`) |
+| `2026-10-23T08:05:33Z` | pid 14600 | `Trading engine stopped event=engine_stopped clean_shutdown=True` (`trading_bot.engine.live_engine`), **the last line of the process and of the capture** |
+
+It has the shape of the two earlier clean stops: `2026-10-12T04:17:41Z` SIGINT then `04:17:43Z` stopped (pid 16076), and `2026-10-20T01:34:42Z` SIGINT then `01:34:44Z` stopped (pid 5224). **The cause the owner stated for this stop is NOT SUPPLIED**: the prompt's field was the unfilled placeholder `<OWNER FILLS IN>` and the owner expressed no preference when asked how to record it. The log shows that a SIGINT was delivered and nothing about who sent it or why. The owner may add the cause in a later section.
+
+**The log did not grow after the stop.** The owner's freeze of `2026-10-23T08:05:51Z` (`080551Z-capture.log`) and the freeze of `18:48:39Z` have the same SHA-256, `c8fc92ad14babb4569e080b273ca3bd338208d58acb2a21394d076155419a0dc`, so nothing was logged for the 10 h 43 m between them, and pid 14600 is the last process in the capture. The same directory holds a third freeze, `190521Z-capture.log`, 171 bytes, written at `2026-10-24 01:05` local time; **it was not opened** (P128 reads the one capture it names, and a successor process is the restart R-DN reserves for a later prompt), and neither was any file under the deploy clone.
+
+### The latch on order 5431129 (list 183218)
+
+| | |
+|---|---|
+| placed | `2026-10-21T13:09:00Z`, BTCUSDT, 0.02233000 at a limit of 83833.77000000, stop 82157.10000000, `entry_bar_time` `13:08:59.999Z` (`event=order_placed`; the list id occurs once in the capture, on that line) |
+| first untrusted pass | `2026-10-21T13:11:00Z`, `states="active=1,unknown=1"`: *"BTCUSDT leg SL reports EXPIRED with 0.01041000 executed; the fill PRICE is unmeasured, so this state is refused rather than interpreted; BTCUSDT leg TP was NOT YET QUERIED -- the point-query budget was exhausted before reaching it"* |
+| the state it stayed in | SL `EXPIRED`, `0.01041000` of `0.02233000` executed (**46.6%**); TP `EXPIRED`, `0E-8` executed (the first `close_planned` that read both, at `13:37:59.999Z`, says `sl_status=EXPIRED sl_executed=0.01041000 tp_status=EXPIRED tp_executed=0E-8`) |
+| what the bot did | `exit_book_refused` for order 5431129 **1,702 times**, from `2026-10-21T13:11:00Z` to `2026-10-23T08:04:02Z`; BTCUSDT named in 1,704 `reconciliation_untrusted` lines over the same span; the position never booked |
+| `CLOSE` signals | 33 refused as `close_halted`, the first (`close_planned decision=halt`, *"A partially executed protective leg is UNMEASURED (Q-C section 10) and is never sold against"*) at `2026-10-21T13:37:59.999Z`'s candle, the last `close_halted` line at `2026-10-23T07:05:01Z` |
+| `BUY` signals | 36 refused at `committed_risk_unknown` (32 BTCUSDT, 4 ETHUSDT), the first at `2026-10-21T13:57:00Z`, the last at `2026-10-23T07:10:01Z`; **no order list was placed after `13:09:00Z`** |
+| the other position | ETHUSDT's last open position booked normally at `2026-10-21T19:20:05Z` (`close_booked` order 4857803); after it BTCUSDT was the only position and the passes read `states="unknown=1"`, as the last one, at `2026-10-23T08:04:02Z`, does |
+| the residual | 0.02233000 less 0.01041000 is **0.01192000 BTC** that the ledger holds and the bot would not sell. **That figure is by subtraction; no venue read of the balance was made** (UNMEASURED at the venue) |
+
+The earlier latch of the same kind is ETHUSDT order 1867449 (list 71012), `2026-10-13`, recorded in sections 46 and 49: stop leg 0.0756 of 0.764 executed, a run of 3 h 54 m 59 s of untrusted passes from `02:59:02Z` to pid 22304's last line at `06:54:01Z` with 2 `committed_risk_unknown` refusals, a boot that refused over the record at `07:00:48Z`, and a restart at `2026-10-14T06:34:32Z`.
+
+### What P128 measured, in one table
+
+The three episodes R-DM finds under the owner's reading, and how the predictions fared. The correction file has every column.
+
+| Episode | R-DM interval | Duration | BUY refusals | Predicted by the prompt |
+|---|---|---|---|---|
+| BTCUSDT 2026-10-11 (a `CLOSE` sell that executed partly) | `2026-10-11T16:00:01Z` to `2026-10-12T04:17:43Z` | 12 h 17 m 42 s, of which 11 h 26 m 42 s after the last evidence | 1 | **not an episode: wrong** |
+| ETHUSDT 2026-10-13 (order 1867449) | `2026-10-13T02:59:02Z` to `06:54:01Z` | 3 h 54 m 59 s | 2 | an episode: right; "mostly inside the frozen intervals": **wrong** (overlap 0) |
+| BTCUSDT 2026-10-21 (order 5431129) | `2026-10-21T13:11:00Z` to `2026-10-23T08:05:33Z` | 1 d 18 h 54 m 33 s | 36 | an episode: right |
+
+Prediction (a), **exactly two episodes, was wrong: three**; (b), the 2026-10-11 lines do not qualify, was wrong; (d), the frozen `down_intervals` yields an interval open to the capture's end, was wrong: **it yields none**, and so does `s4_explore.py`'s corrected rule (7 and 4 intervals, nothing after the stop). **Section 65 said this section would state which of the prompt and the executing session was right where they differed, (b) and (c): the executing session was.** It had put about 40% on (b) holding and predicted (c)'s second clause false from the source; both outcomes went its way. Its own other predictions are scored in the correction file, section 4.
+
+### Digests of this section's files
+
+`measure.py` (the first, wrong implementation) `ccc208ec2e480d4b8bea76168dc59d5c354588d0d5aee8c3aa8bfdf72ded706a`, output `2d95a2e6d3c682ad74aa96ee234e7d2feb34beb4c9b9b179338544d4f731fb2b`; `measure2.py` `bca989083897e285264801e5a48f19f45d2a1a8d29783addb66a808b053d78e9`, output `4e8c3952f968c5fc155469fb24a562a8dbb216c600666749d0974d1627ff0d4b`; the `s4_explore.py` run over this capture, `5d261aadccf28578d20c969f865db4ba55604ae454ac5d2069b81ae3130f70b4`, all under `F:\trading bot\scratch\p128\`.
