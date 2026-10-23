@@ -6371,3 +6371,51 @@ Prediction (a), **exactly two episodes, was wrong: three**; (b), the 2026-10-11 
 ### Digests of this section's files
 
 `measure.py` (the first, wrong implementation) `ccc208ec2e480d4b8bea76168dc59d5c354588d0d5aee8c3aa8bfdf72ded706a`, output `2d95a2e6d3c682ad74aa96ee234e7d2feb34beb4c9b9b179338544d4f731fb2b`; `measure2.py` `bca989083897e285264801e5a48f19f45d2a1a8d29783addb66a808b053d78e9`, output `4e8c3952f968c5fc155469fb24a562a8dbb216c600666749d0974d1627ff0d4b`; the `s4_explore.py` run over this capture, `5d261aadccf28578d20c969f865db4ba55604ae454ac5d2069b81ae3130f70b4`, all under `F:\trading bot\scratch\p128\`.
+
+## 67. M5m S4: the owner's restart of 2026-10-23 and boot #7 (pid 20100), with the predictions made before the capture was parsed (P129 C1, then C3)
+
+An observation log, so this section only adds. P129 is a docs-only prompt: R-DO, the P128 episode table re-measured under it, and the record of the restart that P128 left for a later prompt (R-DN). This section is begun in C1 with the halts and the predictions, committed BEFORE any measurement of the capture (R-T), and completed in C3 with the restart's facts; nothing in what C1 writes is altered by C3. R-DO itself is in `docs/S4_CORRECTION_P129.md` (C2).
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `0586f48` | `git rev-parse HEAD` | `0586f48033a68dbb112794efef3dea74e5bcc08d`, the P128 C4 commit; P128's four commits `7f63985`, `b3d4f8b`, `4e1bef9`, `0586f48` are unpushed, as the prompt says |
+| a command would write under `deploy\45547f107715` or call the venue | every command in this prompt | none does. The one access to the deploy clone is the share-mode COPY of `logs\release.log` into scratch that the prompt names (C3): a read, written elsewhere. No socket is opened |
+| a frozen file differs from its digest | `Get-FileHash` | `scripts/s4_compare.py` `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`, `scripts/trade_census.py` `926bdd4674d7fe9fa418fb5e8b67f3d089012255ba8f478492a043fbbe35d9bb`, `config.s4.yaml` `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594` and `docs/S4_PREREGISTRATION.md` `49e4fdbba55a5f407d8db130ebdc6cf68fc13813a101ab7849e4740050c6566f` are unchanged; `docs/S4_CORRECTION_P128.md` is `36327c4abc2900b80f2961541e25d9e5da727fd08a1c6352ef2ac5056b05daa6` and is not edited |
+| the capture's size or SHA-256 differs | `Get-Item` and `Get-FileHash` | `F:\trading bot\scratch\s4\2026-10-23\190521Z-capture.log` is **3,877,171 bytes**, SHA-256 `ea58a17b59f309f5c8963a9c95d7005ca7612813c09dd61475707ff4913feaed`, both equal to the prompt's |
+
+The bare gate before any commit (`gate_before.txt`, SHA-256 `a3db21aaed79cb42f98ee9ae5c46955341a4f752c2f4833831449eb12d05ee29`): ruff check clean, 228 files formatted, mypy 112 source files, 4373 passed and 1 skipped, exit 0, 329.64 s, the tree still clean afterwards.
+
+**No placeholder was left unfilled this time**, and the stop cause is the owner's own words, recorded in C3.
+
+### A correction to section 66, found by the halt check
+
+Section 66, and the C3 commit message of P128, say the freeze `190521Z-capture.log` was **171 bytes** and "tiny". **That was wrong.** The directory listing P128 read was cut to a column range (`cut -c30-120`) that dropped the leading digits of each size, so `3,877,171` read as `171` and `3,874,511` as `511`. The capture is 3,877,171 bytes: 2,660 bytes longer than the `18:48:39Z` freeze (3,874,511), which is the log of the process that booted after the stop. Section 66 stands as the record of what P128 believed; this annotation says what is true. **What survives:** every other figure in section 66, each of which came from a script and not from that listing, and the finding it was attached to (`M5m-607`): the file was not opened in P128. `M5m-610` records the error.
+
+### The predictions
+
+Written before the capture was parsed. **They are not blind, and the record says so:** the halt check above read the capture's size and SHA-256; P128 read the 2026-10-23 capture up to the stop; and R-DO's wording was taken from P128's own script. Where the executing session disagrees with the prompt's wording, both are written.
+
+| | The prompt's prediction | The executing session's prediction, and why |
+|---|---|---|
+| a | under R-DO the 2026-10-11 BTCUSDT episode ends at `2026-10-11T16:54:00Z`, duration 53 m 59 s | **the same, about 80%.** The first pass after the run's start that reported as many positions as the inventory holds and carried no `unknown` count is the `16:54:00Z` pass (`positions=2`, `states="active=2"`), P128's table. What can move it is the inventory: it is built from placements and bookings, and the 2026-10-11 position closed through a path that books nothing, so the inventory may still hold it |
+| b | the ETHUSDT 2026-10-13 and BTCUSDT 2026-10-21 episodes are unchanged from P128 | **unchanged, about 75%.** R-DO breaks a run on `positions` equal to the inventory and no `unknown` count in the states, and does not ask whether the symbol is named. It differs from P128's rule there. A pass in either episode that covered every position and read `diverged` rather than `unknown` would now break it |
+| c | the R-DO union keeps 161 of the 164 live entries in `[2026-10-11, 2026-10-22)`, the same as the frozen rule | **160, one fewer, about 65%.** The BTCUSDT entry whose signal bar closed at `2026-10-11T16:52:59.999Z` is the first of the eight P128 found in R-DM's tail. It lies before `16:54:00Z`, so it is INSIDE the R-DO interval, and the exclusion adds two bars after it. Frozen 3 plus that 1 is 4 excluded, 160 kept. The other seven of P128's eight fall after `16:54:00Z` and are no longer excluded |
+| d | pid 20100 has logged no `reconciliation_untrusted` line | **true, about 90%,** and in fact no `reconciliation_pass` line either: the release removed the BTCUSDT record, no position is open, and a pass is logged only while one is. The capture holds only about 75 seconds of the process |
+
+The executing session adds:
+
+| | Prediction |
+|---|---|
+| e | **Boot #7:** the first lines of pid 20100 in the capture are the banner and a `boot_provenance` line with `verdict=accepted`, `install_kind=vcs`, `code_intact=true`, `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776`, `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true` and `config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, then `Trading engine started: BTCUSDT/1m, ETHUSDT/5m`. The first `boot_provenance` stamp is `2026-10-23T19:04:06Z`, as the prompt says |
+| f | **The 2,660 added bytes are all pid 20100's.** No line of any earlier process is added: the earlier part of the file is byte-identical to the `18:48:39Z` freeze |
+| g | **`release.log`** (550 bytes at the time of P128's listing) names BTCUSDT, the time `2026-10-23T18:56:48Z` and both store digests the prompt gives (`5d2c4cc3...` then `18d97b07...`), and nothing about the sale, which is outside the ledger by design |
+| h | **B recomputed with all three episodes** (the latch days: 1.788 d for 2026-10-21, 0.163 d for 2026-10-13, 0.037 d for 2026-10-11 under R-DO, 1.988 d in all): surplus 30.9 at the whole-span rate and 38.6 at the uptime rate, so `N_live` must reach 309 and 386. With the same rate used for the live entries still to come (8.2 days from `19:05Z` on the 23rd to `M`), the final kept count is about 288 and 320: **FAIL at both rates when each rate is used consistently, by 7% and 17%.** At the whole-span surplus with the uptime rate for the future (309 against 320) it is a narrow pass; a mixed rate has no basis. I therefore agree with "likely FAIL" and do not agree with a flat "FAIL at both" |
+
+| i | **The downtime after the stop, from the source of the two rules:** `down_intervals` takes a process that has logged no pass to have resumed at its FIRST LINE ("never longer than the evidence supports"), so with pid 20100 present and no pass of it in the capture the frozen rule returns **8 intervals**, the new one running from `2026-10-23T08:05:33Z` to pid 20100's first line, about `19:04:0xZ`; and `s4_explore.py`'s corrected rule returns **5**, the new one ending at pid 20100's first closed candle, `2026-10-23T19:05:00Z`. Both grow when the first pass is logged, to that pass |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. Items (a) to (d) are the prompt's, with (c) the one where the executing session disagrees on the number.
