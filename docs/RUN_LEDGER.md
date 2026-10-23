@@ -6276,3 +6276,50 @@ current asset names and this machine's messages are ASCII. If an S4 output ever 
 
 `static_ascii.py`, `check_bytes.py`, `make_fixture.py`, `rerun_exit.ps1` and `runbook_edit.py` (SHA-256 `a66a485d36dfe9e286e1435357fff74dc1acfeec8f0bd2278a0c55f109791968`) are under `F:\trading bot\scratch\p126\`; `runbook_edit.py` is the script that edited the runbook (four
 sites, one asserted match each, LF kept).
+
+## 65. M5m S4: P128's halts and the predictions written before any measurement (P128 C1, R-T)
+
+An observation log, so this section only adds. P128 is a docs-only prompt: the S4 correction rulings R-DK to R-DN, their measurements and their records. This section is committed BEFORE any measurement of the 2026-10-23 capture, as the prompt requires (R-T). The rulings themselves are quoted verbatim in `docs/S4_CORRECTION_P128.md` (C2), and the file name was the owner's answer to a halt (below).
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD differs from `<HEAD>` | the prompt's `<HEAD>` was an unfilled placeholder | HEAD `d6c1c5a84e8361fa54e55f02239183e4fba7dc2f`, equal to `origin/main`; unchanged since P126 C2, the last commit this session made. **The check could not be run as written and was read as "nothing has moved since P126"; the owner is asked to confirm** |
+| a command would write under `deploy\45547f107715` or call the venue | every command below | none does: the only access to `deploy\` was a directory listing of `logs\` (names, sizes, write times; no file opened), and no socket was opened |
+| a frozen file differs from its pre-registered digest | `Get-FileHash` | `scripts/s4_compare.py` `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08` and `scripts/trade_census.py` `926bdd4674d7fe9fa418fb5e8b67f3d089012255ba8f478492a043fbbe35d9bb` equal the pre-registration's section 9; `config.s4.yaml` `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594` equals its section 6; `docs/S4_PREREGISTRATION.md`, `docs/research/PROTOCOL.md` and `scripts/run_census.py` are unmodified from HEAD (the tree is clean; the pre-registration pins no digest for the last) |
+| the reserved window would be read | the reserved window is S7's research window, 2024-01-01 to 2025-04-01 (`docs/research/PROTOCOL.md`) | nothing in P128 reads it |
+| **no R-AO naming convention for a correction file** (the prompt's own halt) | grep of `docs/`, `docs/research/` and the git history for a correction file or a naming rule | **FOUND NONE.** R-AO and the pre-registration's header require only "a NEW file that says what it supersedes"; no earlier correction file exists. **The prompt's halt applied and the session stopped to ask.** The owner answered: `docs/S4_CORRECTION_P128.md` |
+| the owner's stated cause of the `08:05:33Z` stop | the prompt's field was the placeholder `<OWNER FILLS IN>` | **NOT SUPPLIED.** The owner, asked how to record it, expressed no preference; section 66 therefore records "not supplied in P128" and does not guess |
+| R-DM's terms | "unbroken run" and "followed by" have no stated limits | the owner ruled the reading: **an unbroken run is consecutive `reconciliation_untrusted` passes for one symbol with no pass between them that reports that symbol's position active; "followed by" means a refusal logged while that run is still unbroken.** Recorded in the correction file as a reading of R-DM, not a change to it |
+
+The bare gate before any commit (`gate_before.txt`, SHA-256 `f3393bd90a21bcdbe7b5f25c02649434ec9269c764602ad291a04a87c7e1e4f5`): ruff check clean, 228 files formatted, mypy 112 source files, 4373 passed and 1 skipped, exit 0, 485.66 s, the tree still clean afterwards.
+
+The capture is `F:\trading bot\scratch\s4\2026-10-23\184839Z-capture.log`, 3,874,511 bytes, SHA-256 `c8fc92ad14babb4569e080b273ca3bd338208d58acb2a21394d076155419a0dc`: the size and digest both equal the prompt's. **An observation the prompt did not ask for:** the deploy clone's `logs\` directory shows `release.log` written at 2026-10-24 00:56:48 and `trading_bot.log` and `.bot.lock` at 01:05 (the machine's local time, which is UTC+6 by the earlier freezes' file times), after the capture was frozen. That suggests the owner released a record and the bot ran again; **no file was opened and nothing is concluded**, and R-DN says a restart is recorded in a later prompt, after it has happened.
+
+### The predictions
+
+Written before the capture was parsed for episodes. **They are not blind, and the record says so:** P127 read the 2026-10-22 capture for the 2026-10-11, 2026-10-13 and 2026-10-21 episodes, and the code of `down_intervals` and `s4_explore.py`. Items (a) and (b) rest on that read and on the ratified reading of R-DM; items (c) and (d) rest on the source. Where the executing session disagrees with the prompt's wording, both are written.
+
+| | The prompt's prediction | The executing session's prediction, and why |
+|---|---|---|
+| a | exactly two episodes satisfy R-DM (ETH 2026-10-13, BTC 2026-10-21) | **two or three, with two the most likely (about 55%).** The two are certain to be there. The third candidate is the 2026-10-11 BTCUSDT episode, see (b) |
+| b | the 2026-10-11 `committed_risk_unknown` lines do not satisfy R-DM's start condition | **about 40% that this holds.** P127 saw `reconciliation_untrusted` at `16:00:01Z` and `16:20:01Z` and a `committed_risk_unknown` BUY refusal at `16:21:00Z`, with 29 `exit_unbookable` lines to `16:51:01Z` (section 46). P127's listing printed only lines whose text changed, so passes between those two may also carry the untrusted line. If they do, the run is unbroken across the refusal and the episode SATISFIES the start condition. What can break it is one `states="active=1"` pass line logged at `16:20:01Z` after the untrusted line, which the reading counts. The measurement decides |
+| c | the ETH episode from R-DM's start to its process's last line is shorter than 24 hours and lies mostly inside the frozen `down_intervals` | **the first clause true, the second false.** The ETH run starts about `02:59Z` on 2026-10-13 and ends at pid 22304's last line, `06:54:01Z`: about 3 h 55 m, under 24 h. **R-DM ends the interval at the process's last line, which is where the frozen interval begins** (`2026-10-13T06:54:01Z -> 07:00:35Z`, P127's `s4_explore.py` run on the 2026-10-22 capture). The two touch and do not overlap, so I predict the share inside the frozen intervals is **0, and the union is the R-DM span plus the frozen ones**. The frozen exclusion's two-bar tail adds nothing to the overlap, since both tails lie after the same boundary |
+| d | the frozen `down_intervals` rule, applied to a capture whose last process has stopped with no successor, produces an interval open to the end of the capture | **false: it produces no interval at all.** `down_intervals` builds intervals only from `pairwise(order)` of consecutive processes, so a last process with no successor yields none; `s4_explore.py`'s corrected rule is the same `pairwise`. I predict the frozen rule prints the same 7 intervals as for the 2026-10-22 capture (the last ending `2026-10-20T09:38:01Z`) and the corrected rule the same 4, with **nothing from `2026-10-23T08:05:33Z` to the end of the capture**, and no process after pid 14600 in this capture. This is also why R-DM carries its own end rule |
+
+The executing session adds the predictions for the measurements of step 3, with their reasons:
+
+| | Prediction |
+|---|---|
+| e | **BTC episode:** start `2026-10-21T13:11:00Z` (the first untrusted pass, under the ratified reading), end `2026-10-23T08:05:33Z` (the clean-stop line, if it is pid 14600's last), about 42 h 54 m; closed, not open, since the process stopped inside the capture |
+| f | **refusals in that episode:** `committed_risk_unknown` BUY refusals about **30** (21 to `2026-10-22T19:04Z` at 0.70 an hour, plus 13 h more; range 26 to 34); `close_halted` lines about **58** (40 to `17:55:01Z` on the 22nd at 1.3 an hour, plus the same 13 h; range 50 to 66, two lines per refused CLOSE) |
+| g | **protective-leg exits:** 12 booked (`exit_booked`) and 2 partial-expired (orders 1867449 and 5431129), so **2 of 14**, unchanged from the 2026-10-22 capture because no position has booked since `2026-10-21T19:20:05Z` |
+| h | **entries per day in uptime:** about **18** (the seven full days 2026-10-14 to 2026-10-20 booked 16, 19, 21, 19, 20, 17 and 19, mean 18.7; the window's 164 over about 8.9 days of uptime is 18.4); the whole-window figure of 15.6 includes the outages |
+| i | **B's denominator, from the frozen source:** `figures_of` divides `abs(N_bt - N_live)` by `N_live`, where `N_live` is the number of live entries **kept after** `exclude_downtime`, not the booked count and not `N_bt` |
+| j | **log growth while latched:** about **0.98 MB a day** (the capture grew by 529,661 bytes between the 2026-10-22 and 2026-10-23 freezes, over the 13 hours from `2026-10-22T19:05Z` to the stop at `08:05:33Z`) |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. Items (b) and (c) are the two where the prompt and the executing session differ, and the section that records the measurements (section 66) states which of the two was right.
