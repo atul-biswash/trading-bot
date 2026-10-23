@@ -6419,3 +6419,49 @@ The executing session adds:
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. Items (a) to (d) are the prompt's, with (c) the one where the executing session disagrees on the number.
+
+### The restart, every fact cited by timestamp or digest (completed in P129 C3)
+
+The capture is `F:\trading bot\scratch\s4\2026-10-23\190521Z-capture.log`, 3,877,171 bytes, SHA-256 `ea58a17b59f309f5c8963a9c95d7005ca7612813c09dd61475707ff4913feaed`: the `18:48:39Z` freeze (3,874,511 bytes) plus 2,660 bytes that are all pid 20100's. **What is the owner's word and what is the log's is marked on each row**; nothing marked owner-reported was observed here, and no venue call was made.
+
+| When (UTC) | Event | Source |
+|---|---|---|
+| `2026-10-23T08:05:30Z` and `08:05:33Z` | pid 14600: `Received SIGINT; shutting down gracefully`, then `Trading engine stopped event=engine_stopped clean_shutdown=True`, its last line | the capture (section 66) |
+| (before the restart) | **the stop's cause, in the owner's words: *"my pc was up for a long time so wanted to give it some rest ."*** The log shows the SIGINT and not this | owner-reported (the P129 prompt) |
+| between `08:05:33Z` and `18:56:48Z`; the time is not stated | **a venue sale: order 6268354, 0.01192000 BTC, FILLED.** Outside the ledger by design (R-DN); it is in the owner's terminal output and not in the capture. **It is the quantity section 66 computed by subtraction as the unsold remainder of order 5431129** (0.02233000 less 0.01041000), which that section marked UNMEASURED at the venue; it is now owner-reported FILLED for the same figure, and still not read from the venue here | owner-reported |
+| `2026-10-23T18:56:48.017798Z` | `release_position` for BTCUSDT removed `position:tb1-BTCUSDT-1792588139999-0-L`; store SHA-256 `5d2c4cc38158c592c345435aff2d13ba8ac93978ebc69a72d8c0df98a500fa22` before and `18d97b07946e9045b3e26190c3aa372a1af3f9678644cb61272a057c833978ee` after. **The removed id is list 183218's:** the `order_placed` line of `2026-10-21T13:09:00Z` carries `list_client_order_id=tb1-BTCUSDT-1792588139999-0-L` | `release.log`, read by share-mode copy (below); the digests equal the owner's |
+| `2026-10-23T19:04:05Z` | pid 20100's first line (the banner) | the capture |
+| `19:04:06Z` | `Startup provenance accepted event=boot_provenance`: `verdict=accepted`, `refusal_reasons=none`, `unknown_reasons=none`, `install_kind=vcs`, `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776`, `code_intact=true` over 77 files, `module_file` and `checkout_root` under `F:\trading bot\deploy\45547f107715`, `checkout_commit` the same commit, `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true`, `config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`; then `Starting in TESTNET mode` | the capture |
+| `19:04:09Z` | `514 asset(s) are EXCLUDED FROM EQUITY` (`event=boot_assets_excluded`); `Composition root ready: 2 pair(s), 93448.52773900 USDT free` | the capture |
+| `19:04:09Z` and `19:04:10Z` | `Seeded BTCUSDT/1m with 499 closed candle(s)`, `Seeded ETHUSDT/5m with 499 closed candle(s)`, `Market-data provider started for 2 pair(s)`, `Trading engine started: BTCUSDT/1m, ETHUSDT/5m` | the capture |
+| `19:05:00Z` | the capture's last stamped line: `Signal CLOSE ETHUSDT (death cross ...)` and its refusal as `nothing_to_close` (`signal_ts=2026-10-23T19:04:59.999000+00:00`) | the capture |
+
+**Boot #7** counts the `run` boots from `T0`: pids 16076, 22304, 3444 (the refused boot of 2026-10-13), 25352, 5224, 14600 and 20100. The capture holds nine `boot_provenance` lines, the two non-trading boots of 2026-10-10 (pids 27460 and 27176) among them. Pid 20100 has **11 stamped lines, no `reconciliation_pass` and no `reconciliation_untrusted` line**, because no position is open and a pass is logged only while one is. It is 75 seconds of a process still running at the freeze: no stop, no pass, no booking.
+
+**`release.log`.** Read by a share-mode copy, `[System.IO.FileStream]` opened with `FileShare.ReadWrite` and copied to `scratch\p129\release.log.copy`: 550 bytes, SHA-256 `385222100d8f4f5be412bad01d67a61176832e9c49643b9cb04225a8d733de92`, equal in length to the source, whose last write was `2026-10-24 00:56:48` local time (UTC+6, which is `18:56:48Z`, the record's own stamp). Nothing was written under `deploy\`. It holds **two records, not one**: the BTCUSDT release above and an earlier one, **`2026-10-14T06:33:40.530828Z`, ETHUSDT, removing `position:tb1-ETHUSDT-1791858599999-0-L`** (list 71012's id), store SHA-256 `7995924d1a486448c761ca64e92819339ab2b8d884e4046be16fc85c190c8988` before and `7e5c4d4210eece898fdbb1a4cca596a13380b002fc51b3ba0f6747dce311dd7c` after, **52 seconds before pid 25352's first line** at `06:34:32Z`. That is the resolution of the 2026-10-13 episode (sections 46 and 49), so the earlier episode ended the same way as this one.
+
+**The downtime.** It starts at **`2026-10-23T08:05:33Z`**, pid 14600's last line, and ends by the frozen rule at **the first `reconciliation_pass` of pid 20100, which is not yet logged in this capture.** Until a pass is logged `down_intervals` takes the process to have resumed at its first line, so it returns `2026-10-23T08:05:33Z -> 19:04:05Z` (10 h 58 m 32 s) now, and `s4_explore.py`'s corrected rule `-> 19:05:00Z`, pid 20100's first closed candle. **A pass is logged only while a position is open, so the frozen interval will not end at `19:05Z`: it grows to the first pass, which is the first entry's, and over-excludes the hours in which the bot was trading flat.** That is the property R-DC measured on earlier restarts and is not new. From the stop to the release is 10 h 51 m 15 s, and from the release to pid 20100's first line 7 m 17 s.
+
+### The predictions scored (section 67, commit `ed750f6`)
+
+| | Predicted | Observed |
+|---|---|---|
+| a | the 2026-10-11 episode ends at `16:54:00Z`, 53 m 59 s (the prompt; the executing session about 80%) | **right**: `16:54:00Z`, 53 m 59 s |
+| b | the ETHUSDT and 2026-10-21 episodes are unchanged (the prompt; about 75%) | **right**: identical starts, ends and counts |
+| c | 161 kept (the prompt); **160** (the executing session, about 65%) | **160. The prompt was wrong, the executing session right.** The BTCUSDT entry with signal bar `2026-10-11T16:52:59.999Z` is inside R-DO's interval |
+| d | no `reconciliation_untrusted` line in pid 20100 (the prompt); and no pass (the executing session) | **right on both**: 0 and 0 |
+| e | the `boot_provenance` fields and the engine-started line | **every field as predicted**; the stamp `19:04:06Z` as the prompt says |
+| f | the 2,660 added bytes are pid 20100's; the earlier bytes equal the `18:48:39Z` freeze | **right**: the first 3,874,511 bytes are equal |
+| g | `release.log` names BTCUSDT, `18:56:48Z` and both digests | **right, and it holds a second record I had not predicted** (the 2026-10-14 ETHUSDT release) |
+| h | B recomputed fails at both rates when each is used consistently, and a mixed rate is a narrow pass | **as predicted**: 289 against 309 (-6.7%), 320 against 386 (-17.0%), mixed 320 against 309 (+3.6%) |
+| i | 8 frozen intervals, the new one ending at pid 20100's first line; 5 corrected, the new one ending at its first closed candle | **right**: `19:04:05Z` and `19:05:00Z` |
+
+None of the executing session's predictions missed, and the prompt's (c) did (161 against 160). That is not a measure of skill: (a), (b), (e), (f) and (i) were read off P128's script, the source and the halt check.
+
+### Resolved: the size of the freeze section 66 called "171 bytes"
+
+`Get-Item` at the halt check: 3,877,171 bytes, SHA-256 `ea58a17b59f309f5c8963a9c95d7005ca7612813c09dd61475707ff4913feaed`. Section 66 and the P128 C3 message are annotated in the first half of this section and not edited.
+
+### Digests of this section's files
+
+`measure3.py` `cf0c4a11f5927a3a89bf871b6af3fd9539bd12c528bcf8b7b745978529ccd82c`, its output `eb4f49ab34b42c4fced3af9c0642828485d88c80737512b35c7a459e4821c7b6`, `release.log.copy` `385222100d8f4f5be412bad01d67a61176832e9c49643b9cb04225a8d733de92`, `gate_before.txt` `a3db21aaed79cb42f98ee9ae5c46955341a4f752c2f4833831449eb12d05ee29`, all under `F:\trading bot\scratch\p129\`.
