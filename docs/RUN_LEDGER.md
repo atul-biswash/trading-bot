@@ -7235,3 +7235,45 @@ An observation log, so this section only adds. P136 closes the six gaps section 
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
+
+### The survey's predictions for the closed gaps (P136 C4), written before the survey is run
+
+Added in the commit that follows the fix (`e0c3e1a`, gate green: 4515 passed) and the tests (`e9aa993`, gate green: 4527 passed, 232 files formatted, mypy over 114 source files, credentialed); nothing above is edited. The tests landed as twelve, not the nine predicted: the three beyond are named in `e9aa993`'s message and predicted here. The survey is the P130 harness in a throwaway worktree outside the repository, with import proof, an unmutated baseline and SHA-equal restores; FEWER halts it, MORE is recorded.
+
+#### The new tests, by short name (all `tests/unit/test_s4_wick_annotate.py`)
+
+| | Test |
+|---|---|
+| G1a, G1b | `TestTheSymbolHandedToTheStore`: an ETHUSDT entry reads ETHUSDT's bars and not BTCUSDT's; a BTCUSDT wick in the same minute does not widen an ETHUSDT entry |
+| G2a, G2b | `TestTheFiveMinuteExitBar`: a wide bar at 22:34 is inside a 5m exit bar ending 22:35; one opening at 22:35 is outside |
+| G3a, G3b | `TestE2AndTheFrozenDowntime`: an entry inside a downtime is excluded from E2 as the wrapper excludes it; the primary excludes the downtime and not the latch |
+| G4 | `TestALiveEntryOpenAtM`: a live booking with no exit instant runs to the window end |
+| G5a, G5b | `TestANaiveInstant`: the census refuses a naive instant at parse; a naive exit instant is refused and not compared |
+| G6 | `TestACauseOutsideTheClosedList`: it gets a count line of its own |
+| G7a, G7b | `TestAStoreError`: a store read error makes the run an input error and prints no row; the reader raises on a store error and is unknown only without a store |
+
+The 52 older tests keep the short names of section 72 (W1 to I9).
+
+#### What the survey runs
+
+54 mutations of `scripts/s4_wick_annotate.py`: the 52 of section 72 with m43 re-anchored on the fixed code (one byte-exact replacement of the `except HistoricalDataError as exc:` block by `except HistoricalDataError:` and `return []`), plus m59 (the same block returns `None`) and m60 (an absent store reads as an empty list and not `None`). Each is one replacement with exactly one match, asserted by the spec writer.
+
+| Label | The break | Predicted kills |
+|---|---|---|
+| m16 | the naive-instant guard is removed | G5b |
+| m28 | a cause outside the closed list gets no count line | G6 |
+| m42 | E2's union leaves out the frozen downtime | G3a |
+| m43 | a store error returns an empty list | G7a, G7b |
+| m54 | the live open-at-M end is the window start | G4 |
+| m57 | the live timeframe is always one minute | G2a |
+| m58 | the store is asked for BTCUSDT whatever the pair | G1a, G1b, G2a |
+| m59 | a store error returns `None` | G7a, G7b |
+| m60 | an absent store reads as an empty list | G7b |
+
+**Prediction c, the other 45 mutations:** each is predicted to be killed by exactly the OLD tests section 72's table names for it, unchanged. The new tests are real end-to-end and unit tests, so they are expected to fail under many of those mutations too; those extra kills are **not predicted test by test**, are recorded as MORE, and are not a violation. The property being tested is that no old test stops failing where it did (FEWER), and the completion checks that every test beyond a prediction is one of the twelve new ones.
+
+**Abstentions declared in advance.** G5a is predicted to be killed by none of the nine mutations above: the census, not the tool, refuses a naive instant, and no mutation of the tool changes the census. G2b and G3b are predicted to be killed by none of the nine: a bar at 22:35 is outside under every reading the nine produce, and the primary does not use E2's union. The four older tests that section 72 reported as killed by no mutation (H3, X7, I1, I9) stay unkilled, and none of the nine reaches them.
+
+#### The mechanics re-check
+
+After the fix the P131 rehearsal's three analyses are re-run read-only on the same inputs, with the rehearsal clone's interpreter from the development tree's script path: 19, 11 and 19 rows, exit 0, the two `wide=yes` rows unchanged and output digests equal to section 72's, as predicted in section 73 (e).
