@@ -46,6 +46,7 @@ from trading_bot.data.historical import (
     month_file,
     write_month,
 )
+from trading_bot.strategies.registry import create_strategy
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
@@ -333,8 +334,13 @@ class TestWhenTheStoreCannotBeRead:
 
 
 def prefix_events(candles: Sequence[Candle], name: str, *, enforce_gaps: bool) -> int:
-    """Entry events when the strategy is handed the WHOLE prefix at every bar, nothing trimmed."""
-    strategy = n3._strategy(name, enforce_gaps=enforce_gaps)
+    """Entry events when the strategy is handed the WHOLE prefix at every bar, nothing trimmed.
+
+    The strategy is built here, through the registry, and not through the script's ``_strategy``:
+    an oracle that shares the seam under test agrees with a mutation of it (``n15`` of P142's
+    survey dropped the gap flag in ``_strategy`` and five of these tests did not notice).
+    """
+    strategy = create_strategy(name, enforce_gaps=enforce_gaps)
     frame = n3._build_frame(candles)
     found = 0
     for i in range(len(candles)):
