@@ -6756,3 +6756,57 @@ An observation log, so this section only adds. P131 rehearses steps 6 to 7b of `
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The step is marked E in the runbook's table for **mechanics only**; the real-input run stays at the stop.
+
+### Completion (P131 C3): the commands, the predictions scored, and what the rehearsal found
+
+Added in the commit that completes this section; nothing above is edited. The rehearsal ran on 2026-10-24 (the run directory's own stamp is `20261024T043428Z`), after the predictions of commit `908fe9f`, from PowerShell as the runbook gives its commands, with the variables of `scratch\p131\vars.ps1` (`$M = 2026-10-09`, `$W = 2026-10-08`, `$BT = F:\trading bot\backtest\rehearsal-45547f107715`, `$FROZEN = F:\trading bot\store\testnet-s4-rehearsal-2026-10-09`, `$OUT = F:\trading bot\scratch\s4stop\rehearsal-2026-10-09`). **Every figure below is EXPLORATORY, rehearses mechanics, and decides nothing about S4.** Nothing was opened under `deploy\`, no venue call was made, and the capture was the frozen `scratch\s4\2026-10-23\190521Z-capture.log` copied through a share-mode stream into `$OUT`, its SHA-256 equal before and after.
+
+#### The commands
+
+Output digests are of the files in `$OUT`, listed with their sizes in `$OUT\SHA256SUMS.txt` (SHA-256 `d5d34c0bf6a0c178518f0f4bd9610289b08d07b0b7ded6b83fae5c622b6d12e2`). A command whose time reads "not timed" was a trivial read; the two marked "re-timed" were run again afterwards, read-only, on the frozen copy, to give R-DQ a time.
+
+| # | Step | Command (abridged) | Exit | Wall | Output file and SHA-256 |
+|---|---|---|---|---|---|
+| 1 | 0 | `$OUT` created; `Test-Path $BT` | -; False | - | - |
+| 2 | 6a | `git clone https://github.com/atul-biswash/trading-bot.git $BT` | 0 | 6.04 s | `git_clone.txt` `610171492b812f6a761467b83c10d81d7cddc33e377d3a9d7e8e12e37b402965` |
+| 3 | 6a | `git -C $BT checkout --detach 45547f10771543b41db42e1cbcb8b5a0a9cf1776`; `rev-parse HEAD`; `status --porcelain` | 0 | 0.16 s | `git_checkout.txt` `7aa7ed6fd2519449c46a4dcf730791fd078fc73aff4fe3218b8fb6a3b938e99d`; `rev-parse` the SHA, status empty |
+| 4 | 6a | `python -m venv "$BT\.venv"` (the WindowsApps Python 3.12) | 0 | 8.43 s | - |
+| 5 | 6a | `pip freeze` of the sweep clone's venv, minus the bot, to the constraints file | 0 | 4.97 s | `s4_constraints.txt` `f76063d0cb5e1101f861126a57f635586eb1a73e9b75b9f3cd366739fe728f00` (38 lines) |
+| 6 | 6a | `pip install -c <constraints> "binance-trading-bot @ git+file:///F:/trading%20bot/backtest/rehearsal-45547f107715@<SHA>"` | 0 | 61.17 s | `pip_install.txt` `6774c2148707747cfe2e12c437e4e8a0d2315cddb720897b46d46188137d98b8`; `Successfully built binance-trading-bot` |
+| 7 | 6a CHECKs | `python --version`; `Test-Path .env`; `Get-FileHash config.s4.yaml`; `git status --porcelain` | -; -; -; - | not timed | `Python 3.12.10`; False; `0F170BAEFB7B41C87D9F3BC5220A484CE9FA20B0A62758E15CB485E9B0712594`; empty |
+| 8 | 6a boot | `Set-Location $BT; python -m trading_bot strategies \| Out-File -Encoding ascii` | 0 | 5.97 s | `boot_strategies.txt` `a11be7e7a1853d2fa51daf4f05a8cf3904f0045ad8ac52051682db56267635c1`; the old `Select-String` CHECK printed fragments (below); the joined form printed seven `True`; `status` empty after the boot |
+| 9 | 5 | `robocopy $RSTORE $FROZEN /E /COPY:DAT \| Out-File -Encoding ascii` | 1 | 0.40 s | `robocopy_store.txt` `65a91d6f44bd30520b4d6115c0b65de0e9e4e78797022952fec308dfa9417154`; 17 of 17 files, 9 dirs, 5.45 MB, 0 failed |
+| 10 | 5 | `store_check.py` on the recorder's store, then on the copy | 0; 0 | not timed; re-timed 1.05 s | `store_check_recorder.txt` `dc3ab922a4ee0c8acd58bb2e7de297e8ca9a86a83eb76216433e49ec81716bf0`, `store_check_frozen.txt` `011bda3cb18c5885b0f40ee36a85c6462638057544611e482fccc6fc44238be9`; **`inventory sha256` `6b8d8f18777253d67e822787af07c55a30128fb5f479c1c5887b2025dffed449` on both**, the two inventory files equal (`fb85e40692ce7ca2c7cb1901c88b307d7e1a01fc66811d33019a1c29d7e8aa12`), 0 mismatched, 0 missing or extra, 0 verify problems, 2 snapshots 0 mismatched |
+| 11 | 5 | `record_testnet_klines.py --root $FROZEN --verify-only` from the recorder clone | 0 | not timed; re-timed 1.08 s | `verify_only.txt` `cb31a570139bf50badb99fac29db1e304aaadb92de09388de3e518d8ad864717`: BTCUSDT and ETHUSDT 1m 23,853 bars `2026-10-07T10:32Z..2026-10-24T00:04Z`, 5m 4,771 bars, 0 gaps, 0 problems; the recorder clone's `git status` empty |
+| 12 | 6b | `cmd /c mklink /J "$BT\data\historical_testnet" $FROZEN`; `LinkType`; `Test-Path BTCUSDT\1m`; `git status` | 0 | not timed | `Junction`; True; empty; `data\` holds `historical_testnet` and `.gitkeep` |
+| 13 | 7 | `python -m trading_bot --config config.s4.yaml backtest --start 2026-10-08 --end 2026-10-09` | 0 | 6.46 s (the run's own `wall_seconds` 3.312) | run directory `20261024T043428583000Z-3087d72cd7dc`: `backtest.log` `14ae083a5b52dd92b690658ece06f7a9f81add1312a7a4f90215efe4ce93eb33` (27,749 bytes), `run.json` `5dea4f1fe51c2cb5610e6673e3bc330cab09e1e337533d0bc4f6d8412d0ca1d7` (12,546), `trades.csv` `248bec9688c8c62b6a39ed6f9cd9f806a594fde9dfd3026dd0fa3428a8b69b5d` (6,927); `"evidence_eligible": true`; `status` empty; `Count` 1; 19 trades |
+| 14 | 8 | `s4_compare.py --run $RUN --capture $CAPTURE --window-start 2026-10-08T00:00:00Z --window-end 2026-10-09T00:00:00Z --store $FROZEN \| Out-File -Encoding ascii` (the primary) | 0 | 0.96 s | `s4_compare.txt` `28474ecc31b347ba6f17cbf74a2e336a4f67305d8a47fea370ecfefd92139125` |
+| 15 | 7b | the same with `--window-end 2026-10-08T13:09:00Z` (E1) | 0 | 0.80 s | `s4_compare_e1.txt` `eb365064124b6327efe1e6f57cb1b451699029551553103c06e4868cf501cd71`; backtest entries 11, live 0 |
+| 16 | 7b | `git -C $DEV status --porcelain -- scripts`; `Get-FileHash` of `s4_compare.py` and `s4_latch_compare.py`; `git -C $DEV rev-parse HEAD` | -; -; - | not timed | empty; `B8AFA603F3B52687AEB8F62F4D6340D77FD31B893261A12022794965E5C3AF08`; `59BB70C3C40B0377F8EBF88520C67FA231F5F255E947D297AD2BB32C3E125AA7`; the development tree at `908fe9f` |
+| 17 | 7b | `& $PY "$DEV\scripts\s4_latch_compare.py"` with the primary's arguments (E2) | 0 | 1.10 s | `s4_latch_compare.txt` `0d6bf3db4986c1410fe9af7bfdbf282e2a77950cbe52904b98d9234c86f04b84`; `Select-String -SimpleMatch 'EXPLORATORY E2 (R-DL)'` printed the header |
+| 18 | 7b | `$PY -c "import trading_bot, s4_latch_compare ..."` with the script directory on the path | 0 | not timed | `trading_bot.__file__` is `F:\trading bot\backtest\rehearsal-45547f107715\.venv\Lib\site-packages\trading_bot\__init__.py`; `TRUSTED_STATES` `['absent_by_design', 'active']` |
+
+**The primary, E1 and E2 agree where they should.** The three files carry `capture sha256` `ea58a17b59f309f5c8963a9c95d7005ca7612813c09dd61475707ff4913feaed` and `live entries booked : 0`; E2's `run.json sha256` is the primary's. A line diff of the primary against E2 shows only the two downtime lines E2 merges into its latch interval (`pid 22304 -> pid 3444` and `pid 14600 -> pid 20100`) and the latch header. The primary prints `n/a` for the live mean, its interval and the reproduction (`0 of 0 = n/a`), `difference 19 = n/a of live`, and does not divide by zero.
+
+#### The predictions scored
+
+| | Result |
+|---|---|
+| a | **Held, with one CHECK that cannot be met as written.** Every command exited as its CHECK states (row 9's `robocopy` exit 1 is a clean one). The step 6 boot CHECK read off the file could not be matched: see finding `M5m-657` and the runbook commit `aead848` |
+| b | **Held.** The record's `evidence_eligible` is exactly `true`, and the wrapper's direct call to `require_evidence_eligible` and the frozen loader's both passed (E2 exited 0) |
+| c | **Held.** Zero live entries in the primary, E1 and E2, none crashed, all nine live boot lines read `accepted`, `live bookings with no placement` 0 |
+| d | **Held** (row 18) |
+| e | **Held.** 19 trades (17 to 21), 1,440 BTCUSDT 1m and 288 ETHUSDT 5m bars served |
+| f | **Held.** The pairs' last bars open `2026-10-08T23:59:00Z` (1m) and `23:55:00Z` (5m), and the stream delivered 1,728 bars (1,440 + 288); nothing at or after T0 was read, though the store copy holds bars to `2026-10-24T00:04Z` on disk |
+| g | **One miss, low.** Clone 6 s (under 1 minute), venv 8 s (under 1 minute), the backtest 6.5 s (under 60 s) and each comparison about 1 s (under 60 s) held; `pip install` took **61 s, against 2 to 6 minutes predicted** |
+| h | **Held, by a defect that was not among the candidates.** One runbook defect was found, the boot CHECK; none of the three candidates named (the junction needing `$BT\data`, E1's store argument, the `git status` of the development tree) was a defect |
+
+The risk named in advance, that the scheduled recorder appends between the copy and the second `store_check`, did not occur: the two inventory digests are equal.
+
+#### What the rehearsal found about the procedure
+
+1. **One runbook defect, the step 6 boot CHECK** (`M5m-657`): fixed in the runbook at `aead848`.
+2. **Everything else ran as written**, including step 6b's junction, which had never been executed (`M5m-659`), and step 7b as one command line from the clone's interpreter (`M5m-661`).
+3. **The frozen comparison and the wrapper handle a window with no live entry** (`M5m-660`). The real stop will not exercise this.
+4. **State left behind, for the owner:** the rehearsal clone `F:\trading bot\backtest\rehearsal-45547f107715` with its venv and its run directory, the junction in it, the store copy `F:\trading bot\store\testnet-s4-rehearsal-2026-10-09` (5.45 MB), and `$OUT`. None is under `deploy\`. Nothing was removed. The runbook's Appendix A says to retire the clone by renaming it; the real `$BT` is unbuilt (`M5m-664`).
+5. **E2 prints the capture's whole latch history regardless of the window** (the three episodes of 2026-10-11, 2026-10-13 and 2026-10-21 appear for a window on 2026-10-08), because the episodes are derived from the capture and not clipped to the window; the exclusion matters only where an interval overlaps the window, and this is the design of P130 and not a defect. Recorded so the next reader of an E2 file does not take the list for the window's.
