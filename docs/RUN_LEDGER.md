@@ -6810,3 +6810,39 @@ The risk named in advance, that the scheduled recorder appends between the copy 
 3. **The frozen comparison and the wrapper handle a window with no live entry** (`M5m-660`). The real stop will not exercise this.
 4. **State left behind, for the owner:** the rehearsal clone `F:\trading bot\backtest\rehearsal-45547f107715` with its venv and its run directory, the junction in it, the store copy `F:\trading bot\store\testnet-s4-rehearsal-2026-10-09` (5.45 MB), and `$OUT`. None is under `deploy\`. Nothing was removed. The runbook's Appendix A says to retire the clone by renaming it; the real `$BT` is unbuilt (`M5m-664`).
 5. **E2 prints the capture's whole latch history regardless of the window** (the three episodes of 2026-10-11, 2026-10-13 and 2026-10-21 appear for a window on 2026-10-08), because the episodes are derived from the capture and not clipped to the window; the exclusion matters only where an interval overlaps the window, and this is the design of P130 and not a defect. Recorded so the next reader of an E2 file does not take the list for the window's.
+
+## 70. M5m S4: P133's halts and the predictions for the 2026-10-23 ETHUSDT zero-executed expiry (list 218102), before any measurement (P133 C1, R-T, R-DQ)
+
+An observation log, so this section only adds. P133 records, from the owner's capture, a case that was noticed and not yet measured: pid 20100, five `reconciliation_untrusted` lines on ETHUSDT list `218102` on 2026-10-23 from `22:32:02Z` to `22:40:01Z`, and no operator action. Under R-DQ clause (1) this section is committed BEFORE any measurement: no script that reads the capture or the store is drafted until it exists, and the only reading done before it was of the source (`reconciliation_driver.py`'s `_EVENT_EXIT_UNBOOKABLE` and its `resolution` text) to know what vocabulary the log carries. **Everything below is a record of what the bot did on the Testnet account and decides nothing about S4.**
+
+### The inputs
+
+The capture is the owner's `F:\trading bot\scratch\s4\2026-10-24\051021Z-capture.log`, 3,993,123 bytes, SHA-256 `6aae8a36793ed28e38adf4f7b0f8652407cec5d8dcf29e54a79900935d83c55f`, read in place and never written. The price series is the 1m ETHUSDT series of the frozen store copy `F:\trading bot\store\testnet-s4-rehearsal-2026-10-09` (a copy of the recorder clone's store made at P131, inventory SHA-256 `6b8d8f18777253d67e822787af07c55a30128fb5f479c1c5887b2025dffed449`, bars `2026-10-07T10:32Z..2026-10-24T00:04Z`, section 69), read through the recorder's own CSV reader and never written; the recorder clone's live store is not opened.
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `7a2981e` | `git rev-parse --short HEAD` | `7a2981e` |
+| the capture's size or SHA-256 differs | `ls -l`, `sha256sum` | 3,993,123 bytes; `6aae8a36793ed28e38adf4f7b0f8652407cec5d8dcf29e54a79900935d83c55f` |
+| a command would write under `deploy\45547f107715` or call the venue | every command in the plan | none: the capture and the store copy are read, outputs go to `scratch\p133` |
+| a frozen file differs from its digest | `sha256sum` | `scripts/s4_compare.py`, `scripts/trade_census.py`, `config.s4.yaml`, the pre-registration and the two correction files: unchanged (the six digests of section 68) |
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | pid 20100 has exactly **5** `reconciliation_untrusted` lines, all ETHUSDT and all naming list `218102`, from `22:32:02Z` to `22:40:01Z` on 2026-10-23 |
+| b | pid 20100 has **zero** `committed_risk_unknown` lines and **zero** `close_halted` lines |
+| c | no `BUY` signal on either pair between `22:30:00Z` and `22:40:01Z` |
+| d | under R-DM and R-DP this does **not** qualify as an episode: it has no `committed_risk_unknown` BUY refusal and no `close_halted` dispatch refusal inside it, so `s4_latch_compare.py`'s `latch_episodes` returns the same three episodes as before and the case adds no interval |
+| e | list `218102`'s placement and its last trusted pass bracket the expiry to within one pass interval: the last pass before `22:32:02Z` reads the list trusted and the first untrusted pass is `22:32:02Z`, a gap of one reconciliation pass |
+| f | the log carries an `exit_unbookable` line for ETHUSDT at the untrusted passes, with the resolution text *"OPERATOR ONLY: no leg reported a fill, so there is nothing to price and nothing is booked. The position is retained and stays untrusted, so entries are refused portfolio-wide until it is reconciled by hand."*, and the position is then closed by a strategy `CLOSE` (a death-cross signal) about 8 minutes later, booked as an ordinary `close_booked`, with no operator action in the capture |
+| g | ETHUSDT's lowest 1m low in the bracket from the placement to the close stays ABOVE the stop price: the stop was not touched (a touched stop would have left a leg executed) |
+| h | the entry's quote total is between 1,500 and 2,500 USDT, and the realised value of the close is between -15 and +15 USDT, so it is an ordinary strategy close and not a stop-out (a stop-out of this size books about -59, section 62) |
+| i | **not predicted:** why both legs expired with nothing executed. The capture holds the bot's view of the venue, not the venue's reason; it is UNMEASURED and stays so unless the measurement shows a field that says |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The measurement scripts are written after this section is committed, and their digests are recorded in the completion.
