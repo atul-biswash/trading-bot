@@ -9225,3 +9225,81 @@ The codes are the tests of `tests/unit/test_d1_trail.py` in collection order, D1
 | D51 | `TestThePurity::test_the_module_imports_no_clock_no_store_and_no_io` |
 | D52 | `TestThePurity::test_it_reads_no_wall_clock` |
 | D53 | `TestThePurity::test_it_has_no_comment` |
+
+## 88. M5n N4a: the mutation survey of the D1 trail tests, scored against section 87 (P143 C7, R-T)
+
+An observation log, so this section only adds. The survey ran as section 87 describes, in one detached worktree outside the repository at `5d4512a` (the commit that carries section 87), starting at `2026-10-24T21:27:38Z` by the machine's UTC clock, with the harness of section 80 unchanged (`survey.py` and `p116_hook.py`, SHA-256 as quoted there). The baseline was green (54 passed), the import location of `trading_bot` and `tests` was printed inside the worktree before any result, every restore was SHA-equal, and the worktree was removed afterwards (`git worktree list` shows the main worktree only). The survey was not halted. Nothing here decides anything about S4.
+
+### Totals
+
+**49 mutations: 48 MATCH, 1 MORE, 0 FEWER. Predicted failures 112, observed 113**, the one more being `m09`'s. The two mutations predicted to fail nothing (`m13`, `m31`) failed nothing.
+
+**The declared abstentions held, bar one.** Section 87 named six tests that no mutation would fail. Five never failed under any of the 49: D8, D14, D19, D23 and D54. The sixth, **D50 (every figure is a Decimal), failed under `m09`**, which is the MORE.
+
+**Eight more tests are killed only by crashes**, never by an assertion, so by `M5i-115` they are not killed: D6, D12, D26, D29, D34, D39, D44 and D45. Seven were predicted as crashes (D6, D26, D29, D34 by `m21` and `m22`; D12 by `m19`; D39 by `m32`; D44 by `m17`), and one was not: **D45 (a missing minute is not detected here) fails under `m48` by the `ValueError` the mutation makes it raise**, which is a "must not raise" test failing by letting the exception escape, the shape `CLAUDE.md` names; section 87 predicted the failure and not its type. D9 is killed by `m43` with a `StopIteration` and also by `m09` by an assertion, and D25 is killed by `m25` with a `ValueError` and also by `m01` and `m12` by assertions, so both stand. So 13 of the 54 tests are killed by no assertion under any mutation here: the five that never fail and the eight above.
+
+### The miss, diagnosed
+
+* **`m09` (the peak never takes a high after the entry): MORE, 10 observed against 9.** The extra is D50. Section 87 said no one-line mutation hands back another type, and that is true of a figure; it missed that D50 asserts `type(out.exit_price) is Decimal` on fixture A's outcome, and under `m09` that walk never exits, so `exit_price` is `None` and the assertion fails. A reach error: the test is downstream of any mutation that changes whether fixture A exits.
+
+### What the harness's type line did not say
+
+The harness prints an `exception types` line per mutation by scanning for names ending in `Error`, `Failed` or `Exception`. It therefore reported **nothing beyond `AssertionError` for `m22`**, whose three crashes are `decimal.InvalidOperation`, and nothing for `m43`, whose crash is `StopIteration`: neither name ends in a word it scans for. The crash column below was read from each mutation's own pytest output, not from that line. A crash that reads as an assertion is a false kill, the direction this file names as the cheaper one to catch, and it was caught only because section 87 had predicted the types.
+
+### What the survey leaves unpinned, and does not fix
+
+`m13` is the one real gap: no fixture has the entry minute's low exactly at the trigger. The five tests that never fail and the eight that only crash are each the contrapositive of a test that does bite, or a "raises" or "must not raise" test that no one-line mutation can make fail by an assertion. None is needed by N4b, and none is closed here.
+
+### Every mutation
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| m01 | the trigger is one basis point lower than the delta says | 12 | 12 | MATCH |
+| m02 | the slippage is charged in the seller's favour | 10 | 10 | MATCH |
+| m03 | the slippage is not charged | 10 | 10 | MATCH |
+| m04 | a gapped open is not recognised | 3 | 3 | MATCH |
+| m05 | an open exactly at the trigger is not a gap | 1 | 1 | MATCH |
+| m06 | a gapped open fills at the trigger and not at the open | 2 | 2 | MATCH |
+| m07 | a gapped open is reported as no gap | 3 | 3 | MATCH |
+| m08 | the bar's high is applied before the gap test | 2 | 2 | MATCH |
+| m09 | the peak never takes a high after the entry | 9 | 10 | MORE (see the diagnosis) |
+| m10 | the entry minute's high counts toward the peak | 1 | 1 | MATCH |
+| m11 | an exit in the entry minute is reported as a gap | 2 | 2 | MATCH |
+| m12 | a later low must be strictly below the trigger | 2 | 2 | MATCH |
+| m13 | the entry minute's low must be strictly below the trigger | 0 | 0 | MATCH |
+| m14 | a repeated minute is allowed | 1 | 1 | MATCH |
+| m15 | the strict increase of the minutes is not checked | 2 | 2 | MATCH |
+| m16 | a bar that is not a 1m bar is accepted | 1 | 1 | MATCH |
+| m17 | a bar's naive open time is not checked | 1 | 1 | MATCH; crash: TypeError |
+| m18 | an entry time at the end of the first minute is inside it | 1 | 1 | MATCH |
+| m19 | an entry time at the start of the first minute is outside it | 1 | 1 | MATCH; crash: ValueError |
+| m20 | the entry time is not checked against the first bar | 1 | 1 | MATCH |
+| m21 | a float is not refused as a Decimal | 2 | 2 | MATCH; crash: AttributeError |
+| m22 | a non-finite Decimal is not refused | 4 | 4 | MATCH; crash: decimal.InvalidOperation |
+| m23 | an entry price that is not positive is not refused | 2 | 2 | MATCH |
+| m24 | a slippage of 100 percent is accepted | 1 | 1 | MATCH |
+| m25 | a slippage of zero is refused | 1 | 1 | MATCH; crash: ValueError |
+| m26 | the slippage range is not checked | 3 | 3 | MATCH |
+| m27 | a bool is accepted as a delta | 2 | 2 | MATCH |
+| m28 | the largest delta is 10000 | 2 | 2 | MATCH |
+| m29 | a delta of zero is accepted | 2 | 2 | MATCH |
+| m49 | a delta of minus ten is accepted | 3 | 3 | MATCH |
+| m30 | trigger_price does not check the delta | 2 | 2 | MATCH |
+| m31 | resolve_trail does not check the delta (trigger_price repeats it) | 0 | 0 | MATCH |
+| m32 | a naive entry time is not checked | 1 | 1 | MATCH; crash: TypeError |
+| m33 | an exited outcome without its minute and price is accepted | 1 | 1 | MATCH |
+| m34 | an open outcome with a gap flag is accepted | 1 | 1 | MATCH |
+| m35 | the outcome is not frozen | 1 | 1 | MATCH |
+| m36 | the peak is a plain Decimal and not Money | 1 | 1 | MATCH |
+| m37 | an open outcome reports the fill price as its peak | 2 | 2 | MATCH |
+| m38 | an exit in the entry minute is stamped with the entry time | 1 | 1 | MATCH |
+| m39 | an exit in the entry minute is priced at the low | 2 | 2 | MATCH |
+| m40 | a later exit is priced at the low and not at the trigger | 4 | 4 | MATCH |
+| m41 | a gapped bar's high enters the reported peak | 1 | 1 | MATCH |
+| m42 | the trigger is not recomputed after the high | 2 | 2 | MATCH |
+| m43 | the bars are read to the end before the walk | 1 | 1 | MATCH; crash: StopIteration |
+| m44 | the module imports logging | 1 | 1 | MATCH |
+| m45 | the docstring names a call to the wall clock | 1 | 1 | MATCH |
+| m46 | the module carries a comment | 1 | 1 | MATCH |
+| m47 | the first minute lasts two minutes | 1 | 1 | MATCH |
+| m48 | a missing minute is refused | 1 | 1 | MATCH; crash: ValueError |
