@@ -30,6 +30,7 @@ import s4_wick_annotate as wick
 from trade_census import Trade, build_trades, parse_capture
 
 from trading_bot.backtesting.simulated_executor import SimulatedTrade
+from trading_bot.data.historical import StoredFileError
 
 UTC = timezone.utc
 DAY = "2026-10-12"
@@ -829,3 +830,247 @@ class TestTheInputsAreTheFrozenToolsOwn:
         ):
             assert option in frozen and option in mine
         assert "--analysis" in mine and "--analysis" not in frozen
+
+
+def recon(stamp: str, pid: int, positions: int, states: str) -> str:
+    return line(
+        stamp,
+        pid,
+        f"Reconciled {positions} position(s) event=reconciliation_pass positions={positions} "
+        f'calls={positions} queries=1 states="{states}"',
+    )
+
+
+def untrusted(stamp: str, pid: int, symbols: str) -> str:
+    return line(
+        stamp,
+        pid,
+        "1 position(s) carry protection this bot does not trust event=reconciliation_untrusted "
+        f'count=1 symbols={symbols} detail="x"',
+        "WARNING",
+    )
+
+
+def refuse(stamp: str, pid: int, symbol: str) -> str:
+    return line(
+        stamp,
+        pid,
+        f"Risk refused {symbol} at committed_risk_unknown event=risk_refused symbol={symbol} "
+        f"timeframe=1m action=BUY signal_ts={stamp}.999000+00:00 stage=committed_risk_unknown reason=x",
+    )
+
+
+class TestTheSymbolHandedToTheStore:
+    def test_an_ethusdt_entry_reads_ethusdts_bars_and_not_btcusdts(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        rows = [backtest_row("ETHUSDT", t("10:05:00"), exit_bar_open=t("10:15:00"), timeframe="5m")]
+        run, live = run_dir(tmp_path, rows), capture(tmp_path, [boot(t("00:00:01"), 11)])
+        widen("ETHUSDT", "10:07", "110")
+        assert wick.main(argv(run, live)) == 0
+        found = rows_of(capsys.readouterr().out)
+        assert len(found) == 1
+        assert "ETHUSDT entry bar 2026-10-12T10:05:00+00:00" in found[0]
+        assert "interval [2026-10-12T10:05:00+00:00, 2026-10-12T10:20:00+00:00)" in found[0]
+        assert "wide=yes max_range=10.000000%" in found[0]
+
+    def test_a_btcusdt_wick_in_the_same_minute_does_not_widen_an_ethusdt_entry(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        rows = [backtest_row("ETHUSDT", t("10:05:00"), exit_bar_open=t("10:15:00"), timeframe="5m")]
+        run, live = run_dir(tmp_path, rows), capture(tmp_path, [boot(t("00:00:01"), 11)])
+        widen("BTCUSDT", "10:07", "110")
+        assert wick.main(argv(run, live)) == 0
+        found = rows_of(capsys.readouterr().out)
+        assert len(found) == 1
+        assert "wide=no max_range=0.000000%" in found[0]
+
+
+class TestTheFiveMinuteExitBar:
+    def build(self, tmp_path: Path) -> tuple[Path, Path]:
+        lines = [
+            boot(t("00:00:01"), 11),
+            place(t("22:00:03"), 11, "ETHUSDT", t("21:59:59.999000")),
+            leg_booked(t("22:33:01"), 11, "ETHUSDT", t("22:32:10")),
+        ]
+        return run_dir(tmp_path, []), capture(tmp_path, lines)
+
+    def test_a_wide_bar_in_the_last_minute_of_a_five_minute_exit_bar_is_inside(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        widen("ETHUSDT", "22:34", "110")
+        run, live = self.build(tmp_path)
+        assert wick.main(argv(run, live)) == 0
+        found = rows_of(capsys.readouterr().out)
+        assert len(found) == 1
+        assert "live only" in found[0]
+        assert "interval [2026-10-12T22:00:00+00:00, 2026-10-12T22:35:00+00:00)" in found[0]
+        assert "wide=yes" in found[0]
+
+    def test_a_wide_bar_opening_at_the_five_minute_exit_bars_close_is_outside(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        widen("ETHUSDT", "22:35", "110")
+        run, live = self.build(tmp_path)
+        assert wick.main(argv(run, live)) == 0
+        found = rows_of(capsys.readouterr().out)
+        assert len(found) == 1
+        assert "wide=no" in found[0]
+
+
+class TestE2AndTheFrozenDowntime:
+    def build(self, tmp_path: Path) -> tuple[Path, Path]:
+        lines = [
+            boot(t("00:00:01"), 11),
+            line(t("02:00:00"), 11, "tick"),
+            boot(t("03:00:00"), 12),
+            place(t("03:00:05"), 12, "ETHUSDT", t("02:59:59.999000")),
+            recon(t("03:00:30"), 12, 1, "active=1"),
+            recon(t("05:00:00"), 12, 1, "unknown=1"),
+            untrusted(t("05:00:00"), 12, "ETHUSDT"),
+            refuse(t("05:01:00"), 12, "BTCUSDT"),
+            stopped(t("06:00:00"), 12),
+        ]
+        rows = [
+            backtest_row("BTCUSDT", t("02:20:00"), exit_bar_open=t("02:29:00")),
+            backtest_row("BTCUSDT", t("02:30:00"), exit_bar_open=t("02:39:00")),
+            backtest_row("BTCUSDT", t("05:30:00"), exit_bar_open=t("05:39:00")),
+            backtest_row("BTCUSDT", t("07:30:00"), exit_bar_open=t("07:39:00")),
+        ]
+        return run_dir(tmp_path, rows), capture(tmp_path, lines)
+
+    def test_an_entry_inside_a_downtime_is_excluded_from_e2_as_the_wrapper_excludes_it(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        run, live = self.build(tmp_path)
+        assert e2.main(argv(run, live)[:-2]) == 0
+        wrapper = frozen_list(capsys.readouterr().out)
+        assert wick.main(argv(run, live, analysis="e2")) == 0
+        mine = capsys.readouterr().out
+        assert wick_list(mine) == wrapper
+        assert len(wrapper) == 1
+        assert wrapper[0][3] == "2026-10-12T07:29:59.999000+00:00"
+        assert "entry bar 2026-10-12T02:20:00" not in mine
+        assert "entry bar 2026-10-12T02:30:00" not in mine
+
+    def test_the_frozen_tool_excludes_the_downtime_and_not_the_latch(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        run, live = self.build(tmp_path)
+        assert wick.main(argv(run, live)) == 0
+        out = capsys.readouterr().out
+        assert "entry bar 2026-10-12T02:20:00" not in out
+        assert "entry bar 2026-10-12T05:30:00" in out
+        assert "entry bar 2026-10-12T07:30:00" in out
+
+
+class TestALiveEntryOpenAtM:
+    def test_a_live_booking_with_no_exit_instant_runs_to_the_window_end(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str], widen
+    ) -> None:
+        open_booking = line(
+            t("23:55:01"),
+            11,
+            "Booked exit for BTCUSDT event=exit_booked symbol=BTCUSDT quote_total=98 "
+            "realised=-2 order_id=2 quantity=1",
+        )
+        lines = [
+            boot(t("00:00:01"), 11),
+            place(t("22:50:03"), 11, "BTCUSDT", t("22:49:59.999000")),
+            open_booking,
+        ]
+        widen("BTCUSDT", "23:40", "110")
+        run, live = run_dir(tmp_path, []), capture(tmp_path, lines)
+        assert wick.main(argv(run, live)) == 0
+        found = rows_of(capsys.readouterr().out)
+        assert len(found) == 1
+        assert "live only" in found[0]
+        assert "interval [2026-10-12T22:50:00+00:00, 2026-10-13T00:00:00+00:00)" in found[0]
+        assert "wide=yes" in found[0]
+
+
+class TestANaiveInstant:
+    def trade(self, closing: str) -> Trade:
+        found = build_trades(
+            parse_capture(
+                [
+                    place(t("22:00:01"), 1, "ETHUSDT", t("21:59:59.999000")),
+                    close_booked(t("22:40:03"), 1, "ETHUSDT", t("22:39:59.999000"))
+                    if closing == "close"
+                    else leg_booked(t("22:33:01"), 1, "ETHUSDT", t("22:32:10")),
+                ]
+            ),
+            "USDT",
+        )
+        assert len(found) == 1
+        return found[0]
+
+    def test_the_census_refuses_a_naive_instant_before_the_tool_can_see_one(self) -> None:
+        naive = line(
+            t("22:40:03"),
+            1,
+            "Closed ETHUSDT event=close_booked symbol=ETHUSDT order_id=9 quantity=1 "
+            "quote_total=101 realised=1 candle_time=2026-10-12T22:39:59.999000",
+        )
+        parsed = parse_capture([place(t("22:00:01"), 1, "ETHUSDT", t("21:59:59.999000")), naive])
+        assert parsed.bookings == ()
+        assert len(parsed.anomalies) == 1
+
+    def test_a_naive_exit_instant_is_refused_and_not_compared(self) -> None:
+        for closing in ("close", "leg"):
+            replaced = dataclasses.replace(
+                self.trade(closing), exit_time=datetime(2026, 10, 12, 22, 39, 59, 999000)
+            )
+            with pytest.raises(s4.InputError):
+                wick.live_exit_close(replaced, timedelta(minutes=5), M)
+
+
+class TestACauseOutsideTheClosedList:
+    def test_it_gets_a_count_line_of_its_own(self) -> None:
+        row = wick.Row(
+            "live only",
+            "BTCUSDT",
+            at("10:00:00"),
+            "a-cause-not-on-the-list",
+            wick.Holding(at("10:00:00"), at("10:05:00")),
+            wick.Annotation("yes", Decimal("0.05"), 3),
+        )
+        out = wick.render("primary", [row], window=(at("00:00:00"), M), sources={})
+        assert "  a-cause-not-on-the-list: 1 (wide yes 1, wide no 0, unknown 0)" in out
+        assert "COUNTS BY CAUSE (1)" in out
+
+
+class TestAStoreError:
+    def raising(self, symbol_unused: object = None):
+        def candles(self: FakeStore, symbol: str, interval: str, start: datetime, end: datetime):
+            raise StoredFileError("BTCUSDT-1m-2026-10.csv no longer matches its manifest hash")
+            yield
+
+        return candles
+
+    def test_a_store_read_error_makes_the_run_an_input_error_and_prints_no_row(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+        widen,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        run = run_dir(
+            tmp_path, [backtest_row("BTCUSDT", t("06:00:00"), exit_bar_open=t("06:09:00"))]
+        )
+        live = capture(tmp_path, [boot(t("00:00:01"), 11)])
+        monkeypatch.setattr(FakeStore, "candles", self.raising())
+        assert wick.main(argv(run, live)) == 3
+        out = capsys.readouterr().out
+        assert out.startswith("INPUT ERROR:")
+        assert "no longer matches its manifest hash" in out
+        assert "wide=" not in out
+        assert "ANNOTATED DISAGREEMENTS" not in out
+
+    def test_the_reader_raises_on_a_store_error_and_is_unknown_only_without_a_store(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(FakeStore, "candles", self.raising())
+        with pytest.raises(s4.InputError):
+            wick.store_reader(FakeStore(tmp_path))("BTCUSDT", at("10:00:00"), at("10:05:00"))
+        assert wick.store_reader(None)("BTCUSDT", at("10:00:00"), at("10:05:00")) is None
