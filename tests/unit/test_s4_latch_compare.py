@@ -15,6 +15,7 @@ import dataclasses
 import json
 import re
 import sys
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import ClassVar
@@ -123,6 +124,15 @@ def boot(stamp: str, pid: int, verdict: str = "accepted", reasons: str = "none")
 
 def sink(lines: list[str]) -> list[e2.LatchEpisode]:
     return list(e2.latch_episodes(lines, closed_at=M))
+
+
+def one(episodes: Sequence[e2.LatchEpisode]) -> e2.LatchEpisode:
+    assert len(episodes) == 1, [(e.start.isoformat(), e.end.isoformat()) for e in episodes]
+    return episodes[0]
+
+
+def sink_one(lines: list[str]) -> e2.LatchEpisode:
+    return one(sink(lines))
 
 
 def span(episode: e2.LatchEpisode) -> tuple[datetime, datetime]:
@@ -299,6 +309,14 @@ class TestAttachingUntrustedLines:
         after = self.attach([recon(t("00:10:00"), 1, 1, "unknown=1"), untrusted(t("00:10:01"), 1)])
         assert list(before) == [2] and list(after) == [1]
 
+    def test_among_several_passes_the_nearest_in_time_is_chosen(self) -> None:
+        lines = [
+            recon(t("00:10:00"), 1, 1, "unknown=1"),
+            recon(t("00:10:10"), 1, 1, "unknown=1"),
+            untrusted(t("00:10:09"), 1),
+        ]
+        assert list(self.attach(lines)) == [2]
+
     def test_the_first_line_of_a_pass_is_remembered(self) -> None:
         lines = [
             recon(t("00:10:00"), 1, 2, "unknown=2"),
@@ -336,17 +354,17 @@ class TestASelfClearingLatch:
     def test_it_ends_at_the_pass_that_covered_every_position_and_found_them_all_trusted(
         self,
     ) -> None:
-        (episode,) = sink(self.lines())
+        episode = sink_one(self.lines())
         assert span(episode) == (at("16:00:01"), at("16:54:00"))
         assert episode.end_kind == "breaking pass"
 
     def test_it_counts_its_untrusted_passes_and_its_refusals(self) -> None:
-        (episode,) = sink(self.lines())
+        episode = sink_one(self.lines())
         assert (episode.passes, episode.refusals, episode.symbols) == (2, 1, ("BTCUSDT",))
 
     def test_a_pass_covering_fewer_positions_than_the_inventory_breaks_nothing(self) -> None:
         without_the_full_coverage_pass = self.lines()[:-3]
-        (episode,) = sink(without_the_full_coverage_pass)
+        episode = sink_one(without_the_full_coverage_pass)
         assert episode.start == at("16:00:01")
         assert (episode.end, episode.end_kind) == (M, "open, closed at M")
         assert episode.passes == 2
@@ -360,7 +378,7 @@ class TestASelfClearingLatch:
             refuse(t("16:10:00"), 1),
             idle(t("17:00:00"), 1),
         ]
-        (episode,) = sink(lines)
+        episode = sink_one(lines)
         assert episode.start == at("16:00:02")
 
 
@@ -378,7 +396,7 @@ class TestALatchEndedByTheProcess:
         ]
 
     def test_with_a_successor_it_ends_at_the_last_line_of_the_process(self) -> None:
-        (episode,) = sink(self.lines())
+        episode = sink_one(self.lines())
         assert span(episode) == (at("02:59:02"), at("06:54:01"))
         assert episode.end_kind == "last line of the process"
         assert episode.symbols == ("ETHUSDT",)
@@ -392,7 +410,7 @@ class TestALatchEndedByTheProcess:
             refuse(t("03:10:00"), 1),
             idle(t("04:00:00"), 1),
         ]
-        (episode,) = sink(lines)
+        episode = sink_one(lines)
         assert episode.symbols == ("BTCUSDT", "ETHUSDT")
 
 
@@ -404,7 +422,7 @@ class TestALatchEndedByACleanStop:
             halted(t("13:38:02"), 1),
             stopped(t("20:05:33"), 1),
         ]
-        (episode,) = sink(lines)
+        episode = sink_one(lines)
         assert span(episode) == (at("13:11:00"), at("20:05:33"))
         assert episode.end_kind == "last line of the process"
 
@@ -415,7 +433,7 @@ class TestALatchEndedByACleanStop:
             halted(t("13:38:02"), 1),
             stopped(t("20:05:33"), 1, clean="False"),
         ]
-        (episode,) = sink(lines)
+        episode = sink_one(lines)
         assert (episode.end, episode.end_kind) == (M, "open, closed at M")
 
 
@@ -429,13 +447,13 @@ class TestALatchOpenAtTheCaptureEnd:
     ]
 
     def test_the_interval_is_open_and_closed_at_the_window_end(self) -> None:
-        (episode,) = sink(self.LINES)
+        episode = sink_one(self.LINES)
         assert span(episode) == (at("13:11:00"), M)
         assert episode.end_kind == "open, closed at M"
 
     def test_it_is_closed_at_whatever_m_the_caller_names(self) -> None:
         other = datetime(2026, 11, 1, tzinfo=UTC)
-        (episode,) = e2.latch_episodes(self.LINES, closed_at=other)
+        episode = one(e2.latch_episodes(self.LINES, closed_at=other))
         assert episode.end == other
 
 
@@ -527,19 +545,19 @@ class TestAUntrustedStateOnALonePosition:
     def test_every_pass_is_inside_one_unbroken_run_that_ends_with_the_process(
         self, states: str
     ) -> None:
-        (episode,) = sink(self.lines(states, [stopped(t("01:00:00"), 1)]))
+        episode = sink_one(self.lines(states, [stopped(t("01:00:00"), 1)]))
         assert span(episode) == (at("00:10:00"), at("01:00:00"))
         assert (episode.passes, episode.end_kind) == (3, "last line of the process")
 
     def test_the_same_lone_position_reported_active_does_break(self) -> None:
         tail = [recon(t("00:13:00"), 1, 1, "active=1"), stopped(t("01:00:00"), 1)]
-        (episode,) = sink(self.lines("diverged=1", tail))
+        episode = sink_one(self.lines("diverged=1", tail))
         assert span(episode) == (at("00:10:00"), at("00:13:00"))
         assert episode.end_kind == "breaking pass"
 
     def test_a_lone_absent_by_design_position_does_break(self) -> None:
         tail = [recon(t("00:13:00"), 1, 1, "absent_by_design=1"), stopped(t("01:00:00"), 1)]
-        (episode,) = sink(self.lines("diverged=1", tail))
+        episode = sink_one(self.lines("diverged=1", tail))
         assert episode.end == at("00:13:00")
 
 
@@ -556,20 +574,20 @@ class TestCoverageWithTwoPositions:
         ]
 
     def test_a_pass_that_handled_only_the_other_position_breaks_nothing(self) -> None:
-        (episode,) = sink(self.lines([recon(t("00:12:00"), 1, 1, "active=1")]))
+        episode = sink_one(self.lines([recon(t("00:12:00"), 1, 1, "active=1")]))
         assert episode.end == M
 
     def test_a_pass_that_covered_both_and_found_both_trusted_breaks(self) -> None:
-        (episode,) = sink(self.lines([recon(t("00:12:00"), 1, 2, "active=2")]))
+        episode = sink_one(self.lines([recon(t("00:12:00"), 1, 2, "active=2")]))
         assert span(episode) == (at("00:10:00"), at("00:12:00"))
 
     def test_a_pass_that_covered_both_and_found_one_unknown_does_not(self) -> None:
-        (episode,) = sink(self.lines([recon(t("00:12:00"), 1, 2, "active=1,unknown=1")]))
+        episode = sink_one(self.lines([recon(t("00:12:00"), 1, 2, "active=1,unknown=1")]))
         assert episode.end == M
 
     def test_a_booking_shrinks_the_inventory_so_a_single_position_pass_then_covers_it(self) -> None:
         middle = [book(t("00:11:30"), 1, "ETHUSDT"), recon(t("00:12:00"), 1, 1, "active=1")]
-        (episode,) = sink(self.lines(middle))
+        episode = sink_one(self.lines(middle))
         assert episode.end == at("00:12:00")
 
     def test_positions_restored_at_boot_and_unseen_by_the_inventory_break_nothing(self) -> None:
@@ -580,7 +598,7 @@ class TestCoverageWithTwoPositions:
             recon(t("00:12:00"), 1, 2, "active=2"),
             idle(t("02:00:00"), 1),
         ]
-        (episode,) = sink(lines)
+        episode = sink_one(lines)
         assert episode.end == M
 
 
@@ -799,6 +817,7 @@ class TestExclusionOnBothSides:
             recon(t("02:10:00"), 11, 1, "unknown=1"),
             untrusted(t("02:10:00"), 11, "ETHUSDT"),
             refuse(t("02:11:00"), 11),
+            place(t("02:15:03"), 11, "ETHUSDT", t("02:14:59.999000")),
             place(t("02:20:03"), 11, "BTCUSDT", t("02:19:59.999000")),
             book(t("02:40:03"), 11, "BTCUSDT"),
             recon(t("02:50:00"), 11, 1, "unknown=1"),
@@ -823,6 +842,16 @@ class TestExclusionOnBothSides:
         assert "backtest BTCUSDT signal bar close 2026-10-12T02:29:59.999000+00:00" in out
         assert "backtest BTCUSDT signal bar close 2026-10-12T02:19:59.999000+00:00" in out
         assert "LATCH EPISODES (1)" in out
+        assert "0.833 h, 2 untrusted pass(es), 1 refusal(s)" in out
+
+    def test_a_placement_inside_a_latch_is_not_listed_as_unfilled_but_is_by_the_frozen_tool(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        run, live = self.build(tmp_path)
+        assert e2.main(argv(run, live)) == 0
+        assert "LIVE PLACEMENTS WITH NO BOOKING IN THE CAPTURE (1)" in capsys.readouterr().out
+        assert s4.main(argv(run, live)) == 0
+        assert "LIVE PLACEMENTS WITH NO BOOKING IN THE CAPTURE (2)" in capsys.readouterr().out
 
     def test_the_frozen_tool_on_the_same_inputs_excludes_nothing(
         self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
