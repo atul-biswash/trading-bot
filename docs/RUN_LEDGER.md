@@ -6465,3 +6465,43 @@ None of the executing session's predictions missed, and the prompt's (c) did (16
 ### Digests of this section's files
 
 `measure3.py` `cf0c4a11f5927a3a89bf871b6af3fd9539bd12c528bcf8b7b745978529ccd82c`, its output `eb4f49ab34b42c4fced3af9c0642828485d88c80737512b35c7a459e4821c7b6`, `release.log.copy` `385222100d8f4f5be412bad01d67a61176832e9c49643b9cb04225a8d733de92`, `gate_before.txt` `a3db21aaed79cb42f98ee9ae5c46955341a4f752c2f4833831449eb12d05ee29`, all under `F:\trading bot\scratch\p129\`.
+
+## 68. M5m S4: P130's halts, the step-0 halt, and the predictions for the E2 wrapper (P130 C2, R-T)
+
+An observation log, so this section only adds. P130 builds `scripts/s4_latch_compare.py`, the E2 wrapper of R-DL, with fixture tests, and runs no S4 backtest. This section is committed BEFORE the wrapper and its tests are committed (R-T), and is completed in a later commit with the arming audit and the predictions scored. The rulings are in `docs/S4_CORRECTION_P128.md`, `docs/S4_CORRECTION_P129.md` and `docs/S4_CORRECTION_P130.md` (commit `3fd0ef5`, R-DP).
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `33d6765` | `git rev-parse HEAD` | `33d6765ad4aea2e055d80259c75b0e268020e8ca`, P129's last commit; P129's four commits and P128's four are unpushed |
+| a command would write under `deploy\45547f107715` or call the venue | every command | none does; nothing under `deploy\` was opened and no socket was opened |
+| a frozen file differs from its digest | `Get-FileHash` | `scripts/s4_compare.py` `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`, `scripts/trade_census.py` `926bdd4674d7fe9fa418fb5e8b67f3d089012255ba8f478492a043fbbe35d9bb`, `config.s4.yaml` `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594`, `docs/S4_PREREGISTRATION.md` `49e4fdbba55a5f407d8db130ebdc6cf68fc13813a101ab7849e4740050c6566f`, `docs/S4_CORRECTION_P128.md` `36327c4abc2900b80f2961541e25d9e5da727fd08a1c6352ef2ac5056b05daa6` and `docs/S4_CORRECTION_P129.md` `90291607c9a768f6dfd1018eee1ecfc1ff7af8b385ded7e6f020dd4285d4ee1d` are unchanged |
+| a step would run a backtest over the Testnet store or any part of `[W, M)` | the plan | none does; the wrapper is tested on synthetic fixtures only, and the one run on real data (below) reads the owner's frozen capture and no backtest |
+| **step 0 finds R-DO inconsistent with the source** | `core/portfolio.py:98`, `:1143`, `risk/manager.py:421-428`, `execution/reconciliation.py:691`, `:700` | **FIRED, and the session halted.** A `diverged` position counts uncomputable and refuses entries, which R-DO's "no unknown count" did not. The owner ruled R-DP (Option A); `docs/S4_CORRECTION_P130.md` records the file-and-line list, DOCUMENTED, and the added check that a diverged pass emits the `reconciliation_untrusted` line R-DM's start needs (`reconciliation_driver.py:492-508`) |
+
+The bare gate before any commit (`gate_before.txt`, SHA-256 `7a2f1119e7704d9563d3b3b08143f1d58ef0b6835a2a06238b638fb58e1cc9c0`): ruff check clean, 228 files formatted, mypy 112 source files, 4373 passed and 1 skipped, exit 0, 287.50 s.
+
+### What was done before this section was committed, and why the predictions are not blind
+
+**The wrapper and its tests were drafted in a scratch tree (`scratch\p130\dev\`) while the gate ran, and the draft's tests were run (88 passed) before this commit.** The order the prompt sets is predictions, then code; the draft was written before the predictions were, so this session did not keep it. The draft is not committed here and nothing in the repository carries it yet. It means each of (a) to (d) below was already checked by a test in the draft, (b) in particular by a fixture built from P129's own stamps, and that the predictions on the real capture (f) to (h) were made with the draft's logic in mind. The digests of the draft as it stood: `s4_latch_compare.py` `959770ab8d343ec0cf7b1b639a38180a8171d88ce3b760ddc621ec94d749bde6`, `test_s4_latch_compare.py` `1c33c78bab8a6b92fbaf09b2ab414cd633838a736f8b7214f33e7d300a454a87`. What the draft has NOT done is run on the real capture, and the mutation survey that proves the tests bite has not been run: (f) to (h) and the survey are still predictions in the strict sense.
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | the 13:09 fixture (an entry filled and never booked, with the live position open across a latch that starts after the entry's signal bar) is labelled **`fok-unfilled`** by the frozen `diagnose`, with the evidence *"the live bot placed and nothing was booked"*, and E2 does not exclude it |
+| b | on a synthetic log reproducing the three P129 episodes from P129's own stamps, the wrapper's intervals equal the P129 R-DO table **to the second**: `2026-10-11T16:00:01Z` to `16:54:00Z`, `2026-10-13T02:59:02Z` to `06:54:01Z`, `2026-10-21T13:11:00Z` to `2026-10-23T08:05:33Z` |
+| c | a pass that covers fewer positions than the inventory breaks no run |
+| d | the union with the frozen `down_intervals` merges a latch and the downtime that abuts it into one interval |
+| e | under R-DP the P129 episode table and the kept counts (161 under the frozen rule, 160 under the union) are unchanged, and no lone-position `diverged` pass breaks a run |
+| f | the wrapper's `latch_episodes` run on the real capture (`190521Z-capture.log`) returns **exactly** P129's three episodes, with the same starts and ends to the second and the same end kinds; the `refusals` it reports are the sum of the `committed_risk_unknown` and the `close_halted` refusals inside each, **1, 2 and 69** (36 and 33 for the last) |
+| g | the union of those episodes with the frozen intervals has **9** intervals: the 8 frozen ones plus 3 latches, less the 2 merges that abut (the 2026-10-13 latch with the frozen interval that begins at `06:54:01Z`, and the 2026-10-21 latch with the frozen interval that begins at `08:05:33Z`); the 2026-10-11 latch ends at `16:54:00Z`, hours before the frozen interval that begins `2026-10-12T04:17:43Z`, so it stays alone |
+| h | `exclude_downtime` over that union leaves **160** of the 164 live entries in `[2026-10-11, 2026-10-22)` |
+| i | each of the wrapper's tests fails against a deliberately broken scratch copy of the wrapper that names its break; the survey is run in a disposable worktree outside the repository after the tests are committed, and its predictions are written before it runs |
+| j | **the restart's first entry is excluded under the frozen rule** (REASONED, to be measured at the stop): a pass is logged only while a position is open, so `down_intervals` ends the interval after pid 14600's stop at pid 20100's first `reconciliation_pass`, which is the first entry's, logged after the entry fills; that entry's signal bar closed before the pass, so it falls in the interval and is excluded, together with every flat hour before it |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. (j) cannot be scored on the 2026-10-23 capture, since pid 20100 had logged no pass in it.
