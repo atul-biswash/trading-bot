@@ -7690,3 +7690,112 @@ The codes in the tables are keyed to test ids at the end of the section.
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The survey runs on the tree that carries this section, and its results are appended as section 77. The order of this prompt's remaining commits: this section; the survey and its results; the counts and the lists the new files falsify (`CLAUDE.md` and `README.md`), each with the gate figures of a fresh gate run.
+
+## 77. M5n N2a: the mutation survey of the aggregation and verification tests, scored against section 76 (P140 C9, R-T)
+
+An observation log, so this section only adds. The survey ran as section 76 describes, in two detached worktrees outside the repository at `62ebd00` (the commit that carries section 76), one per source file, each running only that file's own tests; the baselines were green (`58 passed in 1.11s; failing: []` and `37 passed in 2.03s; failing: []`), the import location of `trading_bot` and `tests` was proven inside each worktree before any result counted, every restore was shown SHA-equal and each run ended with *all copied files are intact*. The outputs are `survey_a_out.txt` SHA-256 `b5460d95d381c2261d675006722762f537b19027327695e71ba27bf96bf9e3f0` and `survey_v_out.txt` SHA-256 `047d72ac99ca0fa39e0afb9ca004b92688e0df2c24ed67a573524b6940b102f3`.
+
+### The totals
+
+| | Mutations | MATCH | MORE | FEWER | Predicted kills | Observed kills |
+|---|---|---|---|---|---|---|
+| `aggregation.py` | 30 | 30 | 0 | 0 | 170 | 170 |
+| `n2_verify_bars.py` | 48 | 47 | 1 | 0 | 78 | 79 |
+| both | 78 | 77 | 1 | 0 | 248 | 249 |
+
+### Every mutation, predicted and observed
+
+| Mutation | Predicted | Killed | Verdict |
+|---|---|---|---|
+| a01 | 0 | 0 | MATCH |
+| a02 | 4 | 4 | MATCH |
+| a03 | 4 | 4 | MATCH |
+| a04 | 7 | 7 | MATCH |
+| a05 | 5 | 5 | MATCH |
+| a06 | 9 | 9 | MATCH |
+| a07 | 9 | 9 | MATCH |
+| a08 | 2 | 2 | MATCH |
+| a09 | 20 | 20 | MATCH |
+| a10 | 26 | 26 | MATCH |
+| a11 | 7 | 7 | MATCH |
+| a12 | 38 | 38 | MATCH |
+| a13 | 1 | 1 | MATCH |
+| a14 | 1 | 1 | MATCH |
+| a15 | 1 | 1 | MATCH |
+| a16 | 1 | 1 | MATCH |
+| a17 | 2 | 2 | MATCH |
+| a18 | 4 | 4 | MATCH |
+| a19 | 1 | 1 | MATCH |
+| a20 | 4 | 4 | MATCH |
+| a21 | 5 | 5 | MATCH |
+| a22 | 1 | 1 | MATCH |
+| a23 | 1 | 1 | MATCH |
+| a24 | 1 | 1 | MATCH |
+| a25 | 1 | 1 | MATCH |
+| a26 | 2 | 2 | MATCH |
+| a27 | 5 | 5 | MATCH |
+| a28 | 3 | 3 | MATCH |
+| a29 | 2 | 2 | MATCH |
+| a30 | 3 | 3 | MATCH |
+| v01 | 1 | 1 | MATCH |
+| v02 | 1 | 1 | MATCH |
+| v03 | 1 | 1 | MATCH |
+| v04 | 1 | 1 | MATCH |
+| v05 | 0 | 0 | MATCH |
+| v06 | 1 | 1 | MATCH |
+| v07 | 2 | 2 | MATCH |
+| v08 | 0 | 0 | MATCH |
+| v09 | 1 | 1 | MATCH |
+| v10 | 1 | 1 | MATCH |
+| v11 | 1 | 1 | MATCH |
+| v12 | 1 | 1 | MATCH |
+| v13 | 3 | 3 | MATCH |
+| v14 | 2 | 2 | MATCH |
+| v15 | 1 | 1 | MATCH |
+| v16 | 1 | 1 | MATCH |
+| v17 | 0 | 0 | MATCH |
+| v18 | 1 | 1 | MATCH |
+| v19 | 13 | 13 | MATCH |
+| v20 | 2 | 2 | MATCH |
+| v21 | 5 | 5 | MATCH |
+| v22 | 1 | 1 | MATCH |
+| v23 | 1 | 1 | MATCH |
+| v24 | 2 | 2 | MATCH |
+| v25 | 3 | 3 | MATCH |
+| v26 | 1 | 1 | MATCH |
+| v27 | 2 | 2 | MATCH |
+| v28 | 3 | 3 | MATCH |
+| v29 | 1 | 1 | MATCH |
+| v30 | 2 | 2 | MATCH |
+| v31 | 1 | 1 | MATCH |
+| v32 | 2 | 2 | MATCH |
+| v33 | 2 | 2 | MATCH |
+| v34 | 1 | 1 | MATCH |
+| v35 | 0 | 0 | MATCH |
+| v36 | 1 | 1 | MATCH |
+| v37 | 1 | 1 | MATCH |
+| v38 | 1 | 1 | MATCH |
+| v39 | 2 | 2 | MATCH |
+| v40 | 0 | 0 | MATCH |
+| v41 | 1 | 1 | MATCH |
+| v42 | 1 | 1 | MATCH |
+| v43 | 5 | 5 | MATCH |
+| v44 | 1 | 1 | MATCH |
+| v45 | 0 | 0 | MATCH |
+| v46 | 1 | 2 | MORE |
+| v47 | 2 | 2 | MATCH |
+| v48 | 1 | 1 | MATCH |
+
+### Where the survey and the prediction differ
+
+- **v46** killed beyond the prediction: `TestTheRequests::test_a_page_full_to_the_limit_is_followed_by_the_next_from_the_last_open`
+
+**The one MORE, diagnosed (a reach error, recorded and not a violation).** v46 (the window starting a day late) was predicted to be killed by R2 alone and was killed by R3 as well. R3, `test_a_page_full_to_the_limit_is_followed_by_the_next_from_the_last_open`, asserts that the first 4h request starts at `WINDOW_START_MS` before it asserts the following ones, so it reads the constant the mutation moves; the prediction reasoned from what R3 is for (pagination) and not from what it reaches, the error `CLAUDE.md` names under *Reason from what a thing reaches*. The extra kill is real coverage. No mutation was killed by fewer tests than predicted and the survey did not halt.
+
+### Tests killed by no mutation
+
+`test_aggregation.py`: **3 of 58**: `TestTheValues::test_empty_input_gives_no_bars`; `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[1w]`; `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[]`
+
+`test_n2_verify_bars.py`: **4 of 37**: `TestTheRequests::test_the_only_url_is_the_klines_endpoint_with_five_parameters_and_no_key`; `TestTheRequests::test_a_response_that_is_not_klines_is_an_error[{"code": -1}]`; `TestEvidenceIsKept::test_the_digest_list_is_written_even_when_a_later_request_fails`; `TestRefusals::test_a_new_or_empty_out_directory_is_accepted`
+
+Section 76 predicted 3 and 4. The scripts that made these results are in `scratch\p140`: `make_spec.py`, `build77.py` (this text).
