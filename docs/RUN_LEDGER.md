@@ -7436,3 +7436,52 @@ A bucket is **complete** when all of its minutes (1440 for 1d, 240 for 4h) are s
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2). Predictions for the mutation survey of the new tests are written after the tests exist and committed before the survey runs, as at section 73.
+
+## 75. M5n N2a: the run of scripts/n2_verify_bars.py, the scoring of section 74, and what the mismatches are (P140 C7, R-T)
+
+An observation log, so this section only adds. The script ran once, from the development tree's venv, on branch `m5n` at `9061a1c` (`scripts/n2_verify_bars.py` SHA-256 `2ab94ea4647079a8879f401c7f2593d2583a85c15b93369fc9a08c0a4d57105b`, `src/trading_bot/data/aggregation.py` `096d5abd7d907dc426f11996b82be98f113e4a06b47144dae6a364f9ce2f5d7b`), with `--out "F:\trading bot\scratch\p140\n2_responses"`, from `2026-10-24T10:12:44Z` (the time before the launch) to a finish before `10:14:54Z`: **exit 0, about two minutes, 34 requests, none refused, none rate-limited, no response holding a bar at or after `2024-01-01`** (the script would have stopped with an error). The venue was `https://api.binance.com/api/v3/klines` only, keyless. Nothing was written under `deploy\45547f107715`, the rehearsal clone or the store. The result file is `n2_result.txt`, SHA-256 `55cc0907266c4d9d21583263a280fa85375643d7d2b305404942d51891ab6d6e`; the 34 raw responses are in `n2_responses` with their digests in `responses.sha256`, SHA-256 `c3d099e59f77ef74c96b03179cba0d00050f0099792f92fa4e353d8c28de93fb`. **No return, P&L, equity or metric was computed.**
+
+### The counts the script printed (venue bars are the venue's own, aggregated buckets are those with at least one stored minute)
+
+| Series | Requests | Venue | Aggregated (complete / incomplete) | Compared | Equal | Mismatched | Mismatched in a complete bucket | Mismatched in an incomplete bucket | Incomplete that still equal | Venue-only | Aggregator-only | Off-grid venue |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1d | 3 | 2328 | 2314 (2280 / 34) | 2314 | 2237 | 77 | **73** | 4 | 30 | 14 | 0 | 0 |
+| BTCUSDT 4h | 14 | 13951 | 13861 (13812 / 49) | 13861 | 13713 | 148 | **143** | 5 | 44 | 90 | 0 | 0 |
+| ETHUSDT 1d | 3 | 2328 | 2314 (2280 / 34) | 2314 | 2220 | 94 | **90** | 4 | 30 | 14 | 0 | 0 |
+| ETHUSDT 4h | 14 | 13951 | 13861 (13812 / 49) | 13861 | 13674 | 187 | **181** | 6 | 43 | 90 | 0 | 0 |
+
+Mismatched buckets by field (a bucket can differ in several): BTCUSDT 1d open 29, high 0, low 2, close 1, volume 50; BTCUSDT 4h open 95, high 3, low 6, close 2, volume 55; ETHUSDT 1d open 46, high 1, low 2, close 1, volume 50; ETHUSDT 4h open 135, high 10, low 14, close 2, volume 54. The mismatch list held 558 rows and the first 50 were printed, all of them BTCUSDT 1d (the list runs by series and then by time), so the rest of it is in the saved result only by count. Venue-only runs, both pairs: 1d **2017-12-05 to 2017-12-17 (13 days)** and **2018-02-09 (1 day)**; 4h **2017-09-06 16:00 (1 bucket)**, **2017-12-04 08:00 to 2017-12-18 04:00 (84 buckets)** and **2018-02-09 08:00 to 2018-02-10 00:00 (5 buckets)**. The venue has no 4h bar for 17 of the 13968 grid slots (the first, `2017-08-17 00:00`, and 16 more) and none of those has an aggregated bucket either; it has a 1d bar for all 2328 days.
+
+### Section 74's predictions, scored
+
+| | Prediction | Result |
+|---|---|---|
+| a | Every complete bucket equals the venue's bar in all five fields | **FALSE.** 73 of 2280 complete BTCUSDT 1d buckets (3.2%), 143 of 13812 4h (1.0%), 90 of 2280 ETHUSDT 1d (3.9%) and 181 of 13812 4h (1.3%) differ. Diagnosed below |
+| b | Every mismatch lies in a bucket with missing minutes | **FALSE** for the same buckets: 487 of the 506 mismatched buckets that were paired are complete. The lean that most incomplete buckets still equal the venue's **HELD**: 30 of 34 (BTCUSDT 1d), 44 of 49 (4h), 30 of 34 and 43 of 49 (ETHUSDT) |
+| c | Incomplete about 33 (1d, range 25 to 45) and 50 (4h, 35 to 70) per pair; absent about 14 (11 to 20) and 105 (90 to 130); ETHUSDT within 3 of BTCUSDT | **HELD.** Incomplete 34 and 49 for both pairs; absent buckets (no stored minute) 14 (1d) and 106 (4h, 13967 less 13861, the first slot excluded); ETHUSDT equal to BTCUSDT |
+| c2 | The venue has klines across most of 2017-12's hole (lean 60%): venue-only about 13 to 14 (1d) and 80 to 86 (4h) in 2017-12 | **HELD.** 13 days and 84 4h buckets, plus 2018-02-09 (1 day, 5 4h buckets) and one 4h bucket on 2017-09-06. The archive's hole is the archive's and not the exchange's |
+| d | Boundaries: every venue open time and every bucket on the 00:00 (1d) and 00/04/08/12/16/20 (4h) grid | **HELD.** Off-grid venue open times 0; the aggregator is on the grid by construction (tested) |
+| e | 34 requests, all HTTP 200, none at or after `1704067200000`, 34 saved responses with a SHA-256 each | **HELD.** 3 + 14 + 3 + 14; 34 responses and a 34-line digest list |
+| f | The store is read only up to 2023-12 | **HELD by construction and not observed**: the script prints no month count; the end is passed to the store, which skips later month files (pinned by `test_no_month_file_at_or_after_end_is_opened`), and the diagnosis below passed the same end |
+| g | Under 15 minutes in all | **HELD:** about two minutes |
+| h | Counts and a capped mismatch list, no price outside it | **HELD** |
+
+### What the mismatches are (read-only diagnosis, `scratch\p140\diagnose.py` SHA-256 `ee21477c82a02ba98ff99577c1f2c3f605c13d8e17538cbefd463971cfe8dbe4`, output `diagnose_out.txt` SHA-256 `dbe873c40b5806d813c24fe842c815ce2ea42198ed42760ddc2748881ca22c68`)
+
+It re-read the saved responses and the store over the same window and counted, for the complete buckets only, how the differences relate to **zero-volume minutes**, which the store holds as filler bars (the module docstring of `historical.py`: the venue stores an empty minute as a bar with zero volume and zero trades). It printed counts and no price.
+
+| Complete buckets | Open differs | ... of which the first minute has zero volume | Open differs with a traded first minute | High or low differs | ... with a zero-volume minute in the bucket | Volume differs | ... venue larger | ... venue smaller |
+|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1d | 27 | 27 | **0** | 0 | | 46 | 46 | 0 |
+| BTCUSDT 4h | 92 | 92 | **0** | 6 | 5 | 51 | 51 | 0 |
+| ETHUSDT 1d | 44 | 44 | **0** | 0 | | 46 | 46 | 0 |
+| ETHUSDT 4h | 131 | 131 | **0** | 19 | 19 | 50 | 50 | 0 |
+
+**Every complete-bucket open mismatch is a bucket whose first minute traded nothing**, and none has a traded first minute. Where the first minute is a filler bar, the bucket's open is that filler's open (the previous close) in the aggregation and the first trade's price at the venue; of the complete buckets with a zero-volume first minute the open still differs in 27 of 32 (BTCUSDT 1d), 92 of 116 (4h), 44 of 51 and 131 of 160, and equals the venue's in the rest, where the filler's price happens to be the first traded one. Highs and lows differ in 6 and 19 4h buckets, 24 of 25 with a zero-volume minute inside, which fits a filler's price lying outside the traded range. **Volumes differ by the venue being larger in every case and smaller in none** (46, 51, 46 and 50 buckets), which a filler cannot explain and which fits trades that reached the venue's longer bars and not its 1m bars; only 2, 2, 3 and 3 of those buckets hold a zero-volume minute. REASONED for the mechanism, MEASURED for every count above; **the mechanism is not tested here**: no aggregation over traded minutes only was run.
+
+### What follows, and what does not
+
+1. **The aggregation as committed (C3) is not the venue's bar for about 1 to 4 percent of complete buckets**, and a candidate strategy built on it would differ from one built on the venue's bars exactly when the bucket opens on an untraded minute. This is N2's finding, not a defect in C3's tests: the module does what its docstring says.
+2. **Two repairs are open and neither is made here.** An aggregation that takes the open, high and low over traded minutes only (and keeps the close and the minute counts) would, if the mechanism above is right, remove the open and most of the high and low differences; it needs its own predictions and tests. The volume difference has no repair on the 1m store: the venue's longer bars hold trades its 1m bars do not, always more and never less. The alternative is to take 4h and 1d bars from the store's own `4h` and `1d` archive series, which exist for both pairs; whether they equal the venue's was **not** measured here.
+3. **The venue-only buckets are all in two archive holes** (2017-12 and 2018-02) and one 4h slot: a bar the venue has and the 1m archive cannot reproduce.
+4. R-DT clause 3 was held: the run printed bar-verification counts; the diagnosis counted zero-volume minutes and the sign of a volume difference and computed no return or metric.
