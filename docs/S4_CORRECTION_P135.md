@@ -31,3 +31,9 @@ P134's predictions (a) and (c), that the stop legs of lists `218102`, `183218` a
 ## 5. Section 3 ratified as the operational rule, at P136
 
 P136's prompt states that `M5m-683` is ratified as the operational exit-bar rule. **The ruling's own words were not supplied**, only that statement, so this section records it as stated and does not quote it (the same limit `M5m-665` records for R-DQ before its text was written down). What it ratifies is the content of section 3 above and of `M5m-683`: the half-open interval over 1m bar opens, the entry bar's open from each side's own `entry_bar_open`, the backtest's exit bar close as `exit_bar_open` plus the pair's timeframe, the live strategy `CLOSE`'s as the booking's candle time plus a millisecond, the live protective-leg fill's as the close of the epoch-aligned pair-timeframe bar that contains the fill, an exit-less side read as open at M with M the tool's `--window-end`, and the strict `>= 3%` bound. **The one point section 3 flagged as a choice, the leg fill's exit bar, is now the rule.** The tool implements it (`scripts/s4_wick_annotate.py`, `live_exit_close`), and `tests/unit/test_s4_wick_annotate.py` pins it for a 5m pair (`TestTheFiveMinuteExitBar`, `M5m-695`). Nothing in sections 1 to 4 is edited.
+
+**The ruling's text, supplied at P137, verbatim:**
+
+> Ratified at the P136 review: the exit bar of a protective-leg fill is the pair-timeframe bar containing the fill, because that is the backtester's own bar semantics and any other choice would make live and backtest intervals differ in kind.
+
+So the paragraph above that says the words were not supplied is true of P136 and no longer true of the file; it is left standing as the record of what P136 had (`M5m-700`). The ruling names the leg-fill rule and its ground, and no more: the other points of section 3 are ratified by the statement P136 relayed, not by this text.
