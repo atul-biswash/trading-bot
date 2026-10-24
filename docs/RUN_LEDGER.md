@@ -7485,3 +7485,208 @@ It re-read the saved responses and the store over the same window and counted, f
 2. **Two repairs are open and neither is made here.** An aggregation that takes the open, high and low over traded minutes only (and keeps the close and the minute counts) would, if the mechanism above is right, remove the open and most of the high and low differences; it needs its own predictions and tests. The volume difference has no repair on the 1m store: the venue's longer bars hold trades its 1m bars do not, always more and never less. The alternative is to take 4h and 1d bars from the store's own `4h` and `1d` archive series, which exist for both pairs; whether they equal the venue's was **not** measured here.
 3. **The venue-only buckets are all in two archive holes** (2017-12 and 2018-02) and one 4h slot: a bar the venue has and the 1m archive cannot reproduce.
 4. R-DT clause 3 was held: the run printed bar-verification counts; the diagnosis counted zero-volume minutes and the sign of a volume difference and computed no return or metric.
+
+## 76. M5n N2a: the predictions for the mutation survey of the aggregation and verification tests, before it is run (P140 C8, R-T, R-DQ)
+
+An observation log, so this section only adds. P140 proves that the 95 tests of C4 and C6 bite: 58 in `tests/unit/test_aggregation.py` against `src/trading_bot/data/aggregation.py`, and 37 in `tests/unit/test_n2_verify_bars.py` against `scripts/n2_verify_bars.py`. **This section is committed before the survey is run**, with the predicted kills of every mutation and the tests predicted to be killed by none. **Everything here decides nothing about S4 or about the choice section 75 leaves open.**
+
+### The method
+
+The P117 harness as P136 used it (`survey.py` SHA-256 `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`, `p116_hook.py` `febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`): a detached worktree outside the repository, at the commit that carries this section, with the copied files shown SHA-256-equal; the import location of `trading_bot` and `tests` proven by a pytest session hook before any result counts; an unmutated baseline first, predicted green at **58 passed** for the aggregation file and **37 passed** for the script file; every mutation byte-exact, asserted to match exactly once, restored from an out-of-tree snapshot in a `finally` and shown SHA-equal; and the worktree removed afterwards. It is two runs, one spec per source file (`survey_a.json` `97872ba67521b728cafb79bbfa03c26051dfbd62c14b3f01d84624c3759f291a`, `survey_v.json` `70fba3e7ea4c8f217d794a81ea85b74b250e63268d93791b5873125050b6e139`, written by `make_spec.py` `9f1e032a9c68b97f8a3641117d9457d3dd728091601b643cb530b3de392eaf52` from the tables below), and **each run executes only the mutated file's own tests**. The tests of `test_n2_verify_bars.py` also pass through `aggregation.py`, so a mutation of the aggregator would fail some of them as well; that cross-file reach is **not** part of this survey and is not predicted.
+
+A kill is a failure present under the mutation and absent at baseline, by the three exception types of `M5i-115`. A mutation that kills **more** than predicted is recorded (MORE); one that kills **fewer** halts the survey until each missing kill is explained (FEWER). The tests were read for expressiveness and for the assertion looking before the predictions were written, and the notes below say where a fixture cannot express a mutation.
+
+### Totals
+
+**30 mutations of the aggregation module with 170 predicted kills and 48 of the script with 78**, 78 mutations and 248 predicted kills in all. Seven mutations are predicted to be killed by **nothing**, and each is declared: **a01** is equivalent (an equal high is copied over an equal high, and tests compare by value); **v05** (the response size cap), **v35** (a run list cut to one run, no test has more than one run), **v40** (the refusal exit status, the tests compare against the constant and never the literal 2) and **v45** (only a `VerifyError` caught by `main`; the one error-exit test raises a `VerifyError`) are **unpinned**, not equivalent; **v08** (the non-list check) is **inexpressible by its fixture**, since the one non-list body is a dict that the next check refuses anyway; and **v17** (`<` for `<=` on an equal open time) is unpinned, since the only out-of-order fixture runs backwards.
+
+**Tests predicted to be killed by no mutation:** in the aggregation file **3** of 58: `TestTheValues::test_empty_input_gives_no_bars` (no mutation touches the empty stream), and the `1w` and empty-string cases of `test_a_timeframe_other_than_4h_and_1d_is_refused` (refused by any membership test, so the one mutation that widens it lets them through unkilled). In the script file **4** of 37: `TestTheRequests::test_the_only_url_is_the_klines_endpoint_with_five_parameters_and_no_key` (the set of query keys is not changed by any mutation in the table, only their values), the `{"code": -1}` case of `test_a_response_that_is_not_klines_is_an_error` (a dict body fails the row check even when the list check is removed), `TestEvidenceIsKept::test_the_digest_list_is_written_even_when_a_later_request_fails` (no mutation breaks the `finally`) and `TestRefusals::test_a_new_or_empty_out_directory_is_accepted` (no mutation makes a fresh directory refused).
+
+**Where a prediction is most likely to be wrong, named in advance:** a10 (every minute its own bucket) and a12 (the last bucket never flushed) have the largest predicted sets, 26 and 38, and each is a count of tests that reach the mutated line; v19 (the venue's bars never kept) reaches 13 and excludes D5, which passes by accident because zero compared buckets also means zero mismatches; v31 is predicted to be killed by W1 alone because U4's fixture makes the on-grid count equal the off-grid count by coincidence (one venue bar of each).
+
+The codes in the tables are keyed to test ids at the end of the section.
+
+### Predicted kills, `src/trading_bot/data/aggregation.py` against `tests/unit/test_aggregation.py`
+
+| Mutation | The break | Predicted kills (tests/unit/test_aggregation.py) |
+|---|---|---|
+| a01 | a new high replaces the old on >= (an equal high is copied) | none |
+| a02 | the high keeps the LOWEST high | V1, V2, V5, P3 |
+| a03 | the low keeps the HIGHEST low | V1, V2, V5, P4 |
+| a04 | the close is never updated, so it stays the first minute's | V1, V2, V5, P1, P3, P7, S1 |
+| a05 | the volume is the last minute's and not the sum | V1, V3, V5, P1, S2 |
+| a06 | the present count is never incremented | V1, V5, P1, P2, P3, P5, P6, S1, S2 |
+| a07 | minutes_missing is the present count | V1, V5, P1, P2, P3, P5, P6, S1, S2 |
+| a08 | close_time is the next bucket's first millisecond | Gclose[4h], Gclose[1d] |
+| a09 | open_time is one millisecond late | G4h[0-0-0], G4h[3-59-0], G4h[4-0-4], G4h[7-59-4], G4h[8-0-8], G4h[11-59-8], G4h[12-0-12], G4h[15-59-12], G4h[16-0-16], G4h[19-59-16], G4h[20-0-20], G4h[23-59-20], G1dmid, G1dmin, P5, P6, P8, S1, S4, S6 |
+| a10 | every minute is its own bucket (grid of one minute) | G4h[3-59-0], G4h[7-59-4], G4h[11-59-8], G4h[15-59-12], G4h[19-59-16], G4h[23-59-20], G1dmid, G1dmin, Gclose[4h], Gclose[1d], V1, V2, V3, V5, P1, P2, P3, P4, P5, P6, P7, P8, S1, S2, S4, S6 |
+| a11 | a later bucket is folded into the current one (<= for ==) | G1dmid, V5, P6, P7, P8, S1, S2 |
+| a12 | the last bucket is never flushed | G4h[0-0-0], G4h[3-59-0], G4h[4-0-4], G4h[7-59-4], G4h[8-0-8], G4h[11-59-8], G4h[12-0-12], G4h[15-59-12], G4h[16-0-16], G4h[19-59-16], G4h[20-0-20], G4h[23-59-20], G1dmid, G1dmin, Gclose[4h], Gclose[1d], V1, V2, V3, V4, V5, P1, P2, P3, P4, P5, P6, P7, P8, B[4h-BTCUSDT], B[4h-ETHUSDT], B[1d-BTCUSDT], B[1d-ETHUSDT], S1, S2, S3, S4, S6 |
+| a13 | a candle that is not 1m is accepted | I1 |
+| a14 | a second symbol is accepted | B2 |
+| a15 | an open off the minute grid is accepted | I4 |
+| a16 | a repeated minute is accepted (< for <=) | I3 |
+| a17 | the ordering check is removed | I2, I3 |
+| a18 | any stored interval is an aggregated timeframe | I5[1m], I5[5m], I5[1h], S8 |
+| a19 | a naive instant is not refused by the aggregator | S7 |
+| a20 | the grid check on start and end is removed | S5[0], S5[1], S5[2], S7 |
+| a21 | the store is asked for an empty range | S1, S2, S3, S4, S6 |
+| a22 | the store is asked for 40 days beyond end | S4 |
+| a23 | the store is always asked for BTCUSDT | S3 |
+| a24 | the bar is not frozen | T2 |
+| a25 | the open is not a Money field | T1 |
+| a26 | complete is true for one missing minute (<= 1) | T3, P1 |
+| a27 | the bucket's open is its first minute's close | V1, V2, P1, P2, P7 |
+| a28 | the bar's symbol is always BTCUSDT | B[4h-ETHUSDT], B[1d-ETHUSDT], S3 |
+| a29 | the bar's timeframe is always 4h | B[1d-BTCUSDT], B[1d-ETHUSDT] |
+| a30 | 1h is an aggregated timeframe | Gtf, I5[1h], S8 |
+
+### Predicted kills, `scripts/n2_verify_bars.py` against `tests/unit/test_n2_verify_bars.py`
+
+| Mutation | The break | Predicted kills (tests/unit/test_n2_verify_bars.py) |
+|---|---|---|
+| v01 | any https URL is accepted | F1 |
+| v02 | a key header is sent | F2 |
+| v03 | an HTTP error returns an empty page | F3 |
+| v04 | a transport failure returns an empty page | F4 |
+| v05 | the response size cap is removed | none |
+| v06 | endTime is one millisecond past the window | R2 |
+| v07 | the page limit is always 1000 | R3, R4 |
+| v08 | a non-list response is not refused at its own check | none |
+| v09 | a short kline row is not refused at its own check | R7[[[1, 2]]] |
+| v10 | a non-integer open time is not refused | R7[[["x", "1", "1", "1", "1", "1"]]] |
+| v11 | a figure that is not a decimal escapes as InvalidOperation | R8 |
+| v12 | a body that is not JSON escapes as a JSON error | R7[not json] |
+| v13 | the next page starts at the last open and not after it | R3, R4, E1 |
+| v14 | a short page does not end the series | R4, P-1 |
+| v15 | the pause is taken before every request | R4 |
+| v16 | a bar at or after the window end is accepted | R5 |
+| v17 | an equal open time is accepted (< for <=) | none |
+| v18 | the ordering check is removed | R6 |
+| v19 | the venue's bars are never kept | W1, W2, D1, D2, D3, D4, U1, U2, U4, R3, P-1, P-2, P-3 |
+| v20 | the pairing iterates the aggregator's buckets | U2, P-2 |
+| v21 | compared counts two per pair | W1, W2, D1, U1, U2 |
+| v22 | figures are compared as strings | D5 |
+| v23 | incomplete_equal counts the complete ones | D4 |
+| v24 | complete and incomplete mismatches are swapped | D1, D3 |
+| v25 | a field is counted twice | D1, D2, D3 |
+| v26 | a mismatch row carries 0 minutes missing | D3 |
+| v27 | a mismatch row has the two values swapped | D1, D3 |
+| v28 | complete counts the incomplete buckets | W1, D3, D4 |
+| v29 | the aggregator-only runs are built from the venue-only buckets | U2 |
+| v30 | the venue-only runs are built from the aggregator-only buckets | U1, P-3 |
+| v31 | off-grid counts the on-grid venue opens | W1 |
+| v32 | a run joins only buckets two widths apart | U3, P-3 |
+| v33 | a run counts two per bucket after the first | U3, P-3 |
+| v34 | the mismatch list prints 51 rows | P-2 |
+| v35 | a run list is cut to one run | none |
+| v36 | a timestamp has a space for the T | P-3 |
+| v37 | an out directory under logs is accepted | X1 |
+| v38 | an out directory inside the store is accepted | X2 |
+| v39 | an out directory that holds files is accepted | X3, X5 |
+| v40 | the refusal exit status is 3 | none |
+| v41 | the digest list holds the SHA-256 of the name | E1 |
+| v42 | a raw response is not written | E1 |
+| v43 | main always writes to stdout | X5, P-1, P-2, P-3, P-4 |
+| v44 | a fetch error exits 0 | P-4 |
+| v45 | only a VerifyError is caught by main | none |
+| v46 | the window starts a day late | R2 |
+| v47 | the window ends a day late | R2, R5 |
+| v48 | the timeframes run 4h before 1d | W2 |
+
+### The test key (every code the tables use)
+
+| Code | Test |
+|---|---|
+| B2 | `TestBothPairs::test_two_symbols_in_one_stream_are_refused` |
+| B[1d-BTCUSDT] | `TestBothPairs::test_the_symbol_and_timeframe_are_carried_onto_the_bar[1d-BTCUSDT]` |
+| B[1d-ETHUSDT] | `TestBothPairs::test_the_symbol_and_timeframe_are_carried_onto_the_bar[1d-ETHUSDT]` |
+| B[4h-BTCUSDT] | `TestBothPairs::test_the_symbol_and_timeframe_are_carried_onto_the_bar[4h-BTCUSDT]` |
+| B[4h-ETHUSDT] | `TestBothPairs::test_the_symbol_and_timeframe_are_carried_onto_the_bar[4h-ETHUSDT]` |
+| D1 | `TestADifferenceIsCountedByFieldAndByCompleteness::test_a_wrong_high_in_a_complete_bucket_is_a_complete_mismatch` |
+| D2 | `TestADifferenceIsCountedByFieldAndByCompleteness::test_two_wrong_fields_in_one_bucket_are_one_mismatched_bucket_and_two_field_counts` |
+| D3 | `TestADifferenceIsCountedByFieldAndByCompleteness::test_a_missing_minute_that_changes_the_volume_is_an_incomplete_mismatch` |
+| D4 | `TestADifferenceIsCountedByFieldAndByCompleteness::test_an_incomplete_bucket_that_still_equals_the_venue_is_counted_as_such` |
+| D5 | `TestADifferenceIsCountedByFieldAndByCompleteness::test_figures_are_compared_as_decimals_not_as_strings` |
+| E1 | `TestEvidenceIsKept::test_every_raw_response_is_saved_with_its_sha256` |
+| F1 | `TestFetchUrl::test_a_url_outside_the_klines_endpoint_is_refused_before_any_request` |
+| F2 | `TestFetchUrl::test_the_request_carries_no_key_and_no_header_but_a_user_agent` |
+| F3 | `TestFetchUrl::test_a_rate_limit_is_an_error_and_not_retried` |
+| F4 | `TestFetchUrl::test_a_transport_failure_is_an_error` |
+| G1dmid | `TestTheGrid::test_the_minute_before_midnight_and_the_midnight_minute_are_two_1d_buckets` |
+| G1dmin | `TestTheGrid::test_a_1d_bucket_opens_at_00_utc_whatever_the_minute_inside_it` |
+| G4h[0-0-0] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[0-0-0]` |
+| G4h[11-59-8] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[11-59-8]` |
+| G4h[12-0-12] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[12-0-12]` |
+| G4h[15-59-12] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[15-59-12]` |
+| G4h[16-0-16] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[16-0-16]` |
+| G4h[19-59-16] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[19-59-16]` |
+| G4h[20-0-20] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[20-0-20]` |
+| G4h[23-59-20] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[23-59-20]` |
+| G4h[3-59-0] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[3-59-0]` |
+| G4h[4-0-4] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[4-0-4]` |
+| G4h[7-59-4] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[7-59-4]` |
+| G4h[8-0-8] | `TestTheGrid::test_a_4h_bucket_opens_on_00_04_08_12_16_or_20_utc[8-0-8]` |
+| Gclose[1d] | `TestTheGrid::test_close_time_is_the_last_millisecond_of_the_bucket[1d-closes1]` |
+| Gclose[4h] | `TestTheGrid::test_close_time_is_the_last_millisecond_of_the_bucket[4h-closes0]` |
+| Gtf | `TestTheGrid::test_only_4h_and_1d_are_aggregated` |
+| I1 | `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_candle_that_is_not_a_1m_bar_is_refused` |
+| I2 | `TestInputThatCannotBeAggregatedWithoutGuessing::test_open_times_must_increase` |
+| I3 | `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_repeated_minute_is_refused_not_added_twice` |
+| I4 | `TestInputThatCannotBeAggregatedWithoutGuessing::test_an_open_time_off_the_minute_is_refused` |
+| I5[1h] | `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[1h]` |
+| I5[1m] | `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[1m]` |
+| I5[5m] | `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[5m]` |
+| P-1 | `TestWhatIsPrinted::test_a_clean_run_prints_counts_and_no_price_or_volume` |
+| P-2 | `TestWhatIsPrinted::test_the_mismatch_list_is_capped_at_fifty_rows` |
+| P-3 | `TestWhatIsPrinted::test_runs_of_unpaired_buckets_are_printed_with_their_times_and_count` |
+| P-4 | `TestWhatIsPrinted::test_a_fetch_error_is_an_error_exit_and_prints_no_result` |
+| P1 | `TestGapsAreReportedAndNeverFilled::test_one_missing_interior_minute_is_counted_and_the_bucket_is_incomplete` |
+| P2 | `TestGapsAreReportedAndNeverFilled::test_a_missing_first_minute_makes_the_second_minute_the_open` |
+| P3 | `TestGapsAreReportedAndNeverFilled::test_a_missing_last_minute_makes_the_one_before_the_close` |
+| P4 | `TestGapsAreReportedAndNeverFilled::test_the_missing_minute_that_held_the_extreme_is_not_replaced` |
+| P5 | `TestGapsAreReportedAndNeverFilled::test_a_stream_that_starts_mid_day_has_a_first_day_missing_the_earlier_minutes` |
+| P6 | `TestGapsAreReportedAndNeverFilled::test_a_bucket_with_no_stored_minute_is_not_emitted_and_nothing_stands_in_for_it` |
+| P7 | `TestGapsAreReportedAndNeverFilled::test_the_bar_after_a_gap_starts_from_its_own_first_minute` |
+| P8 | `TestGapsAreReportedAndNeverFilled::test_a_whole_missing_day_inside_a_run_of_days_gives_no_bar_for_it` |
+| R2 | `TestTheRequests::test_the_first_request_starts_at_2017_08_17_and_every_one_ends_before_2024` |
+| R3 | `TestTheRequests::test_a_page_full_to_the_limit_is_followed_by_the_next_from_the_last_open` |
+| R4 | `TestTheRequests::test_requests_are_paced_by_the_pause_and_not_before_the_first` |
+| R5 | `TestTheRequests::test_a_bar_at_or_after_the_window_end_is_an_error_not_a_row` |
+| R6 | `TestTheRequests::test_open_times_that_do_not_increase_are_an_error` |
+| R7[[["x", "1", "1", "1", "1", "1"]]] | `TestTheRequests::test_a_response_that_is_not_klines_is_an_error[[["x", "1", "1", "1", "1", "1"]]]` |
+| R7[[[1, 2]]] | `TestTheRequests::test_a_response_that_is_not_klines_is_an_error[[[1, 2]]]` |
+| R7[not json] | `TestTheRequests::test_a_response_that_is_not_klines_is_an_error[not json]` |
+| R8 | `TestTheRequests::test_a_figure_that_is_not_a_decimal_is_an_error` |
+| S1 | `TestAgainstARealStore::test_a_month_file_boundary_ends_one_bucket_and_starts_the_next` |
+| S2 | `TestAgainstARealStore::test_a_whole_day_in_a_month_file_is_one_complete_1d_bar_and_six_4h_bars` |
+| S3 | `TestAgainstARealStore::test_the_symbol_is_the_one_asked_for` |
+| S4 | `TestAgainstARealStore::test_no_month_file_at_or_after_end_is_opened` |
+| S5[0] | `TestAgainstARealStore::test_a_range_off_the_1d_grid_is_refused_at_the_call[start0-end0]` |
+| S5[1] | `TestAgainstARealStore::test_a_range_off_the_1d_grid_is_refused_at_the_call[start1-end1]` |
+| S5[2] | `TestAgainstARealStore::test_a_range_off_the_1d_grid_is_refused_at_the_call[start2-end2]` |
+| S6 | `TestAgainstARealStore::test_a_range_on_the_4h_grid_but_not_the_1d_grid_is_accepted_for_4h` |
+| S7 | `TestAgainstARealStore::test_a_naive_start_or_end_is_refused_at_the_call` |
+| S8 | `TestAgainstARealStore::test_an_unaggregated_timeframe_is_refused_at_the_call` |
+| T1 | `TestTheBarType::test_a_float_figure_is_refused` |
+| T2 | `TestTheBarType::test_the_bar_is_frozen` |
+| T3 | `TestTheBarType::test_complete_follows_the_missing_count` |
+| U1 | `TestBucketsOnlyOneSideHas::test_a_venue_bar_with_no_stored_minute_is_venue_only` |
+| U2 | `TestBucketsOnlyOneSideHas::test_a_stored_bucket_the_venue_lacks_is_aggregator_only` |
+| U3 | `TestBucketsOnlyOneSideHas::test_consecutive_unpaired_buckets_are_one_run_and_a_break_starts_another` |
+| U4 | `TestBucketsOnlyOneSideHas::test_a_venue_open_off_the_grid_is_counted` |
+| V1 | `TestTheValues::test_a_full_4h_bucket_has_the_first_open_the_last_close_the_extremes_and_the_sum` |
+| V2 | `TestTheValues::test_open_and_close_are_the_first_and_last_minute_not_the_extremes` |
+| V3 | `TestTheValues::test_a_volume_is_an_exact_decimal_sum` |
+| V4 | `TestTheValues::test_every_figure_is_a_decimal` |
+| V5 | `TestTheValues::test_a_day_equals_the_fold_of_its_six_4h_buckets` |
+| W1 | `TestAWholeDayThatAgrees::test_every_bucket_is_complete_and_equal` |
+| W2 | `TestAWholeDayThatAgrees::test_both_pairs_and_both_timeframes_are_run_in_order` |
+| X1 | `TestRefusals::test_an_out_directory_under_logs_is_refused` |
+| X2 | `TestRefusals::test_an_out_directory_inside_the_store_is_refused` |
+| X3 | `TestRefusals::test_an_out_directory_that_already_holds_files_is_refused` |
+| X5 | `TestRefusals::test_a_second_run_into_the_same_directory_is_refused_and_overwrites_nothing` |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The survey runs on the tree that carries this section, and its results are appended as section 77. The order of this prompt's remaining commits: this section; the survey and its results; the counts and the lists the new files falsify (`CLAUDE.md` and `README.md`), each with the gate figures of a fresh gate run.
