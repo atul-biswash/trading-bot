@@ -7104,3 +7104,96 @@ Each is one byte-exact replacement with exactly one match, asserted by the spec 
 **Abstentions declared in advance.** (1) **X2 abstains under m14**: a strategy `CLOSE` ends at a signal bar's close plus a millisecond, which equals the close of the bar containing it, so the inverted test gives the same instant for X2's 5m case and for every 1m case in the fixtures; X2 is killed only by m13. (2) **No mutation is predicted to kill H3, X7, I1, I9 or R5**: H3's bound is implied by H1 and H2; X7's guard can only fail by an exception that is not an assertion; I1 is covered by the frozen loader, so the tool's own direct door call is not what it exercises; I9 compares option names and no mutation removes one; R5 lists files and no mutation writes one. (3) **m16, m28, m42, m54, m57 and m58 are predicted to kill nothing, and each is a gap in the tests, not an equivalent mutant**: the naive-instant guard, the extra-cause line, the frozen downtime in E2's union, the live open-at-M wiring, the live timeframe wiring and the symbol handed to the store have no test that fails when they break (every end-to-end fixture is BTCUSDT, 1m, with a booking that has an exit instant). m43 alone is an equivalent mutant. They are reported as findings, not forced green.
 
 The survey's results, the union of kills and the tests killed by no mutation follow in a later commit.
+
+### Completion (P135 C9): the arming audit's results, a mechanics check on the real store, and what the audit found
+
+Added in the commit that completes this section; nothing above is edited. The commits of P135, in order: `d2fab1e` (R-DS), `4f757ea` (the predictions), `526002f` (the tool), `af9ccc4` (its 52 tests), `766b1e4` (the survey's predictions), `da3a8b5` (U10), `51cd7b4` (the runbook), `dcb66b7` (the counts), then the commit that carries this text. The gates: `526002f` on its own tree (tests moved aside), 4463 passed, 231 files formatted, mypy over 114 source files, credentialed, exit 0, 333.5 s; `af9ccc4`, 4515 passed and 1 skipped, 232 files formatted, mypy over 114, exit 0, 347.5 s.
+
+#### The predictions of section 72 scored
+
+| | Result |
+|---|---|
+| a | **Held** (`TestTheIntervalOfEachKind`, the backtest-only and live-only stretches, both wide=yes; the tool passes all 52 tests) |
+| b | **Held**: a backtest-only entry with no wide bar reads wide=no with max range 0.000000%, and the output never says *no live position* |
+| c | **Held**: a bar of exactly 3% is wide, 2.999% is not, 3.001% is |
+| d | **Held** for the primary, E1 and E2: the counts by cause sum to the list's length, and the three real-store runs below print 19, 11 and 19 rows against the frozen files' `DISAGREEMENTS (19)`, `(11)` and `(19)` |
+| e to g | **Held** (the open-at-M, half-open and exit-bar-close tests) |
+| h | **Held**: the primary and E1 lists equal the frozen tool's printed list, entry for entry, and E2's equals the wrapper's and differs from the frozen one |
+| i to m | **Held** |
+
+#### The survey
+
+Run by the P130 harness (`survey.py` `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`, hook `p116_hook.py` `febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`) in a detached worktree at `766b1e4` outside the repository (`F:\trading bot\scratch\p135\wt`), with the import location proven (`trading_bot` and `tests` both resolved inside the worktree), an unmutated baseline of 111 passed (the tool's 52 and the repository's evidence-door scan file), every one of the 52 restores shown SHA-256-equal (52 of 52 `True`, none `False`), and the worktree removed afterwards (`git worktree list` shows the main worktree only). The spec was generated from the committed ledger table by `make_spec.py` `34b20354aa4238c1295a38d00c46258fea2c8b39609429efb2c5fce45fb5ccae` (`survey_spec.json` `d9aa127ad53a2bedcc9b6f083c1fae7ef90f4914ec65306b09070268f43b1389`; each anchor asserted to match once), the output is `survey_out.txt` `7073f064e30fe8107f31b2df12987d34f45772f1b0dc868594fd59130d08d4d8` and the union script `union.py` `5a1766854652cb1ac19db32ee1a4e491660eaf93217d6a55150d0982db22a9e4`. **All 52 mutations matched their predicted kill sets exactly: 52 MATCH, 0 MORE, 0 FEWER**, 148 kills predicted and 148 observed, so the survey never halted.
+
+| Mutation | The break | Predicted | Killed | Verdict |
+|---|---|---|---|---|
+| m01 | the bound is strict: `widest >= threshold` becomes `>` | 1 | 1 | MATCH |
+| m02 | the threshold is 4% | 3 | 3 | MATCH |
+| m03 | the range divides by the high and not the open | 8 | 8 | MATCH |
+| m04 | a bar with a non-positive open has range zero and not none | 1 | 1 | MATCH |
+| m05 | the interval filter is removed (every bar is inside) | 4 | 4 | MATCH |
+| m06 | the end is inclusive | 2 | 2 | MATCH |
+| m07 | the start is exclusive | 6 | 6 | MATCH |
+| m08 | a reader that served nothing reads "no" and not "unknown" | 2 | 2 | MATCH |
+| m09 | an interval with no bar reads "no" and not "unknown" | 3 | 3 | MATCH |
+| m10 | the widest bar is the narrowest | 7 | 7 | MATCH |
+| m11 | the bar count is one too many | 3 | 3 | MATCH |
+| m12 | the epoch floor rounds up | 3 | 3 | MATCH |
+| m13 | a strategy `CLOSE` ends at the signal bar's close, without the millisecond | 3 | 3 | MATCH |
+| m14 | the `CLOSE` test is inverted | 2 | 2 | MATCH |
+| m15 | a booking with no exit instant ends one millisecond before M | 1 | 1 | MATCH |
+| m16 | the naive-instant guard is removed | 0 | 0 | MATCH |
+| m17 | the backtest row's timeframe is not added | 4 | 4 | MATCH |
+| m20 | a backtest row with no exit ends at its own entry | 3 | 3 | MATCH |
+| m21 | a live-only entry looks up the backtest table | 11 | 11 | MATCH |
+| m22 | a backtest-only entry looks up the live table | 23 | 23 | MATCH |
+| m23 | a matched entry takes the live period only | 1 | 1 | MATCH |
+| m24 | a matched entry takes the shorter period | 2 | 2 | MATCH |
+| m26 | each cause's count line counts every row | 3 | 3 | MATCH |
+| m27 | only the causes present get a count line | 1 | 1 | MATCH |
+| m28 | a cause outside the closed list gets no count line | 0 | 0 | MATCH |
+| m29 | the header is `DIAGNOSTIC R-DR` | 1 | 1 | MATCH |
+| m30 | the annotation line names a verdict word | 1 | 1 | MATCH |
+| m31 | the rulings line cites the P134 file twice | 1 | 1 | MATCH |
+| m32 | the threshold line prints 0.03% | 1 | 1 | MATCH |
+| m33 | the percentage has two places | 4 | 4 | MATCH |
+| m34 | the percentage is not multiplied by 100 | 3 | 3 | MATCH |
+| m35 | no range prints `n/a` and not `none` | 1 | 1 | MATCH |
+| m36 | the window line prints end before start | 1 | 1 | MATCH |
+| m37 | the analysis line is always `primary` | 1 | 1 | MATCH |
+| m38 | the digest lines are not printed | 2 | 2 | MATCH |
+| m39 | `e3` is added to the analyses | 2 | 2 | MATCH |
+| m40 | the E2 latch union is never applied | 1 | 1 | MATCH |
+| m41 | E1 applies the latch union | 1 | 1 | MATCH |
+| m42 | E2 drops the frozen downtime from its union | 0 | 0 | MATCH |
+| m43 | a store error returns an empty list and not `None` | 0 | 0 | MATCH |
+| m44 | the series read is `5m` and not `1m` | 8 | 8 | MATCH |
+| m46 | the inverted-window refusal is removed | 1 | 1 | MATCH |
+| m47 | the direct `require_evidence_eligible` call is removed | 1 | 1 | MATCH |
+| m48 | the `logs/` refusal is removed | 1 | 1 | MATCH |
+| m49 | the live-boot eligibility check is removed | 2 | 2 | MATCH |
+| m50 | the inverted window exits with the input-error status | 1 | 1 | MATCH |
+| m51 | `--analysis` has a default | 1 | 1 | MATCH |
+| m54 | the live open-at-M end is the window start | 0 | 0 | MATCH |
+| m55 | the backtest open-at-M end is the window start | 2 | 2 | MATCH |
+| m56 | the live exit table is keyed on the signal bar's close | 14 | 14 | MATCH |
+| m57 | the live timeframe is always one minute | 0 | 0 | MATCH |
+| m58 | the store is asked for BTCUSDT whatever the pair | 0 | 0 | MATCH |
+
+#### The tests killed by no mutation, and what the audit found
+
+48 of the tool's 52 tests fail under at least one mutation. **The four that fail under none are H3, X7, I1 and I9**, which section 72 predicted would be killed by none along with R5: **H3** (a wide bar one minute before the exit bar's close is inside), whose bound H1 and H2 imply; **X7** (a file without the exit column is an input error), whose guard can fail a test only by an exception that is not an assertion; **I1** (a run record that is not evidence is refused), which the frozen loader refuses before the tool's own direct door call is reached, so only the repository's scan fails when that call goes (m47, the one kill outside this file); and **I9** (the arguments are the frozen parser's plus `--analysis`), which compares option names that no mutation removes.
+
+**R5 was predicted to be killed by none, and the prediction contradicted its own table.** The abstention sentence of section 72 lists R5 (the read-only test) among the tests no mutation is predicted to kill, while the same section's m22 row lists R5 among the 23 it kills. m22 killed it, as the table said and the sentence did not. The kill is incidental: m22 makes the run exit with an input error, so `assert wick.main(...) == 0` fails before the test reaches its listing of the temporary tree; nothing in the survey makes R5's own subject, a write, fail. The sentence was wrong and the table right; the test is as unarmed as the sentence said.
+
+**Seven mutations were predicted to kill nothing and killed nothing: six are gaps in the tests and m43, a store error read as an empty list, is an equivalent mutant (both read as unknown).** The six gaps: m16 (the naive-instant guard), m28 (a cause outside the closed list gets a count line), m42 (E2's union without the frozen downtime), m54 (the live open-at-M wiring), m57 (the live timeframe, so a leg fill on a 5m pair is never exercised end to end) and m58 (the symbol handed to the store, whose every fixture is BTCUSDT). The first three are pinned by nothing in this file; m42's union is pinned by the wrapper's own tests, not by this tool's. They are carried, not forced green: a fixture with an ETHUSDT leg fill, a naive booking instant, a downtime beside a latch and a cause outside the list would each close one.
+
+**X2 abstained under m14, as predicted:** a strategy `CLOSE` ends at the signal bar's close plus a millisecond, which equals the close of the bar containing it, so the inverted route test gives the same instant; only m13 kills X2.
+
+#### A mechanics check on the real store (unpredicted, labelled so)
+
+The tests use a fake store, so `HistoricalStore.candles` was never exercised. The three analyses were run through their real command lines, with the backtest clone's interpreter from the development tree's script path, on the P131 rehearsal's inputs: its run directory `20261024T043428583000Z-3087d72cd7dc`, the frozen capture copy (SHA-256 `ea58a17b59f309f5c8963a9c95d7005ca7612813c09dd61475707ff4913feaed`) and the rehearsal store copy, window `[2026-10-08, 2026-10-09)` (E1 to `2026-10-08T13:09:00Z`). Read-only; no backtest; nothing under `deploy\`; no venue call. `s4_wick_primary.txt` `fa286fc99c054d702195640924769dd2cc7e2100ad500e85176d8cfdc6fa0882` (exit 0, 8.80 s), `s4_wick_e1.txt` `ed2032907505543d87c0e6c236c169777eec95a2c1571d2e243f85004e3fbf4f` (exit 0, 0.86 s) and `s4_wick_e2.txt` `b1176cc55e02da27be28eede7e42571ba4e4657ccea912f53108d485f1335258` (exit 0, 1.05 s), in `F:\trading bot\scratch\s4stop\rehearsal-2026-10-09`. The primary and E2 list 19 entries, all backtest-only and all `unexplained` (there are no live entries in the window), and E1 lists 11; the counts equal the frozen files' `DISAGREEMENTS (19)`, `(11)` and `(19)`, and the capture digest is equal in all three. In the primary **17 rows are wide=no and 2 are wide=yes**: the BTCUSDT entries at `11:46` (interval `[11:46, 12:02)`, max range 16.929702%) and `15:48` (`[15:48, 15:52)`, 16.112126%). An independent read of the store's CSV (a separate script, `python -c`, not the tool) finds BTCUSDT bars of 3% or more on 2026-10-08 at `12:01` (16.930%), `12:03` (5.291%), `15:23`, `15:25` (21.549%), `15:51` (16.112%), `17:26` and `23:18` and `23:19`, and no ETHUSDT bar: the `12:01` bar (16.930%, equal to the tool's 16.929702%) lies in the `11:46` entry's interval and the `15:51` bar (16.112%) in the `15:48` entry's, which is what the tool printed for those two rows. The other 17 rows were not recomputed by hand, so their wide=no is the tool's word and not a second instrument's. **Those two entries are exactly the rehearsal backtest's two `stop_loss` exits** (P131's primary: BTCUSDT `11:46` at 80100.70, `realised -59.455`, and `15:48` at 78778.14, `-59.414`); the other 17 are `close` exits. So on this one day every backtest stop-out sat in a wick and no close-out did. It is one day, outside `[W, M)`, with zero live entries, and decides nothing about S4; it is the first sight of the wick annotation separating the backtest's stop-outs from its closes.
+
+#### Scripts
+
+Read-only, in `scratch\p135`: `make_spec.py`, `survey.py` and `p116_hook.py` (copied from `scratch\p130`, digests above), `union.py`, `build_completion.py` (this text), `debug1.py` and `debug2.py` (throwaway, used to find the fixtures' duplicate ids, not part of any result), `counts.py` (the C8 script edit) and `splice.py` (the ledger append, in `scratch\p131`).
