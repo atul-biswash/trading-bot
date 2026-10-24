@@ -17,6 +17,13 @@ emitted at all. No minute is invented, copied forward or interpolated, so a down
 reader that wants only whole buckets filters on ``complete`` and one that wants every
 bucket the store can say anything about takes them all.
 
+**A second aggregation takes the prices over traded minutes only** (``aggregate_traded_bars``,
+``TradedBar``), because the archive writes a zero-volume filler bar for a minute nothing traded
+in and its prices are the previous close. The plain aggregation above takes the filler's open
+as a bucket's open when the first minute is a filler, and that is why it differs from the
+venue's bar in about one to four percent of complete buckets (``docs/RUN_LEDGER.md`` section
+75). The store keeps no trade count, so a traded minute is one with nonzero volume.
+
 **The range is checked before any file is opened.** ``aggregate_from_store`` requires a
 start and an end that sit on the timeframe's grid, because a range cut inside a bucket
 would make its last bucket look incomplete for a reason that is not the store's, and it
@@ -27,9 +34,10 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Final
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from trading_bot.core.models import Candle, Money
 from trading_bot.data.historical import INTERVAL_MS, HistoricalStore
@@ -38,8 +46,11 @@ __all__ = [
     "AGGREGATED_TIMEFRAMES",
     "AggregatedBar",
     "AggregationError",
+    "TradedBar",
     "aggregate_bars",
     "aggregate_from_store",
+    "aggregate_traded_bars",
+    "aggregate_traded_from_store",
 ]
 
 AGGREGATED_TIMEFRAMES: Final = ("4h", "1d")
@@ -126,6 +137,13 @@ def _epoch_ms(moment: datetime, name: str) -> int:
     return (moment - _EPOCH) // _MS
 
 
+def _require_grid(timeframe: str, start: datetime, end: datetime) -> None:
+    width_ms = _width_ms(timeframe)
+    for name, moment in (("start", start), ("end", end)):
+        if _epoch_ms(moment, name) % width_ms:
+            raise AggregationError(f"{name} is not on the {timeframe} grid: {moment!r}")
+
+
 def _checked_stream(candles: Iterable[Candle], width_ms: int) -> Iterator[tuple[str, int, Candle]]:
     """Each candle of a 1m stream with its symbol and the open of its bucket, after the checks.
 
@@ -183,8 +201,128 @@ def aggregate_from_store(
     checked now, when this is called, and files are read as the iterator is consumed. The
     store opens no month file that begins at or after ``end``.
     """
-    width_ms = _width_ms(timeframe)
-    for name, moment in (("start", start), ("end", end)):
-        if _epoch_ms(moment, name) % width_ms:
-            raise AggregationError(f"{name} is not on the {timeframe} grid: {moment!r}")
+    _require_grid(timeframe, start, end)
     return aggregate_bars(store.candles(symbol, "1m", start, end), timeframe)
+
+
+class TradedBar(BaseModel):
+    """One 4h or 1d bar whose prices are those of its traded minutes only.
+
+    A traded minute is a minute with nonzero volume, because the store keeps no trade count.
+    ``open`` is the first traded minute's open, ``close`` the last traded minute's close,
+    ``high`` and ``low`` the extremes over the traded minutes; a minute with no volume is the
+    filler the archive writes for a minute nothing traded in, its prices are the previous
+    close, and it takes no part in them. ``volume`` is the sum over every stored minute, as in
+    ``AggregatedBar``. A bucket with no traded minute has no prices, which are ``None``
+    together, and is not given any.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    symbol: str
+    timeframe: str
+    open_time: datetime
+    close_time: datetime
+    open: Money | None
+    high: Money | None
+    low: Money | None
+    close: Money | None
+    volume: Money
+    minutes_present: int
+    minutes_missing: int
+    traded_minutes: int
+
+    @model_validator(mode="after")
+    def _prices_follow_the_traded_minutes(self) -> TradedBar:
+        priced = (self.open, self.high, self.low, self.close)
+        if self.traded_minutes == 0 and any(price is not None for price in priced):
+            raise ValueError("a bucket with no traded minute has no prices")
+        if self.traded_minutes > 0 and any(price is None for price in priced):
+            raise ValueError("a bucket with a traded minute has all four prices")
+        return self
+
+    @property
+    def complete(self) -> bool:
+        return self.minutes_missing == 0
+
+    @property
+    def has_trade(self) -> bool:
+        return self.traded_minutes > 0
+
+
+class _TradedBucket:
+    __slots__ = ("close", "high", "low", "open", "open_ms", "present", "traded", "volume")
+
+    def __init__(self, open_ms: int, first: Candle) -> None:
+        self.open_ms = open_ms
+        self.open: Decimal | None = None
+        self.high: Decimal | None = None
+        self.low: Decimal | None = None
+        self.close: Decimal | None = None
+        self.volume = Decimal(0)
+        self.present = 0
+        self.traded = 0
+        self.add(first)
+
+    def add(self, candle: Candle) -> None:
+        self.volume += candle.volume
+        self.present += 1
+        if candle.volume == 0:
+            return
+        if self.open is None or self.high is None or self.low is None:
+            self.open = candle.open
+            self.high = candle.high
+            self.low = candle.low
+        else:
+            if candle.high > self.high:
+                self.high = candle.high
+            if candle.low < self.low:
+                self.low = candle.low
+        self.close = candle.close
+        self.traded += 1
+
+    def build(self, symbol: str, timeframe: str, width_ms: int) -> TradedBar:
+        return TradedBar(
+            symbol=symbol,
+            timeframe=timeframe,
+            open_time=_EPOCH + timedelta(milliseconds=self.open_ms),
+            close_time=_EPOCH + timedelta(milliseconds=self.open_ms + width_ms - 1),
+            open=self.open,
+            high=self.high,
+            low=self.low,
+            close=self.close,
+            volume=self.volume,
+            minutes_present=self.present,
+            minutes_missing=width_ms // _MINUTE_MS - self.present,
+            traded_minutes=self.traded,
+        )
+
+
+def aggregate_traded_bars(candles: Iterable[Candle], timeframe: str) -> Iterator[TradedBar]:
+    """Aggregate a time-ordered stream of 1m candles into ``timeframe`` bars over traded minutes.
+
+    The same stream checks, the same grid and the same completeness as ``aggregate_bars``;
+    only the four prices differ (see ``TradedBar``). A generator.
+    """
+    width_ms = _width_ms(timeframe)
+    current: _TradedBucket | None = None
+    last_symbol = ""
+    for symbol, bucket_ms, candle in _checked_stream(candles, width_ms):
+        last_symbol = symbol
+        if current is None:
+            current = _TradedBucket(bucket_ms, candle)
+        elif current.open_ms == bucket_ms:
+            current.add(candle)
+        else:
+            yield current.build(symbol, timeframe, width_ms)
+            current = _TradedBucket(bucket_ms, candle)
+    if current is not None:
+        yield current.build(last_symbol, timeframe, width_ms)
+
+
+def aggregate_traded_from_store(
+    store: HistoricalStore, symbol: str, timeframe: str, start: datetime, end: datetime
+) -> Iterator[TradedBar]:
+    """``aggregate_from_store`` with the traded-minute prices of ``aggregate_traded_bars``."""
+    _require_grid(timeframe, start, end)
+    return aggregate_traded_bars(store.candles(symbol, "1m", start, end), timeframe)
