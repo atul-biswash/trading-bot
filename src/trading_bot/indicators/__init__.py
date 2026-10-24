@@ -4,6 +4,7 @@ Importing this package pulls in the pandas/NumPy stack; the pure domain layer
 under ``trading_bot.core`` does not.
 """
 
+from trading_bot.indicators.breakout import donchian_high, keltner_upper, momentum
 from trading_bot.indicators.indicators import (
     BollingerBandsResult,
     MacdResult,
@@ -21,8 +22,11 @@ __all__ = [
     "MacdResult",
     "atr",
     "bollinger_bands",
+    "donchian_high",
     "ema",
+    "keltner_upper",
     "macd",
+    "momentum",
     "rsi",
     "sma",
     "true_range",
