@@ -7197,3 +7197,41 @@ The tests use a fake store, so `HistoricalStore.candles` was never exercised. Th
 #### Scripts
 
 Read-only, in `scratch\p135`: `make_spec.py`, `survey.py` and `p116_hook.py` (copied from `scratch\p130`, digests above), `union.py`, `build_completion.py` (this text), `debug1.py` and `debug2.py` (throwaway, used to find the fixtures' duplicate ids, not part of any result), `counts.py` (the C8 script edit) and `splice.py` (the ledger append, in `scratch\p131`).
+
+## 73. M5m S4: P136's halts, the trace of a store read error, and the predictions for closing P135's six test gaps, before any code (P136 C1, R-T, R-DQ)
+
+An observation log, so this section only adds. P136 closes the six gaps section 72 named in the tests of `scripts/s4_wick_annotate.py` and settles m43, the mutation section 72 called equivalent. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted, in scratch or in the repository; the only reading done before it was of the source (`scripts/s4_wick_annotate.py`, `src/trading_bot/data/historical.py` and `scripts/trade_census.py`), which the clause allows. **Everything here decides nothing about S4.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `811fd09` | `git rev-parse --short HEAD` | `811fd09` |
+| a command would write under `deploy\45547f107715`, call the venue or run a backtest | every command in the plan | none: the tests are synthetic, the survey runs in a throwaway worktree, and the mechanics re-check reads the P131 rehearsal's run directory and store copy (a day before T0) |
+| a frozen file or `scripts/s4_latch_compare.py` differs from its digest | `sha256sum` | the frozen digests of section 68 and `scripts/s4_latch_compare.py` `59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7`: unchanged |
+
+### Step 1: what the tool does when the store read raises, by file and line (read-only)
+
+1. `scripts/s4_wick_annotate.py:250-259`, `store_reader`'s `read`: `store.candles(symbol, "1m", start, end)` returns a generator, and the list comprehension consumes it inside a `try`.
+2. `src/trading_bot/data/historical.py:1263-1288`, `HistoricalStore._stream`: the file is read and hashed **as the generator is consumed**; an unreadable month file raises `StoredFileError` (1278-1279) and one that no longer matches its manifest hash raises `StoredFileError` (1280-1281). `StoredFileError` is a `HistoricalDataError` (`historical.py:150`; `ChecksumMismatchError` is another, `:142`).
+3. `scripts/s4_wick_annotate.py:258-259`: `except HistoricalDataError:` returns `None`.
+4. `scripts/s4_wick_annotate.py:173-174`, `annotate`: `bars is None` returns `Annotation("unknown", None, 0)`.
+5. `:339`, `annotate_rows` carries on to the next disagreement; `render` prints every row and the counts; `main` returns 0.
+
+**So a corrupt or unreadable month file gives rows with `wide=unknown` and exit status 0.** The only trace is the `unknown` count in the report, and an operator reading a clean exit and a long list of `unknown` rows cannot tell a store that held no bar from a store that failed to read. This is also why m43 survived: returning `[]` instead of `None` is read the same by `annotate` (`:181-182`), so no test could tell them apart, and no test raised a `HistoricalDataError` at all. **m43 was called an equivalent mutant on the strength of "both read as unknown", which is true of the mutation and false of the code it mutates: the behaviour both preserve is itself the defect.** A non-`HistoricalDataError` exception from the read (a malformed line, `historical.py:1283`, or a decode error, `:1282`) is not caught by `read` and leaves `annotate_rows` (`:445`) inside a `try` that catches only `InputError` (`:451`): a traceback and exit 1, before `render`, so no row is printed. That path is not changed here.
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | **The prompt's: a store read error makes the tool exit nonzero with no row printed. PREDICTED FALSE by the trace**: a `HistoricalDataError` yields rows and exit 0. So, as the prompt orders, the new store-error test is predicted to **fail against the unfixed tool** (it will see exit 0 and `wide=unknown` rows where it expects exit 3 and no row), and the fix is a separate code commit: `read` raises `InputError` for a `HistoricalDataError`, which `main` already turns into `INPUT ERROR` and exit 3, before any row is printed. No store at all (`store is None`) stays `unknown`, and a store that yields no bar stays `unknown` |
+| b | **Each new test fails under the P135 mutation it targets, and under no other of the six**, with the fixes in place. The nine new tests are `TestTheSymbolHandedToTheStore::test_an_ethusdt_entry_reads_ethusdts_bars_and_not_btcusdts` (G1), `TestTheFiveMinuteExitBar::test_a_wide_bar_in_the_last_minute_of_a_five_minute_exit_bar_is_inside` (G2a) and `::test_a_wide_bar_opening_at_the_five_minute_exit_bars_close_is_outside` (G2b), `TestE2AndTheFrozenDowntime::test_an_entry_inside_a_downtime_is_excluded_from_e2_as_the_wrapper_excludes_it` (G3), `TestALiveEntryOpenAtM::test_a_live_booking_with_no_exit_instant_runs_to_the_window_end` (G4), `TestANaiveInstant::test_a_naive_exit_instant_is_refused_and_not_compared` (G5), `TestACauseOutsideTheClosedList::test_it_gets_a_count_line_of_its_own` (G6), and `TestAStoreError::test_a_store_read_error_makes_the_run_an_input_error_and_prints_no_row` (G7a) and `::test_the_reader_raises_on_a_store_error_and_is_unknown_only_without_a_store` (G7b). Predicted kills: **m16** (the naive-instant guard) G5; **m28** (a cause outside the closed list gets no count line) G6; **m42** (E2's union without the frozen downtime) G3; **m54** (the live open-at-M end is the window start) G4; **m57** (the live timeframe is always one minute) G2a; **m58** (the store is asked for BTCUSDT whatever the pair) G1 and G2a, since G2a's entry is ETHUSDT too; **m43** re-anchored on the fixed code (a store error returns an empty list) G7a and G7b; and a new **m59** (a store error returns `None`) G7a and G7b |
+| c | **The existing 52 tests' kill sets are unchanged.** The survey re-runs all 52 original mutations on the new test file, each predicted to be killed by exactly the tests section 72 predicted (the same tests, by name); the new tests may add kills, which are recorded as MORE and are not a violation; **an existing test failing to fail where it did (FEWER) is** |
+| d | The fixtures for G1, G2 and G4 use BTCUSDT or ETHUSDT as stated and nothing else; G3 needs two processes, a downtime between them and a latch, and its expected list is the committed wrapper's, not the tool's own; G5 builds its naive instant by `dataclasses.replace` on a parsed `Trade`, because the census refuses a naive `candle_time` or `filled_at` at parse (`scripts/trade_census.py:276-277`), so the guard in `live_exit_close` is **unreachable from a capture** and the test pins it as defence in depth; G5 and G7b fail under their mutations by `pytest.raises`'s own `Failed`, which the project counts as a kill |
+| e | The P131 rehearsal mechanics check, re-run read-only after the fix on the same inputs, prints **19, 11 and 19** rows for the primary, E1 and E2 with exit 0, the same two `wide=yes` rows in the primary, and digests equal to section 72's (`fa286fc9...0882`, `ed203290...f4f`, `b1176cc5...5258`) |
+| f | The order of commits: this section; the fix to the tool with its full bare gate (the existing 52 tests pass against it, since none raises `HistoricalDataError`); the nine tests with their gate; the survey's predicted kills; the survey and the re-run; the counts. The new store-error test is run against the unfixed tool before the fix is committed, and its failure recorded |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
