@@ -8352,3 +8352,470 @@ None of these is a rerun: the script was run once, as P142 item 5 says, so each 
 ### What these counts are, and are not
 
 They are the number of times each rule, as ruled, said "enter" over the in-sample window, bar by bar, with the gap rule on. **They are not trades**, which need the one-position-per-pair rule (a candidate that is long cannot enter again) and N4's trailing exit; the counts bound the trades from above and nothing yet says by how much. They make no statement about any return. **C3 has 6 events per pair in 6.4 years**, which is a count of trades the gate will have to work with at most, per pair; whether a rule that sparse can be judged at all is for the owner and not decided here.
+
+## 84. M5n N3: the predictions for the mutation survey of the N3 tests, before it is run (P142 C13, R-T, R-DQ)
+
+An observation log, so this section only adds. P142 proves that the 218 tests it added bite: 26 in `tests/unit/test_indicators_breakout.py` against `src/trading_bot/indicators/breakout.py`, 42 in `tests/unit/test_m5n_gaps.py` against `src/trading_bot/strategies/m5n/gaps.py`, 89 in `tests/unit/test_m5n_strategies.py` against `base.py` and the four candidate modules (and one against the live registry's source), 49 in `tests/unit/test_n3_entry_counts.py` against `scripts/n3_entry_counts.py`, and 12 in `tests/unit/test_config_m5n.py` against `config.m5n.yaml`. **This section is committed before any of the five surveys is run.** Everything here decides nothing about S4.
+
+### The method
+
+As sections 76 and 80: the P117 harness (`survey.py` SHA-256 `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`, `p116_hook.py` `febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`, both unchanged from section 80) in a detached worktree outside the repository at the commit that carries this section, the import location of `trading_bot` and `tests` proven before any result counts, an unmutated baseline predicted green, every mutation byte-exact with exactly one match asserted and every restore shown SHA-equal, the worktrees removed afterwards. Five runs, one spec each, each executing only the mutated files' own tests. The specs and these tables are one program's output (`scratch\p142\make_spec.py`), so the table cannot differ from the spec; the spec files' SHA-256 are `survey_b.json` `a747c7a03948db4807715d910e9f743e92e794dcbb78e1c0c546db509f96f217`, `survey_g.json` `e325a70e10d7620ffd1d15f10b2078ae5e24e5d017477c18fcae0f883edf6651`, `survey_s.json` `accc2ec70b79ad4af50acf10131ccbf3fe098ea939e0487143519b067a84da06`, `survey_n.json` `ef8563ef1006bbaa76e79d75c5a9758d2e440290812a764a7731d685434ba3bd` and `survey_y.json` `b2514bf684825bb19be2d8da0b71d4ad4af883478b5058909710687a391d1192`.
+
+**What the harness counts, and what this section counts.** The harness reports every test that fails under a mutation, whatever it raised, and prints the exception types beside the verdict. A kill, by `M5i-115`, is a failure by `AssertionError` or `Failed`; an error raised by the code under test, or by a fixture, is a crash. Every mutation here is built to fail by an assertion, with two declared exceptions that fail by a crash and are counted in the predicted set because the harness counts them: `n45` (the last report row is dropped, so `N12` fails by a `KeyError` reading it) and `y22` (a mode the loader refuses, so every test that loads the file fails by the loader's `ValidationError`). A MORE is recorded and a FEWER halts the run, as before.
+
+A mutation is predicted to fail a test only after the test's fixture was read for whether it can express the mutation and its assertion for whether it looks at what the mutation moves; the predictions below were written from the test sources, not from a run. **The one execution on mutated text before this commit** loaded the 22 mutated config texts through `AppConfig`, to learn which of them the loader still accepts (all but `y22`, which is meant to be refused); no test was run on any mutated tree.
+
+### Totals
+
+| Survey | Mutated file(s) | Tests | Mutations | Predicted failures | Mutations predicted to fail nothing |
+|---|---|---|---|---|---|
+| B | `indicators/breakout.py` | 26 | 25 | 47 | 3 |
+| G | `strategies/m5n/gaps.py` | 42 | 20 | 98 | 0 |
+| S | `base.py`, `donchian.py`, `sma_cross.py`, `tsmom.py`, `keltner.py`, `registry.py` | 89 | 45 | 282 | 5 |
+| N | `scripts/n3_entry_counts.py` | 49 | 45 | 123 | 10 |
+| Y | `config.m5n.yaml` | 12 | 22 | 29 | 2 |
+| all five | | 218 | 157 | 579 | 20 |
+
+**Mutations predicted to fail nothing, 20, each for a stated reason.** They are not omissions: each names a property that the tests do not pin, or an equivalent mutation, and a MORE on any of them is a finding.
+
+| Mutation | Why no test is predicted to fail |
+|---|---|
+| m05 | `Series.diff(n)` is `series - series.shift(n)`: equivalent |
+| m06 | momentum's index is asserted nowhere (B14 reads the name and dtype only), though Donchian's and Keltner's are |
+| k07 | `atr` repeats the alignment check, so skipping Keltner's own leaves the refusal in B23 in place |
+| s11 | the `timeframe` metadata value is asserted nowhere; the type check in S43 to S48 reads its type only |
+| s12 | a recursive window as the last 22 rows is not told from the run, because every Keltner fixture is flat before the spike and an EMA and a Wilder ATR over flat bars do not depend on how many bars were read |
+| s13 | the ungated window as the whole frame: every ungated fixture holds exactly the window or reads only its last rows |
+| d09 | the Donchian `donchian_high` metadata of the previous bar equals the current bar's in every fixture (both are 10.0) |
+| k05 | no Keltner fixture puts a close exactly on the band, which is not a round number |
+| n08 | the store never serves a bar outside the window, so the guard that refuses one is never reached |
+| n10 | the slots round down, not up: every fixture's first bar and `end` lie on the grid |
+| n16, n17 | evaluating warm-up bars, and handing every candidate the whole prefix, change no count (they only cost time) |
+| n23 | the signal's price and time come from the candle and no count reads them |
+| n30 | the order of the series rows is read nowhere (the tests parse rows into a dictionary) |
+| n32, n37 | `--start` is exercised by no test except as a refusal, so narrowing it, and its default's day, are unpinned |
+| n39 | only `StoredFileError` is raised in the tests; the base class is never needed |
+| n43 | the type check on a built strategy is never reached with a non-candidate |
+| y20, y21 | the initial balance and the placeholder sizing fraction are asserted nowhere |
+
+### Tests predicted to be killed by no mutation, and why
+
+Ten of 218. In each the abstention is declared here, in advance, and a failure on any of them is a MORE.
+
+| Test | Why no mutation in these tables fails it |
+|---|---|
+| B9 (a non-numeric series is refused) | the refusal is `_numeric_float`'s, in `indicators.py`, outside this survey's mutated file; removing it from `donchian_high` would raise pandas' own `DataError`, an escape and not a failure by assertion |
+| B23 (misaligned indices are refused) | `atr` repeats the alignment check (`k07`) |
+| S1 (the six names are registered) | the only way to fail it is a mutation that unregisters a name, which makes `create_strategy` raise inside the test: a crash, and none is in these tables |
+| N5 and N38 (BTCUSDT C5 counts and trimming) | C5's rows are equal to C4's on the fixtures (both fire on the spike bar and not on the bar after), so no mutation of the counting separates them; only the order test, N48, tells the names apart (`n44`) |
+| N9 and N42 (ETHUSDT C3 counts and trimming) | the expected count is zero in both readings; a mutation can only change a zero by inventing events, and none here does |
+| N21 (the report is reproducible) | no mutation introduces non-determinism |
+| N22 (a replaced volume column changes nothing) | the script's independence of volume rests on the candidates' own volume tests (S40 to S42, S63, S64, S75, S76, S86, S87); no mutation of the script reads a volume |
+| N29 (check_window needs timezone-aware bounds) | removing the check makes the comparison raise `TypeError`, an escape and not a `ValueError` |
+
+### Where a prediction is most likely to be wrong, named in advance
+
+* **`s12` and S85.** S85 asserts that a gated Keltner band after a gap equals, with `==`, the band of the run alone. Under `s12` the window is 22 rows and not 40, over flat bars. Both give the same figures in exact arithmetic; whether pandas' recursive mean gives them to the last bit after 2 steps and after 20 is not known. The prediction is no failure; S85 failing would be a MORE and would be the one place the fixtures do tell the two windows apart.
+* **`s14` (38) and `s15` (35)** are counts of the tests that reach a one-row change in the window; `s15` leaves S28 to S30 and S34 to S36 out because their frames hold a row more than the window needs.
+* **`n19` (18) and `n18` (2).** `n18` predicts only N3 and N36, because the only event that sits on the first evaluable bar is BTCUSDT C3's, bar 200 against a warm-up of 201.
+* **`b06` (B8) and `m04` (B15).** `b06` rests on pandas refusing a rolling window of 0 with a message that does not contain the test's pattern, or accepting it; either fails B8, and a different exception type would escape.
+* **`s09` and `s17`.** Both rest on `Signal` accepting `CLOSE` and a strength of 0.5.
+* **`k03` (8)** rests on the multiplier-3 band lying above every fixture's close, including S83's.
+* **`y22`.** Ten tests fail by the loader's error, and C5 and C6, which read the file's text and never load it, are the two that do not.
+
+### B: predicted failures, `src/trading_bot/indicators/breakout.py` against `tests/unit/test_indicators_breakout.py`
+
+| Mutation | The break | Predicted failures (tests/unit/test_indicators_breakout.py) |
+|---|---|---|
+| b01 | the Donchian window includes the current bar (shift 0) | B1, B2, B3, B4, B5, B7 |
+| b02 | the Donchian window takes the minimum, not the maximum | B1, B3, B4, B7 |
+| b03 | the Donchian window accepts a partial window | B1, B3, B4 |
+| b04 | the Donchian series is named without its period | B6 |
+| b05 | the Donchian index is replaced by a range | B6 |
+| b06 | the Donchian period is not checked | B8 |
+| m01 | the momentum lag is one bar short | B10, B11, B12, B13 |
+| m02 | the momentum sign is reversed | B10, B11, B12, B13 |
+| m03 | the momentum series is named without its period | B14 |
+| m04 | the momentum period is not checked | B15 |
+| m05 | momentum is pandas' diff (an equivalent mutation) | none |
+| m06 | the momentum index is replaced by a range (its index is asserted nowhere) | none |
+| k01 | the Keltner EMA period is not checked | B22 |
+| k02 | the Keltner ATR period is not checked | B22 |
+| k03 | a zero or NaN multiplier is accepted | B22 |
+| k04 | the multiplier is ignored | B16, B19, B20 |
+| k05 | the EMA runs over the ATR period | B17, B20 |
+| k06 | the ATR runs over the EMA period | B17, B20 |
+| k07 | the alignment check is skipped (atr repeats it) | none |
+| k08 | the Keltner series is named without its multiplier | B21 |
+| k09 | the Keltner index is replaced by a range | B20, B21 |
+| k10 | the band carries a constant offset | B16, B18, B19, B20 |
+| v01 | momentum gains a volume parameter | B25 |
+| v02 | keltner_upper gains a volume parameter | B24, B25 |
+| e01 | momentum is dropped from __all__ | B26 |
+
+### G: predicted failures, `src/trading_bot/strategies/m5n/gaps.py` against `tests/unit/test_m5n_gaps.py`
+
+| Mutation | The break | Predicted failures (tests/unit/test_m5n_gaps.py) |
+|---|---|---|
+| g01 | the 4h width is one millisecond long | G1, G2, G4, G10, G12, G24, G31, G33, G39 |
+| g02 | the 1d width is one millisecond long | G1, G3, G5, G11, G13, G25, G32, G34, G40 |
+| g03 | the two widths are swapped | G1, G2, G3, G4, G5, G10, G11, G12, G13, G24, G25, G31, G32, G33, G34, G39, G40 |
+| g04 | zero bars is not refused | G22, G23 |
+| g05 | exactly the rows asked for are too few | G4, G5, G24, G25 |
+| g06 | the tail is one row too long | G2, G3, G10, G11, G12, G13, G14, G15 |
+| g07 | any consecutive pair makes a tail gap-free | G8, G9, G12, G13, G14, G15, G16, G17, G18, G19 |
+| g08 | a step of at most one width is consecutive | G16, G17, G24 |
+| g09 | a short frame is not checked for its timeframe | G30 |
+| g10 | the run starts at the row before the last gap | G33, G34, G35, G36, G39, G40 |
+| g11 | the run starts after the first gap | G33, G34 |
+| g12 | a frame without a gap loses its first row | G31, G32 |
+| g13 | the run is read from the spaced pairs, not the broken ones | G31, G32, G33, G34, G35, G36, G39, G40 |
+| g14 | a repeated open time counts as spaced in the run | G39, G40 |
+| g15 | an hourly frame is a decision timeframe | G1, G27, G30 |
+| g16 | the refusal does not say a decision timeframe | G26, G27, G28, G29 |
+| g17 | the tail writes into its input | G20, G21 |
+| g18 | the run writes into its input | G41, G42 |
+| g19 | too few rows are not refused | G6, G7 |
+| g20 | a frame of one row loses it | G37, G38 |
+
+### S: predicted failures, the candidates against `tests/unit/test_m5n_strategies.py`
+
+| Mutation | The break | Predicted failures (tests/unit/test_m5n_strategies.py) |
+|---|---|---|
+| s01 | enforce_gaps is not checked to be a bool | S9 |
+| s02 | the enforce_gaps attribute is always on | S34, S35, S36, S61, S73, S84 |
+| s03 | the warm-up is one bar short of the window | S3, S4, S5, S6, S7, S8 |
+| s04 | a candle of another timeframe is accepted | S49, S50, S51, S65, S89 |
+| s05 | the refusal names the candle's timeframe as the candidate's | S65, S89 |
+| s06 | a condition that is false still signals | S13, S14, S15, S19, S20, S21, S22, S23, S24, S28, S29, S30, S56, S57, S58, S59, S68, S69, S70, S71, S78, S79, S80, S81 |
+| s07 | the timestamp is the bar's open time | S43, S44, S45, S46, S47, S48 |
+| s08 | the price is the candle's low | S10, S11, S12, S43, S44, S45, S46, S47, S48 |
+| s09 | the action is CLOSE | S10, S11, S12, S55, S66, S77 |
+| s10 | the strategy metadata carries the timeframe | S43, S44, S45, S46, S47, S48 |
+| s11 | the timeframe metadata carries the name (asserted nowhere) | none |
+| s12 | a recursive window is the last window_bars rows | none |
+| s13 | the ungated window is the whole frame | none |
+| s14 | the gated window is one row short | S10, S11, S12, S16, S17, S18, S25, S26, S27, S28, S29, S30, S31, S32, S33, S37, S38, S39, S40, S41, S42, S43, S44, S45, S46, S47, S48, S55, S59, S62, S63, S64, S66, S67, S71, S74, S75, S76 |
+| s15 | the gated window is one row long | S10, S11, S12, S16, S17, S18, S25, S26, S27, S31, S32, S33, S37, S38, S39, S40, S41, S42, S43, S44, S45, S46, S47, S48, S55, S59, S62, S63, S64, S66, S67, S71, S74, S75, S76 |
+| s16 | the missing-column message drops the repr quotes | S52, S53, S54, S88 |
+| s17 | the signal's strength is one half | S43, S44, S45, S46, S47, S48 |
+| s18 | the live registry's source mentions the research package | S2 |
+| d01 | the Donchian window is period + 1 rows | S3, S4, S6, S10, S11, S12, S16, S17, S18, S25, S26, S27, S28, S29, S30, S31, S32, S33, S34, S35, S36, S37, S38, S39, S40, S41, S42, S43, S44, S45, S46, S47, S48 |
+| d02 | a close equal to the highest high signals | S13, S14, S15 |
+| d03 | a previous close equal to its threshold counts as above | S25, S26, S27 |
+| d04 | the Donchian entry is level-triggered | S22, S23, S24, S28, S29, S30 |
+| d05 | the Donchian threshold is built from the closes | S10, S11, S12, S13, S14, S15, S19, S20, S21, S25, S26, S27, S52, S53, S54 |
+| d06 | donchian_1d_55 looks back 50 bars | S4, S11, S32, S35 |
+| d07 | donchian_1d_20 looks back 15 bars | S3, S10, S31, S34 |
+| d08 | donchian_4h_20 looks back 15 bars | S6, S12, S33, S36 |
+| d09 | the donchian_high metadata is the previous bar's (equal in the fixtures) | none |
+| c01 | the fast average is a 49-bar one | S55 |
+| c02 | the slow average is a 199-bar one | S5, S55, S60 |
+| c03 | the cross is read the wrong way round | S55, S59, S61, S62, S63, S64 |
+| c04 | the SMA window is the slow period, not one more | S5 |
+| c05 | the fast_sma metadata is the previous bar's | S55 |
+| t01 | the momentum lookback is 89 bars | S8, S72 |
+| t02 | momentum must rise above 1 | S66, S67, S69, S71, S73, S74, S75, S76 |
+| t03 | momentum must rise from below -1 | S66, S71, S73, S74, S75, S76 |
+| t04 | the momentum metadata is the previous bar's | S66 |
+| t05 | the prev_momentum metadata is the current bar's | S66, S67 |
+| k01 | the Keltner EMA period is 19 | S77, S78 |
+| k02 | the Keltner ATR period is 19 | S7, S77, S78, S82 |
+| k03 | the Keltner multiplier is 3 | S77, S78, S81, S83, S84, S85, S86, S87 |
+| k04 | the Keltner high and low are swapped | S77, S78, S79 |
+| k05 | a close equal to the Keltner band signals (the band is never equal in the fixtures) | none |
+| k06 | the Keltner entry is level-triggered | S80, S81 |
+| k07 | the Keltner low is the close | S77, S78, S79, S88 |
+| k08 | the Keltner window is the ATR period + 1 rows | S7 |
+
+### N: predicted failures, `scripts/n3_entry_counts.py` against `tests/unit/test_n3_entry_counts.py`
+
+| Mutation | The break | Predicted failures (tests/unit/test_n3_entry_counts.py) |
+|---|---|---|
+| n01 | a start before the window is accepted | N23 |
+| n02 | an end after the window is accepted | N24, N25, N30 |
+| n03 | an empty or reversed window is accepted | N26, N27 |
+| n04 | the refusal does not name R-DT | N30 |
+| n05 | the window ends on 2024-01-02 | N24, N25, N30, N49 |
+| n06 | the window starts on 2017-08-16 | N23, N49 |
+| n07 | load_series does not check the window | N30 |
+| n08 | a served bar outside the window is not refused | none |
+| n09 | an empty series reports one bar | N17 |
+| n10 | the slots are rounded down (the grid is aligned in every fixture) | none |
+| n11 | the missing slots are the slots plus the bars | N15, N16, N18, N28, N31 |
+| n12 | the gap runs count the consecutive steps | N15, N16, N18, N28, N31 |
+| n13 | the bars are one more than stored | N15, N16, N18, N28, N31 |
+| n14 | the slots use the daily width | N15, N16 |
+| n15 | the candidate is built without the gap flag | N7, N8, N10, N11, N12, N40, N41, N43, N44, N45 |
+| n16 | every bar is evaluated, warm-up included | none |
+| n17 | every candidate is handed the whole prefix | none |
+| n18 | the view is one row longer than the window | N3, N36 |
+| n19 | the view is one row shorter than the window | N1, N2, N3, N4, N6, N7, N8, N10, N12, N34, N35, N36, N37, N39, N40, N41, N43, N45 |
+| n20 | the events are the ungated ones | N7, N8, N10, N11, N12, N14, N40, N41, N43, N44, N45 |
+| n21 | the suppressions are the gated-only events | N7, N8, N10, N11, N12, N14 |
+| n22 | the gated-only events are the suppressions | N7, N8, N10, N11, N12, N14 |
+| n23 | the signal is built on the previous candle | none |
+| n24 | the report does not say upper bound | N20 |
+| n25 | the events and no-rule columns are swapped | N7, N8, N10, N11, N12, N14 |
+| n26 | the slots and missing columns are swapped | N15, N16, N28, N31 |
+| n27 | the report prints a decimal number | N19 |
+| n28 | the report prints a time of day | N19 |
+| n29 | a series with no bars is not refused | N32 |
+| n30 | the series rows run pair first (order is read nowhere) | none |
+| n31 | a narrowed window is read whole | N28 |
+| n32 | a narrowed start is read whole (--start is narrowed nowhere) | none |
+| n33 | a refused window exits 1 | N23, N24, N25, N26, N27 |
+| n34 | an unreadable store exits 2 | N32, N33 |
+| n35 | the refusal message says denied | N23, N24, N25, N26, N27 |
+| n36 | the unreadable message says broken | N32, N33 |
+| n37 | the default start is 2017-08-18 (--start is exercised nowhere) | none |
+| n38 | the default end is 2023-12-31 | N15, N16, N31 |
+| n39 | only a StoredFileError is caught by main | none |
+| n40 | the first two candidates swap their names | N48 |
+| n41 | the source mentions a download | N46 |
+| n42 | the source opens a file for writing | N47 |
+| n43 | a non-candidate strategy is accepted | none |
+| n44 | candidates C4 and C5 swap their names (their counts are equal on the fixtures) | N48 |
+| n45 | the last report row is dropped (N12 then fails by a KeyError, a crash) | N12, N13 |
+
+### Y: predicted failures, `config.m5n.yaml` against `tests/unit/test_config_m5n.py`
+
+| Mutation | The break | Predicted failures (tests/unit/test_config_m5n.py) |
+|---|---|---|
+| y01 | the mode is testnet | C2 |
+| y02 | the stop-loss is enabled | C3 |
+| y03 | the stop-loss and the take-profit are enabled | C3 |
+| y04 | the stop-loss and the trailing stop are enabled | C3 |
+| y05 | Telegram is enabled | C4 |
+| y06 | the log file is enabled | C4 |
+| y07 | a comment names an api_key | C5 |
+| y08 | the mode line ends in a carriage return | C6 |
+| y09 | ETHUSDT is disabled | C7 |
+| y10 | BTCUSDT decides on 4h | C7 |
+| y11 | the window starts on 2017-08-18 | C8 |
+| y12 | the window ends on 2024-01-02 | C8 |
+| y13 | the fee is 0.075 | C9 |
+| y14 | the slippage is 0.10 | C10 |
+| y15 | the stop slippage is 1.00 | C10 |
+| y16 | the data directory is the testnet one | C11 |
+| y17 | the filters are testnet's | C11 |
+| y18 | the strategy is the live SMA crossover | C12 |
+| y19 | the strategy is not registered | C12 |
+| y20 | the initial balance is 5000 (asserted nowhere) | none |
+| y21 | the placeholder sizing fraction is 0.05 (asserted nowhere) | none |
+| y22 | the mode is not a mode (the loader refuses the file) | C1, C2, C3, C4, C7, C8, C9, C10, C11, C12 |
+
+### The test key (every code the tables use)
+
+The codes are the tests of each file in collection order, B1 to B26, G1 to G42, S1 to S89, N1 to N49 and C1 to C12, and the specs carry the full node-id suffix.
+
+| Code | Test |
+|---|---|
+| B1 | `TestDonchianHigh::test_it_is_the_highest_high_of_the_prior_bars` |
+| B2 | `TestDonchianHigh::test_the_current_bar_is_not_in_its_own_window` |
+| B3 | `TestDonchianHigh::test_the_first_period_values_are_nan_and_the_next_is_not` |
+| B4 | `TestDonchianHigh::test_a_window_holding_a_nan_gives_nan` |
+| B5 | `TestDonchianHigh::test_a_period_of_one_is_the_previous_high` |
+| B6 | `TestDonchianHigh::test_the_input_is_not_mutated_and_the_index_and_dtype_are_kept` |
+| B7 | `TestDonchianHigh::test_integer_input_gives_floats` |
+| B8 | `TestDonchianHigh::test_a_period_below_one_is_refused` |
+| B10 | `TestMomentum::test_it_is_the_series_minus_itself_period_bars_earlier` |
+| B11 | `TestMomentum::test_a_period_of_one_is_the_first_difference` |
+| B12 | `TestMomentum::test_a_flat_series_has_zero_momentum_and_a_falling_one_negative` |
+| B13 | `TestMomentum::test_a_nan_input_gives_nan_where_it_is_read` |
+| B14 | `TestMomentum::test_the_input_is_not_mutated_and_the_name_and_dtype_are_set` |
+| B15 | `TestMomentum::test_a_period_below_one_is_refused` |
+| B16 | `TestKeltnerUpper::test_a_constant_range_gives_the_close_plus_two_ranges` |
+| B17 | `TestKeltnerUpper::test_the_first_value_lands_at_the_longer_of_the_two_warm_ups` |
+| B18 | `TestKeltnerUpper::test_a_flat_market_has_a_band_equal_to_the_ema` |
+| B19 | `TestKeltnerUpper::test_a_breakout_bar_is_worked_from_the_wilder_atr_and_the_ema` |
+| B20 | `TestKeltnerUpper::test_it_is_the_existing_ema_plus_the_multiple_of_the_existing_atr` |
+| B21 | `TestKeltnerUpper::test_the_input_is_not_mutated_and_the_name_and_index_are_set` |
+| B22 | `TestKeltnerUpper::test_a_period_below_one_or_a_multiplier_not_above_zero_is_refused` |
+| B24 | `TestKeltnerUpper::test_it_takes_no_volume` |
+| B25 | `TestTheModuleReadsNoVolume::test_no_function_here_has_a_volume_parameter` |
+| B26 | `TestTheModuleReadsNoVolume::test_the_three_functions_are_exported_from_the_package` |
+| C1 | `TestItEnablesNothingLive::test_it_loads_under_the_real_config_model` |
+| C2 | `TestItEnablesNothingLive::test_the_mode_is_backtest` |
+| C3 | `TestItEnablesNothingLive::test_no_protective_order_is_enabled` |
+| C4 | `TestItEnablesNothingLive::test_no_notification_and_no_log_file` |
+| C5 | `TestItEnablesNothingLive::test_it_carries_no_secret` |
+| C6 | `TestItEnablesNothingLive::test_the_file_is_lf_only` |
+| C7 | `TestThePairsAndTheWindow::test_the_pairs_are_btcusdt_and_ethusdt_daily_and_enabled` |
+| C8 | `TestThePairsAndTheWindow::test_the_window_is_the_in_sample_span_ending_at_the_boundary` |
+| C9 | `TestThePairsAndTheWindow::test_the_fee_is_ten_basis_points_per_side_as_a_decimal` |
+| C10 | `TestThePairsAndTheWindow::test_the_slippage_figures_are_the_shipped_ones` |
+| C11 | `TestThePairsAndTheWindow::test_the_data_directory_is_the_mainnet_archive` |
+| C12 | `TestTheStrategyIsACandidate::test_it_names_one_of_the_six` |
+| G1 | `TestTheWidths::test_they_equal_the_stores_interval_widths` |
+| G2 | `TestGapFreeTail::test_consecutive_bars_give_the_last_rows[4h]` |
+| G3 | `TestGapFreeTail::test_consecutive_bars_give_the_last_rows[1d]` |
+| G4 | `TestGapFreeTail::test_exactly_the_rows_asked_for_are_enough[4h]` |
+| G5 | `TestGapFreeTail::test_exactly_the_rows_asked_for_are_enough[1d]` |
+| G6 | `TestGapFreeTail::test_fewer_rows_than_asked_for_give_none[4h]` |
+| G7 | `TestGapFreeTail::test_fewer_rows_than_asked_for_give_none[1d]` |
+| G8 | `TestGapFreeTail::test_a_missing_bar_inside_the_tail_gives_none[4h]` |
+| G9 | `TestGapFreeTail::test_a_missing_bar_inside_the_tail_gives_none[1d]` |
+| G10 | `TestGapFreeTail::test_a_missing_bar_before_the_tail_gives_the_tail[4h]` |
+| G11 | `TestGapFreeTail::test_a_missing_bar_before_the_tail_gives_the_tail[1d]` |
+| G12 | `TestGapFreeTail::test_a_gap_exactly_at_the_tails_first_row_is_inside_it[4h]` |
+| G13 | `TestGapFreeTail::test_a_gap_exactly_at_the_tails_first_row_is_inside_it[1d]` |
+| G14 | `TestGapFreeTail::test_one_row_is_always_gap_free[4h]` |
+| G15 | `TestGapFreeTail::test_one_row_is_always_gap_free[1d]` |
+| G16 | `TestGapFreeTail::test_a_repeated_open_time_is_a_gap[4h]` |
+| G17 | `TestGapFreeTail::test_a_repeated_open_time_is_a_gap[1d]` |
+| G18 | `TestGapFreeTail::test_an_out_of_order_row_is_a_gap[4h]` |
+| G19 | `TestGapFreeTail::test_an_out_of_order_row_is_a_gap[1d]` |
+| G20 | `TestGapFreeTail::test_the_input_is_not_mutated[4h]` |
+| G21 | `TestGapFreeTail::test_the_input_is_not_mutated[1d]` |
+| G22 | `TestGapFreeTail::test_zero_bars_is_refused[4h]` |
+| G23 | `TestGapFreeTail::test_zero_bars_is_refused[1d]` |
+| G24 | `TestTheWidthIsThatOfTheTimeframe::test_four_hour_bars_are_consecutive_in_a_4h_frame_and_gaps_in_a_1d_frame` |
+| G25 | `TestTheWidthIsThatOfTheTimeframe::test_daily_bars_are_consecutive_in_a_1d_frame_and_gaps_in_a_4h_frame` |
+| G26 | `TestTheWidthIsThatOfTheTimeframe::test_another_timeframe_is_refused[1m]` |
+| G27 | `TestTheWidthIsThatOfTheTimeframe::test_another_timeframe_is_refused[1h]` |
+| G28 | `TestTheWidthIsThatOfTheTimeframe::test_another_timeframe_is_refused[1w]` |
+| G29 | `TestTheWidthIsThatOfTheTimeframe::test_another_timeframe_is_refused[]` |
+| G30 | `TestTheWidthIsThatOfTheTimeframe::test_another_timeframe_is_refused_even_for_a_frame_too_short_to_have_a_gap` |
+| G31 | `TestGapFreeRun::test_no_gap_gives_the_whole_frame[4h]` |
+| G32 | `TestGapFreeRun::test_no_gap_gives_the_whole_frame[1d]` |
+| G33 | `TestGapFreeRun::test_the_run_starts_after_the_last_gap[4h]` |
+| G34 | `TestGapFreeRun::test_the_run_starts_after_the_last_gap[1d]` |
+| G35 | `TestGapFreeRun::test_a_last_row_that_follows_a_gap_is_a_run_of_one[4h]` |
+| G36 | `TestGapFreeRun::test_a_last_row_that_follows_a_gap_is_a_run_of_one[1d]` |
+| G37 | `TestGapFreeRun::test_an_empty_or_one_row_frame_is_returned_as_it_is[4h]` |
+| G38 | `TestGapFreeRun::test_an_empty_or_one_row_frame_is_returned_as_it_is[1d]` |
+| G39 | `TestGapFreeRun::test_a_repeated_open_time_ends_the_run_before_it[4h]` |
+| G40 | `TestGapFreeRun::test_a_repeated_open_time_ends_the_run_before_it[1d]` |
+| G41 | `TestGapFreeRun::test_the_input_is_not_mutated[4h]` |
+| G42 | `TestGapFreeRun::test_the_input_is_not_mutated[1d]` |
+| N1 | `TestTheCounts::test_a_pair_without_a_gap_counts_the_hand_worked_events[C1-expected0]` |
+| N2 | `TestTheCounts::test_a_pair_without_a_gap_counts_the_hand_worked_events[C2-expected1]` |
+| N3 | `TestTheCounts::test_a_pair_without_a_gap_counts_the_hand_worked_events[C3-expected2]` |
+| N4 | `TestTheCounts::test_a_pair_without_a_gap_counts_the_hand_worked_events[C4-expected3]` |
+| N6 | `TestTheCounts::test_a_pair_without_a_gap_counts_the_hand_worked_events[C6-expected5]` |
+| N7 | `TestTheCounts::test_a_missing_bar_suppresses_the_events_whose_window_holds_it[C1-expected0]` |
+| N8 | `TestTheCounts::test_a_missing_bar_suppresses_the_events_whose_window_holds_it[C2-expected1]` |
+| N10 | `TestTheCounts::test_a_missing_bar_suppresses_the_events_whose_window_holds_it[C4-expected3]` |
+| N11 | `TestTheCounts::test_a_missing_bar_suppresses_the_events_whose_window_holds_it[C5-expected4]` |
+| N12 | `TestTheCounts::test_a_missing_bar_suppresses_the_events_whose_window_holds_it[C6-expected5]` |
+| N13 | `TestTheCounts::test_every_candidate_and_pair_has_a_row` |
+| N14 | `TestTheCounts::test_the_events_are_the_ungated_events_less_the_suppressed_plus_the_gated_only` |
+| N15 | `TestTheSeriesFacts::test_a_series_without_a_gap_has_no_missing_slots` |
+| N16 | `TestTheSeriesFacts::test_a_missing_bar_is_one_missing_slot_and_one_gap_run` |
+| N17 | `TestTheSeriesFacts::test_an_empty_series_has_nothing` |
+| N18 | `TestTheSeriesFacts::test_a_missing_last_bar_counts_as_a_missing_slot` |
+| N19 | `TestWhatIsPrinted::test_counts_only_no_price_no_time_and_no_return` |
+| N20 | `TestWhatIsPrinted::test_it_says_the_counts_are_upper_bounds_on_trades` |
+| N23 | `TestTheWindow::test_a_window_outside_the_committed_one_is_refused_before_the_store_is_opened[args0]` |
+| N24 | `TestTheWindow::test_a_window_outside_the_committed_one_is_refused_before_the_store_is_opened[args1]` |
+| N25 | `TestTheWindow::test_a_window_outside_the_committed_one_is_refused_before_the_store_is_opened[args2]` |
+| N26 | `TestTheWindow::test_a_window_outside_the_committed_one_is_refused_before_the_store_is_opened[args3]` |
+| N27 | `TestTheWindow::test_a_window_outside_the_committed_one_is_refused_before_the_store_is_opened[args4]` |
+| N28 | `TestTheWindow::test_the_window_may_narrow` |
+| N30 | `TestTheWindow::test_load_series_refuses_a_window_past_the_boundary` |
+| N31 | `TestTheWindow::test_a_month_at_or_after_the_boundary_is_never_opened` |
+| N32 | `TestWhenTheStoreCannotBeRead::test_an_absent_store_is_exit_one` |
+| N33 | `TestWhenTheStoreCannotBeRead::test_a_month_that_no_longer_matches_its_manifest_is_exit_one` |
+| N34 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[BTCUSDT-C1-donchian_1d_20-1d]` |
+| N35 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[BTCUSDT-C2-donchian_1d_55-1d]` |
+| N36 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[BTCUSDT-C3-sma_cross_1d_50_200-1d]` |
+| N37 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[BTCUSDT-C4-donchian_4h_20-4h]` |
+| N39 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[BTCUSDT-C6-tsmom_1d_90-1d]` |
+| N40 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[ETHUSDT-C1-donchian_1d_20-1d]` |
+| N41 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[ETHUSDT-C2-donchian_1d_55-1d]` |
+| N43 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[ETHUSDT-C4-donchian_4h_20-4h]` |
+| N44 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[ETHUSDT-C5-keltner_4h_20_2-4h]` |
+| N45 | `TestTrimmingTheViewChangesNothing::test_the_counts_equal_those_of_the_whole_prefix[ETHUSDT-C6-tsmom_1d_90-1d]` |
+| N46 | `TestTheScriptIsReadOnlyAndOffline::test_it_reads_through_the_store_and_has_no_fetcher` |
+| N47 | `TestTheScriptIsReadOnlyAndOffline::test_it_opens_nothing_for_writing` |
+| N48 | `TestTheScriptIsReadOnlyAndOffline::test_the_candidates_are_the_six_in_r_dys_order` |
+| N49 | `TestTheScriptIsReadOnlyAndOffline::test_the_window_constants_are_the_committed_ones` |
+| S2 | `TestTheSixAreRegisteredAndIndependent::test_they_are_listed_once_imported_and_the_registry_does_not_import_them` |
+| S3 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[donchian_1d_20-22]` |
+| S4 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[donchian_1d_55-57]` |
+| S5 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[sma_cross_1d_50_200-201]` |
+| S6 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[donchian_4h_20-22]` |
+| S7 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[keltner_4h_20_2-22]` |
+| S8 | `TestTheSixAreRegisteredAndIndependent::test_the_warmup_is_the_window_the_edge_reads[tsmom_1d_90-92]` |
+| S9 | `TestTheSixAreRegisteredAndIndependent::test_gap_enforcement_defaults_on_and_must_be_a_bool` |
+| S10 | `TestDonchian::test_a_close_above_the_prior_highs_fires_on_that_bar[donchian_1d_20-1d-20]` |
+| S11 | `TestDonchian::test_a_close_above_the_prior_highs_fires_on_that_bar[donchian_1d_55-1d-55]` |
+| S12 | `TestDonchian::test_a_close_above_the_prior_highs_fires_on_that_bar[donchian_4h_20-4h-20]` |
+| S13 | `TestDonchian::test_a_close_equal_to_the_highest_high_does_not[donchian_1d_20-1d-20]` |
+| S14 | `TestDonchian::test_a_close_equal_to_the_highest_high_does_not[donchian_1d_55-1d-55]` |
+| S15 | `TestDonchian::test_a_close_equal_to_the_highest_high_does_not[donchian_4h_20-4h-20]` |
+| S16 | `TestDonchian::test_one_tick_above_does[donchian_1d_20-1d-20]` |
+| S17 | `TestDonchian::test_one_tick_above_does[donchian_1d_55-1d-55]` |
+| S18 | `TestDonchian::test_one_tick_above_does[donchian_4h_20-4h-20]` |
+| S19 | `TestDonchian::test_a_close_below_does_not[donchian_1d_20-1d-20]` |
+| S20 | `TestDonchian::test_a_close_below_does_not[donchian_1d_55-1d-55]` |
+| S21 | `TestDonchian::test_a_close_below_does_not[donchian_4h_20-4h-20]` |
+| S22 | `TestDonchian::test_a_run_of_new_highs_signals_once_not_on_every_bar[donchian_1d_20-1d-20]` |
+| S23 | `TestDonchian::test_a_run_of_new_highs_signals_once_not_on_every_bar[donchian_1d_55-1d-55]` |
+| S24 | `TestDonchian::test_a_run_of_new_highs_signals_once_not_on_every_bar[donchian_4h_20-4h-20]` |
+| S25 | `TestDonchian::test_a_previous_close_equal_to_its_threshold_counts_as_not_above[donchian_1d_20-1d-20]` |
+| S26 | `TestDonchian::test_a_previous_close_equal_to_its_threshold_counts_as_not_above[donchian_1d_55-1d-55]` |
+| S27 | `TestDonchian::test_a_previous_close_equal_to_its_threshold_counts_as_not_above[donchian_4h_20-4h-20]` |
+| S28 | `TestDonchian::test_it_fires_on_the_crossing_bar_and_on_no_other[donchian_1d_20-1d-20]` |
+| S29 | `TestDonchian::test_it_fires_on_the_crossing_bar_and_on_no_other[donchian_1d_55-1d-55]` |
+| S30 | `TestDonchian::test_it_fires_on_the_crossing_bar_and_on_no_other[donchian_4h_20-4h-20]` |
+| S31 | `TestDonchian::test_fewer_rows_than_the_window_give_no_signal[donchian_1d_20-1d-20]` |
+| S32 | `TestDonchian::test_fewer_rows_than_the_window_give_no_signal[donchian_1d_55-1d-55]` |
+| S33 | `TestDonchian::test_fewer_rows_than_the_window_give_no_signal[donchian_4h_20-4h-20]` |
+| S34 | `TestDonchian::test_a_missing_bar_inside_the_window_gives_no_signal_until_the_window_is_clean[donchian_1d_20-1d-20]` |
+| S35 | `TestDonchian::test_a_missing_bar_inside_the_window_gives_no_signal_until_the_window_is_clean[donchian_1d_55-1d-55]` |
+| S36 | `TestDonchian::test_a_missing_bar_inside_the_window_gives_no_signal_until_the_window_is_clean[donchian_4h_20-4h-20]` |
+| S37 | `TestDonchian::test_a_missing_bar_before_the_window_does_not_matter[donchian_1d_20-1d-20]` |
+| S38 | `TestDonchian::test_a_missing_bar_before_the_window_does_not_matter[donchian_1d_55-1d-55]` |
+| S39 | `TestDonchian::test_a_missing_bar_before_the_window_does_not_matter[donchian_4h_20-4h-20]` |
+| S40 | `TestDonchian::test_the_volume_column_changes_nothing[donchian_1d_20-1d-20]` |
+| S41 | `TestDonchian::test_the_volume_column_changes_nothing[donchian_1d_55-1d-55]` |
+| S42 | `TestDonchian::test_the_volume_column_changes_nothing[donchian_4h_20-4h-20]` |
+| S43 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[BTCUSDT-donchian_1d_20-1d-20]` |
+| S44 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[BTCUSDT-donchian_1d_55-1d-55]` |
+| S45 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[BTCUSDT-donchian_4h_20-4h-20]` |
+| S46 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[ETHUSDT-donchian_1d_20-1d-20]` |
+| S47 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[ETHUSDT-donchian_1d_55-1d-55]` |
+| S48 | `TestDonchian::test_the_signal_carries_the_pair_the_candle_price_and_the_close_time[ETHUSDT-donchian_4h_20-4h-20]` |
+| S49 | `TestDonchian::test_a_candle_of_another_timeframe_is_refused[donchian_1d_20-1d-20]` |
+| S50 | `TestDonchian::test_a_candle_of_another_timeframe_is_refused[donchian_1d_55-1d-55]` |
+| S51 | `TestDonchian::test_a_candle_of_another_timeframe_is_refused[donchian_4h_20-4h-20]` |
+| S52 | `TestDonchian::test_a_frame_with_no_high_column_is_a_data_error[donchian_1d_20-1d-20]` |
+| S53 | `TestDonchian::test_a_frame_with_no_high_column_is_a_data_error[donchian_1d_55-1d-55]` |
+| S54 | `TestDonchian::test_a_frame_with_no_high_column_is_a_data_error[donchian_4h_20-4h-20]` |
+| S55 | `TestSmaCross::test_the_fast_average_crossing_above_the_slow_fires_on_that_bar` |
+| S56 | `TestSmaCross::test_equal_averages_on_both_bars_do_not_fire` |
+| S57 | `TestSmaCross::test_a_fast_average_already_above_does_not_fire_again` |
+| S58 | `TestSmaCross::test_a_fast_average_below_and_staying_below_does_not_fire` |
+| S59 | `TestSmaCross::test_it_fires_on_the_crossing_bar_and_on_no_other` |
+| S60 | `TestSmaCross::test_fewer_than_slow_plus_one_rows_give_no_signal` |
+| S61 | `TestSmaCross::test_a_missing_bar_inside_the_window_gives_no_signal` |
+| S62 | `TestSmaCross::test_a_missing_bar_before_the_window_does_not_matter` |
+| S63 | `TestSmaCross::test_both_pairs_and_the_volume_column[BTCUSDT]` |
+| S64 | `TestSmaCross::test_both_pairs_and_the_volume_column[ETHUSDT]` |
+| S65 | `TestSmaCross::test_a_4h_candle_is_refused` |
+| S66 | `TestTsmom::test_momentum_turning_from_zero_to_positive_fires` |
+| S67 | `TestTsmom::test_momentum_turning_from_negative_to_positive_fires` |
+| S68 | `TestTsmom::test_a_close_equal_to_the_close_90_bars_earlier_does_not_fire` |
+| S69 | `TestTsmom::test_momentum_already_positive_does_not_fire_again` |
+| S70 | `TestTsmom::test_negative_momentum_does_not_fire` |
+| S71 | `TestTsmom::test_it_fires_on_the_crossing_bar_and_on_no_other` |
+| S72 | `TestTsmom::test_fewer_than_lookback_plus_two_rows_give_no_signal` |
+| S73 | `TestTsmom::test_a_missing_bar_inside_the_window_gives_no_signal` |
+| S74 | `TestTsmom::test_a_missing_bar_before_the_window_does_not_matter` |
+| S75 | `TestTsmom::test_both_pairs_and_the_volume_column[BTCUSDT]` |
+| S76 | `TestTsmom::test_both_pairs_and_the_volume_column[ETHUSDT]` |
+| S77 | `TestKeltner::test_a_close_above_the_band_fires_with_the_hand_worked_band` |
+| S78 | `TestKeltner::test_the_band_sits_between_a_close_that_fails_and_one_that_passes` |
+| S79 | `TestKeltner::test_a_close_inside_the_band_does_not_fire` |
+| S80 | `TestKeltner::test_a_close_already_above_does_not_fire_again` |
+| S81 | `TestKeltner::test_it_fires_on_the_crossing_bar_and_on_no_other` |
+| S82 | `TestKeltner::test_a_run_of_21_bars_has_no_previous_band_so_no_signal` |
+| S83 | `TestKeltner::test_a_run_of_22_bars_is_enough` |
+| S84 | `TestKeltner::test_a_gap_leaves_a_short_run_and_no_signal_until_it_is_long_enough` |
+| S85 | `TestKeltner::test_after_a_gap_the_band_is_the_one_the_run_alone_would_give` |
+| S86 | `TestKeltner::test_both_pairs_and_the_volume_column[BTCUSDT]` |
+| S87 | `TestKeltner::test_both_pairs_and_the_volume_column[ETHUSDT]` |
+| S88 | `TestKeltner::test_a_frame_with_no_low_column_is_a_data_error` |
+| S89 | `TestKeltner::test_a_1d_candle_is_refused` |
