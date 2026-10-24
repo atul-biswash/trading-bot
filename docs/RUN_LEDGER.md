@@ -6939,3 +6939,46 @@ The capture is `F:\trading bot\scratch\s4\2026-10-24\051021Z-capture.log`, SHA-2
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The measurement scripts are written after this section is committed, are read-only, and their digests are recorded in the completion. No script is committed to the repository unless step 2 needs one, and then it passes the full bare gate first.
+
+### Completion (P134 C2): the stop-leg table, the threshold sensitivity, and the predictions scored
+
+Added in the commit that completes this section; nothing above is edited. The two scripts were written after commit `551da8b` and are read-only. `measure1.py` `35730c3f46ce608e22b0ebfca3d951915970d396b1325759e8a0059698576983` (output `m1_out.txt` `6e5285ac1ee55e99779e22dcf6ae75f234b172313a7626d7ad176603d1875b4d`) reads the capture, whose size and SHA-256 it re-printed equal to the prompt's; `measure2.py` `623335d53030233778251ca61ff100c7ec0f6213a3e79540813c1ec83e916180` (output `m2_out.txt` `e4760e5281c6fd09139ecb247dac0ded7d812f40bcb300fb1955dfbcb9a8f5cb`) reads the store copy. No venue call was made, no backtest was run, and nothing was written under `deploy\`.
+
+#### The stop legs of the three lists
+
+| List | Placed (UTC), capture line | Stop price recorded | Stop-leg order, first named at | Leg type | Limit price | Time in force |
+|---|---|---|---|---|---|---|
+| ETHUSDT 218102 | `2026-10-23T22:00:01Z`, line 15588 | `2354.20000000` | not named anywhere in the capture (8 lines name the list, none the leg's order) | **not recorded** | **not recorded** | **not recorded** |
+| BTCUSDT 183218 | `2026-10-21T13:09:00Z`, line 9154 | `82157.10000000` | order `5431129`, line 9158 (`2026-10-21T13:11:00Z`), 1,702 lines name it | **not recorded** | **not recorded** | **not recorded** |
+| ETHUSDT 71012 | `2026-10-13T02:30:02Z`, line 2169 | `2433.59000000` | order `1867449`, line 2190 (`2026-10-13T02:59:02Z`), 171 lines name it | **not recorded** | **not recorded** | **not recorded** |
+
+**The capture records none of the three fields anywhere.** Of the twelve tokens searched across all of its lines (`STOP_LOSS_LIMIT`, `STOP_LOSS`, `TAKE_PROFIT`, `stopLimit`, `stop_limit`, `limit_price`, `timeInForce`, `time_in_force`, `pendingBelowType`, `pendingType`, `FOK`, `GTC`) every one occurs in **0** lines, and the `order_placed` events carry exactly seven fields (`entry`, `entry_bar_time`, `list_client_order_id`, `order_list_id`, `quantity`, `stop_loss`, `symbol`). Line 2737 shows the third list's end state as the bot read it, *"list 71012 ALL_DONE: W FILLED 0.76400000/0.76400000, SL EXPIRED 0.07560000/0.76400000, TP EXPIRED 0E-8/0.76400000"*, and line 9158 the second's partial fill (`0.01041000 executed against a position of 0.02233000`); neither names a type. **So the leg type is known from the code that sent it and from nothing the log observed:** the mappers send `STOP_LOSS` with a stop price and no limit price or time in force. **That is MEASURED of the code:** `git show 45547f1:src/trading_bot/exchange/models.py` has `"pendingBelowType": OrderType.STOP_LOSS.value` with `"pendingBelowStopPrice"` (line 875 to 876) and `"pendingType": OrderType.STOP_LOSS.value` with `"pendingStopPrice"` (line 913 to 916) and no limit key, `git diff --stat 45547f1 HEAD` over `exchange/models.py` and `execution/placement.py` is empty, and the capture has 9 lines carrying `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776`, the same count as the nine boot lines the primary's eligibility list printed in section 69 (pids 27460, 27176, 16076, 22304, 3444, 25352, 5224, 14600 and 20100), so the processes that placed lists 71012 (pid 22304), 183218 (pid 14600) and 218102 (pid 20100) ran that commit (the count is of matching lines, not joined to the pids one by one). **That the venue stored what was sent is REASONED:** no venue read of any terminal list was made, and one is what would measure the type the venue holds.
+
+#### The wide-bar counts by threshold, per pair (since T0, 19,799 1m bars per pair)
+
+| Threshold | BTCUSDT bars | ETHUSDT bars |
+|---|---|---|
+| range >= 3% of open | **54** | **16** |
+| range >= 5% | **51** | **15** |
+| range >= 10% | **46** | **15** |
+| range >= 15% | **45** | **15** |
+
+The bars that leave the set as the threshold rises:
+
+| Step | BTCUSDT | ETHUSDT |
+|---|---|---|
+| 3% to 5% | 3: `2026-10-20T19:44` (3.37%), `2026-10-20T19:59` (3.77%), `2026-10-22T01:38` (4.22%) | 1: `2026-10-20T18:47` (3.71%) |
+| 5% to 10% | 5: `2026-10-17T15:36` (7.23%), `2026-10-20T01:30` (5.20%), `2026-10-20T23:01` (6.21%), `2026-10-23T12:26` (6.05%), `2026-10-23T12:27` (7.01%) | 0 |
+| 10% to 15% | 1: `2026-10-19T18:45` (12.97%) | 0 |
+
+The set is **not** identical at 3%, 5% and 10% for either pair (BTCUSDT loses 8 bars between 3% and 10%, ETHUSDT 1), and it is stable above 5% for ETHUSDT. The bars narrower than 10% are 8 of the 54 BTCUSDT bars and 1 of the 16 ETHUSDT bars, and the rest are 12.97% or wider (most 15% to 25%, as section 70 printed). Whether any of the narrow ones coincides with a cluster of untrusted protection was not measured here.
+
+#### The predictions scored
+
+| | Result |
+|---|---|
+| a | **The prompt's prediction cannot be scored from the capture, and the source contradicts it.** The capture holds no leg type and no limit price for list 218102, so neither "`STOP_LOSS_LIMIT`" nor "a limit above the wick low" can be observed; the code sends `STOP_LOSS`, a market-type stop with no limit price, so there is no limit to be above or below the `22:30` to `22:32` wick. Recorded as predicted FALSE by the source, not measured |
+| a2 | **Held.** The placement lines record the stop price (`2354.20000000`, `82157.10000000`, `2433.59000000`, each as predicted) and no type, limit price or time in force, for all three lists |
+| b | **Held, as a prediction of FALSE, and every count matches.** Not identical at 3%, 5% and 10% for either pair; BTCUSDT 54, 51, 46 and 45, ETHUSDT 16, 15, 15 and 15, the numbers predicted in section 71 from the bars section 70 printed |
+| c | **Held as predicted:** not testable from the capture (orders `1867449` and `5431129` are named, with their executed quantities, and never with a type), and `STOP_LOSS` by the source |
+| d | **Held.** Nothing measured here explains why a crossed market-type stop executed nothing on list 218102. A `STOP_LOSS_LIMIT` with a limit above the market would explain a trigger with nothing executed, which is why the prompt asked; the bot does not send one. The reason stays UNMEASURED, and the one instrument that could settle the type, a read of the terminal lists at the venue, was not used |
