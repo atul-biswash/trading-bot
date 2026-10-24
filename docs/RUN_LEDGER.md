@@ -7799,3 +7799,43 @@ An observation log, so this section only adds. The survey ran as section 76 desc
 `test_n2_verify_bars.py`: **4 of 37**: `TestTheRequests::test_the_only_url_is_the_klines_endpoint_with_five_parameters_and_no_key`; `TestTheRequests::test_a_response_that_is_not_klines_is_an_error[{"code": -1}]`; `TestEvidenceIsKept::test_the_digest_list_is_written_even_when_a_later_request_fails`; `TestRefusals::test_a_new_or_empty_out_directory_is_accepted`
 
 Section 76 predicted 3 and 4. The scripts that made these results are in `scratch\p140`: `make_spec.py`, `build77.py` (this text).
+
+## 78. M5n N2b: P141's halts and the predictions for the archive 4h and 1d series, the traded-minute consistency mode and the volume gap, before any code (P141 C2, R-T, R-DQ, R-DT)
+
+An observation log, so this section only adds. P141 follows R-DV (`docs/M5N_CHARTER_DRAFT.md` section 14): the decision bars are the venue's native 4h and 1d klines as held in the canonical store's archive series, checked against P140's saved API responses; the aggregation from the 1m store is kept as a consistency check under a traded-minute rule. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted. The only reading done first was of the source (`src/trading_bot/data/historical.py`, `src/trading_bot/data/aggregation.py`, `scripts/n2_verify_bars.py`) and of the `MANIFEST.jsonl` files (row counts and times, no bar value). **Everything here decides nothing about S4, and no return, P&L, equity or metric is computed.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `m5n`, `git status` not clean, HEAD is not `2882fae` | `git branch --show-current`, `git status --porcelain`, `git rev-parse --short HEAD` | `m5n`, empty, `2882fae` (then `e14ce80` after C1, the charter commit) |
+| a command would write under `deploy\45547f107715`, the rehearsal clone or the canonical store | every command in the plan | none: the store is opened by `HistoricalStore`, which only reads; output goes to scratch |
+| any venue request | the plan | none: the check reads P140's saved responses by digest (`scratch\p140\n2_responses`, `responses.sha256` SHA-256 `c3d099e59f77ef74c96b03179cba0d00050f0099792f92fa4e353d8c28de93fb`) and has no fetcher |
+| any bar at or after `2024-01-01T00:00:00Z` read | the reader is called with `end = 2024-01-01T00:00:00Z`, and the store opens no month file beginning at or after it | no bar was read; the manifests (metadata, no bar value) were parsed whole and the lines of 2024-01 and later were discarded unused |
+| the canonical store holds no archive 4h or 1d series for a pair | `data/historical/<pair>/4h` and `/1d` | **both series exist for both pairs**, 110 month files each from 2017-08 to 2026-09 |
+| anything computes a return, P&L, equity or metric | the plan | none: bars, minute counts, equality and bands of a volume difference only |
+
+### What the archive series hold, from their manifests (counts and times only)
+
+For months before 2024-01, `MANIFEST.jsonl` gives **2328 rows for the 1d series of each pair** (from `2017-08-17T00:00:00Z`, so every UTC day) and **13950 rows for the 4h series of each pair** (from `2017-08-17T04:00:00Z`), with 0 quarantined rows in either, 0 registered rows in the 1d series and 19 registered (kept verbatim, with a close time that is not the regular one) in each 4h series. P140's API responses held 2328 1d bars and **13951** 4h bars per pair, so the 4h archive holds **one fewer** than the API.
+
+**The store's 1m rows carry no trade count.** `Row` in `historical.py` has seven fields (`open_time_ms`, `open`, `high`, `low`, `close`, `volume`, `close_time_ms`) and the stored CSV header is `open_time_ms,open,high,low,close,volume,close_time_ms`; the archive's number-of-trades column is read at ingest and not kept. So R-DV's fallback applies: **a traded minute is a minute with nonzero volume.**
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | **The archive 1d series equals P140's API 1d responses in open, high, low, close and base volume for every one of the 2328 buckets of each pair** (0 mismatches, 0 archive-only, 0 API-only). REASONED, lean about 65%: both come from the venue's own longer bars, and P140's volume gap was between the venue's longer bars and the 1m rows. **The 4h series: 13950 archive buckets against 13951 API buckets per pair, so exactly one API-only bucket and no archive-only bucket**, the lean (60%) being that it is the slot `2017-09-06 16:00`, the one 4h slot P140 found the venue had and the 1m store did not; and 0 mismatches among the 13950 compared. If there are mismatches the lean is that they are in volume and in 2017 and 2018. UNMEASURED |
+| b | **Under the traded-minute rule the aggregation's open, high, low and close equal the venue's for every complete bucket, with one expected exception.** P140's diagnosis found one complete bucket (BTCUSDT 4h) whose high or low differed with no zero-volume minute inside it, which no traded-minute rule can repair, so the prediction is: residual open, high, low or close mismatches among complete buckets **BTCUSDT 1d 0, 4h 1 (plus or minus 1); ETHUSDT 1d 0, 4h 0 (plus or minus 1); open mismatches 0 and close mismatches 0 everywhere.** Complete buckets with no traded minute at all (undefined under the rule): **0 expected, at most 3** per series. The 4h and 1d rows themselves are unaffected, the volume still being the sum of every stored minute. REASONED from P140's counts (24 of 25 complete 4h high or low mismatches had a zero-volume minute inside, and every open mismatch had a zero-volume first minute) |
+| c | **Volume: the venue's is larger in the same complete buckets as P140 and smaller in none**, namely 46 (BTCUSDT 1d), 51 (4h), 46 (ETHUSDT 1d) and 50 (4h), against the venue's longer bars as the API and the archive both give them. Of those buckets the **median relative difference (venue minus aggregated, over the venue's) is about 0.002%** (range 0.0005% to 0.01%) and the **maximum about 1%** (range 0.5% to 3%), read from the dozen differences P140 printed (a few parts in a hundred thousand for most, 0.13% for one, 1.0% for 2018-03-04). The bands of step 5, per pair and timeframe, predicted for BTCUSDT 1d: **0: about 2234 of 2280 complete buckets; up to 0.01%: about 30; up to 0.1%: about 12; up to 1%: about 3; over 1%: 1 (or 2)**; the other three series within a factor of two of that shape, with 4h holding more of its count in the first band. UNMEASURED |
+| d | **The store's 1m rows carry no trade count** (seven fields, no trades column), so the traded minute is a minute with nonzero volume. **PREDICTED TRUE, from the schema, and not in doubt.** The consistency mode is therefore keyed on volume, and a bucket whose minutes all have zero volume has no open, high, low or close under the rule |
+| e | The checks and the consistency run read the saved responses and the store only: **no request is made** (there is no fetcher in the script), every one of the 34 saved responses matches its line in `responses.sha256` (a mismatch refuses the run), and the whole run takes **under 10 minutes** |
+| f | The output is counts and two capped lists (at most 50 archive-against-API mismatch rows, and the buckets that fail the consistency check, capped likewise); the volume bands carry no price |
+
+### What is built, and in what order
+
+An addition to `src/trading_bot/data/aggregation.py` (a traded-minute aggregation beside the existing one, which is not changed), with its tests in a new file; then `scripts/n2_archive_check.py`, which does steps 3, 4's run and 5, with its tests in a new file; each code and test commit gated bare before it is made. The run follows, then the survey of the new tests with its predictions committed first, then the counts.
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
