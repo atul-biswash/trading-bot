@@ -403,15 +403,40 @@ owner to those figures; this runbook does not apply them. **Do not edit `scripts
    where the backtest is expected to book a stop-out on the same bar (`M5m-675`, REASONED, to be measured here; `docs/RUN_LEDGER.md` section 70).
    The label the frozen tool prints is reported UNALTERED and annotated; if the entry is not in the primary's disagreement list (for example
    because the backtest did not match it), the note is still written, with the reason.
-4. **The R-DR annotation (P134, `docs/S4_CORRECTION_P134.md`), required.** Every entry in the disagreement lists of the primary, E1 and E2 is
-   annotated with whether a 1m bar of its pair with range (high - low) / open >= 3% occurred while the live position was open, with the
-   widest range found beside the yes or no so another threshold can be re-cut, and the counts are reported BY CAUSE (recorded-gap, bar differs,
-   exact-decimal tie, window-edge, risk refusal differs, fok-unfilled, fill-model, unexplained). It recomputes no A, B or C figure, is not an
-   exploratory analysis under R-DL, excludes nothing and changes no verdict; the 3% was chosen after P133's measurement and its sensitivity
-   is in the correction file (BTCUSDT 54, 51, 46 and 45 wide bars and ETHUSDT 16, 15, 15 and 15 at 3%, 5%, 10% and 15%). **No tool makes this
-   annotation yet** (`M5m-682`): written by hand it is a lookup of each listed entry's open interval against the frozen store, and a program
-   for it is code, drafted only after its predictions commit exists and committed only after the full bare gate (R-DQ). **For an entry with no
-   live position (a backtest-only entry) the ruling gives no interval; write *no live position* and leave the question to the owner.**
+4. **The R-DR/R-DS annotation (P134 and P135, `docs/S4_CORRECTION_P134.md` and `docs/S4_CORRECTION_P135.md`), required, made by
+   `scripts\s4_wick_annotate.py`.** Every entry in the disagreement lists of the primary, E1 and E2 is annotated with whether a 1m bar of its
+   pair with range (high - low) / open >= 3% opened inside its holding period (R-DS: for a matched entry the union of the live and the backtest
+   holding periods, for a backtest-only entry the backtest's, for a live-only entry the live one, each from the entry bar's open to the exit
+   bar's close, or to M if open at M), with the widest range found beside the yes or no, and the counts are reported BY CAUSE (recorded-gap, bar
+   differs, exact-decimal tie, window-edge, risk refusal differs, fok-unfilled, fill-model, unexplained). It recomputes no A, B or C figure, is
+   not an exploratory analysis under R-DL, excludes nothing and changes no verdict; the 3% was chosen after P133's measurement and its
+   sensitivity is in the P134 file (BTCUSDT 54, 51, 46 and 45 wide bars and ETHUSDT 16, 15, 15 and 15 at 3%, 5%, 10% and 15%). **This replaces
+   the by-hand instruction of P134 (`M5m-682`) and its *no live position* text**, which R-DS made false: a backtest-only entry has an interval.
+   The tool takes the primary's arguments plus `--analysis`, and is run like E2: with the backtest clone's interpreter from the development
+   tree's script path, after step 7b, so it reads the same capture, run directory and frozen store. E1's `--window-end` is E1's own.
+
+```powershell
+Set-Location $BT
+& $PY "$DEV\scripts\s4_wick_annotate.py" --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" --store $FROZEN --analysis primary | Out-File -Encoding ascii "$OUT\s4_wick_primary.txt"
+"exit $LASTEXITCODE"
+& $PY "$DEV\scripts\s4_wick_annotate.py" --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "2026-10-21T13:09:00Z" --store $FROZEN --analysis e1 | Out-File -Encoding ascii "$OUT\s4_wick_e1.txt"
+"exit $LASTEXITCODE"
+& $PY "$DEV\scripts\s4_wick_annotate.py" --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" --store $FROZEN --analysis e2 | Out-File -Encoding ascii "$OUT\s4_wick_e2.txt"
+"exit $LASTEXITCODE"
+```
+
+   CHECK, each its own command. The three `exit` lines print `0` (`2` is a refusal, `3` an input error, as for the frozen tool).
+
+```powershell
+Select-String -Path "$OUT\s4_wick_primary.txt","$OUT\s4_wick_e1.txt","$OUT\s4_wick_e2.txt" -SimpleMatch 'DIAGNOSTIC R-DR/R-DS'
+Select-String -Path "$OUT\s4_wick_primary.txt","$OUT\s4_wick_e1.txt","$OUT\s4_wick_e2.txt" -Pattern 'capture sha256|ANNOTATED DISAGREEMENTS'
+Select-String -Path "$OUT\s4_compare.txt","$OUT\s4_compare_e1.txt","$OUT\s4_latch_compare.txt" -Pattern '^DISAGREEMENTS \('
+```
+
+   The first prints the header three times; the second prints the capture's digest (equal to step 3's, in all three) and the count `n` of
+   `ANNOTATED DISAGREEMENTS (n)`; the third prints `DISAGREEMENTS (n)` of the primary, E1 and E2, and **each `n` equals the one above it**, in the
+   same order (the counts by cause in each file sum to it). An entry whose interval holds no recorded 1m bar reads `unknown`, never `no`; report
+   how many.
 
 ## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
 
@@ -586,6 +611,8 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 7b | `s4_compare.py ... --window-end <inside the day>` (E1), piped to `Out-File -Encoding ascii` | E | section 69 (P131, `--window-end 2026-10-08T13:09:00Z`: exit 0, zero live entries; MECHANICS ONLY, the real-input run stays at the stop); the pipe, section 64 |
 | 7b | `s4_latch_compare.py` (E2) through its real command line, with `$PY` from the development tree's script path | E | section 69 (P131: exit 0, header printed, `trading_bot` from the clone's site-packages, digests equal the primary's; MECHANICS ONLY); 90 tests over fixtures (section 68) |
 | 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | E | section 69 (empty; `b8afa603...af08` and `59bb70c3...25aa7`; the header line) |
+| 8 | `s4_wick_annotate.py --analysis primary`, `e1` and `e2` through their real command lines, `$PY` from the development tree's script path, piped to `Out-File -Encoding ascii` | E | section 72 (P135, on the P131 rehearsal's run directory, capture and store: exit 0 each, 19 backtest-only rows, two `wide=yes` equal to an independent read of the store; MECHANICS ONLY, zero live entries) |
+| 8 | the three CHECK `Select-String` commands of the R-DR/R-DS item (header, digest and count, and the matching `DISAGREEMENTS (n)`) | E | section 72 (run on the rehearsal's six files: the header three times, the capture digest equal in all three, and the counts 19, 11 and 19 equal to the `DISAGREEMENTS (n)` of the frozen primary, E1 and E2 files; MECHANICS ONLY) |
 
 **ANNOTATED AT P124 (C2), BY APPENDIX A'S EXECUTION (RUN_LEDGER section 62): both were executed over the whole day
 2026-10-11 and ran to exit 0; the rows above that read E now were N or R at P123.** What the sentence below says was
