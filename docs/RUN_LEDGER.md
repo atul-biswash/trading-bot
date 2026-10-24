@@ -6982,3 +6982,42 @@ The set is **not** identical at 3%, 5% and 10% for either pair (BTCUSDT loses 8 
 | b | **Held, as a prediction of FALSE, and every count matches.** Not identical at 3%, 5% and 10% for either pair; BTCUSDT 54, 51, 46 and 45, ETHUSDT 16, 15, 15 and 15, the numbers predicted in section 71 from the bars section 70 printed |
 | c | **Held as predicted:** not testable from the capture (orders `1867449` and `5431129` are named, with their executed quantities, and never with a type), and `STOP_LOSS` by the source |
 | d | **Held.** Nothing measured here explains why a crossed market-type stop executed nothing on list 218102. A `STOP_LOSS_LIMIT` with a limit above the market would explain a trigger with nothing executed, which is why the prompt asked; the bot does not send one. The reason stays UNMEASURED, and the one instrument that could settle the type, a read of the terminal lists at the venue, was not used |
+
+## 72. M5m S4: P135's halts and the predictions for scripts/s4_wick_annotate.py, before any code (P135 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. P135 builds `scripts/s4_wick_annotate.py`, the tool R-DR asked for and R-DS gave its interval (`docs/S4_CORRECTION_P134.md`, `docs/S4_CORRECTION_P135.md`, commit `d2fab1e`), with fixture tests, and runs no S4 backtest. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted, in scratch or in the repository: the only reading done before it was of the source (`scripts/s4_compare.py`, `scripts/trade_census.py` and `scripts/s4_latch_compare.py`: the `Disagreement`, `LiveEntry`, `BacktestEntry` and `Trade` shapes, how `main` builds a disagreement list, and the `trades.csv` columns, whose header carries `exit_bar_open` and `exit_time`), which the clause allows. **Every figure the tool will print is a diagnostic and decides nothing about S4.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `7d95de4` | `git rev-parse --short HEAD` | `7d95de4` |
+| a command would write under `deploy\45547f107715`, call the venue or run a backtest | every command in the plan | none: the tool is tested on synthetic fixtures only; the survey runs in a throwaway worktree outside the repository |
+| a frozen file or `scripts/s4_latch_compare.py` differs from its committed digest | `sha256sum` | `scripts/s4_compare.py` `b8afa603...af08`, `scripts/trade_census.py` `926bdd46...d9bb`, `config.s4.yaml` `0f170bae...2594`, the pre-registration `49e4fdbb...566f`, the P128 and P129 files `36327c4a...daa6` and `90291607...ee1d`, and `scripts/s4_latch_compare.py` `59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7`: unchanged |
+
+### What the source says before any code is written
+
+A `Disagreement` is `(kind, symbol, signal_close, cause, evidence)` with `kind` one of *live only*, *backtest only* and *different exit*; the entry it is about is found by `(symbol, signal_close + 1 ms)` on `entry_bar_open`. A `LiveEntry` carries no exit instant; the `Trade` the census builds does (`exit_time` is the booking's candle time for a strategy `CLOSE` and its `filled_at` for a protective-leg fill). A `BacktestEntry` carries none either; `trades.csv` does (`timeframe`, `exit_bar_open`, `exit_time`). So the tool must read the census trades and the CSV rows itself, beside the frozen functions. The primary and E1 exclude the frozen `down_intervals`; E2 excludes the union of those and the latch intervals (`s4_latch_compare.merge_intervals`, `latch_intervals`, `latch_episodes`). E1 differs from the primary only in `--window-end`.
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | **The prompt's:** on a fixture with one wide bar inside a matched entry's backtest-only stretch (the stretch after the live exit while the backtest still holds, or the reverse), the entry is annotated **wide=yes**, because R-DS's interval for a matched entry is the union of the two holding periods |
+| b | **The prompt's:** a backtest-only entry with no wide bar in its backtest holding period is annotated **wide=no**, and never *"no live position"* (R-DS removed that text) |
+| c | **The prompt's:** the threshold is the strict R-DR inequality `(high - low) / open >= 3%` on a 1m bar with a positive open: a bar of exactly 3% is wide, a bar of 2.999% is **not**, and a bar of 3.001% is |
+| d | **The prompt's:** for each of the primary, E1 and E2 the counts by cause sum to the length of that analysis's disagreement list |
+| e | **A position open at M** (no exit instant on that side) has its holding period run to the tool's `--window-end`: a wide bar between its entry bar and M makes the entry wide=yes, and a wide bar after M does not |
+| f | **The interval is half open on 1m bar opens:** a wide bar opening exactly at the entry bar's open is inside (wide=yes); a wide bar opening exactly at the exit bar's close is outside (wide=no); a wide bar opening one minute before the exit bar's close is inside |
+| g | **The exit bar's close:** backtest, the `exit_bar_open` column plus the pair's timeframe; live, for a strategy `CLOSE` the booking's candle time plus one millisecond, and for a protective-leg fill the close of the pair-timeframe bar that contains the fill instant (a fill at `22:32:10` on a 5m pair ends its interval at `22:35:00`) |
+| h | **The three analyses agree with their sources:** on a fixture the tool's disagreement list for `--analysis primary` and for `e1` equals the one the frozen tool's `diagnose` returns for the same inputs, and for `e2` equals the one the committed wrapper's flow returns, entry for entry and in order |
+| i | **No bars is not "no":** an entry whose interval holds no 1m bar of its pair in the store is annotated **unknown**, not wide=no, and is counted in its own column; the counts by cause still sum to the list length |
+| j | **Its output** begins with the header `DIAGNOSTIC R-DR/R-DS`, names the analysis and the window, prints one row per disagreement (symbol, entry bar, cause, interval, wide yes/no/unknown, max range) and counts by cause, and contains **no verdict word** (the pre-registration's verdict words, as `tests/unit/test_s4_latch_compare.py` already lists them) and no figure A, B or C |
+| k | **The max range** of a row is the largest `(high - low) / open` over the 1m bars inside its interval, printed as an exact percentage of a `Decimal`, never a float; a row with no bars prints none |
+| l | **The inputs are the frozen tool's own:** the tool calls `require_evidence_eligible` and the frozen live-boot eligibility check, so an ineligible run record or an ineligible live boot is a `REFUSED` with the frozen exit status; a path under `logs\` is refused as the frozen tool refuses it; `--analysis` takes `primary`, `e1` or `e2` and nothing else |
+| m | **It reads only:** it opens no file for writing and calls no venue API; the store is read through the repository's own historical-store reader, never written |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The arming audit's predicted kills are written to this ledger in a later commit, after the tests exist and before the survey is run (the P130 procedure). A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
