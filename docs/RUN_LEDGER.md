@@ -9035,3 +9035,55 @@ Section 84's twenty "fails nothing" mutations are each a property no test holds,
 | y20 | the initial balance is 5000 (asserted nowhere) | 0 | 0 | MATCH |
 | y21 | the placeholder sizing fraction is 0.05 (asserted nowhere) | 0 | 0 | MATCH |
 | y22 | the mode is not a mode (the loader refuses the file) | 10 | 10 | MATCH; crash: ValidationError |
+
+## 86. M5n N4a: P143's halts and the predictions for the D1 trail as a pure function, before any code (P143 C3, R-T, R-DQ, R-DT, R-EA)
+
+An observation log, so this section only adds. P143 builds N4a: the D1 trail of R-EA (`docs/M5N_CHARTER_DRAFT.md` section 16) as a pure function. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted, in scratch or in the repository. Everything below is hand arithmetic from the figures stated in it. **No recorded bar was read, no backtest was run, and nothing here decides anything about S4.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `m5n`, `git status` not clean, HEAD is not `70980c6` | `git branch --show-current`, `git status --porcelain`, `git rev-parse --short HEAD` | `m5n`, empty, `70980c6` (then `bf602b1` and `febf0b4` after the two charter commits) |
+| a command would write under `deploy\45547f107715`, the rehearsal clone or the canonical store, or touch `config.yaml` or `config.s4.yaml` | every command in the plan | none: the module takes bars as an argument and has no store access |
+| any venue request | the plan | none: three public documentation pages on `developers.binance.com` were read (charter section 3); no API endpoint, key or order was touched |
+| any recorded bar is read | the plan | none: every fixture is a literal |
+| any existing backtester, fill-model or risk module changes behaviour | the plan | none: the module is a new file that nothing imports, and `fill_model.py`, `engine.py`, `simulated_executor.py` and `risk/` are not edited |
+
+### What is built
+
+`src/trading_bot/backtesting/d1_trail.py`, a new module that nothing imports, with no I/O, no clock and no store: `trigger_price(peak, delta_bps)`, and `resolve_trail(*, entry_time, entry_price, delta_bps, stop_slippage_percent, bars)` returning a frozen `TrailOutcome` of `status` (`OPEN` or `EXITED`), `exit_minute`, `exit_price`, `gap` and `peak`. Money is `Decimal` throughout (`Candle` carries `Money`), the delta is an integer in basis points that the caller has already clamped and rounded (D1), the slippage is a whole percent in the fill model's convention (1.20 is 1.20%), and a `float`, a `bool` for the delta or a naive instant is refused. The rules are R-EA's, with the six readings of charter section 16: the trigger is `peak x (1 - delta / 10000)`; the peak starts at the entry fill price; the entry minute tests its low against the trigger from the fill price and counts neither its high nor its open; each later bar first tests its open against the trigger in force before it (at or below is a gap: the fill is the open less the slippage and the peak does not take that bar's high), otherwise takes its high into the peak and tests its low against the recomputed trigger (at or below triggers, at the trigger less the slippage). The first exit ends the walk. A path that ends first is `OPEN` with the peak so far; an empty path is `OPEN` with the fill price as the peak.
+
+### The fixtures and the predictions
+
+Minute 0 is `2023-01-01T00:00Z`, the fill is inside it, and the exit minute is the open time of the bar on which the exit happens. Bars are open / high / low / close. Slippage is a whole percent, so 1.00 multiplies by 0.99 and 1.20 by 0.988. A trigger is `peak x (1 - delta / 10000)`.
+
+| Fixture | Fill, delta bps, slippage % | Bars (minute: O/H/L/C) | Trigger at the exit | Exit minute | Exit price | Gap flag | Peak at exit |
+|---|---|---|---|---|---|---|---|
+| A monotone rise, then a fall through the trigger | 100, 500, 1.00 | 0: 100/101/100/101; 1: 101/103/101/103; 2: 103/105/103/105; 3: 105/108/105/108; 4: 108/108/100/101; 5: 101/200/100/150 | 108 x 0.95 = 102.60 | 4 | 102.60 x 0.99 = **101.5740** | no | 108 |
+| B a fall in the entry minute | 100, 500, 1.20 | 0: 100/100/94/95 | 100 x 0.95 = 95.00 | 0 | 95 x 0.988 = **93.860** | no | 100 |
+| B2 the entry minute opens below the trigger and its high is ignored | 100, 500, 1.20 | 0: 90/101/90/100 | 95.00 (the high of 101 does not count) | 0 | 95 x 0.988 = **93.860** | no | 100 |
+| C a high and a low in one minute that trigger only if the low came first | 100, 500, 1.00 | 0: 100/100/100/100; 1: 100/110/99/105 | 110 x 0.95 = 104.50 | 1 | 104.50 x 0.99 = **103.4550** | no | 110 |
+| D a gap open below the trigger | 100, 500, 1.20 | 0: 100/104/100/104; 1: 104/106/104/106; 2: 99/100/98/98 | before minute 2: 106 x 0.95 = 100.70; the open 99 is below it | 2 | 99 x 0.988 = **97.812** (the open, not the trigger) | **yes** | 106 |
+| D2 a gap bar's high does not enter the peak | 100, 500, 1.20 | as D, with minute 2: 99/120/98/110 | 100.70 | 2 | **97.812** | **yes** | 106 (not 120) |
+| E a bar whose low touches the trigger exactly | 100, 500, 1.00 | 0: 100/100/100/100; 1: 100/100/95/96 | 100 x 0.95 = 95.00 | 1 | 95 x 0.99 = **94.0500** | no | 100 |
+| E2 a bar that opens exactly at the trigger | 100, 500, 1.00 | 0: 100/100/100/100; 1: 95/96/95/95 | 95.00; the open equals it | 1 | 95 x 0.99 = **94.0500** | **yes** | 100 |
+| E3 a low one cent above the trigger | 100, 500, 1.00 | 0: 100/100/100/100; 1: 100/100/95.01/96 | 95.00 | none: **OPEN** | none | no | 100 |
+| F delta 10 | 1000, 10, 1.00 | 0: 1000/1000/999.5/999.8; 1: 999.8/1000.5/999/999.2 | 1000.5 x 0.999 = 999.4995 | 1 | 999.4995 x 0.99 = **989.504505** | no | 1000.5 |
+| G delta 2000 | 50, 2000, 1.20 | 0: 50/52/49/51; 1: 51/60/51/59; 2: 59/59/47/48 | 60 x 0.80 = 48.00 | 2 | 48 x 0.988 = **47.424** | no | 60 |
+| H the path ends with the position open | 100, 500, 1.00 | 0: 100/101/100/101; 1: 101/102/100.5/101 | 102 x 0.95 = 96.90 (the entry minute's high of 101 did not count) | none: **OPEN** | none | no | 102 |
+| I an empty path | 100, 500, 1.00 | none | none | none: **OPEN** | none | no | 100 |
+| J the peak never moves down | 100, 500, 1.00 | 0: 100/100/100/100; 1: 100/104/100/104; 2: 104/102/101/101 | 104 x 0.95 = 98.80 | none: **OPEN** | none | no | 104 |
+| K the FAQ's own example | 45500, 700, 0 | 0: 45500/45500/45500/45500; 1: 45500/45500/42315/42400 | 45500 x 0.93 = **42315** | 1 | **42315** (slippage 0) | no | 45500 |
+
+`trigger_price(Decimal(45500), 700)` is exactly 42315, and `trigger_price(Decimal(100), 10)` is 99.9 and `trigger_price(Decimal(100), 2000)` is 80.
+
+**The gap flag is predicted set on exactly three fixtures: D, D2 and E2.** It is clear on B2 (the entry minute's open predates the fill, so it is never a gap), on C (the bar opened above the trigger in force before it and only the recomputed trigger caught the low), on E (a low at the trigger is not an open at it), and on every other fixture. D and D2 differ only in the gap bar's high, so they pin that the peak at exit is 106 and not 120; E and E2 give the same exit price and differ only in the flag.
+
+**Refusals, each predicted to raise `ValueError` (a `TypeError` for a wrong type):** a delta that is zero, negative, 10000 or more, a `bool` or a `float`; a slippage that is negative, 100 or more, or a `float`; an entry price that is not positive or is a `float`; a naive entry time; a bar that is not a `1m` bar; bars whose open times do not strictly increase; a first bar whose minute does not contain the entry time. A path that continues after the exit (fixture A's minute 5, with a high of 200) changes nothing.
+
+**Where a prediction is most likely to be wrong, named in advance:** C and D2, because each rests on the order of two operations inside one bar (the peak takes the high before the low is tested; the gap test uses the trigger before the high is applied), and the code's order is easy to write the other way round; and F, because its figure carries nine significant digits and the multiplication order of two `Decimal` factors can move a trailing digit.
+
+### The commits that follow
+
+The module and its tests (one file each, the gate run bare before each); the survey predictions, committed before the survey; the survey and its results; the counts. Findings begin at `M5n-076` and are gapless.
