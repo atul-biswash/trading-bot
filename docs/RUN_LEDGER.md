@@ -8074,3 +8074,146 @@ The codes in the T and C tables are keyed to test ids at the end of the section;
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The surveys run on the tree that carries this section, and their results are appended as section 81. The order of the remaining commits: this section; the three surveys and their results; the counts and the lists the new files falsify (`CLAUDE.md` and `README.md`).
+
+## 81. M5n N2b: the mutation surveys of the traded-minute and archive-check tests, and the re-run of the aggregation survey, scored against section 80 (P141 C10, R-T)
+
+An observation log, so this section only adds. The surveys ran as section 80 describes, in three detached worktrees outside the repository at `6666f4f` (the commit that carries section 80), one per spec, each running only the mutated file's own tests. Baselines: `a2` 58 passed in 1.00s; failing: []; `t` 38 passed in 0.88s; failing: []; `c` 38 passed in 4.52s; failing: []. The import location of `trading_bot` and `tests` was proven inside each worktree before any result counted, every restore was shown SHA-equal and each run ended with *all copied files are intact*. Outputs, SHA-256: `survey_a2_out.txt` `e4ff014f12abde2fad20e1d0e4bcf32cfcec6e9849d8486e81d92285eb8733c6`; `survey_t_out.txt` `a456a4b4b2d0d71fa0f872647ef74fab0d8a9a40c5eb2fdce594397d649fcf79`; `survey_c_out.txt` `9130f2983d43ae06713ac8d32e484845023639e6694bd2620bb48aaf3df0bb74`. Specs: `survey_a2.json` `8461b25bfb352388ec22f327f37850b420ef61d8772ad0954d3bb3e66cfb6eb9`; `survey_t.json` `13b26c509b3164b4bdded032ad9ccd5dfb03092fc0a369d7d43dd64e58896e13`; `survey_c.json` `62c637014d737c9ccf6478b2923dc628f82cb34c08499c39ee2f233aca180956`; `make_spec2.py` `d010dcafc5ba89b36694fa1e7b5c3842be6adb566a41ce34bf4af1c8cd446caa`.
+
+### The totals
+
+| Survey | Mutations | MATCH | MORE | FEWER | Predicted kills | Observed kills |
+|---|---|---|---|---|---|---|
+| `aggregation.py` against `test_aggregation.py` (section 76's 30, re-anchored) | 30 | 30 | 0 | 0 | 170 | 170 |
+| `aggregation.py` traded-minute code against `test_aggregation_traded.py` | 29 | 29 | 0 | 0 | 128 | 128 |
+| `n2_archive_check.py` against `test_n2_archive_check.py` | 35 | 33 | 2 | 0 | 51 | 63 |
+| all three | 94 | 92 | 2 | 0 | 349 | 361 |
+
+### Every mutation, `aggregation.py` against `test_aggregation.py` (section 76's 30, re-anchored)
+
+| Mutation | Predicted | Killed | Verdict |
+|---|---|---|---|
+| a01 | 0 | 0 | MATCH |
+| a02 | 4 | 4 | MATCH |
+| a03 | 4 | 4 | MATCH |
+| a04 | 7 | 7 | MATCH |
+| a05 | 5 | 5 | MATCH |
+| a06 | 9 | 9 | MATCH |
+| a07 | 9 | 9 | MATCH |
+| a08 | 2 | 2 | MATCH |
+| a09 | 20 | 20 | MATCH |
+| a10 | 26 | 26 | MATCH |
+| a11 | 7 | 7 | MATCH |
+| a12 | 38 | 38 | MATCH |
+| a13 | 1 | 1 | MATCH |
+| a14 | 1 | 1 | MATCH |
+| a15 | 1 | 1 | MATCH |
+| a16 | 1 | 1 | MATCH |
+| a17 | 2 | 2 | MATCH |
+| a18 | 4 | 4 | MATCH |
+| a19 | 1 | 1 | MATCH |
+| a20 | 4 | 4 | MATCH |
+| a21 | 5 | 5 | MATCH |
+| a22 | 1 | 1 | MATCH |
+| a23 | 1 | 1 | MATCH |
+| a24 | 1 | 1 | MATCH |
+| a25 | 1 | 1 | MATCH |
+| a26 | 2 | 2 | MATCH |
+| a27 | 5 | 5 | MATCH |
+| a28 | 3 | 3 | MATCH |
+| a29 | 2 | 2 | MATCH |
+| a30 | 3 | 3 | MATCH |
+
+### Every mutation, `aggregation.py` traded-minute code against `test_aggregation_traded.py`
+
+| Mutation | Predicted | Killed | Verdict |
+|---|---|---|---|
+| t01 | 11 | 11 | MATCH |
+| t03 | 3 | 3 | MATCH |
+| t04 | 5 | 5 | MATCH |
+| t05 | 5 | 5 | MATCH |
+| t06 | 4 | 4 | MATCH |
+| t07 | 3 | 3 | MATCH |
+| t08 | 7 | 7 | MATCH |
+| t09 | 3 | 3 | MATCH |
+| t10 | 7 | 7 | MATCH |
+| t11 | 4 | 4 | MATCH |
+| t12 | 6 | 6 | MATCH |
+| t13 | 1 | 1 | MATCH |
+| t14 | 1 | 1 | MATCH |
+| t15 | 1 | 1 | MATCH |
+| t16 | 3 | 3 | MATCH |
+| t17 | 1 | 1 | MATCH |
+| t18 | 1 | 1 | MATCH |
+| t19 | 3 | 3 | MATCH |
+| t21 | 23 | 23 | MATCH |
+| t22 | 6 | 6 | MATCH |
+| t23 | 3 | 3 | MATCH |
+| t24 | 1 | 1 | MATCH |
+| t25 | 1 | 1 | MATCH |
+| t26 | 1 | 1 | MATCH |
+| t27 | 1 | 1 | MATCH |
+| t28 | 3 | 3 | MATCH |
+| t29 | 1 | 1 | MATCH |
+| t30 | 18 | 18 | MATCH |
+| t31 | 1 | 1 | MATCH |
+
+### Every mutation, `n2_archive_check.py` against `test_n2_archive_check.py`
+
+| Mutation | Predicted | Killed | Verdict |
+|---|---|---|---|
+| c01 | 1 | 1 | MATCH |
+| c02 | 1 | 1 | MATCH |
+| c03 | 2 | 2 | MATCH |
+| c04 | 1 | 2 | MORE |
+| c06 | 1 | 1 | MATCH |
+| c07 | 1 | 1 | MATCH |
+| c08 | 1 | 1 | MATCH |
+| c09 | 1 | 1 | MATCH |
+| c11 | 6 | 6 | MATCH |
+| c12 | 2 | 2 | MATCH |
+| c13 | 1 | 1 | MATCH |
+| c14 | 2 | 2 | MATCH |
+| c15 | 1 | 1 | MATCH |
+| c16 | 1 | 1 | MATCH |
+| c17 | 1 | 1 | MATCH |
+| c18 | 2 | 2 | MATCH |
+| c19 | 2 | 2 | MATCH |
+| c20 | 1 | 1 | MATCH |
+| c21 | 3 | 14 | MORE |
+| c22 | 2 | 2 | MATCH |
+| c23 | 2 | 2 | MATCH |
+| c24 | 7 | 7 | MATCH |
+| c25 | 1 | 1 | MATCH |
+| c26 | 1 | 1 | MATCH |
+| c28 | 1 | 1 | MATCH |
+| c30 | 1 | 1 | MATCH |
+| c31 | 0 | 0 | MATCH |
+| c32 | 0 | 0 | MATCH |
+| c33 | 1 | 1 | MATCH |
+| c34 | 0 | 0 | MATCH |
+| c35 | 0 | 0 | MATCH |
+| c38 | 1 | 1 | MATCH |
+| c39 | 1 | 1 | MATCH |
+| c40 | 1 | 1 | MATCH |
+| c37 | 1 | 1 | MATCH |
+
+### Where the surveys and the predictions differ
+
+- **c04** killed beyond the prediction: `TestWhatIsPrintedAndWhatIsNotAsked::test_a_refused_run_is_an_error_exit_and_prints_no_report`
+- **c21** killed beyond the prediction: `TestTheVolumeGap::test_an_incomplete_bucket_is_left_out_of_the_gap`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10000.00000000-bands1]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10000.10000000-bands2]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10001.00000000-bands3]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10100.00000000-bands4]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10101.00000000-bands5]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[20000.00000000-bands6]`; `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[9999.00000000-bands0]`; `TestTheVolumeGap::test_the_archive_being_smaller_is_counted_apart_from_the_bands`; `TestTheVolumeGap::test_the_median_and_maximum_are_percentages_of_the_archive_volume`; `TestWhatIsPrintedAndWhatIsNotAsked::test_the_failing_bucket_list_has_times_and_fields_and_no_price`
+
+**The two MORE, diagnosed (reach errors, recorded and not violations; no mutation was killed by fewer tests than predicted, and no survey halted).**
+
+- **c04** (a response not checked against its digest) was predicted to be killed by `test_a_response_that_no_longer_matches_its_digest_refuses_the_run` alone and was killed also by `test_a_refused_run_is_an_error_exit_and_prints_no_report`, which tampers with a response in the same way and asserts the error exit. The prediction named the test whose title says digest and not the one that reaches the check by another route: reasoning from what a test is for.
+- **c21** (volume added to the consistency fields) was predicted to be killed by three tests and was killed by 14. The mutation lets the loop name `volume`, and the tally that follows is `dict.fromkeys(PRICE_FIELDS, 0)`, so `by_field["volume"] += 1` raises `KeyError`. Every test whose fixture has a volume that differs between the aggregation and the archive series therefore crashes in the consistency check, which is every volume-gap test (the fixtures are built to differ) and, through the 4h series staged beside the 1d one, all seven band cases including the equal one. The prediction traced the three tests that assert on the failing fields and not the line after the comprehension that indexes a dict by what it returns. A crash is a kill by the exception types of `M5i-115`, and these are `KeyError`s inside the code under test, which the harness counts as failures present under the mutation.
+- **A consequence for the abstentions:** `test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[9999.00000000-bands0]` was predicted to be killed by no mutation and was killed by `c21`'s crash, so that abstention was an incidental kill and not a test that bites its own path. Section 80's other abstentions held.
+
+### Tests killed by no mutation
+
+`aggregation.py` against `test_aggregation.py` (section 76's 30, re-anchored): **3 of 58**: `TestTheValues::test_empty_input_gives_no_bars`; `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[1w]`; `TestInputThatCannotBeAggregatedWithoutGuessing::test_a_timeframe_other_than_4h_and_1d_is_refused[]`
+
+`aggregation.py` traded-minute code against `test_aggregation_traded.py`: **3 of 38**: `TestTheStreamChecksAreTheSame::test_a_timeframe_other_than_4h_and_1d_is_refused[1w]`; `TestTheStreamChecksAreTheSame::test_a_timeframe_other_than_4h_and_1d_is_refused[]`; `TestTheStreamChecksAreTheSame::test_empty_input_gives_no_bars`
+
+`n2_archive_check.py` against `test_n2_archive_check.py`: **1 of 38**: `TestWhatIsPrintedAndWhatIsNotAsked::test_the_script_has_no_fetcher_and_no_network_parameter`
+
+Section 80 predicted 3, 3 and 2. The scripts that made these results are in `scratch\p141`: `make_spec2.py`, `build81.py` (this text).
