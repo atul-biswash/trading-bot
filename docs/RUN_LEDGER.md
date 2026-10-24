@@ -6846,3 +6846,60 @@ The capture is the owner's `F:\trading bot\scratch\s4\2026-10-24\051021Z-capture
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The measurement scripts are written after this section is committed, and their digests are recorded in the completion.
+
+### Completion (P133 C2): what the capture and the store say about list 218102, and the predictions scored
+
+Added in the commit that completes this section; nothing above is edited. Every fact below is cited by its capture line number and timestamp (line numbers are of `051021Z-capture.log`, SHA-256 `6aae8a36793ed28e38adf4f7b0f8652407cec5d8dcf29e54a79900935d83c55f`, and are valid for those bytes only) or by the bar that opens at the stated minute in the store copy. **The measurement scripts were written after commit `337de24` and are read-only; their digests are at the end of this subsection.** The capture's size and digest were re-printed by the first script and equal the prompt's.
+
+#### The case, in order
+
+| Instant (UTC, 2026-10-23) | Line | What the capture says |
+|---|---|---|
+| `22:00:00Z` | 15585 | `Signal BUY ETHUSDT (golden cross: SMA(20)=2401.1465 crossed above SMA(50)=2401.013)` on the 5m bar |
+| `22:00:00Z` | 15586, 15587 | risk approved 0.77800000 at 2402.24000000, stop `2354.20000000`, take-profit `2498.32000000`; `intent_dispatched` `order_type=LIMIT entry=2402.24000000 reference=2399.84000000` |
+| `22:00:01Z` | 15588 | `order_placed`, **list 218102**, `list_client_order_id=tb1-ETHUSDT-1792792799999-0-L`, `stop_loss=2354.20000000`, `entry_bar_time=2026-10-23T21:59:59.999000+00:00` |
+| `22:01:00Z` to `22:30:01Z` | 15589 to 15618 | `reconciliation_pass` with `states="active=1"` (`active=2` at `22:18:02Z` and `22:20:02Z`, while BTCUSDT list 218263 was also open: placed `22:17:01Z`, line 15604, closed `22:21:03Z`, `realised=-0.00022950`, line 15611). **The last trusted pass of list 218102 is `22:30:01Z`, line 15618** |
+| `22:32:02Z` | 15619, 15620, 15621 | the first pass reading `states="diverged=1"`; `reconciliation_untrusted count=1 symbols=ETHUSDT` with *"ETHUSDT leg SL was requested and does not rest: the point query reports EXPIRED; ETHUSDT leg TP was requested and does not rest: the point query reports EXPIRED"*; and a `CRITICAL` `exit_unbookable` for ETHUSDT, `state=diverged quantity=0.77800000 venue_order_list_id=218102` |
+| `22:34:02Z`, `22:36:02Z`, `22:38:01Z`, `22:40:01Z` | 15622 to 15633 | the same three lines at each pass: four more `diverged=1` passes, four more `reconciliation_untrusted`, four more `exit_unbookable`, each naming list 218102 |
+| `22:40:01Z` | 15634, 15635 | `Signal CLOSE ETHUSDT (death cross: SMA(20)=2398.902 crossed below SMA(50)=2399.1212)`; `Intent SELL 0.77800000 ETHUSDT ... action=CLOSE ... order_type=MARKET` |
+| `22:40:02Z` | 15636, 15637, 15638 | `close_planned decision=sell`, *"no protective leg executed across 2 leg(s); the position is still open and the sell may be dispatched"*, `reads=2`; `close_window_open`; `close_cancel_already_terminal` for `venue_order_list_id=218102` (*"Order list for ETHUSDT was already terminal at cancel"*) |
+| `22:40:03Z` | 15639 | `close_booked`: `quote_total=1855.59224000 quote_total_source=venue entry_quote_total=1866.95882000 realised=-11.36658000 order_id=5380675 quantity=0.77800000 fee=0E-8 fee_asset=USDT fills=1 filled_at=2026-10-23T22:40:02.896000+00:00` |
+
+The entry quote total is 1,866.95882 USDT (an average fill of about 2,399.69, by division, and a derived figure); the close is 1,855.59224 (about 2,385.08); the difference is the realised `-11.36658000`, gross of the entry fee as the ledger always is. The list was open 40 minutes 2 seconds from the placement to the booking. The capture holds **exactly eight lines that name list 218102**, none before `22:00:01Z` and none after `22:40:02Z`, and they are the eight in the table (lines 15588, 15621, 15624, 15627, 15630, 15633, 15637, 15638). **Nothing in the capture records an operator action, and none was needed to explain the sequence:** the `CLOSE` is the bot's own, dispatched on the death-cross signal at `22:40:01Z` and booked at `22:40:03Z`. (Operator tools write no log, so an operator's act would not appear either way; the argument rests on the presence of the bot's own complete sequence, not on the absence of anything else.)
+
+#### The price series in the bracket (store copy, ETHUSDT 1m, read-only)
+
+The 41 bars that open from `22:00` to `22:40` are all present. The stop is `2354.20`, the take-profit `2498.32`.
+
+| Bar opens | Open | High | Low | Close | Volume |
+|---|---|---|---|---|---|
+| `22:28` | 2396.26 | 2396.27 | 2396.26 | 2396.26 | |
+| `22:29` | 2396.27 | 2396.27 | 2396.26 | 2396.27 | |
+| `22:30` | 2396.26 | 2410.50 | **1940.21** | 2300.00 | 29.8826 |
+| `22:31` | 2300.00 | 2334.76 | **1937.53** | 1937.53 | 0.8440 |
+| `22:32` | 1928.32 | 2385.30 | **1918.15** | 2385.29 | 25.4658 |
+| `22:33` | 2385.30 | 2385.30 | 2382.26 | 2384.60 | |
+
+**The stop price was touched.** The lowest low from the placement to the close is `1918.15` (the `22:32` bar), **436.05 below the stop**; the `22:30` bar alone reaches `1940.21`, 413.99 below it, and the two bars before it, opening `22:28` and `22:29`, sit at 2,396.26. **The take-profit was not touched:** the highest high in the whole span is `2410.50` (the `22:30` bar), 87.82 below `2498.32`. The bracket between the last trusted pass (`22:30:01Z`) and the first untrusted one (`22:32:02Z`) is 2 minutes 1 second and contains the whole wick. Yet both legs read `EXPIRED` with nothing executed (`close_planned`, line 15636, `reads=2`), so a stop that the recorded series says was crossed by 436 USDT executed **zero**.
+
+#### The predictions scored
+
+| | Result |
+|---|---|
+| a | **Held, with one nuance.** pid 20100 has exactly **5** `reconciliation_untrusted` lines (lines 15620, 15623, 15626, 15629, 15632), all `symbols=ETHUSDT`, `22:32:02Z` to `22:40:01Z`. The untrusted line does not carry the list id; each is paired in the same second with an `exit_unbookable` line that names `venue_order_list_id=218102`, and those are the 5 |
+| b | **Held.** 0 `committed_risk_unknown` and 0 `close_halted` lines under pid 20100 |
+| c | **Held.** The only signal line between `22:30:00Z` and `22:40:01Z` is `Signal CLOSE ETHUSDT` at `22:40:01Z`; no `BUY` on either pair |
+| d | **Held.** `latch_episodes` over the capture, run with the 45547f1 interpreter and the committed wrapper, returns the same **3** episodes (BTCUSDT `2026-10-11T16:00:01Z` to `16:54:00Z`, ETHUSDT `2026-10-13T02:59:02Z` to `06:54:01Z`, BTCUSDT `2026-10-21T13:11:00Z` to `2026-10-23T08:05:33Z`); pid 20100's five passes each read `diverged=1` and `can_break` is false for all five. No interval is added |
+| e | **Held.** The last trusted pass is `22:30:01Z` and the first untrusted is `22:32:02Z`, adjacent passes 2 m 1 s apart; the placement is `22:00:01Z`, 32 m 1 s before the first |
+| f | **Held.** 5 `exit_unbookable` `CRITICAL` lines carrying the predicted `resolution` text; the `CLOSE` signal is `22:40:01Z`, 7 m 59 s after the first untrusted pass, and it is booked at `22:40:03Z`, 8 m 1 s after it; an ordinary `close_booked`; no operator action needed to explain it |
+| g | **WRONG.** Predicted: the stop was not touched. Measured: **touched**, by 436.05 at the lowest low, and the legs still executed nothing. The prediction reasoned *"a touched stop would have left a leg executed"* from the two earlier cases (lists 71012 and 183218, whose stop legs executed 9.9% and 46.6% before expiring); the third shape, a stop crossed and executed **zero**, is a case that reasoning could not see |
+| h | **Held.** Entry quote total 1,866.95882 USDT (1,500 to 2,500); realised `-11.36658000` (-15 to +15), an ordinary close and not a stop-out |
+| i | **Not predicted, still UNMEASURED.** Why both legs expired with nothing executed through a 436-USDT wick. The capture holds the point query's answer (`EXPIRED`) and not a venue reason |
+
+#### An exploratory comparison nobody predicted (labelled as such)
+
+The stop was crossed by a wick, so the same series was read for how common wicks are and whether the bot's other protective-leg expiries coincide with them. **Unpredicted, post hoc, and not a test.** In the store copy since T0 (`2026-10-10T06:05:20Z`, 19,799 1m bars per pair) **BTCUSDT has 54 bars and ETHUSDT 16 whose high-to-low range is at least 3% of the open**, and most of them are 15% to 25% wide (the ETHUSDT bars at `22:30`, `22:31` and `22:32` are 19.6%, 17.3% and 24.2%). Separately, `exit_unbookable` occurs in **110 lines in 5 clusters** (one pid on one day each, `event=exit_unbookable`): pid 16076 on 2026-10-11 (29 lines, first `16:00:03Z`, BTCUSDT list 51703), pid 25352 on 2026-10-15 (39, `04:22:01Z`, BTCUSDT list 96640), pid 5224 on 2026-10-19 (6, `13:17:01Z`, BTCUSDT list 153714), pid 14600 on 2026-10-20 (31, `14:20:02Z`, BTCUSDT list 168650) and pid 20100 on 2026-10-23 (5, `22:32:02Z`, ETHUSDT list 218102). **In each of the five, a bar of the same pair that is 15% or more wide opens within the 6 minutes before the first line** (BTCUSDT `15:59` 16.4%, `04:20` 19.4%, `13:15` 18.2%, `14:18` 15.7%; ETHUSDT `22:30` to `22:32`). The two latch episodes that were `exit_book_refused` and not `exit_unbookable` (ETHUSDT `2026-10-13T02:59:02Z`, BTCUSDT `2026-10-21T13:11:00Z`) each follow a wide bar the same way (`02:57` 18.9%, `13:10` 18.1%). So each of the seven clusters this section looked at (the five `exit_unbookable` clusters, one of which is the 2026-10-11 latch episode, and the two latch episodes that were `exit_book_refused`) begins within about three minutes after a Testnet wick of its pair. It did not look at the other, smaller untrusted days (`reconciliation_untrusted` occurs on 15 pid-days in the capture). The wide bars are far more numerous than the clusters (70 bars at 3% or more, in fewer wicks, against 7 clusters), because a cluster needs an open position with a resting stop. **That is a coincidence in time, MEASURED; that the wick is the cause is REASONED, and for list 218102 the stop was crossed and executed nothing.** Whether the venue refuses to execute a triggered `STOP_LOSS` into a book that thin is UNMEASURED.
+
+#### Scripts and outputs
+
+Read-only; none writes a file. `measure1.py` `706b10c5342f7404718358c1cc38529c003e2f4a5abf689e4ab45ab7915201f5` (output `m1_out.txt` `2b9f065f9585ed55a441566950426bcfa3e0143628c9e5389cf879fbe1a53676`), `measure2.py` `56eedc4810143a3352740bc97c075177ba7e7b968ddfe1e7e9eafe11f3b2392b` (`m2_out.txt` `e8846d1d1b583a28c10276f711b53df377ce925e600e0465c2da1b4fa3049e3b`), `measure3.py` `0bf4a2a867a9871cd86a3b980bfe52236308f37e13c35cdf0163c0549d455f52` (`m3_out.txt` `72a7fc752a2773a3fb3ae52ece20a774bf8aab1c9f32f022b838a27e7d1bf924`), `measure4.py` `da68245271999b2c4cd35b1b1fe06528a8769a4ddab2aa5366f51e6b78c34de2` (`m4_out.txt` `5b003842bffd6c2ca0f01221e589641943d2a6a0104582a7f4b2f4d9047b46df`; run with the rehearsal clone's interpreter), `measure5.py` `e581b52fa670fd90190e2ede39438fb8b37d4bffdb442ac59da19d4d9832233f` (`m5_out.txt` `f13ceb395f9ebfa78660813deb45367602a7a466152d3eada129641756cee6af`), `measure6.py` `6dd29c6cf509564935f603d8603cf135077ec771df62126b3814f313133261c4` (`m6_out.txt` `8f96e1468f4b4856541af06abe6e1ff6a1ac718eaeec8909f66283a2244b5ede`) and `measure7.py` `a23b07bd4538ad27939249b014fbc46acca120131adc5ef9f9d4219e358d9db8` (`m7_out.txt` `e6df44f4344b14476775930c946429721f9bd88eb095b453097cdd0f0516fbf2`). The frozen files were not opened for writing and no venue call was made.
