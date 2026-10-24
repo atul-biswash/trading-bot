@@ -6903,3 +6903,39 @@ The stop was crossed by a wick, so the same series was read for how common wicks
 #### Scripts and outputs
 
 Read-only; none writes a file. `measure1.py` `706b10c5342f7404718358c1cc38529c003e2f4a5abf689e4ab45ab7915201f5` (output `m1_out.txt` `2b9f065f9585ed55a441566950426bcfa3e0143628c9e5389cf879fbe1a53676`), `measure2.py` `56eedc4810143a3352740bc97c075177ba7e7b968ddfe1e7e9eafe11f3b2392b` (`m2_out.txt` `e8846d1d1b583a28c10276f711b53df377ce925e600e0465c2da1b4fa3049e3b`), `measure3.py` `0bf4a2a867a9871cd86a3b980bfe52236308f37e13c35cdf0163c0549d455f52` (`m3_out.txt` `72a7fc752a2773a3fb3ae52ece20a774bf8aab1c9f32f022b838a27e7d1bf924`), `measure4.py` `da68245271999b2c4cd35b1b1fe06528a8769a4ddab2aa5366f51e6b78c34de2` (`m4_out.txt` `5b003842bffd6c2ca0f01221e589641943d2a6a0104582a7f4b2f4d9047b46df`; run with the rehearsal clone's interpreter), `measure5.py` `e581b52fa670fd90190e2ede39438fb8b37d4bffdb442ac59da19d4d9832233f` (`m5_out.txt` `f13ceb395f9ebfa78660813deb45367602a7a466152d3eada129641756cee6af`), `measure6.py` `6dd29c6cf509564935f603d8603cf135077ec771df62126b3814f313133261c4` (`m6_out.txt` `8f96e1468f4b4856541af06abe6e1ff6a1ac718eaeec8909f66283a2244b5ede`) and `measure7.py` `a23b07bd4538ad27939249b014fbc46acca120131adc5ef9f9d4219e358d9db8` (`m7_out.txt` `e6df44f4344b14476775930c946429721f9bd88eb095b453097cdd0f0516fbf2`). The frozen files were not opened for writing and no venue call was made.
+
+## 71. M5m S4: P134's halts and the predictions for the stop-leg types of three order lists and the wide-bar threshold sensitivity, before any measurement (P134 C1, R-T, R-DQ)
+
+An observation log, so this section only adds. P134 measures, read-only from the owner's capture and from the P131 store copy, two things P133 left open: what order type the stop leg of ETHUSDT list `218102` (and of the BTCUSDT list `183218` and the 2026-10-13 ETHUSDT list `71012`) was, and how the count of wide 1m bars since T0 moves with the threshold. Under R-DQ clause (1) this section is committed BEFORE any measurement: no script that reads the capture or the store is drafted until it exists. The only reading done before it was of the source (`exchange/models.py`'s two order-list mappers and the `order_placed` fields in `execution/executor.py`), which the clause allows, and of P133's own printed output (section 70), which is a record and not a new measurement. **Everything here records what the bot and the Testnet did and decides nothing about S4.**
+
+### The inputs
+
+The capture is `F:\trading bot\scratch\s4\2026-10-24\051021Z-capture.log`, SHA-256 `6aae8a36793ed28e38adf4f7b0f8652407cec5d8dcf29e54a79900935d83c55f` (3,993,123 bytes), read in place. The series is the 1m store copy `F:\trading bot\store\testnet-s4-rehearsal-2026-10-09` (inventory SHA-256 `6b8d8f18777253d67e822787af07c55a30128fb5f479c1c5887b2025dffed449`), read through the CSV files and never written. A wide bar is a 1m bar with `(high - low) / open >=` the threshold and an open time at or after T0 (`2026-10-10T06:05:20Z`), the definition P133's measurement 5 used.
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| `git status` not clean | `git status --porcelain` | empty |
+| HEAD is not `9ee6b67` | `git rev-parse --short HEAD` | `9ee6b67` |
+| the capture's SHA-256 differs | `sha256sum` | `6aae8a36793ed28e38adf4f7b0f8652407cec5d8dcf29e54a79900935d83c55f` |
+| a command would write under `deploy\45547f107715`, call the venue or run a backtest | every command in the plan | none: the capture and the store copy are read, outputs go to `scratch\p134` |
+| a frozen file differs from its digest | `sha256sum` | the six digests of section 68: unchanged |
+
+### What the source says before anything is measured
+
+`exchange/models.py` builds the OTOCO list with `"pendingBelowType": OrderType.STOP_LOSS.value` and `"pendingBelowStopPrice"`, and the OTO list with `"pendingType": OrderType.STOP_LOSS.value` and `"pendingStopPrice"`; **neither mapper has a limit-price key**: `pendingBelowPrice` and `pendingBelowTimeInForce` occur in `src/` only in docstrings (`core/exceptions.py`, `core/models.py`, `exchange/models.py`) that say the request type cannot carry them, the `-1106` fields M5d made unrepresentable; and `STOP_LOSS_LIMIT` occurs in `src/` in the `OrderType` enum and in two sets of order types in `exchange/models.py`, and in no mapper. The `order_placed` event carries `symbol`, `quantity`, `entry`, `stop_loss`, `order_list_id`, `list_client_order_id` and `entry_bar_time`, and no leg type, limit price or time in force. `CLAUDE.md`'s Q-C decision fixes the leg types as a working `LIMIT`+`FOK`, `STOP_LOSS` below and `TAKE_PROFIT` above. So predictions a and c of the prompt are contradicted by the source before the capture is read, and the prompt's step 2 asks the capture a question its placement lines cannot answer; both facts are stated here so the measurement is not read as a surprise.
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | **The prompt's:** list 218102's SL leg is `STOP_LOSS_LIMIT`, with a limit price above the `22:30` to `22:32` wick low. **Predicted FALSE by the source:** the leg was sent as `STOP_LOSS`, a market-type stop with no limit price, so there is no limit price to be above or below the wick |
+| a2 | The capture's placement lines for lists 218102, 183218 and 71012 record the stop price (`stop_loss=2354.20000000`, and the lists' own stops, `82157.10` and `2433.59`) and **record no leg type, no limit price and no time in force**, so the measurement returns "not recorded" for those three fields on every list. The type is therefore known from the code that sent it and not from the capture |
+| b | **The prompt's:** the set of wide 1m bars since T0 is identical at thresholds 3%, 5% and 10% for both pairs. **Predicted FALSE for both pairs**, from the bars section 70 printed (P133 measurement 5, `m5_out.txt` `f13ceb395f9ebfa78660813deb45367602a7a466152d3eada129641756cee6af`) and counted by eye from them, not remeasured: BTCUSDT **54** bars at 3%, **51** at 5% (the 3.37%, 3.77% and 4.22% bars drop out), **46** at 10% (and the 5.20%, 6.05%, 6.21%, 7.01% and 7.23% bars), **45** at 15% (the 12.97% bar); ETHUSDT **16** at 3%, **15** at 5% (the 3.71% bar drops out), **15** at 10% and **15** at 15% |
+| c | **The prompt's:** the triggering legs of the two latch episodes (orders 1867449 and 5431129) are also `STOP_LOSS_LIMIT`. **Predicted FALSE by the source, and untestable from the capture:** both were `STOP_LOSS` legs of lists 71012 and 183218, placed by the same mappers; the capture records no type for either |
+| d | Whatever the types are, **a market-type stop that is crossed and executes nothing is the open question**, not a limit-type one: the predictions above do not explain list 218102's expiry, and the measurement is not expected to |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The measurement scripts are written after this section is committed, are read-only, and their digests are recorded in the completion. No script is committed to the repository unless step 2 needs one, and then it passes the full bare gate first.
