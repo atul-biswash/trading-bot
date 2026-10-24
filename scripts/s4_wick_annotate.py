@@ -15,7 +15,9 @@ time is at or after the start and before the end. The exit bar's close is, on th
 column plus the pair's timeframe; live, for a strategy ``CLOSE`` the booking's candle time plus one millisecond (the
 signal bar's close), and for a protective-leg fill the close of the pair-timeframe bar that contains the fill instant.
 A side with no exit instant is read as open at M, and M is ``--window-end``. An interval that holds no 1m bar of the pair
-in the store is ``unknown``, never ``no``.
+in the store is ``unknown``, never ``no``, and so is every interval when there is no store at all; a store that is there
+and cannot be read (an unreadable month file, a hash that no longer matches its manifest) is an input error, exit 3,
+before any row is printed.
 
 Inputs, refusals and exit statuses are ``s4_compare.py``'s own, plus ``--analysis``: a path under ``logs/`` is refused
 before a byte is read, the live boots and the backtest record go through the evidence door, and the recorded 1m series
@@ -245,7 +247,15 @@ def backtest_exit_closes(path: Path, window_end: datetime) -> dict[tuple[str, da
 
 
 def store_reader(store: HistoricalStore | None) -> BarReader:
-    """A reader of the recorded 1m series; ``None`` for a store that is absent or cannot serve the range."""
+    """A reader of the recorded 1m series.
+
+    ``None`` means there is no store at all, which the caller reads as ``unknown``. A store that is there and
+    cannot serve the range (a month file that cannot be read, or that no longer matches its manifest hash) is
+    not the same fact as a store that holds no bar, so it raises ``InputError`` and the run exits nonzero
+    before any row is printed.
+
+    :raises InputError: the store raised ``HistoricalDataError`` while the range was read.
+    """
 
     def read(symbol: str, start: datetime, end: datetime) -> Sequence[Bar] | None:
         if store is None:
@@ -255,8 +265,10 @@ def store_reader(store: HistoricalStore | None) -> BarReader:
                 Bar(candle.open_time, candle.open, candle.high, candle.low)
                 for candle in store.candles(symbol, _SERIES, start, end)
             ]
-        except HistoricalDataError:
-            return None
+        except HistoricalDataError as exc:
+            raise InputError(
+                f"the recorded {_SERIES} series of {symbol} cannot be read: {exc}"
+            ) from exc
 
     return read
 
