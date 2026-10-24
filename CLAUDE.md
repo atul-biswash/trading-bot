@@ -3190,6 +3190,14 @@ written next time.
 Commit at each verified milestone, never mid-milestone. Before committing, all
 three gates must be green. Write the *why* in the commit body, not just the what.
 
+> **ANNOTATED AT M5m P132: R-DQ RESTATES THIS RULE FOR CODE AND TESTS AND EXEMPTS DOCS-ONLY COMMITS FROM IT.** The project owner's ruling,
+> recorded verbatim in `docs/NEXT_MILESTONE.md` (the block headed *ANNOTATED AT M5m P132 (C1)*): every commit that touches code
+> or tests passes the full bare gate *before it is made*, docs-only commits exempt, and no code, test or script is drafted
+> before the predictions commit about it exists. "Before committing" above means the gate run on the tree being committed, not
+> a gate at the start and end of a piece of work: P130 gated its test commits with `ruff` and the file's own tests, and five
+> commits left one test failing (`M5m-644`). **What stops being true:** that every commit, docs included, waits on the gate; a docs-only
+commit is exempt by R-DQ. **What survives:** the rule for every commit that touches code or tests, entire.
+
 I review via `git diff` — so keep mechanical changes (formatting, line endings,
 renames) in **separate commits** from semantic ones. Never mix them.
 
