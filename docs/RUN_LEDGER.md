@@ -7277,3 +7277,121 @@ The 52 older tests keep the short names of section 72 (W1 to I9).
 #### The mechanics re-check
 
 After the fix the P131 rehearsal's three analyses are re-run read-only on the same inputs, with the rehearsal clone's interpreter from the development tree's script path: 19, 11 and 19 rows, exit 0, the two `wide=yes` rows unchanged and output digests equal to section 72's, as predicted in section 73 (e).
+
+### Completion (P136 C6): the predictions scored, the survey, and the m43 verdict
+
+Added in the commit that completes this section; nothing above is edited. The commits of P136, in order: `8043049` (this section's predictions and the trace), `e0c3e1a` (the fix), `e9aa993` (the twelve tests), `146f920` (the survey's predictions), `bcfc8b4` (the counts), then the commit that carries this text. The gates: `e0c3e1a`, 4515 passed and 1 skipped, 232 files formatted, mypy over 114 source files, credentialed, exit 0, 286.4 s; `e9aa993`, 4527 passed and 1 skipped, exit 0, 279.9 s.
+
+#### The predictions of section 73 scored
+
+| | Result |
+|---|---|
+| a | **Predicted FALSE by the trace, and the trace was right.** Run against the unfixed tool the store-error end-to-end test failed with `assert 0 == 3` (exit 0, rows printed) and the reader test with `DID NOT RAISE InputError`; every other new test passed. After `e0c3e1a` both pass |
+| b | **Held**, all nine: m16 killed by G5b alone, m28 by G6, m42 by G3a, m43 and m59 by G7a and G7b, m54 by G4, m57 by G2a, m58 by G1a, G1b and G2a, m60 by G7b; each as the table of the survey's predictions said, and each MATCH, so no other test fails under any of the nine |
+| c | **Held.** All 54 mutations ran; **0 FEWER**: no old test stopped failing where it did. The 13 mutations that killed more than predicted killed only new tests (below), never an old test beyond its section-72 set |
+| d | **Held.** G5a pins that the census refuses a naive instant at parse (`scripts/trade_census.py:276-277`), so G5b builds one by `dataclasses.replace`; the guard in `live_exit_close` is unreachable from a capture and is pinned as defence in depth. G5b fails under m16 by `pytest.raises`'s `Failed`, which the project counts as a kill |
+| e | **Held.** The P131 rehearsal's three analyses re-run read-only on the same inputs print 19, 11 and 19 rows with exit 0, 2, 1 and 2 `wide=yes` rows, and output digests **equal to section 72's**: `fa286fc99c054d702195640924769dd2cc7e2100ad500e85176d8cfdc6fa0882`, `ed2032907505543d87c0e6c236c169777eec95a2c1571d2e243f85004e3fbf4f` and `b1176cc55e02da27be28eede7e42571ba4e4657ccea912f53108d485f1335258` (the re-run's own files are `s4_wick_*_p136.txt`) |
+| f | **Held**, the order of commits as written; the store-error tests were run against the unfixed tool before the fix was committed |
+
+#### The survey
+
+The P130 harness (`survey.py` `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`, `p116_hook.py` `febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`) in a detached worktree at `146f920` outside the repository, import location proven, an unmutated baseline of 123 passed (the tool's 64 tests and the evidence-door file), 54 of 54 restores shown SHA-equal, the worktree removed afterwards. The spec was generated from the committed ledger tables by `make_spec.py` `86902461b996a25d04b49310d3c363d0c015f86208e338eab21dadceb44f4923` (`survey_spec.json` `8ea9dfc51346547c670ce2e68cb5994ccd6b2019e3479da9021eddc67bd47f26`, each anchor asserted to match once); the output is `survey_out.txt` `6361137b22c0f08368a83a9625b5ebe8430a07fac4cbe2f490e6273806e4d8a0` and the analysis script `analyse.py` `9f0c582e81b75d983e8aeba3f06051317a127af6fa418d7397c9428e062d68b5`. **54 mutations: 41 MATCH, 13 MORE, 0 FEWER**, 161 kills predicted and every one observed.
+
+The nine mutations concerning the new tests (each MATCH):
+
+| Mutation | The break | Killed |
+|---|---|---|
+| m16 | the naive-instant guard is removed | G5b |
+| m28 | a cause outside the closed list gets no count line | G6 |
+| m42 | E2's union leaves out the frozen downtime | G3a |
+| m43 | a store error returns an empty list | G7a, G7b |
+| m54 | the live open-at-M end is the window start | G4 |
+| m57 | the live timeframe is always one minute | G2a |
+| m58 | the store is asked for BTCUSDT whatever the pair | G1a, G1b, G2a |
+| m59 | a store error returns `None` | G7a, G7b |
+| m60 | an absent store reads as an empty list | G7b |
+
+The 13 MORE, each a mutation killing tests beyond its prediction, and every beyond-prediction test a new one:
+
+| Mutation | The break | New tests beyond the prediction |
+|---|---|---|
+| m03 | the range divides by the high and not the open | G1a |
+| m10 | the widest bar is the narrowest | G4, G2a, G1a |
+| m12 | the epoch floor rounds up | G2a, G2b |
+| m14 | the `CLOSE` test is inverted | G2a |
+| m15 | a booking with no exit instant ends one millisecond before M | G4 |
+| m17 | the backtest row's timeframe is not added | G1a |
+| m21 | a live-only entry looks up the backtest table | G4, G2a, G2b |
+| m22 | a backtest-only entry looks up the live table | G7a, G3a, G3b, G1b, G1a |
+| m33 | the percentage has two places | G1b, G1a |
+| m34 | the percentage is not multiplied by 100 | G1a |
+| m40 | the E2 latch union is never applied | G3a |
+| m44 | the series read is `5m` and not `1m` | G4, G2a, G2b, G1b, G1a |
+| m56 | the live exit table is keyed on the signal bar's close | G4, G2a, G2b |
+
+All 54 results (predicted and observed kill counts):
+
+| Mutation | Predicted | Killed | Verdict |
+|---|---|---|---|
+| m01 | 1 | 1 | MATCH |
+| m02 | 3 | 3 | MATCH |
+| m03 | 8 | 9 | MORE |
+| m04 | 1 | 1 | MATCH |
+| m05 | 4 | 4 | MATCH |
+| m06 | 2 | 2 | MATCH |
+| m07 | 6 | 6 | MATCH |
+| m08 | 2 | 2 | MATCH |
+| m09 | 3 | 3 | MATCH |
+| m10 | 7 | 10 | MORE |
+| m11 | 3 | 3 | MATCH |
+| m12 | 3 | 5 | MORE |
+| m13 | 3 | 3 | MATCH |
+| m14 | 2 | 3 | MORE |
+| m15 | 1 | 2 | MORE |
+| m16 | 1 | 1 | MATCH |
+| m17 | 4 | 5 | MORE |
+| m20 | 3 | 3 | MATCH |
+| m21 | 11 | 14 | MORE |
+| m22 | 23 | 28 | MORE |
+| m23 | 1 | 1 | MATCH |
+| m24 | 2 | 2 | MATCH |
+| m26 | 3 | 3 | MATCH |
+| m27 | 1 | 1 | MATCH |
+| m28 | 1 | 1 | MATCH |
+| m29 | 1 | 1 | MATCH |
+| m30 | 1 | 1 | MATCH |
+| m31 | 1 | 1 | MATCH |
+| m32 | 1 | 1 | MATCH |
+| m33 | 4 | 6 | MORE |
+| m34 | 3 | 4 | MORE |
+| m35 | 1 | 1 | MATCH |
+| m36 | 1 | 1 | MATCH |
+| m37 | 1 | 1 | MATCH |
+| m38 | 2 | 2 | MATCH |
+| m39 | 2 | 2 | MATCH |
+| m40 | 1 | 2 | MORE |
+| m41 | 1 | 1 | MATCH |
+| m42 | 1 | 1 | MATCH |
+| m43 | 2 | 2 | MATCH |
+| m44 | 8 | 13 | MORE |
+| m46 | 1 | 1 | MATCH |
+| m47 | 1 | 1 | MATCH |
+| m48 | 1 | 1 | MATCH |
+| m49 | 2 | 2 | MATCH |
+| m50 | 1 | 1 | MATCH |
+| m51 | 1 | 1 | MATCH |
+| m54 | 1 | 1 | MATCH |
+| m55 | 2 | 2 | MATCH |
+| m56 | 14 | 17 | MORE |
+| m57 | 1 | 1 | MATCH |
+| m58 | 3 | 3 | MATCH |
+| m59 | 2 | 2 | MATCH |
+| m60 | 1 | 1 | MATCH |
+
+#### m43 settled, and the tests no mutation kills
+
+**m43 is no longer an equivalent mutant, and it never was one in the code that mattered.** Re-anchored on the fixed code (a store error returns an empty list), it is killed by G7a and G7b, and so is m59 (a store error returns `None`); m60 (an absent store reads as an empty list) is killed by G7b alone, which pins that `None` means no store and a raise means a store that failed. Section 72 called m43 equivalent because an empty list and `None` both read as unknown; that was true of the two values and false of the behaviour they shared, a store read error answered by a full report and exit status 0.
+
+**Five tests are killed by no mutation of the 54:** H3, X7, I1 and I9, as in section 72 and for the same reasons, and **G5a**, as predicted: the census, not the tool, refuses a naive instant, so no mutation of the tool changes it. G5a is a test of the census's behaviour and is kept as the evidence that the tool's own guard is unreachable. G2b and G3b were predicted to be killed by none of the nine and are killed by other mutations of the 54 (a bar at the exit bar's close; the primary's list), which is ordinary. R5 is still killed only incidentally (section 72). **The six gaps section 72 named are closed**, one test each: the naive-instant guard (G5b), the extra-cause line (G6), E2's frozen downtime (G3a), the live open-at-M wiring (G4), the live timeframe wiring (G2a, with G2b for the close edge) and the symbol handed to the store (G1a, G1b, G2a).
+
+Scripts, read-only, in `scratch\p136`: `make_spec.py`, `survey.py`, `p116_hook.py`, `analyse.py`, `build_completion.py` (this text), `counts.py` (the C5 script edit).
