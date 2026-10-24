@@ -255,7 +255,7 @@ with `install_kind=vcs` and `code_intact=true` over 77 files), and in the same f
 (`M5l-172`). An editable install (`pip install -e`) is never the procedure: the boot would read `install_kind=editable` and the
 record would be ineligible, as section 40's smoke run was.
 
-**Step 6a can be done now, before the stop** (about 10 to 20 minutes; the network is needed for `pip` only):
+**Step 6a can be done now, before the stop** (the estimate was 10 to 20 minutes; P131 measured about 1.5 minutes of commands, `pip install` 61 s of them; the network is needed for `git clone` and `pip`):
 
 ```powershell
 $PYTHON = "$env:LOCALAPPDATA\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
@@ -294,6 +294,18 @@ split across two of them. The file keeps them in order; read them there. The reh
 `verdict=refused` (`checkout_dirty=true`, `commits_agree=false`: the development tree's checkout, not the clone's), and a CHECK
 read there would have looked like a failed install. RUN_LEDGER section 64.
 
+**Corrected at P131 (the stop rehearsal of steps 6 to 7b ran this step):** the file keeps the record in order but WRAPPED at the
+console's width, so a `Select-String` over it prints fragments, and `code_commit` is split across two physical lines
+(`...a9cf17` then `76 code_intact=...`): the CHECK "`code_commit=<$SHA>`" cannot be read off those lines or matched by a pattern.
+Join the file and remove the whitespace, then test each field. Measured at P131 (RUN_LEDGER section 69): all seven print `True`.
+
+```powershell
+$RAW = (Get-Content "$OUT\boot_strategies.txt" -Raw) -replace '\s+', ''
+foreach ($p in 'verdict=accepted','install_kind=vcs','code_intact=true',"code_commit=$SHA",'checkout_dirty=false','commits_agree=true','config_tracked=true') { "{0,-60} {1}" -f $p, $RAW.Contains($p) }
+```
+
+CHECK: seven lines, each ending `True`. The `Select-String` above remains a way to look at the record; it is not the CHECK.
+
 **Step 6b, after step 5** (the junction's target must exist and be the frozen copy):
 
 ```powershell
@@ -306,7 +318,8 @@ git -C $BT status --porcelain
 CHECK: `Junction`; `True`; and the last prints nothing (`data/` is ignored by git, so the junction leaves the checkout
 clean, which the run record's eligibility requires). Do not copy anything else into the clone.
 
-Never executed: step 6b (the junction and its `LinkType` read: section 48 checked a junction with Python's `is_junction`, and
+**Executed at P131 (RUN_LEDGER section 69), against a copy of the recorder's store made as step 5 gives it:** `mklink /J` exit 0, `LinkType`
+`Junction`, `Test-Path` True, `git status --porcelain` empty. The line below was true at P124 and is kept as the record of it: Never executed: step 6b (the junction and its `LinkType` read: section 48 checked a junction with Python's `is_junction`, and
 Appendix A copied the store in instead, R-DF). Every command of 6a was executed at `45547f1` by section 62, including the
 sweep clone's venv as the constraints source (O1 had used the S5 clone's, `67b7563de683`).
 
@@ -342,7 +355,7 @@ checkout, a commit that does not agree with the install, or a config outside the
 may exist in `data\backtests` at the time**: a second backtest (an exploratory arm, a retry) is a second directory, and
 the `-Last 1` above then picks the wrong one; check `(Get-ChildItem "$BT\data\backtests").Count` prints `1`.
 
-Never executed: the whole step, in this form (the closest are section 40's smoke run and the S5/S6 runs of sections 50 to
+**Executed at P131 (section 69), for mechanics only:** from a vcs-install clone at `45547f1` over the one day `2026-10-08` (before T0), through the junction: exit 0 in 6.5 s, one run directory with the three files, `"evidence_eligible": true`, `git status` empty, count 1, 19 trades, 1,440 BTCUSDT 1m and 288 ETHUSDT 5m bars served. The real window `[W, M)` is not rehearsed. The line below was true at P124 and is kept as the record of it: Never executed: the whole step, in this form (the closest are section 40's smoke run and the S5/S6 runs of sections 50 to
 54, which differ in the config, the store and the clone). `--config` before the subcommand is the pre-registration's
 form (section 6) and `tests/unit/test_config_s4.py` pins the config, not the invocation. `$RUN` and the listing.
 
@@ -406,8 +419,12 @@ its `run.json sha256` equals step 8's. **The wrapper also prints the episodes it
 report (pinned by a test), so E2 equals the primary there. Record the two output files' digests in step 9 and report both
 beside step 8's figures; neither replaces it, and the test applied to them is the pre-registration's, by the owner.
 
-Never executed on real inputs: this step. The wrapper's logic ran on the real 2026-10-23 capture (RUN_LEDGER section 68) and
-its command line only over fixtures; E1 is the frozen tool with a different `--window-end` (section 62 ran it with another window).
+**Executed at P131 (RUN_LEDGER section 69), for mechanics only:** every command above exited as its CHECK says, with the backtest of
+`2026-10-08` as `$RUN`, `$M` = `2026-10-09`, E1's `--window-end` at `2026-10-08T13:09:00Z` and the frozen 2026-10-23 capture, from a
+rehearsal clone at `45547f1`: zero live entries in the window, no crash, the E2 wrapper imported `trading_bot` from the clone's
+site-packages (trusted set `absent_by_design, active`), and its `capture sha256` and `run.json sha256` equalled the primary's.
+The real-input run, with live entries in the window, stays at the stop. Before P131 this step had not been run as one command
+(its logic had run on the 2026-10-23 capture in RUN_LEDGER section 68 and its command line only over fixtures).
 
 ## Step 8a. Archive the evidence, before ANY clone is removed (R-DG)
 
@@ -490,6 +507,14 @@ the stop rule are fixed in advance, so seeing them changes neither; whether to l
 result and are never written into the ledger as such. The rehearsal executes every step marked N in the table below except
 the stop itself, and is the only way to execute step 7 and step 8 before the evidence exists.
 
+**A second rehearsal, of steps 6 to 7b, on a day BEFORE T0 (P131, R-DQ; RUN_LEDGER section 69).** To keep the real `$BT` clean for the
+stop, it is built at a different path: set `$M = '2026-10-09'`, `$W = '2026-10-08'`, `$BT = "F:\trading bot\backtest\rehearsal-$S"` and a
+`$FROZEN` and `$OUT` that carry `rehearsal`, and give `pip install` the rehearsal path in its `git+file:///` URL (the one command that names
+the clone's own path). A run at the real `$BT` would leave a second directory in `data\backtests`, which step 7's CHECK forbids, and
+removing it would delete a run record (R-DG). Retire the rehearsal clone afterwards by renaming it, as the other clones are retired.
+The window `[2026-10-08, 2026-10-09)` has no live entry, so the comparison prints `n/a` for the live mean and the reproduction and does
+not crash (measured); it rehearses mechanics and never produces a figure about S4.
+
 ## Which commands have never been executed
 
 E = executed on this machine in this form; R = executed in a related form (another SHA, store, config or tool); N = never.
@@ -511,7 +536,8 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 5 | the digest comparison and the `Select-String` over the two outputs | E | section 62 |
 | 6a | `git clone`, `checkout --detach`, `venv`, `pip install -c`, the boot check, at `45547f1` | E | section 62 (every command exit 0; the boot `accepted`; the boot CHECK was corrected, see step 6) |
 | 6a | `pip freeze` from the sweep clone as constraints | E | section 62 (38 lines) |
-| 6b | `mklink /J` to the frozen Testnet store; `LinkType` | R | section 48; NOT executed by Appendix A, which copied the store in and held no junction (R-DF) |
+| 6b | `mklink /J` to the frozen Testnet store; `LinkType` | E | section 69 (P131: exit 0, `Junction`, `Test-Path` True, status empty; a rehearsal store, mechanics only); section 48 checked a junction in Python; Appendix A (R-DF) copied the store in |
+| 6 | the joined-text boot CHECK (`-replace '\s+', ''` then `.Contains` for the seven fields) | E | section 69 (all seven True; the old `Select-String` form printed fragments with `code_commit` split) |
 | 7 | `trading_bot --config config.s4.yaml backtest --start --end` from a clone with a vcs install | E | section 62 (one day, exit 0 in 7 s, `evidence_eligible` true) |
 | 8 | `trade_census.py` over a capture | E | section 58 |
 | 8 | `\| Out-File -Encoding ascii` in place of `>` for `trade_census.py`, `store_check.py` and `s4_explore.py` | E | section 63 (each output equal, line for line, to the earlier output of the same command on the same input; no byte order mark; the exit status kept, including a forced exit 3) |
@@ -521,9 +547,9 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 8a | the step on the S4 backtest's run directory and the final captures | N | the evidence does not exist yet |
 | 8 | `s4_compare.py` on real inputs | E | section 62 (a one-day window, exit 0; the figures are exploratory) |
 | 9 | `s4_explore.py` on the final capture | N | one run on a copy, section 60 |
-| 7b | `s4_compare.py ... --window-end 2026-10-21T13:09:00Z` (E1), piped to `Out-File -Encoding ascii` | R | the frozen tool with another window, section 62; the pipe, section 64 |
-| 7b | `s4_latch_compare.py` (E2) through its real command line | R | 90 tests over fixtures (section 68); the logic on the 2026-10-23 capture; NOT executed from the backtest clone's interpreter on real inputs |
-| 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | N | |
+| 7b | `s4_compare.py ... --window-end <inside the day>` (E1), piped to `Out-File -Encoding ascii` | E | section 69 (P131, `--window-end 2026-10-08T13:09:00Z`: exit 0, zero live entries; MECHANICS ONLY, the real-input run stays at the stop); the pipe, section 64 |
+| 7b | `s4_latch_compare.py` (E2) through its real command line, with `$PY` from the development tree's script path | E | section 69 (P131: exit 0, header printed, `trading_bot` from the clone's site-packages, digests equal the primary's; MECHANICS ONLY); 90 tests over fixtures (section 68) |
+| 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | E | section 69 (empty; `b8afa603...af08` and `59bb70c3...25aa7`; the header line) |
 
 **ANNOTATED AT P124 (C2), BY APPENDIX A'S EXECUTION (RUN_LEDGER section 62): both were executed over the whole day
 2026-10-11 and ran to exit 0; the rows above that read E now were N or R at P123.** What the sentence below says was
