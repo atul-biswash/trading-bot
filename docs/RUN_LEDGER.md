@@ -7839,3 +7839,57 @@ An addition to `src/trading_bot/data/aggregation.py` (a traded-minute aggregatio
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
+
+## 79. M5n N2b: the archive check run, the scoring of section 78, and what the decision bars are (P141 C8, R-T)
+
+An observation log, so this section only adds. `scripts/n2_archive_check.py` ran once at `m5n` `f43acc0` (SHA-256 of the script is that of the committed file) with `--responses "F:\trading bot\scratch\p140\n2_responses"`, from `2026-10-24T11:17:37Z` to `11:19:20Z`: **exit 0, 1 minute 43 seconds, no request** (the script has no fetcher), all **34 saved responses matching `responses.sha256`** (SHA-256 of the list `c3d099e59f77ef74c96b03179cba0d00050f0099792f92fa4e353d8c28de93fb`, the same as section 75's). Nothing was written under `deploy\45547f107715`, the rehearsal clone or the store; no bar at or after `2024-01-01` was read. The output is `archive_check_out.txt`, SHA-256 `39bf6aeec2d4a5ed6e4c8715111e2da4528f970e29a285a567e5c7c8e01dcda0`. **No return, P&L, equity or metric was computed.**
+
+### Table A: the archive series against the saved API responses
+
+| Series | Archive | API | Compared | Equal | Mismatched | open | high | low | close | volume | Archive-only | API-only |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1d | 2328 | 2328 | 2328 | 2318 | 10 | 0 | 0 | 0 | 0 | 10 | 0 | 0 |
+| BTCUSDT 4h | 13950 | 13951 | 13950 | 13939 | 11 | 0 | 0 | 0 | 0 | 11 | 0 | 1 |
+| ETHUSDT 1d | 2328 | 2328 | 2328 | 2319 | 9 | 0 | 0 | 0 | 0 | 9 | 0 | 0 |
+| ETHUSDT 4h | 13950 | 13951 | 13950 | 13940 | 10 | 0 | 0 | 1 | 0 | 10 | 0 | 1 |
+
+The one API-only bucket in each 4h series is `2017-09-06T16:00:00Z`. The mismatch list holds **41 rows (40 volume rows and one ETHUSDT 4h low, `2021-01-11T08:00:00Z`, archive `1063` against API `1049.01`)**, so none was cut by the cap of 50. Every mismatching volume has the **API's larger than the archive's**; the buckets lie between `2018-11-26` and `2021-12-27`.
+
+### Table B: the traded-minute aggregation against the archive series (R-DV)
+
+| Series | Archive | Aggregated | Complete / incomplete | No traded minute | Consistent | Failed | open | high | low | close | Failed complete | Failed incomplete | Archive-only |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1d | 2328 | 2314 | 2280 / 34 | 0 | 2311 | 3 | 2 | 0 | 2 | 1 | **0** | 3 | 14 |
+| BTCUSDT 4h | 13950 | 13861 | 13812 / 49 | 0 | 13856 | 5 | 2 | 1 | 3 | 2 | **1** | 4 | 89 |
+| ETHUSDT 1d | 2328 | 2314 | 2280 / 34 | 0 | 2311 | 3 | 2 | 1 | 2 | 1 | **0** | 3 | 14 |
+| ETHUSDT 4h | 13950 | 13861 | 13812 / 49 | 0 | 13857 | 4 | 2 | 2 | 2 | 2 | **0** | 4 | 89 |
+
+The failing buckets (15) are listed in the output with their times and fields and no price. **Fourteen are incomplete buckets at the edges of the archive's 1m holes** (`2017-12-04`, `2017-12-18`, `2018-02-10` in the 1d series and their 4h buckets, and the 4h bucket `2020-12-21T12:00:00Z`), where minutes the 1m store lacks are in the venue's bar. **One is complete: BTCUSDT 4h `2021-04-22T00:00:00Z`, field `low`, 240 traded minutes, 0 missing.** The aggregator has no bucket the archive lacks.
+
+### Table C: the volume gap on the complete buckets (archive volume against the sum of the 1m rows)
+
+| Series | Complete paired | Equal | Larger up to 0.01% | up to 0.1% | up to 1% | over 1% | Archive smaller | Median | Max |
+|---|---|---|---|---|---|---|---|---|---|
+| BTCUSDT 1d | 2280 | 2241 | 28 | 6 | 2 | 2 | 1 | 0.003562% | 4.379802% |
+| BTCUSDT 4h | 13812 | 13770 | 15 | 17 | 6 | 3 | 1 | 0.013775% | 14.663466% |
+| ETHUSDT 1d | 2280 | 2241 | 26 | 9 | 2 | 1 | 1 | 0.003641% | 4.746397% |
+| ETHUSDT 4h | 13812 | 13770 | 17 | 16 | 5 | 3 | 1 | 0.023834% | 16.347276% |
+
+A read-only look at where the large gaps are (`scratch\p141\diagnose_gap.py` SHA-256 `bf20761a73253eaa8dd77ce6b0fb23a2113488243cfe0888e493b0b49bff4dd9`, output `diagnose_gap_out.txt` `f168e2e822dd961c7173be24bf4326bb1d3fb9dfbe3a9e1f4d688200be7b68a6`, dates and relative sizes only): the buckets over 1%, and the one with the archive smaller, are `2018-03-04` (archive larger, 1.0% in 1d and 7.4% to 8.5% in 4h), **`2021-01-21` (archive SMALLER than the 1m sum, 2.4% in 1d and 11% in 4h at 08:00)** and `2021-04-22` and `2021-04-23` (archive larger, 4.4% to 4.7% in 1d and 14.7% to 16.3% in 4h on the 23rd). Nothing in the tree says what happened on those days.
+
+### Section 78's predictions, scored
+
+| | Prediction | Result |
+|---|---|---|
+| a | The archive 1d equals the API in all five fields in all 2328 buckets; the 4h has exactly one API-only bucket (lean: `2017-09-06 16:00`), no archive-only and 0 mismatches; if there are mismatches, in volume and in 2017 and 2018 | **The set part HELD** (2328 against 2328; 4h API-only 1 at `2017-09-06T16:00:00Z`, archive-only 0). **The 0-mismatch part is FALSE:** 10, 11, 9 and 10 buckets differ, all in volume but one ETHUSDT 4h low, and the API's volume is the larger in every one. The lean about 2017 and 2018 was **wrong**: they lie between 2018-11 and 2021-12 |
+| b | Under the traded-minute rule the open, high, low and close equal the venue's for every complete bucket except about one (BTCUSDT 4h, plus or minus 1); open and close mismatches 0 everywhere; complete buckets with no traded minute 0 (at most 3) | **HELD, to the bucket.** Failed complete: BTCUSDT 1d 0, 4h **1**, ETHUSDT 1d 0, 4h 0; open and close mismatches in complete buckets 0; no traded-minute-less bucket in any series |
+| c | The venue's volume is larger in the same complete buckets as P140 and smaller in none; median about 0.002% (0.0005% to 0.01%), maximum about 1% (0.5% to 3%); BTCUSDT 1d bands about 2234 / 30 / 12 / 3 / 1 or 2 | **Partly FALSE.** The decision bars' volume is larger than the 1m sum in 38 BTCUSDT 1d buckets (P140's API figure was 46) and **smaller in one per series (`2021-01-21`)**, so "smaller in none" fails. Median **held for 1d** (0.0036%) and **missed for 4h** (0.0138% and 0.0238%, above the range). **The maximum missed everywhere** (4.4% to 16.3%, against about 1%). Bands for BTCUSDT 1d: 2241 / 28 / 6 / 2 / 2: the first, second, fourth and fifth held, the third (12) was twice the observed 6 |
+| d | The store's 1m rows carry no trade count, so a traded minute is a minute with nonzero volume | **HELD** (the schema; the aggregation was keyed on volume and 0 buckets lacked a traded minute) |
+| e | No request; every one of the 34 saved responses matches its digest; under 10 minutes | **HELD.** 1 minute 43 seconds |
+| f | Counts and two capped lists, no price in the volume bands | **HELD.** 41 mismatch rows and 15 failing buckets, both under the cap; the failing-bucket list carries no price |
+
+### What follows, and what does not
+
+1. **R-DV's check passes in the sense the ruling needs, with its exceptions listed.** Every complete bucket's open, high, low and close under the traded-minute rule equals the archive series' except one (BTCUSDT 4h `2021-04-22T00:00:00Z`, low), and the other failures are incomplete buckets whose minutes the 1m store lacks. How N4 treats the 15 is for N4 to rule, as R-DV says.
+2. **The "venue's native bar" has two volumes.** The archive series and the API agree on every open, high, low and close (one ETHUSDT 4h low excepted) and disagree on volume in about 0.4% of buckets, the API's the larger; and the 1m rows' sum differs from the archive's volume in about 1.7% of complete 1d buckets. Which volume is the decision bar's is not ruled; R-DV names the archive series, which is what Tables B and C use. A strategy that uses volume (the charter's candidates are trend and breakout on price, not volume) would meet the question; one that does not is untouched by it.
+3. **The aggregation's plain version is now superseded for prices** by the traded-minute version; the plain one stays, because section 75 and its tests are about it.
