@@ -6505,3 +6505,214 @@ The bare gate before any commit (`gate_before.txt`, SHA-256 `7a2f1119e7704d9563d
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. (j) cannot be scored on the 2026-10-23 capture, since pid 20100 had logged no pass in it.
+
+### Completion (P130 C12): the arming audit, the predictions scored, and the process disclosures
+
+Added in the commit that completes this section; nothing above is edited. The commits of P130, in order: `3fd0ef5` (R-DP), `e4e12a4` (this section's predictions), `c254740` (the wrapper), `8a570fd`, `4714d11`, `a923f63` and `4062ccb` (the tests, C4 to C7), `5a7891c` (C8, the wrapper calls the evidence door itself), `21358d2` (C9, the counts), `cc82563` (C10, runbook step 7b) and `7451d01` (C11, NEXT_MILESTONE), then the commit that carries this text.
+
+#### The predictions scored
+
+| | Result | Where |
+|---|---|---|
+| a | **held.** The 13:09 fixture is labelled `fok-unfilled` by the frozen `diagnose` with *"the live bot placed and nothing was booked"*, and E2 does not exclude it | `TestTheThirteenOhNineEntry` (3 tests), `M5m-637`, `M5m-638` |
+| b | **held.** The synthetic log built from P129's stamps gives the three intervals of P129's R-DO table to the second, with its durations and end kinds | `TestTheP129Table` (4 tests), `M5m-637` |
+| c | **held.** A pass that covers fewer positions than the inventory breaks no run | `TestCoverageWithTwoPositions`, `TestWhenAPassBreaksARun`, `M5m-637` |
+| d | **held.** A latch and the downtime that abuts it become one interval | `TestTheUnion` (6 tests), `M5m-637` |
+| e | **held**, on the real capture: the same three episodes, 161 kept under the frozen rule and 160 under the union, and no lone-position `diverged` pass breaks a run (105 `diverged` passes, 45 of them on a lone position, `can_break` false for all) | `M5m-632`, `M5m-633` |
+| f | **held.** `latch_episodes` on `190521Z-capture.log` returns P129's three episodes to the second, with refusals 1, 2 and 69 | `M5m-632` |
+| g | **held.** The union has 9 intervals | `M5m-632` |
+| h | **held.** 160 of the 164 live entries are kept | `M5m-632` |
+| i | **held, with one test declared unreachable and one halt, explained.** 89 of the 90 tests fail under at least one of 60 mutations, each break named below; 57 mutations killed exactly the predicted set, 2 killed more (recorded, not changed) and 1 killed fewer, which halted the survey until it was explained (`r05`, below) | the tables below, `M5m-649`, `M5m-650`, `M5m-651` |
+| j | **not scored.** Pid 20100 had logged no pass in the 2026-10-23 capture, so the restart's first entry cannot be tested until the stop | `M5m-631` |
+
+#### The survey, and how it was run
+
+Every mutation is one byte-exact replacement with exactly one match, asserted by the spec writer (`make_spec.py`, `make_spec2.py`) and again by the harness, run in a detached worktree OUTSIDE the repository (`F:\trading bot\scratch\p130\wt`), with the import location proven by a pytest session hook before any result counted (`trading_bot` and `tests` both resolved inside the worktree), an unmutated baseline in the worktree before the first mutation (90 passed in rounds 1 and 2, 149 passed in round 3 with `test_backtest_evidence.py` added), and every restore shown SHA-256-equal (60 of 60 `restored; sha equal to before = True`, none False). The worktree was removed after each run; `git worktree list` showed the main worktree only. The harness is `survey.py` (SHA-256 `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`) with the hook `p116_hook.py` (`febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`). A mutation of the frozen `s4_compare.py` (`r13`, `r24`) was made in the worktree only; the repository's copy kept its digest `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`.
+
+| Round | Predictions written to | Outputs | Worktree at | Mutations |
+|---|---|---|---|---|
+| 1 | `survey_spec.json` `c329892216517398ddb33365a04ff3aa3539c00b74e98e542005f6a8a5b87239` (`make_spec.py` `af8100df560c4b17e251f1747d17e24670f44ce2065a01d9b994ada5a9694842`) | `survey_out.txt` `e22eb86dbc5cf6d26bf60480c9317739e0df8cf5e465c11e4e2f00327a420f50` | `4714d11` (tests as of C5) | 38: 36 MATCH, 2 MORE |
+| 2 | `survey_spec2.json` `ff20a826a4fa9acf565eeeab1bd707142503027da06ca1f729acfff1db72a9a6` (`make_spec2.py` `fff115cd59b84c4b116a04cfe48ffd1a861cebaf9084a97df4698882110a8f6c`), written before it ran and not changed | `survey_out2.txt` `3357fc436e211d1151e7ca06bdf10ccd4e24201f2da984cdb83d4a742f88a2c0` (`r01` to `r05`, halted at `r05`) and `survey_out2b.txt` `726094a927f678f67fa824a883f2dd704d35faf799a6ffa7f65b50b6b2ed8d36` (`r06` to `r25`, from `survey_spec2b.json` `6ce6389cd7463ef8312b19966de32cc76badab0b6d912726e1c03806d4dbd972`, the same entries) | `4062ccb` | 21: 20 MATCH, 1 FEWER |
+| 3 | `survey_spec3.json` `ac998123fe7f2400593330a6499320a2788b0e7388d71796b8957c6d4656c2ce` | `survey_out3.txt` `2f4d02b4e6c7ff55f76924fc101b5cfa6efe39f3a6292db9e4c966049efa7eba` | `4062ccb` plus the uncommitted C8 edit | 1: 1 MATCH |
+
+Round 1 ran on a tree whose tests were those of C5; C6 and C7 later changed three tests (the help test and the two attach tests), and round 1 killed none of those three, so every kill the audit credits to them comes from round 2.
+
+**The three mutations that did not match.**
+
+- `m02-the-old-r-do-break-test` predicted 7, killed 9 (MORE). The mutation restores R-DO's break test (a pass breaks unless it names `unknown`). The two extra kills are the positive controls `test_a_lone_absent_by_design_position_does_break` and `test_the_same_lone_position_reported_active_does_break`: their episodes are built from `diverged` passes before the trusted one, and the old rule breaks the run at the first `diverged` pass, so the episode ends earlier than the test asserts. The prediction counted the tests about the state set and not the fixtures that route through it; the extra kills are real coverage and a reach error. Recorded.
+- `m32-two-passes-counted-for-one` predicted 5, killed 6 (MORE). The mutation counts each pass twice in an episode's pass count. The extra kill is `test_a_pass_covering_fewer_positions_than_the_inventory_breaks_nothing`, which asserts the episode's pass count as well as its end and was not on the prediction list; a reach error, and real coverage. Recorded.
+- **`r05-unknown-counts-as-trusted` predicted 13, killed 12 (FEWER), and the survey halted as the rule requires.** The missing kill is `TestALatchEndedByACleanStop::test_a_stop_that_was_not_clean_is_not_a_stop`. The cause is in `latch_episodes`: a run can break only at a LATER pass (`current is not None and can_break(candidate)`), and that test has a single pass, which starts the run and has no later pass to break it, so no mutation of `can_break` can reach it. The test's subject is the clean-stop line, not the trust set, and the prediction listed it by reading the fixture's `unknown=1` rather than tracing the loop; that is `M5m-649`. It is a prediction error of fixture reach, not a gap in the tests, and no test was changed for it. The remaining 16 mutations of the round were run from the same prediction record (`survey_spec2b.json`) in a fresh worktree.
+
+#### The mutations, with the break each names
+
+| Round | Mutation (the break, in its label) | Predicted | Killed | Verdict |
+|---|---|---|---|---|
+| 1 | `m01-no-inventory-equality` | 11 | 11 | MATCH |
+| 1 | `m02-the-old-r-do-break-test` | 7 | 9 | MORE |
+| 1 | `m03-trusted-set-restated` | 1 | 1 | MATCH |
+| 1 | `m04-trusted-set-loses-absent-by-design` | 5 | 5 | MATCH |
+| 1 | `m05-stopped-means-clean-only` | 5 | 5 | MATCH |
+| 1 | `m06-open-interval-ends-at-last-line` | 7 | 7 | MATCH |
+| 1 | `m07-abutting-intervals-not-merged` | 2 | 2 | MATCH |
+| 1 | `m08-merge-end-is-the-later-intervals` | 1 | 1 | MATCH |
+| 1 | `m09-backtest-side-not-excluded` | 2 | 2 | MATCH |
+| 1 | `m10-union-ignores-the-frozen-downtime` | 1 | 1 | MATCH |
+| 1 | `m11-union-ignores-the-latches` | 3 | 3 | MATCH |
+| 1 | `m12-every-line-is-a-refusal` | 7 | 7 | MATCH |
+| 1 | `m13-start-at-the-pass-not-the-line` | 1 | 1 | MATCH |
+| 1 | `m14-attach-window-too-wide` | 1 | 1 | MATCH |
+| 1 | `m15-attach-the-first-pass-not-the-nearest` | 1 | 1 | MATCH |
+| 1 | `m16-a-booking-adds-to-the-inventory` | 4 | 4 | MATCH |
+| 1 | `m17-boot-exit-booking-ignored` | 1 | 1 | MATCH |
+| 1 | `m18-exit-booking-ignored` | 1 | 1 | MATCH |
+| 1 | `m19-one-inventory-for-all-processes` | 1 | 1 | MATCH |
+| 1 | `m20-a-pass-covering-nothing-can-break` | 1 | 1 | MATCH |
+| 1 | `m22-a-verdict-word-in-the-header` | 1 | 1 | MATCH |
+| 1 | `m23-the-header-loses-its-name` | 1 | 1 | MATCH |
+| 1 | `m24-the-live-boots-skip-the-door` | 2 | 2 | MATCH |
+| 1 | `m25-the-logs-path-is-read` | 1 | 1 | MATCH |
+| 1 | `m26-an-inverted-window-is-accepted` | 1 | 1 | MATCH |
+| 1 | `m27-an-input-error-exits-as-a-refusal` | 1 | 1 | MATCH |
+| 1 | `m29-any-stop-is-a-clean-stop` | 1 | 1 | MATCH |
+| 1 | `m30-episodes-in-reverse-order` | 5 | 5 | MATCH |
+| 1 | `m31-the-symbols-are-not-collected` | 3 | 3 | MATCH |
+| 1 | `m32-two-passes-counted-for-one` | 5 | 6 | MORE |
+| 1 | `m33-no-upper-bound-on-the-refusal-window` | 1 | 1 | MATCH |
+| 1 | `m34-no-lower-bound-on-the-refusal-window` | 1 | 1 | MATCH |
+| 1 | `m35-a-refusal-of-any-process-counts` | 1 | 1 | MATCH |
+| 1 | `m36-the-hours-are-rounded-to-hundredths` | 1 | 1 | MATCH |
+| 1 | `m37-unfilled-uses-the-frozen-intervals-only` | 1 | 1 | MATCH |
+| 1 | `m41-the-trusted-set-is-not-printed` | 1 | 1 | MATCH |
+| 1 | `m42-the-rulings-line-is-dropped` | 1 | 1 | MATCH |
+| 1 | `m43-close-halted-does-not-qualify` | 4 | 4 | MATCH |
+| 2 | `r01-the-count-is-off-by-one` | 1 | 1 | MATCH |
+| 2 | `r02-a-missing-field-is-empty-not-none` | 2 | 2 | MATCH |
+| 2 | `r03-the-parser-accepts-anything` | 5 | 5 | MATCH |
+| 2 | `r04-no-pass-ever-breaks` | 14 | 14 | MATCH |
+| 2 | `r05-unknown-counts-as-trusted` | 13 | 12 | FEWER |
+| 2 | `r06-a-line-need-not-carry-a-pid` | 1 | 1 | MATCH |
+| 2 | `r07-a-line-never-attaches-to-an-earlier-pass` | 4 | 4 | MATCH |
+| 2 | `r08-the-last-line-is-remembered-not-the-first` | 1 | 1 | MATCH |
+| 2 | `r11-passes-of-every-process-are-candidates` | 2 | 2 | MATCH |
+| 2 | `r13-the-frozen-label-is-fill-model` | 2 | 2 | MATCH |
+| 2 | `r14-an-extra-line-after-the-frozen-report` | 2 | 2 | MATCH |
+| 2 | `r15-the-frozen-figures-are-not-printed` | 4 | 4 | MATCH |
+| 2 | `r16-the-diagnosis-is-not-printed` | 6 | 6 | MATCH |
+| 2 | `r17-the-record-need-not-name-its-pairs` | 1 | 1 | MATCH |
+| 2 | `r18-the-wrapper-has-a-diagnose-of-its-own` | 1 | 1 | MATCH |
+| 2 | `r19-the-wrapper-adds-an-argument` | 1 | 1 | MATCH |
+| 2 | `r20-an-evidence-refusal-is-not-caught` | 3 | 3 | MATCH |
+| 2 | `r21-only-abutting-intervals-merge` | 2 | 2 | MATCH |
+| 2 | `r22-the-intervals-are-not-sorted` | 2 | 2 | MATCH |
+| 2 | `r24-the-frozen-exclusion-line-is-reworded` | 4 | 4 | MATCH |
+| 2 | `r25-an-untrusted-line-in-a-process-with-no-pass-is-not-skipped` | 1 | 1 | MATCH |
+| 3 | `s01-the-wrapper-never-calls-the-door-itself` | 1 | 1 | MATCH |
+
+#### The arming audit, by test
+
+Each of the 90 tests, the number of mutations (of 60) that make it fail, and the first three breaks that do. A test shown against NO break is the one exception, declared after the table.
+
+| Test | Failing mutations | First three breaks |
+|---|---|---|
+| `TestTheTrustedSet::test_it_is_the_value_names_of_the_whitelist_the_portfolio_refuses_entries_by` | 1 | `m04-trusted-set-loses-absent-by-design` |
+| `TestTheTrustedSet::test_it_is_imported_and_never_restated_in_the_script` | 4 | `m02-the-old-r-do-break-test`, `m03-trusted-set-restated`, `m04-trusted-set-loses-absent-by-design` (+1) |
+| `TestStates::test_the_field_reads_as_name_and_count_pairs` | 1 | `r01-the-count-is-off-by-one` |
+| `TestStates::test_an_absent_empty_or_unreadable_field_is_none_and_never_trusted[]` | 1 | `r03-the-parser-accepts-anything` |
+| `TestStates::test_an_absent_empty_or_unreadable_field_is_none_and_never_trusted[active]` | 1 | `r03-the-parser-accepts-anything` |
+| `TestStates::test_an_absent_empty_or_unreadable_field_is_none_and_never_trusted[active=x]` | 1 | `r03-the-parser-accepts-anything` |
+| `TestStates::test_an_absent_empty_or_unreadable_field_is_none_and_never_trusted[=1]` | 1 | `r03-the-parser-accepts-anything` |
+| `TestStates::test_an_absent_empty_or_unreadable_field_is_none_and_never_trusted[active=1,]` | 1 | `r03-the-parser-accepts-anything` |
+| `TestStates::test_a_line_without_the_field_is_none` | 1 | `r02-a-missing-field-is-empty-not-none` |
+| `TestWhenAPassBreaksARun::test_a_full_coverage_all_active_pass_breaks` | 1 | `r04-no-pass-ever-breaks` |
+| `TestWhenAPassBreaksARun::test_a_lone_position_reported_active_breaks` | 1 | `r04-no-pass-ever-breaks` |
+| `TestWhenAPassBreaksARun::test_an_absent_by_design_position_is_trusted_and_breaks` | 2 | `m04-trusted-set-loses-absent-by-design`, `r04-no-pass-ever-breaks` |
+| `TestWhenAPassBreaksARun::test_a_pass_covering_fewer_positions_than_the_inventory_breaks_nothing` | 1 | `m01-no-inventory-equality` |
+| `TestWhenAPassBreaksARun::test_a_pass_reporting_more_positions_than_the_inventory_holds_breaks_nothing` | 1 | `m01-no-inventory-equality` |
+| `TestWhenAPassBreaksARun::test_an_unknown_count_among_trusted_ones_breaks_nothing` | 1 | `r05-unknown-counts-as-trusted` |
+| `TestWhenAPassBreaksARun::test_any_state_outside_the_trusted_set_named_or_not_breaks_nothing[diverged=1]` | 1 | `m02-the-old-r-do-break-test` |
+| `TestWhenAPassBreaksARun::test_any_state_outside_the_trusted_set_named_or_not_breaks_nothing[pending=1]` | 1 | `m02-the-old-r-do-break-test` |
+| `TestWhenAPassBreaksARun::test_any_state_outside_the_trusted_set_named_or_not_breaks_nothing[unknown=1]` | 1 | `r05-unknown-counts-as-trusted` |
+| `TestWhenAPassBreaksARun::test_any_state_outside_the_trusted_set_named_or_not_breaks_nothing[unheard_of=1]` | 1 | `m02-the-old-r-do-break-test` |
+| `TestWhenAPassBreaksARun::test_a_trusted_and_an_untrusted_state_together_break_nothing` | 1 | `m02-the-old-r-do-break-test` |
+| `TestWhenAPassBreaksARun::test_a_pass_with_no_readable_states_breaks_nothing` | 1 | `r02-a-missing-field-is-empty-not-none` |
+| `TestWhenAPassBreaksARun::test_a_pass_covering_nothing_breaks_nothing` | 1 | `m20-a-pass-covering-nothing-can-break` |
+| `TestWhenAPassBreaksARun::test_the_trusted_set_can_be_handed_in` | 1 | `r04-no-pass-ever-breaks` |
+| `TestTheInventory::test_a_placement_adds_the_symbol_and_a_booking_removes_it` | 1 | `m16-a-booking-adds-to-the-inventory` |
+| `TestTheInventory::test_an_exit_booking_and_a_boot_booking_remove_it_too[exit_booked]` | 2 | `m16-a-booking-adds-to-the-inventory`, `m18-exit-booking-ignored` |
+| `TestTheInventory::test_an_exit_booking_and_a_boot_booking_remove_it_too[boot_exit_booked]` | 2 | `m16-a-booking-adds-to-the-inventory`, `m17-boot-exit-booking-ignored` |
+| `TestTheInventory::test_each_process_keeps_its_own_inventory` | 1 | `m19-one-inventory-for-all-processes` |
+| `TestTheInventory::test_a_line_without_a_pid_or_a_stamp_is_not_a_row` | 1 | `r06-a-line-need-not-carry-a-pid` |
+| `TestAttachingUntrustedLines::test_a_line_goes_to_the_nearest_pass_of_its_own_process` | 2 | `r07-a-line-never-attaches-to-an-earlier-pass`, `r11-passes-of-every-process-are-candidates` |
+| `TestAttachingUntrustedLines::test_a_line_before_its_pass_is_attached_as_well_as_one_after` | 1 | `r07-a-line-never-attaches-to-an-earlier-pass` |
+| `TestAttachingUntrustedLines::test_among_several_passes_the_nearest_in_time_is_chosen` | 1 | `m15-attach-the-first-pass-not-the-nearest` |
+| `TestAttachingUntrustedLines::test_the_first_line_of_a_pass_is_remembered` | 2 | `r07-a-line-never-attaches-to-an-earlier-pass`, `r08-the-last-line-is-remembered-not-the-first` |
+| `TestAttachingUntrustedLines::test_a_line_with_no_pass_within_fifteen_seconds_is_dropped` | 2 | `m14-attach-window-too-wide`, `r11-passes-of-every-process-are-candidates` |
+| `TestASelfClearingLatch::test_it_ends_at_the_pass_that_covered_every_position_and_found_them_all_trusted` | 2 | `m01-no-inventory-equality`, `r04-no-pass-ever-breaks` |
+| `TestASelfClearingLatch::test_it_counts_its_untrusted_passes_and_its_refusals` | 4 | `m01-no-inventory-equality`, `m12-every-line-is-a-refusal`, `m31-the-symbols-are-not-collected` (+1) |
+| `TestASelfClearingLatch::test_a_pass_covering_fewer_positions_than_the_inventory_breaks_nothing` | 3 | `m01-no-inventory-equality`, `m06-open-interval-ends-at-last-line`, `m32-two-passes-counted-for-one` |
+| `TestASelfClearingLatch::test_the_start_is_the_first_untrusted_line_and_not_the_pass_before_it` | 2 | `m13-start-at-the-pass-not-the-line`, `r07-a-line-never-attaches-to-an-earlier-pass` |
+| `TestALatchEndedByTheProcess::test_with_a_successor_it_ends_at_the_last_line_of_the_process` | 3 | `m05-stopped-means-clean-only`, `m31-the-symbols-are-not-collected`, `r05-unknown-counts-as-trusted` |
+| `TestALatchEndedByTheProcess::test_a_second_untrusted_symbol_in_the_run_is_named` | 1 | `m31-the-symbols-are-not-collected` |
+| `TestALatchEndedByACleanStop::test_it_ends_at_the_clean_stop_though_no_process_follows` | 2 | `m43-close-halted-does-not-qualify`, `r05-unknown-counts-as-trusted` |
+| `TestALatchEndedByACleanStop::test_a_stop_that_was_not_clean_is_not_a_stop` | 3 | `m06-open-interval-ends-at-last-line`, `m29-any-stop-is-a-clean-stop`, `m43-close-halted-does-not-qualify` |
+| `TestALatchOpenAtTheCaptureEnd::test_the_interval_is_open_and_closed_at_the_window_end` | 1 | `m06-open-interval-ends-at-last-line` |
+| `TestALatchOpenAtTheCaptureEnd::test_it_is_closed_at_whatever_m_the_caller_names` | 1 | `m06-open-interval-ends-at-last-line` |
+| `TestWhatIsAnEpisode::test_a_run_with_no_refusal_inside_it_is_not_an_episode` | 1 | `m12-every-line-is-a-refusal` |
+| `TestWhatIsAnEpisode::test_a_refusal_after_the_run_broke_does_not_count` | 3 | `m12-every-line-is-a-refusal`, `m33-no-upper-bound-on-the-refusal-window`, `r04-no-pass-ever-breaks` |
+| `TestWhatIsAnEpisode::test_a_refusal_before_the_run_started_does_not_count` | 2 | `m12-every-line-is-a-refusal`, `m34-no-lower-bound-on-the-refusal-window` |
+| `TestWhatIsAnEpisode::test_a_refusal_in_another_process_does_not_count` | 2 | `m12-every-line-is-a-refusal`, `m35-a-refusal-of-any-process-counts` |
+| `TestWhatIsAnEpisode::test_a_close_halted_refusal_qualifies_as_well_as_a_committed_risk_one` | 1 | `m43-close-halted-does-not-qualify` |
+| `TestWhatIsAnEpisode::test_an_untrusted_line_with_no_pass_near_it_starts_nothing` | 1 | `r25-an-untrusted-line-in-a-process-with-no-pass-is-not-skipped` |
+| `TestWhatIsAnEpisode::test_after_a_break_a_new_run_can_start_and_qualify_on_its_own` | 2 | `m30-episodes-in-reverse-order`, `r04-no-pass-ever-breaks` |
+| `TestAUntrustedStateOnALonePosition::test_every_pass_is_inside_one_unbroken_run_that_ends_with_the_process[diverged=1]` | 2 | `m02-the-old-r-do-break-test`, `m32-two-passes-counted-for-one` |
+| `TestAUntrustedStateOnALonePosition::test_every_pass_is_inside_one_unbroken_run_that_ends_with_the_process[pending=1]` | 2 | `m02-the-old-r-do-break-test`, `m32-two-passes-counted-for-one` |
+| `TestAUntrustedStateOnALonePosition::test_every_pass_is_inside_one_unbroken_run_that_ends_with_the_process[unknown=1]` | 2 | `m32-two-passes-counted-for-one`, `r05-unknown-counts-as-trusted` |
+| `TestAUntrustedStateOnALonePosition::test_the_same_lone_position_reported_active_does_break` | 2 | `m02-the-old-r-do-break-test`, `r04-no-pass-ever-breaks` |
+| `TestAUntrustedStateOnALonePosition::test_a_lone_absent_by_design_position_does_break` | 3 | `m02-the-old-r-do-break-test`, `m04-trusted-set-loses-absent-by-design`, `r04-no-pass-ever-breaks` |
+| `TestCoverageWithTwoPositions::test_a_pass_that_handled_only_the_other_position_breaks_nothing` | 2 | `m01-no-inventory-equality`, `m06-open-interval-ends-at-last-line` |
+| `TestCoverageWithTwoPositions::test_a_pass_that_covered_both_and_found_both_trusted_breaks` | 1 | `r04-no-pass-ever-breaks` |
+| `TestCoverageWithTwoPositions::test_a_pass_that_covered_both_and_found_one_unknown_does_not` | 2 | `m06-open-interval-ends-at-last-line`, `r05-unknown-counts-as-trusted` |
+| `TestCoverageWithTwoPositions::test_a_booking_shrinks_the_inventory_so_a_single_position_pass_then_covers_it` | 2 | `m16-a-booking-adds-to-the-inventory`, `r04-no-pass-ever-breaks` |
+| `TestCoverageWithTwoPositions::test_positions_restored_at_boot_and_unseen_by_the_inventory_break_nothing` | 2 | `m01-no-inventory-equality`, `m06-open-interval-ends-at-last-line` |
+| `TestTheP129Table::test_the_intervals_equal_the_p129_r_do_table_to_the_second` | 5 | `m01-no-inventory-equality`, `m05-stopped-means-clean-only`, `m30-episodes-in-reverse-order` (+2) |
+| `TestTheP129Table::test_the_durations_are_p129s` | 5 | `m01-no-inventory-equality`, `m05-stopped-means-clean-only`, `m30-episodes-in-reverse-order` (+2) |
+| `TestTheP129Table::test_how_each_one_ends` | 5 | `m01-no-inventory-equality`, `m05-stopped-means-clean-only`, `m30-episodes-in-reverse-order` (+2) |
+| `TestTheP129Table::test_the_refusals_each_one_holds` | 4 | `m01-no-inventory-equality`, `m12-every-line-is-a-refusal`, `m30-episodes-in-reverse-order` (+1) |
+| `TestTheUnion::test_an_interval_that_abuts_another_is_merged_into_one` | 1 | `m07-abutting-intervals-not-merged` |
+| `TestTheUnion::test_overlapping_intervals_are_merged` | 1 | `r21-only-abutting-intervals-merge` |
+| `TestTheUnion::test_an_interval_inside_another_is_absorbed` | 2 | `m08-merge-end-is-the-later-intervals`, `r21-only-abutting-intervals-merge` |
+| `TestTheUnion::test_intervals_with_a_gap_stay_apart_and_come_out_sorted` | 1 | `r22-the-intervals-are-not-sorted` |
+| `TestTheUnion::test_nothing_in_is_nothing_out` | 0 | **none** |
+| `TestTheUnion::test_a_latch_and_the_downtime_that_follows_it_in_a_real_log_become_one` | 4 | `m05-stopped-means-clean-only`, `m07-abutting-intervals-not-merged`, `r05-unknown-counts-as-trusted` (+1) |
+| `TestExclusionOnBothSides::test_the_wrapper_drops_the_entries_the_latch_covers_from_both_sides_and_lists_them` | 7 | `m11-union-ignores-the-latches`, `m12-every-line-is-a-refusal`, `m32-two-passes-counted-for-one` (+4) |
+| `TestExclusionOnBothSides::test_a_placement_inside_a_latch_is_not_listed_as_unfilled_but_is_by_the_frozen_tool` | 3 | `m11-union-ignores-the-latches`, `m37-unfilled-uses-the-frozen-intervals-only`, `r16-the-diagnosis-is-not-printed` |
+| `TestExclusionOnBothSides::test_the_frozen_tool_on_the_same_inputs_excludes_nothing` | 1 | `r24-the-frozen-exclusion-line-is-reworded` |
+| `TestExclusionOnBothSides::test_the_figures_follow_the_exclusion` | 3 | `m09-backtest-side-not-excluded`, `m11-union-ignores-the-latches`, `r15-the-frozen-figures-are-not-printed` |
+| `TestTheThirteenOhNineEntry::test_the_frozen_diagnosis_labels_a_filled_entry_that_was_never_booked_fok_unfilled` | 1 | `r13-the-frozen-label-is-fill-model` |
+| `TestTheThirteenOhNineEntry::test_the_latch_starts_after_the_entrys_signal_bar_so_e2_does_not_exclude_it` | 3 | `r13-the-frozen-label-is-fill-model`, `r16-the-diagnosis-is-not-printed`, `r24-the-frozen-exclusion-line-is-reworded` |
+| `TestTheThirteenOhNineEntry::test_the_wrapper_adds_no_label_of_its_own` | 1 | `r18-the-wrapper-has-a-diagnose-of-its-own` |
+| `TestTheReport::test_it_is_headed_as_exploratory_and_names_the_rulings_and_the_trusted_set` | 4 | `m04-trusted-set-loses-absent-by-design`, `m23-the-header-loses-its-name`, `m41-the-trusted-set-is-not-printed` (+1) |
+| `TestTheReport::test_it_prints_the_three_figures_and_every_cause_count` | 2 | `r15-the-frozen-figures-are-not-printed`, `r16-the-diagnosis-is-not-printed` |
+| `TestTheReport::test_no_verdict_word_appears` | 1 | `m22-a-verdict-word-in-the-header` |
+| `TestTheReport::test_with_no_latch_it_ends_with_exactly_the_frozen_report` | 3 | `r14-an-extra-line-after-the-frozen-report`, `r15-the-frozen-figures-are-not-printed`, `r16-the-diagnosis-is-not-printed` |
+| `TestTheReport::test_with_only_downtime_and_no_latch_the_exclusion_is_the_frozen_one` | 6 | `m09-backtest-side-not-excluded`, `m10-union-ignores-the-frozen-downtime`, `r14-an-extra-line-after-the-frozen-report` (+3) |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_backtest_record_that_is_not_evidence_is_refused_before_any_figure` | 1 | `r20-an-evidence-refusal-is-not-caught` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_refused_boot_refuses_the_live_run` | 2 | `m24-the-live-boots-skip-the-door`, `r20-an-evidence-refusal-is-not-caught` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_capture_with_no_boot_line_is_refused` | 2 | `m24-the-live-boots-skip-the-door`, `r20-an-evidence-refusal-is-not-caught` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_capture_under_a_logs_directory_is_never_read` | 1 | `m25-the-logs-path-is-read` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_window_that_ends_before_it_starts_is_refused` | 1 | `m26-an-inverted-window-is-accepted` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_trades_csv_that_disagrees_with_the_record_is_an_input_error` | 1 | `m27-an-input-error-exits-as-a-refusal` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_a_record_with_no_pairs_is_an_input_error_and_not_a_default` | 1 | `r17-the-record-need-not-name-its-pairs` |
+| `TestTheInputsAreTheFrozenToolsOwn::test_the_arguments_are_the_frozen_parsers_with_only_the_name_changed` | 1 | `r19-the-wrapper-adds-an-argument` |
+
+#### The one declared exception
+
+**`TestTheUnion::test_nothing_in_is_nothing_out` fails under no mutation, and the exception is declared rather than forced.** It asserts that `merge_intervals` of an empty sequence is empty. Every natural break of `merge_intervals` (an unsorted input, a merge that needs an exact abutment, the wrong end kept) leaves an empty input empty, and a mutant that invents an interval from nothing is not a mistake anyone would make, so a test of the empty case is a guard against a regression that has no ordinary form. It stays as a pin of the empty case and is counted as unarmed. (`M5m-650`)
+
+Equivalent mutants declared, because their break cannot change an outcome: the direct `require_evidence_eligible` call added at C8 duplicates the refusal `load_backtest` has already made (round 3), so no wrapper test can fail on its removal, and only the repository's scan of scripts for an unguarded run record does (killed, 1 of 1).
+
+#### Process disclosures
+
+- **Five commits left the gate red.** C3 to C7 were each gated with `ruff` and the file's own tests, and the wrapper named the run record without calling the evidence door itself, which `tests/unit/test_backtest_evidence.py` refuses; the full gate was first run after C7 and read one failure, fixed at C8 (`5a7891c`). The summary figures C9 records come from the green gate on that tree: 230 files formatted, mypy over 113 source files, 4463 passed and 1 skipped credentialed (`M5m-644`).
+- **C6's message misstates its numstat.** It says 12 lines added and 4 removed; `git diff --numstat` of the commit reads 12 and 3. C7's message records the difference and C6's is not edited.
+- **The predictions of this section were written after a draft of the wrapper and its tests existed** (88 passed in scratch), which the subsection headed *What was done before this section was committed* above discloses (`M5m-630`); the survey's predictions were written before the survey ran, in each round's spec file, whose digest is above.
