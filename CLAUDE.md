@@ -2290,8 +2290,8 @@ The four steps, and what each reports when green:
 ruff check src tests scripts           All checks passed!
 ruff format --check src tests scripts  232 files already formatted
 mypy                                   Success: no issues found in 114 source files
-pytest                                 4512 passed, 4 skipped
-                                       (4515 passed, 1 skipped with Testnet credentials)
+pytest                                 4524 passed, 4 skipped
+                                       (4527 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2300,14 +2300,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `4515 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `4512 passed, 4 skipped` on a machine without them
+- `4527 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `4524 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 4512 and must not read it as a regression against a documented
-4515. Quote the count with its condition, never bare.
+runner will see 4524 and must not read it as a regression against a documented
+4527. Quote the count with its condition, never bare.
 
-Only the `4515` is measured here; `4512 passed, 4 skipped` is that run minus the
+Only the `4527` is measured here; `4524 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
