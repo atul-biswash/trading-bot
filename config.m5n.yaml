@@ -1,0 +1,64 @@
+# ===========================================================================
+# M5n research configuration (N3). RESEARCH ONLY: it enables nothing live.
+#
+#   * mode is backtest: no connection to any venue is made under this file.
+#   * no fixed stop, no take-profit and no fixed trailing percent: the exit of every M5n
+#     candidate is the D1 trailing stop (k x ATR(20) at entry), which is N4's, and R-DY
+#     gives the candidates no signal exit and no take-profit.
+#   * no notification, no log file, no secret. Secrets belong in .env, never here.
+#
+# The window is the in-sample span [2017-08-17, 2024-01-01), half-open, and the fee is
+# 0.10% per side, taker on both legs (the confirmed fee of docs/M5N_CHARTER_DRAFT.md
+# section 14); 0.075% with BNB is a sensitivity only and is not in this file.
+#
+# Edit nothing here for a live run: live trading is refused at every entry point.
+# ===========================================================================
+
+mode: backtest
+
+trading:
+  base_currency: USDT
+  default_timeframe: 1d
+  pairs:
+    - symbol: BTCUSDT
+      timeframe: 1d
+      enabled: true
+    - symbol: ETHUSDT
+      timeframe: 1d
+      enabled: true
+
+strategy:
+  name: donchian_1d_20       # one of the six M5n candidates; import trading_bot.strategies.m5n first
+  params: {}
+
+risk:
+  position_sizing:
+    method: fixed_fraction     # a placeholder: N5 sizes from the clamped trailing distance, and the
+    fraction: 0.02             # risk_per_trade method is refused while stop_loss is disabled
+  stop_loss:
+    enabled: false
+  take_profit:
+    enabled: false
+  trailing_stop:
+    enabled: false
+  max_position_staleness_s: 259200.0   # three days; the load floor for a 1d shortest timeframe is 216006 s
+
+backtesting:
+  start_date: "2017-08-17"
+  end_date: "2024-01-01"
+  initial_balance: 10000
+  fee_percent: 0.10
+  slippage_percent: 0.05
+  stop_slippage_percent: 1.20
+  data_dir: data/historical
+  exchange_info_environment: mainnet
+
+notifications:
+  telegram:
+    enabled: false
+
+logging:
+  level: INFO
+  console: true
+  file:
+    enabled: false
