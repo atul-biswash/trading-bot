@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P143 on branch `m5n` (HEAD `70980c6`).** Section 16 records C3, R-EA and R-DT-3c verbatim, with six readings of R-EA marked as the owner's to overrule; the old section 16 is section 17.
+
 **Amended at P142 on branch `m5n` (HEAD `f840e98`).** Section 15 records R-DX, R-DZ, R-DY and R-DT-3b verbatim, with five readings of them marked as the owner's to overrule. The N3 and N4 rows are annotated; the old section 15 is section 16.
 
 **Amended at P141 on branch `m5n` (HEAD `2882fae`).** Section 14 records R-DU, R-DV, R-DT-3a, R-DW and the confirmed fee verbatim. Sections 7, 11 and 13 and the N1, N2 and N3 rows are annotated or corrected where those rulings displaced their text, and the old section 14 is section 15.
@@ -218,6 +220,25 @@ The project owner's rulings, quoted as the P142 prompt gives them, in the order 
 4. **The decision series are the canonical store's archive 4h and 1d series** (R-DV), so a gap is a 4h slot the archive lacks; the archive 1d series has none over the in-sample span.
 5. **The structure is four modules for six candidates**: the three Donchian candidates share one implementation and are registered under their three names; the others have a module each. Each registered name is an independent strategy on the existing interface.
 
-## 16. What this draft does not do
+## 16. C3, R-EA and R-DT-3c, recorded verbatim at P143
+
+The project owner's rulings, quoted as the P143 prompt gives them, in the order the prompt gives them.
+
+> **C3** C3 (sma_cross_1d_50_200) stays in the candidate set despite 6 entry events per pair in sample (M5n section 83); no candidate is replaced after counts are seen.
+
+> **R-EA** The D1 trail as the backtester implements it, per the Binance spot trailing stop FAQ (developers.binance.com/docs/binance-spot-api-docs/faqs/trailing-stop-faq, read 2026-10-25): with trailingDelta and no stopPrice, tracking starts from the next trade, and the trigger is the highest trade price since submission x (1 - delta / 10000). (1) The peak starts at the entry fill price. In the entry minute only the fill price counts as the peak, and that minute's low is tested. Each later 1m bar updates the peak with its high, then tests its low against the trigger. (2) The exit price is the trigger less the stop slippage. If a 1m bar opens at or below the trigger, the fill is at that open less slippage, per the existing gap-through rules R-P1/R-W. The slippage is the existing default 1.20 percent, with 0.66 and 0.10 percent reported as sensitivities that never decide a verdict. (3) Exit fees are 0.10 percent taker. (4) Partial execution is not modelled; the Testnet partial and zero-fill cases stay under U10. Ruled before any M5n trade exists.
+
+> **R-DT-3c** R-DT clause 3's exception extends to N4 to the extent that N4 may also print refusal counts by stage, and its count run writes no run record or trade file. If the backtester cannot run that way, N4b halts and reports.
+
+**Readings the executing session records so they are not settled by accident; each is the owner's to overrule.** R-EA fixes the mechanism and leaves these cases to whoever writes the code, so they are written down before the code exists and pinned by the tests of N4a.
+
+1. **A bar whose low equals the trigger triggers.** The trigger is tested as *low at or below the trigger*. The source is the fill model's *"the stop triggers when the bar's low is at or below it"* (`backtesting/fill_model.py`), and the FAQ's own wording that a 700 BIPS decrease *"will trigger"*; the documentation does not say what happens at exact equality. DOCUMENTED for the direction, REASONED for the equality.
+2. **The entry minute has no gap case.** The entry fill happens inside the minute, so that bar's open predates the position and cannot be a price the stop could have traded at. R-EA (1) already tests that minute's low against the trigger from the fill price; its exit price is that trigger less the slippage and its gap flag is false.
+3. **The gap test uses the trigger in force before the bar's high is applied.** For a later bar, if its open is at or below the trigger computed from the peak *before* this bar, the fill is at the open less slippage and the gap flag is set, and the peak at exit does not include that bar's high. If it is not, the peak takes the bar's high, the trigger is recomputed, and the low is tested against the new trigger (R-EA (1)). A bar that opens above the old trigger and below the new one therefore triggers at the new trigger, not as a gap.
+4. **An open exactly at the trigger is a gap.** *"At or below"* in R-EA (2) includes equality. The exit price is then numerically the trigger less slippage, and the flag is the only difference from a low that touches the trigger.
+5. **Prices are not rounded to the tick.** The trigger and the exit price are exact `Decimal` products, as the fill model's R-AB has it; the venue's tick rounding of a real trailing trigger is not modelled.
+6. **A missing minute is the caller's.** The module reads the bars it is given in order and does not know the minutes it was not given. N4b's caller owns what a gap in the 1m path means.
+
+## 17. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
