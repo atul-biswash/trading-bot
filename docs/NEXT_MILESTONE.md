@@ -1958,6 +1958,16 @@ takes and the bot did not is a finding about one of them.
 >
 > *Arming condition:* **whoever next edits `scripts/s4_latch_compare.py` or `docs/S4_CORRECTION_P130.md`, or first reads E2's output against the primary at the S4 stop: it runs step 7b's checks from the backtest clone's interpreter, and does not let an E2 figure stand in for the primary (R-DK, R-DL).**
 
+> **ANNOTATED AT M5m P132 (C1). R-DQ, recorded verbatim, ruled at P130's review; it sat in no file until now.** P131 applied R-DQ from its prompt's description and `docs/RUN_LEDGER.md` section 69 and `M5m-653` record that description, not the text.
+> **R-DQ:** *"(1) No code, test or script, in scratch or the repository, is drafted before the predictions commit about it exists; read-only exploration of the source is allowed. (2) Every commit that touches code or tests passes the full bare gate before it is made; docs-only commits are exempt. Ruled at P130's review; P130's prompt wording "bare gate before and after" contradicted CLAUDE.md's every-commit rule and is withdrawn."*
+>
+> **What stops being true, by content.**
+> 1. `M5m-653` and section 69 describe R-DQ as *"a stop rehearsal of steps 6 to 7b on a past day outside [W, M), predictions first, a bare gate on every code or test commit"*. The rehearsal on a past day was P131's own instruction and is not part of R-DQ as ruled; R-DQ is the two clauses above. The description's other two parts are R-DQ's, in other words.
+> 2. `M5m-655` says P130's step 6 wording *"left room for a per-file gate between"* and the omission was the executing session's against `CLAUDE.md`. R-DQ's last sentence withdraws that wording and says it contradicted the every-commit rule: the wording was the architect's, and the omission is still the executing session's (the rule was in `CLAUDE.md` and was not applied). Both are true.
+> 3. `M5m-656` calls the predictions-after-a-draft defect the executing session's alone and cites R-DQ's predictions-first rule as applying to P131. Clause (1) is that rule and is wider than the finding says: it forbids drafting code, a test or a script in scratch before the predictions commit. P130's draft in `scratch\p130\dev\` is the case it forbids.
+>
+> **What survives.** `M5m-653` to `M5m-656` as findings; the gate rule of `CLAUDE.md`, which R-DQ quotes and does not change (annotated there with a pointer to this block); read-only exploration of the source stays allowed before a predictions commit.
+
 **S5. The baseline — the shipped strategy, honestly.** `sma_crossover` 20/50 on BTCUSDT
 1m and ETHUSDT 5m, the committed config, over the full history, net of fees. This is the
 number the census predicts to be negative; S5 confirms or refutes it on two years rather
