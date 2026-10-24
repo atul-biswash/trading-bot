@@ -72,7 +72,11 @@ from s4_compare import (
 )
 from trade_census import build_trades, parse_capture
 
-from trading_bot.backtesting.evidence import RUN_RECORD_NAME, EvidenceRefusedError
+from trading_bot.backtesting.evidence import (
+    RUN_RECORD_NAME,
+    EvidenceRefusedError,
+    require_evidence_eligible,
+)
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION
 from trading_bot.data.historical import HistoricalStore
 
@@ -397,6 +401,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         boots = live_boots(lines)
         require_live_run_eligible(boots)
         record, all_backtest = load_backtest(args.run)
+        require_evidence_eligible(record, source=str(args.run / RUN_RECORD_NAME))
     except (CaptureRefusedError, EvidenceRefusedError) as exc:
         print(f"REFUSED: {exc}")
         return _REFUSED_EXIT
