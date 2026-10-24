@@ -7021,3 +7021,86 @@ A `Disagreement` is `(kind, symbol, signal_close, cause, evidence)` with `kind` 
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The arming audit's predicted kills are written to this ledger in a later commit, after the tests exist and before the survey is run (the P130 procedure). A code or test commit passes the full bare gate before it is made (R-DQ clause 2).
+
+### The arming audit's predictions (P135 C5), written before the survey is run
+
+Added in the commit that follows the tests (`af9ccc4`) and precedes the mutation survey; nothing above is edited. The scripts gate was green on both the tool (`526002f`, 4463 passed) and the tests (`af9ccc4`, 4515 passed, 232 files formatted, mypy over 114 source files, credentialed). The survey runs in a detached worktree outside the repository, with the import location proven, an unmutated baseline and every restore shown SHA-256-equal, by the harness of P130 (`survey.py`, SHA-256 `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`). A mutation that kills FEWER tests than predicted halts the survey; one that kills MORE is recorded.
+
+#### The tests, by the short names the table uses
+
+| | Test (all `tests/unit/test_s4_wick_annotate.py`) |
+|---|---|
+| W1 to W6 | `TestWhatIsWide`: `test_the_bound_itself_...`, `..._two_point_nine_nine_nine_percent_is_not_wide`, `..._three_point_zero_zero_one_percent_is_wide`, `..._the_range_is_taken_from_the_low_to_the_high_over_the_open`, `..._a_bar_whose_open_is_not_positive_has_no_range`, `..._the_widest_bar_decides_and_the_count_of_bars_is_reported` |
+| H1 to H6 | `TestTheHalfOpenInterval`: wide bar at the entry's open inside; at the exit's close outside; one minute before inside; before the entry outside; no bar inside is unknown; a reader that could not serve is unknown |
+| X1 to X7 | `TestTheExitBarsClose`: the epoch floor; a strategy `CLOSE`; a leg fill inside a 5m bar; a fill on a boundary; no exit instant is open at M; the backtest row's `exit_bar_open` plus timeframe; a file without the exit column |
+| K1 to K7 | `TestTheIntervalOfEachKind`: a wide bar in the backtest-only stretch; in the live-only stretch; inside neither; the same bar after the union ends; a live-only entry; a backtest-only entry with no wide bar; one with a wide bar |
+| O1, O2 | `TestAPositionOpenAtM`: runs to the window end and a wide bar before M counts; a wide bar at M is outside |
+| N1, N2 | `TestNoBarsIsUnknown`: an interval with no recorded bar; a missing store |
+| C1 to C3 | `TestTheCountsByCause::test_the_counts_by_cause_sum_to_the_length_of_the_list[primary]`, `[e1]`, `[e2]` |
+| C4, C5 | `TestTheCountsByCause`: the wide columns add up to each total; every cause of the closed list has a line |
+| A1 to A3 | `TestTheAnalysesAgreeWithTheirSources`: primary against the frozen tool; e1 against it for its window; e2 against the wrapper |
+| R1 to R5 | `TestTheReport`: header, analysis and window; no verdict and no figure; the two rulings and the threshold; the three digests; reads and never writes |
+| I1 to I9 | `TestTheInputsAreTheFrozenToolsOwn`: a run record that is not evidence; a refused live boot; no boot line; a path under `logs`; an inverted window; an analysis that is not one of the three; the analysis is required; the three analyses are exactly primary, e1, e2; the arguments are the frozen parser's plus `--analysis` |
+
+#### The mutations, the break each makes, and the tests predicted to fail
+
+Each is one byte-exact replacement with exactly one match, asserted by the spec writer. Where a mutation could only fail a test by an exception that is not an assertion, it was replaced by one that fails by assertion (m04, m08, m09).
+
+| Label | The break | Predicted kills |
+|---|---|---|
+| m01 | the bound is strict: `widest >= threshold` becomes `>` | W1 |
+| m02 | the threshold is 4% | W1, W3, R3 |
+| m03 | the range divides by the high and not the open | W1, W2, W3, W4, W6, K1, K5, K7 |
+| m04 | a bar with a non-positive open has range zero and not none | W5 |
+| m05 | the interval filter is removed (every bar is inside) | H2, H4, H5, O2 |
+| m06 | the end is inclusive | H2, O2 |
+| m07 | the start is exclusive | W1, W2, W3, W4, W6, H1 |
+| m08 | a reader that served nothing reads "no" and not "unknown" | H6, N2 |
+| m09 | an interval with no bar reads "no" and not "unknown" | H5, W5, N1 |
+| m10 | the widest bar is the narrowest | W6, H1, K1, K2, K5, K7, O1 |
+| m11 | the bar count is one too many | W6, H2, H4 |
+| m12 | the epoch floor rounds up | X1, X3, X4 |
+| m13 | a strategy `CLOSE` ends at the signal bar's close, without the millisecond | X2, K2, K5 |
+| m14 | the `CLOSE` test is inverted | X3, X4 |
+| m15 | a booking with no exit instant ends one millisecond before M | X5 |
+| m16 | the naive-instant guard is removed | none |
+| m17 | the backtest row's timeframe is not added | X6, K1, K6, K7 |
+| m20 | a backtest row with no exit ends at its own entry | X6, O1, O2 |
+| m21 | a live-only entry looks up the backtest table | K1, K3, K4, K5, K6, K7, C1, C2, C3, C4, C5 |
+| m22 | a backtest-only entry looks up the live table | K1, K3, K4, K5, K6, K7, O1, O2, N1, N2, C1, C2, C3, C4, C5, A1, A2, A3, R1, R2, R3, R4, R5 |
+| m23 | a matched entry takes the live period only | K1 |
+| m24 | a matched entry takes the shorter period | K1, K2 |
+| m26 | each cause's count line counts every row | C1, C2, C3 |
+| m27 | only the causes present get a count line | C5 |
+| m28 | a cause outside the closed list gets no count line | none |
+| m29 | the header is `DIAGNOSTIC R-DR` | R1 |
+| m30 | the annotation line names a verdict word | R2 |
+| m31 | the rulings line cites the P134 file twice | R3 |
+| m32 | the threshold line prints 0.03% | R3 |
+| m33 | the percentage has two places | K1, K5, K6, K7 |
+| m34 | the percentage is not multiplied by 100 | K1, K5, K7 |
+| m35 | no range prints `n/a` and not `none` | N1 |
+| m36 | the window line prints end before start | R1 |
+| m37 | the analysis line is always `primary` | R1 |
+| m38 | the digest lines are not printed | R4, N2 |
+| m39 | `e3` is added to the analyses | I6, I8 |
+| m40 | the E2 latch union is never applied | A3 |
+| m41 | E1 applies the latch union | A2 |
+| m42 | E2 drops the frozen downtime from its union | none |
+| m43 | a store error returns an empty list and not `None` | none (an equivalent mutant: both read as unknown) |
+| m44 | the series read is `5m` and not `1m` | K1, K2, K3, K4, K5, K6, K7, O1 |
+| m46 | the inverted-window refusal is removed | I5 |
+| m47 | the direct `require_evidence_eligible` call is removed | `test_backtest_evidence.py::TestEveryConsumerGoesThroughTheDoor::test_no_module_reads_a_run_record_without_calling_the_door` only, none of this file's (declared equivalent for them) |
+| m48 | the `logs/` refusal is removed | I4 |
+| m49 | the live-boot eligibility check is removed | I2, I3 |
+| m50 | the inverted window exits with the input-error status | I5 |
+| m51 | `--analysis` has a default | I7 |
+| m54 | the live open-at-M end is the window start | none |
+| m55 | the backtest open-at-M end is the window start | O1, O2 |
+| m56 | the live exit table is keyed on the signal bar's close | K1, K2, K3, K4, K5, K6, K7, C1, C2, C3, C4, C5, A1, A2 |
+| m57 | the live timeframe is always one minute | none |
+| m58 | the store is asked for BTCUSDT whatever the pair | none |
+
+**Abstentions declared in advance.** (1) **X2 abstains under m14**: a strategy `CLOSE` ends at a signal bar's close plus a millisecond, which equals the close of the bar containing it, so the inverted test gives the same instant for X2's 5m case and for every 1m case in the fixtures; X2 is killed only by m13. (2) **No mutation is predicted to kill H3, X7, I1, I9 or R5**: H3's bound is implied by H1 and H2; X7's guard can only fail by an exception that is not an assertion; I1 is covered by the frozen loader, so the tool's own direct door call is not what it exercises; I9 compares option names and no mutation removes one; R5 lists files and no mutation writes one. (3) **m16, m28, m42, m54, m57 and m58 are predicted to kill nothing, and each is a gap in the tests, not an equivalent mutant**: the naive-instant guard, the extra-cause line, the frozen downtime in E2's union, the live open-at-M wiring, the live timeframe wiring and the symbol handed to the store have no test that fails when they break (every end-to-end fixture is BTCUSDT, 1m, with a booking that has an exit instant). m43 alone is an equivalent mutant. They are reported as findings, not forced green.
+
+The survey's results, the union of kills and the tests killed by no mutation follow in a later commit.
