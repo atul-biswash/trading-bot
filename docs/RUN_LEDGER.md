@@ -8217,3 +8217,42 @@ An observation log, so this section only adds. The surveys ran as section 80 des
 `n2_archive_check.py` against `test_n2_archive_check.py`: **1 of 38**: `TestWhatIsPrintedAndWhatIsNotAsked::test_the_script_has_no_fetcher_and_no_network_parameter`
 
 Section 80 predicted 3, 3 and 2. The scripts that made these results are in `scratch\p141`: `make_spec2.py`, `build81.py` (this text).
+
+## 82. M5n N3: P142's halts and the predictions for the indicators, the six candidates and their entry-event counts, before any code (P142 C2, R-T, R-DQ, R-DT)
+
+An observation log, so this section only adds. P142 builds N3 under R-DX, R-DY, R-DZ and R-DT-3b (`docs/M5N_CHARTER_DRAFT.md` section 15): six long-only candidates on the archive decision series, no volume, every indicator window gap-free, and a script that counts entry events. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted, in scratch or in the repository. The only reading done first was of the source (`indicators/indicators.py`, `strategies/base.py`, `registry.py`, `helpers.py`, `examples/sma_crossover.py`, `config/models.py`) and of the `MANIFEST.jsonl` row counts already quoted in section 78. **No archive bar was read, and nothing here decides anything about S4.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `m5n`, `git status` not clean, HEAD is not `f840e98` | `git branch --show-current`, `git status --porcelain`, `git rev-parse --short HEAD` | `m5n`, empty, `f840e98` (then `e942e4f` after C1, the charter commit) |
+| a command would write under `deploy\45547f107715`, the rehearsal clone or the canonical store, or touch `config.yaml` or `config.s4.yaml` | every command in the plan | none: the count script reads the store through `HistoricalStore`, which only reads, and `config.s4.yaml` was read only as a committed blob (`git cat-file -p HEAD:config.s4.yaml`) to learn the file's shape |
+| any venue request | the plan | none: the script has no fetcher |
+| any bar at or after `2024-01-01T00:00:00Z` read | the reader is called with `end = 2024-01-01T00:00:00Z` | no bar read yet |
+| anything computes a return, P&L, equity, exit or metric | the plan | none: a candidate answers whether a condition became true on a bar, and the script counts those answers |
+| a candidate needs a volume input | R-DY's six definitions | none: they read close, high, low (C1, C2, C4), two SMAs of the close (C3), the close with a high, a low and a close for the ATR (C5), and the close (C6) |
+
+### What is built, and which indicators are reused
+
+**Reused unchanged from `indicators/indicators.py`: `sma` (C3), `ema` and `atr` (C5), and `true_range`, which `atr` calls.** Their NaN contract (leading `NaN` for warm-up, a value at `period - 1` for `sma` and `ema`, the first `atr` at position `period`) is what the gap rule leans on. **New, in a module of their own (`indicators/breakout.py`), because `indicators.py` documents a leading-NaN table that a new function would have to join: `donchian_high` (the highest high of the prior `period` bars, not including the current one), `keltner_upper` (EMA plus a multiple of the Wilder ATR, composed from the two reused functions) and `momentum` (a series minus itself `period` bars earlier).**
+
+A gap-free-window helper (`strategies/m5n/gaps.py`) takes the decision series' index and the timeframe's width and answers the two questions R-DZ needs: whether the last *n* rows are consecutive bars, and where the gap-free run that ends at the last row begins. Four strategy modules register six names: one Donchian implementation under `donchian_1d_20`, `donchian_1d_55` and `donchian_4h_20`, and one module each for `sma_cross_1d_50_200`, `keltner_4h_20_2` and `tsmom_1d_90`. Each reads open, high, low and close from the frame, ignores a volume column, takes `Signal.price` and `Signal.timestamp` from the candle, emits `BUY` and never `CLOSE`, and accepts one research parameter, `enforce_gaps` (default `True`), which switches R-DZ off so that its effect can be counted; nothing live uses it. A `config.m5n.yaml` for research names a backtest of `[2017-08-17, 2024-01-01)`, `fee_percent` 0.10, and enables no stop, no take-profit, no notification and no live mode.
+
+### Definitions the predictions use
+
+An **entry event** is a bar on which the candidate's condition is true and was false on the bar before (the edge; reading 1 of charter section 15); the bar before must itself be answerable, so an event needs the indicator window plus one bar. **Warm-up at the start of a series is not a gap and is not counted as a suppression.** A **suppression** is a bar on which the ungated candidate (`enforce_gaps=False`, the same rows read as if consecutive and the recursive indicators run over the whole history) has an entry event and the gated one has none; a **gated-only** event is the converse, which is possible only for C5 because its EMA and ATR are seeded again after a gap. All counts are upper bounds on trades, which need N4's trailing exit and the one-position rule.
+
+### The predictions
+
+| | Prediction |
+|---|---|
+| a | **Entry events over `[2017-08-17, 2024-01-01)`, per pair (BTCUSDT, ETHUSDT), estimate and range.** C1 `donchian_1d_20`: **115 (85 to 150)** and **120 (90 to 155)**; C2 `donchian_1d_55`: **70 (50 to 95)** and **72 (50 to 95)**; C3 `sma_cross_1d_50_200`: **5 (3 to 8)** and **6 (3 to 9)**; C4 `donchian_4h_20`: **880 (740 to 1030)** and **900 (760 to 1050)**; C5 `keltner_4h_20_2`: **450 (300 to 620)** and **480 (310 to 650)**; C6 `tsmom_1d_90`: **25 (15 to 40)** and **27 (15 to 42)**. REASONED from the share of bars on which each condition holds (about 9% for a 20-bar breakout of the highs, 5.5% for 55, about 5% of 4h closes above a 2-ATR channel, 55% of days with positive 90-day momentum) divided by the mean length of a run of true bars (1.5 to 2.2); UNMEASURED. The 4h counts are about seven times the 1d counts because the series has six bars a day; the SMA cross is the sparsest by an order of magnitude |
+| b | **Entry events a gap suppresses: C1, C2, C3 and C6 none, in either pair** (the archive 1d series has all 2328 days). **C4: about 18 per pair (8 to 30); C5: about 11 per pair (4 to 20).** The archive 4h series has 13950 bars against 13967 possible slots from `2017-08-17T04:00`, so 17 missing slots; the same slots in both pairs is the lean, since the venue's outages and the one API-only bucket of section 79 are not pair-specific. A missing bar blocks the 22 following bars for C4 (the 20 prior bars, the current and the previous) and about 22 for C5 (the run must again hold an ATR and its previous value), and the events per bar are about 0.063 and 0.036, so about 1.4 and 0.8 events per isolated gap. **Gated-only events: none for C1 to C4 and C6; C5 at most 6 per pair** |
+| c | **Indicators reused unchanged: `sma`, `ema`, `atr` and, inside it, `true_range`. New: `donchian_high`, `keltner_upper`, `momentum`.** No indicator in `indicators.py` is edited |
+| d | The count script **prints counts only**: per candidate and pair the entry events, the R-DZ suppressions and gated-only events, and per timeframe and pair the number of missing decision slots (**1d: 0 in both pairs; 4h: 17 in both**); no price, no timestamp list and no return. It makes no request, reads `[2017-08-17, 2024-01-01)` only, and runs in **under 10 minutes** (the archive series are 2328 and 13950 bars per pair and each candidate is evaluated once per bar, with and without the gap rule) |
+| e | The warm-up of the first event is the window plus one: C1 22 bars, C2 57, C3 201, C4 22, C5 22 after the first gap-free run begins, C6 92; **no event is counted inside a candidate's warm-up** |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2). The commits that follow: the indicators and the gap helper with their tests; the six candidates with theirs; the research config with its test; the count script with its tests; the run; the survey predictions; the survey; the counts.
