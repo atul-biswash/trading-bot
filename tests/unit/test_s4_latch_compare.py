@@ -1035,7 +1035,16 @@ class TestTheInputsAreTheFrozenToolsOwn:
         (run / "run.json").write_text(json.dumps(record), encoding="utf-8", newline="\n")
         assert e2.main(argv(run, live)) == 3
 
-    def test_the_arguments_are_the_frozen_parsers_with_only_the_name_changed(self) -> None:
-        with pytest.raises(SystemExit) as caught:
+    def test_the_arguments_are_the_frozen_parsers_with_only_the_name_changed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        with pytest.raises(SystemExit) as frozen:
+            s4.main(["--help"])
+        frozen_help = capsys.readouterr().out
+        with pytest.raises(SystemExit) as wrapped:
             e2.main(["--help"])
-        assert caught.value.code == 0
+        wrapped_help = capsys.readouterr().out
+        assert frozen.value.code == 0 and wrapped.value.code == 0
+        assert wrapped_help.startswith("usage: s4_latch_compare.py")
+        assert frozen_help.startswith("usage: s4_compare.py")
+        assert wrapped_help.split("\noptions:\n", 1)[1] == frozen_help.split("\noptions:\n", 1)[1]
