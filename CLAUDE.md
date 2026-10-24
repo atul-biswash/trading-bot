@@ -265,7 +265,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · normalize_ledger_exponents.py · trade_census.py
                  · regime_labels.py
                  · record_testnet_klines.py (+ recorder_task.xml)
-                 · n2_verify_bars.py
+                 · n2_archive_check.py · n2_verify_bars.py
                  · s4_compare.py · s4_daily.py · s4_explore.py · s4_latch_compare.py · s4_wick_annotate.py · s5_report.py · s6_mark_read.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
                  · s7_gate.py · s7_null.py · store_check.py
 ```
@@ -2289,10 +2289,10 @@ The four steps, and what each reports when green:
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  236 files already formatted
-mypy                                   Success: no issues found in 116 source files
-pytest                                 4619 passed, 4 skipped
-                                       (4622 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  239 files already formatted
+mypy                                   Success: no issues found in 117 source files
+pytest                                 4695 passed, 4 skipped
+                                       (4698 passed, 1 skipped with Testnet credentials)
 ```
 
 **The gate's output is not a function of the tree alone — this is a property,
@@ -2301,14 +2301,14 @@ not a footnote.** It varies by **credentials** and by **network state**.
 *Credentials.* The three integration tests are `skipif(not HAS_CREDENTIALS)`, so
 the *same commit* reports:
 
-- `4622 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
-- `4619 passed, 4 skipped` on a machine without them
+- `4698 passed, 1 skipped` on a machine with Binance Testnet credentials in `.env`
+- `4695 passed, 4 skipped` on a machine without them
 
 **Both are honestly green.** A fresh clone, a new contributor, or the first CI
-runner will see 4619 and must not read it as a regression against a documented
-4622. Quote the count with its condition, never bare.
+runner will see 4695 and must not read it as a regression against a documented
+4698. Quote the count with its condition, never bare.
 
-Only the `4622` is measured here; `4619 passed, 4 skipped` is that run minus the
+Only the `4698` is measured here; `4695 passed, 4 skipped` is that run minus the
 three `skipif`-gated integration tests, which move from the passed column to the
 skipped one. Say which is which rather than presenting both as observed. The
 three were re-counted at M5i's rotation — one per integration module, still
@@ -2419,8 +2419,8 @@ everywhere:
 
 | Gate | Scope | Files |
 |---|---|---|
-| `ruff check` / `ruff format --check` | `src tests scripts` | 236 |
-| `mypy` | `files = ["src/trading_bot", "scripts"]` | 116 |
+| `ruff check` / `ruff format --check` | `src tests scripts` | 239 |
+| `mypy` | `files = ["src/trading_bot", "scripts"]` | 117 |
 | `pytest` | `tests/` (`testpaths`) | — |
 
 `tests/` sits outside mypy **by policy** (see below). `scripts/` was outside all
