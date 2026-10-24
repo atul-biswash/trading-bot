@@ -370,6 +370,45 @@ The acceptance tests are the pre-registration's section 7 (A gross mean, B count
 owner to those figures; this runbook does not apply them. **Do not edit `scripts\s4_compare.py` or the pre-registration**
 (R-BN): any other reading of the downtime is exploratory under the ratified CHOSEN line 5, and step 9 is where it lives.
 
+## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
+
+It is named 7b because P130 named it so; it runs after step 8, because it reads step 8's inputs and never stands in for its
+result. **The primary is step 8 unmodified (R-DK); a failure of its test B that the latch caused is a FAIL, labelled
+`(latch-caused)`.** R-DL's two analyses are exploratory and are reported beside the primary, each under its own header:
+
+- **E1** is the frozen `s4_compare.py` on the same two inputs with only `--window-end 2026-10-21T13:09:00Z`: the entry bar that
+  opened at `13:09:00Z` falls outside the half-open window.
+- **E2** is `scripts\s4_latch_compare.py` (P130), which takes the same arguments as the frozen tool, derives the latch intervals
+  of R-DM, R-DO and R-DP from the capture, unions them with the frozen downtime intervals, and excludes the entries they cover
+  from BOTH sides. It imports `s4_compare.py` and `trade_census.py` and the trusted set from the installed `trading_bot`
+  (`core/portfolio.py` `_TRUSTED_PROTECTION`), so it is run with the **backtest clone's interpreter** (`$PY`, the `45547f1`
+  install, so the trusted set is the one the live run used) and from the **development tree's script path**, which holds the
+  wrapper and the byte-identical frozen scripts. It prints figures and no verdict, under the header `EXPLORATORY E2 (R-DL)`.
+
+```powershell
+Set-Location $BT
+& $PY scripts\s4_compare.py --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "2026-10-21T13:09:00Z" --store $FROZEN | Out-File -Encoding ascii "$OUT\s4_compare_e1.txt"
+"exit $LASTEXITCODE"
+git -C $DEV status --porcelain -- scripts
+(Get-FileHash "$DEV\scripts\s4_compare.py" -Algorithm SHA256).Hash
+(Get-FileHash "$DEV\scripts\s4_latch_compare.py" -Algorithm SHA256).Hash
+& $PY "$DEV\scripts\s4_latch_compare.py" --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "${M}T00:00:00Z" --store $FROZEN | Out-File -Encoding ascii "$OUT\s4_latch_compare.txt"
+"exit $LASTEXITCODE"
+Select-String -Path "$OUT\s4_latch_compare.txt" -SimpleMatch 'EXPLORATORY E2 (R-DL)'
+```
+
+CHECK, each its own command: E1 exits `0` and its `capture sha256` equals step 3's (the same refusals as step 8: `2`, `3`); `git status`
+prints nothing for `scripts` (the wrapper that runs is a committed one); the first digest is `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`
+(the frozen tool, pre-registration section 9) and the second is the wrapper's, to be recorded in step 9 (at `5a7891c` it was
+`59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7`; a later commit that edits the wrapper changes it, and the
+run is of whatever `git -C $DEV rev-parse HEAD` names); E2 exits `0`; the `Select-String` prints the header line; the file's `capture sha256` equals step 3's and
+its `run.json sha256` equals step 8's. **The wrapper also prints the episodes it found.** For a capture with no latch it ends with exactly the frozen
+report (pinned by a test), so E2 equals the primary there. Record the two output files' digests in step 9 and report both
+beside step 8's figures; neither replaces it, and the test applied to them is the pre-registration's, by the owner.
+
+Never executed on real inputs: this step. The wrapper's logic ran on the real 2026-10-23 capture (RUN_LEDGER section 68) and
+its command line only over fixtures; E1 is the frozen tool with a different `--window-end` (section 62 ran it with another window).
+
 ## Step 8a. Archive the evidence, before ANY clone is removed (R-DG)
 
 R-DG, verbatim: *"Before any clone is removed after the S4 stop, the S4 backtest's run directory and the frozen captures are copied
@@ -482,6 +521,9 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 8a | the step on the S4 backtest's run directory and the final captures | N | the evidence does not exist yet |
 | 8 | `s4_compare.py` on real inputs | E | section 62 (a one-day window, exit 0; the figures are exploratory) |
 | 9 | `s4_explore.py` on the final capture | N | one run on a copy, section 60 |
+| 7b | `s4_compare.py ... --window-end 2026-10-21T13:09:00Z` (E1), piped to `Out-File -Encoding ascii` | R | the frozen tool with another window, section 62; the pipe, section 64 |
+| 7b | `s4_latch_compare.py` (E2) through its real command line | R | 90 tests over fixtures (section 68); the logic on the 2026-10-23 capture; NOT executed from the backtest clone's interpreter on real inputs |
+| 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | N | |
 
 **ANNOTATED AT P124 (C2), BY APPENDIX A'S EXECUTION (RUN_LEDGER section 62): both were executed over the whole day
 2026-10-11 and ran to exit 0; the rows above that read E now were N or R at P123.** What the sentence below says was
