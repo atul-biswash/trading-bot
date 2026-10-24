@@ -383,6 +383,20 @@ The acceptance tests are the pre-registration's section 7 (A gross mean, B count
 owner to those figures; this runbook does not apply them. **Do not edit `scripts\s4_compare.py` or the pre-registration**
 (R-BN): any other reading of the downtime is exploratory under the ratified CHOSEN line 5, and step 9 is where it lives.
 
+**REQUIRED in the step 8 report (P132): two notes, written beside the primary's figures and never inside them.**
+
+1. **The `13:09` BTCUSDT entry.** The entry placed at `2026-10-21T13:09:00Z` (order list `183218`) is labelled `fok-unfilled` by the frozen
+   `diagnose` ("the live bot placed and nothing was booked"), and it FILLED IN FULL: the stop leg executed `0.01041000` of the `0.02233000`
+   placed and the owner sold the remaining `0.01192000` BTC (order `6268354`, owner-reported; no venue read), and `0.01041000 + 0.01192000
+   = 0.02233000` (`M5m-647`, RUN_LEDGER sections 66 and 67). **The label is reported UNALTERED, exactly as the frozen tool prints it, and the
+   report ANNOTATES it with the sentence above; neither the label nor the frozen tool is edited.** If the primary's disagreement list or its
+   "live placements with no booking" list carries that entry, the note goes beside that line; if it does not carry it, the note is still
+   written, with the reason it is absent.
+2. **R-DK, verbatim, for a failure the latch caused:** *"The pre-registered S4 comparison runs at stop exactly as frozen. Its three figures
+   and verdicts are reported first, with the latch named as the diagnosed cause of any failure. A latch-caused failure is recorded as FAIL
+   (latch-caused), not NOT MEASURED. Nothing below replaces or reinterprets it."* So a failed test whose cause is the latch is written
+   `FAIL (latch-caused)` with the latch named, and never `NOT MEASURED`; E1 and E2 (step 7b) are reported beside it as figures only.
+
 ## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
 
 It is named 7b because P130 named it so; it runs after step 8, because it reads step 8's inputs and never stands in for its
@@ -511,7 +525,13 @@ the stop itself, and is the only way to execute step 7 and step 8 before the evi
 stop, it is built at a different path: set `$M = '2026-10-09'`, `$W = '2026-10-08'`, `$BT = "F:\trading bot\backtest\rehearsal-$S"` and a
 `$FROZEN` and `$OUT` that carry `rehearsal`, and give `pip install` the rehearsal path in its `git+file:///` URL (the one command that names
 the clone's own path). A run at the real `$BT` would leave a second directory in `data\backtests`, which step 7's CHECK forbids, and
-removing it would delete a run record (R-DG). Retire the rehearsal clone afterwards by renaming it, as the other clones are retired.
+removing it would delete a run record (R-DG). **The rehearsal clone `F:\trading bot\backtest\rehearsal-45547f107715` is RETAINED as a
+fallback until M5m closes (P132), so it is not renamed or retired now** (P131's first wording here, to retire it by renaming, is withdrawn).
+It holds a junction, `data\historical_testnet`, to the rehearsal store. **If the clone is ever deleted, the junction is removed FIRST and
+alone, with `cmd /c rmdir "F:\trading bot\backtest\rehearsal-45547f107715\data\historical_testnet"`** (`rmdir` without `/s` removes the
+link and leaves its target: MEASURED at P132 on a stand-in junction in `scratch\p132`, exit 0, link gone, target file present; check `Test-Path "F:\trading bot\store\testnet-s4-rehearsal-2026-10-09\BTCUSDT\1m"` still prints `True`
+afterwards), and only then is the clone deleted. A recursive delete that follows the junction would delete the store copy, and one that
+meets the clone's run directory would delete the rehearsal's run record; neither recursive delete was executed, and the `rmdir` of the REAL junction was not either (the stand-in is the measurement). As a fallback it is not the S4 backtest clone: the stop still builds the real `$BT` (step 6a).
 The window `[2026-10-08, 2026-10-09)` has no live entry, so the comparison prints `n/a` for the live mean and the reproduction and does
 not crash (measured); it rehearses mechanics and never produces a figure about S4.
 
