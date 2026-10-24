@@ -7893,3 +7893,184 @@ A read-only look at where the large gaps are (`scratch\p141\diagnose_gap.py` SHA
 1. **R-DV's check passes in the sense the ruling needs, with its exceptions listed.** Every complete bucket's open, high, low and close under the traded-minute rule equals the archive series' except one (BTCUSDT 4h `2021-04-22T00:00:00Z`, low), and the other failures are incomplete buckets whose minutes the 1m store lacks. How N4 treats the 15 is for N4 to rule, as R-DV says.
 2. **The "venue's native bar" has two volumes.** The archive series and the API agree on every open, high, low and close (one ETHUSDT 4h low excepted) and disagree on volume in about 0.4% of buckets, the API's the larger; and the 1m rows' sum differs from the archive's volume in about 1.7% of complete 1d buckets. Which volume is the decision bar's is not ruled; R-DV names the archive series, which is what Tables B and C use. A strategy that uses volume (the charter's candidates are trend and breakout on price, not volume) would meet the question; one that does not is untouched by it.
 3. **The aggregation's plain version is now superseded for prices** by the traded-minute version; the plain one stays, because section 75 and its tests are about it.
+
+## 80. M5n N2b: the predictions for the mutation survey of the traded-minute and archive-check tests, and for the re-run of the aggregation survey, before they are run (P141 C9, R-T, R-DQ)
+
+An observation log, so this section only adds. P141 proves that the 76 tests of C5 and C7 bite (38 in `tests/unit/test_aggregation_traded.py` against the traded-minute code in `src/trading_bot/data/aggregation.py`, and 38 in `tests/unit/test_n2_archive_check.py` against `scripts/n2_archive_check.py`), and re-runs section 76's 30 aggregation mutations because C3 and C4 changed `aggregation.py`'s body (`M5n-032`). **This section is committed before any of the three surveys is run.** Everything here decides nothing about S4.
+
+### The method
+
+As section 76: the P117 harness (`survey.py` SHA-256 `cd2eb339e4fdf65d361482cccf0511ee3fd28a495fd90815cd5b3b357ed3202a`, `p116_hook.py` `febedd0bf7a8fee6a9fe3ac2462975d917ee5e31f5e1daf2acb57f7d378e2a8d`) in a detached worktree outside the repository at the commit that carries this section, the import location of `trading_bot` and `tests` proven before any result counts, an unmutated baseline predicted green, every mutation byte-exact with one match asserted and every restore shown SHA-equal, the worktrees removed afterwards. Three runs, one spec each, each executing only the mutated file's own tests: `survey_a2.json` (the 30 mutations of section 76 against the 58 tests of `test_aggregation.py`; baseline predicted **58 passed**), `survey_t.json` (29 against the 38 tests of `test_aggregation_traded.py`; **38 passed**) and `survey_c.json` (35 against the 38 tests of `test_n2_archive_check.py`; **38 passed**). The specs are written by `scratch\p141\make_spec2.py` from the tables below, and an anchor that occurs more than once in the file is extended to the left, line by line, until it occurs once. The tests of `test_aggregation_traded.py` also pass through the shared helpers (`_checked_stream`, `_width_ms`, `_epoch_ms`, `_require_grid`), so the T run mutates those too; the old tests' reach into the traded code, and `test_n2_archive_check.py`'s into `aggregation.py`, are not predicted.
+
+A kill is a failure present under the mutation and absent at baseline, by the three exception types of `M5i-115`. More than predicted is recorded (MORE); fewer halts the survey (FEWER). The tests were read for expressiveness and for the assertion looking before the predictions were written.
+
+### Totals
+
+**A2: 30 mutations, 170 predicted kills, section 76's table unchanged** (the old tests call only `aggregate_bars`, whose behaviour C3 did not change). The re-anchored mutations differ from section 76's only in where the text now lives: `a10` is the `yield` in `_checked_stream`, `a12` is the final `if current is not None:` of `aggregate_bars`, and the others keep their line and gain context. **T: 29 mutations, 128 predicted kills. C: 35 mutations, 51 predicted kills.** 94 mutations and 349 predicted kills in all.
+
+**Mutations predicted to be killed by nothing, five:** `a01` is equivalent, as in section 76. `c31` (only a `CheckError` caught by `main`), `c32` (the API-only runs not printed), `c34` (the failing-bucket list printing 51 rows) and `c35` (two decimals on a percentage) are **unpinned**: no test refuses a run through a `VerifyError`, an `AggregationError` or an `OSError` by way of `main`, none asserts a run line in the printed output, none has more than 50 failing buckets, and no test renders section C of a real report.
+
+**Tests predicted to be killed by no mutation:** the aggregation file **3 of 58**, as in section 76. In `test_aggregation_traded.py` **3 of 38**: the `1w` and empty-string cases of the timeframe refusal (any membership test refuses them) and `test_empty_input_gives_no_bars` (no mutation touches an empty stream). In `test_n2_archive_check.py` **2 of 38**: `test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[9999.00000000-bands0]` (the equal case returns before the band is chosen, and no mutation of the table changes that path) and `test_the_script_has_no_fetcher_and_no_network_parameter` (a property of the signature, which no mutation in the table changes). The test that no 2024-01 file is opened is predicted to be killed only incidentally, by `c11`, because it asserts an equal count after the run; no mutation of the table removes the window end itself, which the script takes from `n2_verify_bars.py`.
+
+**Where a prediction is most likely to be wrong, named in advance:** `t30` (every minute its own bucket, 18 kills) and `t21` (the last traded bucket never flushed, 23) are counts of the tests that reach the mutated line; `t01` (a filler counted as traded, 11) rests on which tests have a filler whose price differs from the trade next to it; `c24` (the sign test, 7) rests on the volume-gap tests all having a gap above zero except one; and `c21` (volume among the consistency fields, 3) rests on the volumes of an incomplete bucket never equalling the archive's in the fixtures.
+
+The codes in the T and C tables are keyed to test ids at the end of the section; the A2 table is section 76's, to which its codes belong.
+
+### A2: the 30 mutations of section 76, re-anchored, predictions as in section 76
+
+(See section 76's table for the break and the predicted kills of `a01` to `a30`, which are unchanged.)
+
+### T: predicted kills, `src/trading_bot/data/aggregation.py` against `tests/unit/test_aggregation_traded.py`
+
+
+| Mutation | The break | Predicted kills (tests/unit/test_aggregation_traded.py) |
+|---|---|---|
+| t01 | a filler minute counts as traded | T4, T5, T7, T8, T9, T11, T12, T16, T22, T23, T33 |
+| t03 | the close stays the first traded minute's | T1, T22, T23 |
+| t04 | the high keeps the LOWEST traded high | T1, T9, T10, T22, T23 |
+| t05 | the low keeps the HIGHEST traded low | T1, T9, T10, T22, T23 |
+| t06 | open, high and low restart at every traded minute | T1, T9, T22, T23 |
+| t07 | the volume is the last minute's and not the sum | T2, T22, T23 |
+| t08 | the present count is never incremented | T2, T4, T11, T16, T22, T23, T33 |
+| t09 | minutes_missing is the present count | T2, T11, T16 |
+| t10 | a traded minute counts twice | T2, T4, T7, T16, T22, T23, T33 |
+| t11 | close_time is the next bucket's first millisecond | T18, T19, T20, T21 |
+| t12 | open_time is one millisecond late | T17, T18, T19, T20, T21, T35 |
+| t13 | a bar with no traded minute may carry a price | T13 |
+| t14 | a bar with a traded minute may lack a price | T14 |
+| t15 | the open is not a Money field | T15 |
+| t16 | the store reader does not check the grid | T36, T37, T38 |
+| t17 | the store is asked for 40 days beyond end | T35 |
+| t18 | the store is always asked for BTCUSDT | T34 |
+| t19 | the store is asked for an empty range | T33, T34, T35 |
+| t21 | the last traded bucket is never flushed | T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T16, T17, T18, T19, T20, T21, T22, T23, T33, T34, T35 |
+| t22 | a later bucket is folded into the current one | T12, T17, T18, T19, T22, T23 |
+| t23 | any stored interval is an aggregated timeframe | T28, T29, T38 |
+| t24 | a candle that is not 1m is accepted | T24 |
+| t25 | a second symbol is accepted | T26 |
+| t26 | an open off the minute grid is accepted | T27 |
+| t27 | the ordering check is removed | T25 |
+| t28 | the grid check on start and end is removed | T36, T37, T38 |
+| t29 | a naive instant is not refused by the aggregator | T38 |
+| t30 | every minute is its own bucket | T1, T2, T3, T4, T5, T6, T7, T8, T9, T10, T11, T12, T16, T17, T22, T23, T33, T35 |
+| t31 | the previous open time is never remembered | T25 |
+
+### C: predicted kills, `scripts/n2_archive_check.py` against `tests/unit/test_n2_archive_check.py`
+
+| Mutation | The break | Predicted kills (tests/unit/test_n2_archive_check.py) |
+|---|---|---|
+| c01 | a missing digest list is not checked for | K28 |
+| c02 | a malformed digest line is not refused | K29 |
+| c03 | the response files and the list may disagree | K26, K27 |
+| c04 | a response is not checked against its digest | K25 |
+| c06 | open times out of order are accepted | K31 |
+| c07 | a bar at or after the window end is accepted | K30 |
+| c08 | the list digest is that of nothing | K3 |
+| c09 | the file count is one too many | K3 |
+| c11 | equal counts two per bar in the archive comparison | K1, K4, K7, K8, K33, K35 |
+| c12 | a field is counted twice in the archive comparison | K4, K5 |
+| c13 | a field is counted twice in the consistency check | K9 |
+| c14 | archive-only counts the API-only bars | K7, K8 |
+| c15 | the API-only runs are built from the archive-only bars | K7 |
+| c16 | the archive-only runs are built from the API-only bars | K8 |
+| c17 | a bucket with no traded minute is not counted | K13 |
+| c18 | consistent counts two per bucket | K1, K2 |
+| c19 | failed complete and incomplete are swapped | K9, K12 |
+| c20 | every bucket counts as complete | K11 |
+| c21 | volume is one of the consistency fields | K10, K11, K12 |
+| c22 | the first band edge is 0.02% | K17, K18 |
+| c23 | a gap on a band edge falls in the next band | K16, K19 |
+| c24 | a gap above zero is counted as smaller | K16, K17, K18, K19, K20, K21, K22 |
+| c25 | the median is a tenth of the percentage | K23 |
+| c26 | an incomplete bucket is in the volume gap | K24 |
+| c28 | a series with no saved response is not refused | K32 |
+| c30 | a refused run exits 0 | K38 |
+| c31 | only a CheckError is caught by main | none |
+| c32 | the API-only runs are not printed | none |
+| c33 | the archive mismatch list prints 51 rows | K37 |
+| c34 | the failing-bucket list prints 51 rows | none |
+| c35 | the volume percentages print two decimals | none |
+| c38 | figures are compared as strings in the archive comparison | K6 |
+| c39 | aggregator-only counts the archive-only buckets | K14 |
+| c40 | the failing-bucket list inverts complete | K36 |
+| c37 | the consistency fields lack the high | K9 |
+
+### The test key (every code the T and C tables use)
+
+| Code | Test |
+|---|---|
+| K1 | `TestADayThatAgreesEverywhere::test_the_archive_equals_the_api_and_the_aggregation_is_consistent` |
+| K2 | `TestADayThatAgreesEverywhere::test_a_zero_volume_first_minute_is_consistent_under_the_traded_rule` |
+| K3 | `TestADayThatAgreesEverywhere::test_the_list_digest_and_file_count_are_reported` |
+| K4 | `TestArchiveAgainstTheApi::test_a_wrong_field_is_counted_by_field_and_listed_with_both_values` |
+| K5 | `TestArchiveAgainstTheApi::test_two_wrong_fields_are_one_mismatched_bar_and_two_field_counts` |
+| K6 | `TestArchiveAgainstTheApi::test_figures_are_compared_as_decimals_not_as_strings` |
+| K7 | `TestArchiveAgainstTheApi::test_a_bar_only_the_api_has_is_api_only_and_a_run` |
+| K8 | `TestArchiveAgainstTheApi::test_a_bar_only_the_archive_has_is_archive_only` |
+| K9 | `TestTheTradedMinuteConsistencyCheck::test_a_price_the_archive_has_differently_fails_the_bucket_and_is_listed_without_a_price` |
+| K10 | `TestTheTradedMinuteConsistencyCheck::test_a_volume_difference_is_not_a_consistency_failure` |
+| K11 | `TestTheTradedMinuteConsistencyCheck::test_an_incomplete_bucket_with_the_right_prices_is_consistent` |
+| K12 | `TestTheTradedMinuteConsistencyCheck::test_an_incomplete_bucket_whose_extreme_minute_is_missing_fails_and_says_so` |
+| K13 | `TestTheTradedMinuteConsistencyCheck::test_a_bucket_with_no_traded_minute_is_counted_and_not_checked` |
+| K14 | `TestTheTradedMinuteConsistencyCheck::test_buckets_only_one_side_has_are_counted` |
+| K16 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10000.00000000-bands1]` |
+| K17 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10000.10000000-bands2]` |
+| K18 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10001.00000000-bands3]` |
+| K19 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10100.00000000-bands4]` |
+| K20 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[10101.00000000-bands5]` |
+| K21 | `TestTheVolumeGap::test_the_archive_being_larger_lands_in_the_band_its_relative_difference_names[20000.00000000-bands6]` |
+| K22 | `TestTheVolumeGap::test_the_archive_being_smaller_is_counted_apart_from_the_bands` |
+| K23 | `TestTheVolumeGap::test_the_median_and_maximum_are_percentages_of_the_archive_volume` |
+| K24 | `TestTheVolumeGap::test_an_incomplete_bucket_is_left_out_of_the_gap` |
+| K25 | `TestTheSavedEvidenceIsChecked::test_a_response_that_no_longer_matches_its_digest_refuses_the_run` |
+| K26 | `TestTheSavedEvidenceIsChecked::test_a_json_file_the_list_does_not_name_refuses_the_run` |
+| K27 | `TestTheSavedEvidenceIsChecked::test_a_listed_file_that_is_missing_refuses_the_run` |
+| K28 | `TestTheSavedEvidenceIsChecked::test_a_missing_digest_list_refuses_the_run` |
+| K29 | `TestTheSavedEvidenceIsChecked::test_a_malformed_digest_line_refuses_the_run` |
+| K30 | `TestTheSavedEvidenceIsChecked::test_a_bar_at_or_after_the_window_end_refuses_the_run` |
+| K31 | `TestTheSavedEvidenceIsChecked::test_open_times_out_of_order_refuse_the_run` |
+| K32 | `TestTheSavedEvidenceIsChecked::test_a_series_with_no_saved_response_refuses_the_run` |
+| K33 | `TestNothingAtOrAfterTheWindowEndIsRead::test_files_of_2024_01_that_no_longer_match_their_hash_are_never_opened` |
+| K35 | `TestWhatIsPrintedAndWhatIsNotAsked::test_a_clean_run_prints_the_three_reports_and_no_price` |
+| K36 | `TestWhatIsPrintedAndWhatIsNotAsked::test_the_failing_bucket_list_has_times_and_fields_and_no_price` |
+| K37 | `TestWhatIsPrintedAndWhatIsNotAsked::test_the_mismatch_list_is_capped_at_fifty_rows` |
+| K38 | `TestWhatIsPrintedAndWhatIsNotAsked::test_a_refused_run_is_an_error_exit_and_prints_no_report` |
+| T1 | `TestABucketInWhichEveryMinuteTraded::test_it_equals_the_plain_aggregation_in_the_four_prices` |
+| T2 | `TestABucketInWhichEveryMinuteTraded::test_the_counts_and_the_volume` |
+| T3 | `TestABucketInWhichEveryMinuteTraded::test_every_figure_is_a_decimal` |
+| T4 | `TestAZeroTradeFirstMinute::test_the_open_is_the_first_traded_minutes_not_the_fillers` |
+| T5 | `TestAZeroTradeFirstMinute::test_the_plain_aggregation_takes_the_fillers_open_and_that_is_the_difference` |
+| T6 | `TestAZeroTradeFirstMinute::test_a_filler_whose_price_is_the_first_trade_changes_nothing` |
+| T7 | `TestAZeroTradeLastMinute::test_the_close_is_the_last_traded_minutes` |
+| T8 | `TestAZeroTradeLastMinute::test_a_filler_close_that_differs_is_not_taken` |
+| T9 | `TestAZeroTradeExtreme::test_a_fillers_high_and_low_do_not_widen_the_bucket` |
+| T10 | `TestAZeroTradeExtreme::test_a_traded_extreme_is_kept` |
+| T11 | `TestABucketWithNoTradedMinute::test_it_has_no_prices_a_volume_of_zero_and_is_still_complete` |
+| T12 | `TestABucketWithNoTradedMinute::test_it_is_emitted_and_not_skipped_or_priced_from_a_neighbour` |
+| T13 | `TestABucketWithNoTradedMinute::test_a_bar_with_no_traded_minute_cannot_carry_a_price` |
+| T14 | `TestABucketWithNoTradedMinute::test_a_bar_with_a_traded_minute_must_carry_all_four_prices` |
+| T15 | `TestABucketWithNoTradedMinute::test_a_float_price_is_refused` |
+| T16 | `TestGapsAreStillReportedAndNeverFilled::test_a_missing_minute_is_counted_beside_a_filler` |
+| T17 | `TestGapsAreStillReportedAndNeverFilled::test_a_bucket_with_no_stored_minute_is_not_emitted` |
+| T18 | `TestBothPairsAndBothTimeframes::test_the_symbol_timeframe_and_grid_are_the_plain_aggregations[4h-BTCUSDT]` |
+| T19 | `TestBothPairsAndBothTimeframes::test_the_symbol_timeframe_and_grid_are_the_plain_aggregations[4h-ETHUSDT]` |
+| T20 | `TestBothPairsAndBothTimeframes::test_the_symbol_timeframe_and_grid_are_the_plain_aggregations[1d-BTCUSDT]` |
+| T21 | `TestBothPairsAndBothTimeframes::test_the_symbol_timeframe_and_grid_are_the_plain_aggregations[1d-ETHUSDT]` |
+| T22 | `TestBothPairsAndBothTimeframes::test_a_day_equals_the_fold_of_its_six_4h_buckets_with_a_filler_first[BTCUSDT]` |
+| T23 | `TestBothPairsAndBothTimeframes::test_a_day_equals_the_fold_of_its_six_4h_buckets_with_a_filler_first[ETHUSDT]` |
+| T24 | `TestTheStreamChecksAreTheSame::test_a_candle_that_is_not_a_1m_bar_is_refused` |
+| T25 | `TestTheStreamChecksAreTheSame::test_open_times_must_increase` |
+| T26 | `TestTheStreamChecksAreTheSame::test_two_symbols_are_refused` |
+| T27 | `TestTheStreamChecksAreTheSame::test_an_open_time_off_the_minute_is_refused` |
+| T28 | `TestTheStreamChecksAreTheSame::test_a_timeframe_other_than_4h_and_1d_is_refused[1m]` |
+| T29 | `TestTheStreamChecksAreTheSame::test_a_timeframe_other_than_4h_and_1d_is_refused[1h]` |
+| T33 | `TestAgainstARealStore::test_a_filler_first_minute_is_skipped_for_the_open_and_counted_for_the_volume` |
+| T34 | `TestAgainstARealStore::test_the_symbol_is_the_one_asked_for` |
+| T35 | `TestAgainstARealStore::test_no_month_file_at_or_after_end_is_opened` |
+| T36 | `TestAgainstARealStore::test_a_range_off_the_grid_is_refused_at_the_call[start0-end0]` |
+| T37 | `TestAgainstARealStore::test_a_range_off_the_grid_is_refused_at_the_call[start1-end1]` |
+| T38 | `TestAgainstARealStore::test_a_naive_instant_and_an_unaggregated_timeframe_are_refused_at_the_call` |
+
+### The prediction rule in force
+
+A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. The surveys run on the tree that carries this section, and their results are appended as section 81. The order of the remaining commits: this section; the three surveys and their results; the counts and the lists the new files falsify (`CLAUDE.md` and `README.md`).
