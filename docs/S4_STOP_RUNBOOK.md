@@ -383,7 +383,7 @@ The acceptance tests are the pre-registration's section 7 (A gross mean, B count
 owner to those figures; this runbook does not apply them. **Do not edit `scripts\s4_compare.py` or the pre-registration**
 (R-BN): any other reading of the downtime is exploratory under the ratified CHOSEN line 5, and step 9 is where it lives.
 
-**REQUIRED in the step 8 report (P132): two notes, written beside the primary's figures and never inside them.**
+**REQUIRED in the step 8 report (P132, extended at P134): four items, written beside the primary's figures and never inside them.**
 
 1. **The `13:09` BTCUSDT entry.** The entry placed at `2026-10-21T13:09:00Z` (order list `183218`) is labelled `fok-unfilled` by the frozen
    `diagnose` ("the live bot placed and nothing was booked"), and it FILLED IN FULL: the stop leg executed `0.01041000` of the `0.02233000`
@@ -396,6 +396,22 @@ owner to those figures; this runbook does not apply them. **Do not edit `scripts
    and verdicts are reported first, with the latch named as the diagnosed cause of any failure. A latch-caused failure is recorded as FAIL
    (latch-caused), not NOT MEASURED. Nothing below replaces or reinterprets it."* So a failed test whose cause is the latch is written
    `FAIL (latch-caused)` with the latch named, and never `NOT MEASURED`; E1 and E2 (step 7b) are reported beside it as figures only.
+3. **The `22:00` ETHUSDT entry of 2026-10-23, beside the `13:09` note (P134).** ETHUSDT order list `218102`, placed `2026-10-23T22:00:01Z`, is
+   an EXPECTED `fill-model` disagreement and the report says so where it appears: the recorded ETHUSDT 1m series crossed its stop of `2354.20`
+   by 436.05 in the bars opening `22:30`, `22:31` and `22:32` (lows `1940.21`, `1937.53` and `1918.15`) and both legs read `EXPIRED` with
+   ZERO executed live, and the bot's own strategy `CLOSE` then booked it at `22:40:03Z` for a realised `-11.36658000` (order `5380675`),
+   where the backtest is expected to book a stop-out on the same bar (`M5m-675`, REASONED, to be measured here; `docs/RUN_LEDGER.md` section 70).
+   The label the frozen tool prints is reported UNALTERED and annotated; if the entry is not in the primary's disagreement list (for example
+   because the backtest did not match it), the note is still written, with the reason.
+4. **The R-DR annotation (P134, `docs/S4_CORRECTION_P134.md`), required.** Every entry in the disagreement lists of the primary, E1 and E2 is
+   annotated with whether a 1m bar of its pair with range (high - low) / open >= 3% occurred while the live position was open, with the
+   widest range found beside the yes or no so another threshold can be re-cut, and the counts are reported BY CAUSE (recorded-gap, bar differs,
+   exact-decimal tie, window-edge, risk refusal differs, fok-unfilled, fill-model, unexplained). It recomputes no A, B or C figure, is not an
+   exploratory analysis under R-DL, excludes nothing and changes no verdict; the 3% was chosen after P133's measurement and its sensitivity
+   is in the correction file (BTCUSDT 54, 51, 46 and 45 wide bars and ETHUSDT 16, 15, 15 and 15 at 3%, 5%, 10% and 15%). **No tool makes this
+   annotation yet** (`M5m-682`): written by hand it is a lookup of each listed entry's open interval against the frozen store, and a program
+   for it is code, drafted only after its predictions commit exists and committed only after the full bare gate (R-DQ). **For an entry with no
+   live position (a backtest-only entry) the ruling gives no interval; write *no live position* and leave the question to the owner.**
 
 ## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
 
