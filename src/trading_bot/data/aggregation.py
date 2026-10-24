@@ -126,17 +126,15 @@ def _epoch_ms(moment: datetime, name: str) -> int:
     return (moment - _EPOCH) // _MS
 
 
-def aggregate_bars(candles: Iterable[Candle], timeframe: str) -> Iterator[AggregatedBar]:
-    """Aggregate a time-ordered stream of 1m candles of one symbol into ``timeframe`` bars.
+def _checked_stream(candles: Iterable[Candle], width_ms: int) -> Iterator[tuple[str, int, Candle]]:
+    """Each candle of a 1m stream with its symbol and the open of its bucket, after the checks.
 
-    Raises ``AggregationError`` for a candle that is not a 1m bar, a second symbol, an open
-    time that is off the minute or does not increase, and for a timeframe other than
-    ``AGGREGATED_TIMEFRAMES``. A generator: the checks on the stream run as it is consumed.
+    Raises ``AggregationError`` for a candle that is not a 1m bar, a second symbol, and an
+    open time that is off the minute or does not increase. A generator: the checks run as
+    the stream is consumed.
     """
-    width_ms = _width_ms(timeframe)
     symbol: str | None = None
     previous_ms: int | None = None
-    current: _Bucket | None = None
     for candle in candles:
         if candle.timeframe != "1m":
             raise AggregationError(f"expected 1m candles, got {candle.timeframe!r}")
@@ -150,7 +148,21 @@ def aggregate_bars(candles: Iterable[Candle], timeframe: str) -> Iterator[Aggreg
         if previous_ms is not None and opened_ms <= previous_ms:
             raise AggregationError(f"open times do not increase at {candle.open_time!r}")
         previous_ms = opened_ms
-        bucket_ms = opened_ms - opened_ms % width_ms
+        yield symbol, opened_ms - opened_ms % width_ms, candle
+
+
+def aggregate_bars(candles: Iterable[Candle], timeframe: str) -> Iterator[AggregatedBar]:
+    """Aggregate a time-ordered stream of 1m candles of one symbol into ``timeframe`` bars.
+
+    Raises ``AggregationError`` for the stream faults ``_checked_stream`` names and for a
+    timeframe other than ``AGGREGATED_TIMEFRAMES``. A generator: the checks run as the stream
+    is consumed.
+    """
+    width_ms = _width_ms(timeframe)
+    current: _Bucket | None = None
+    last_symbol = ""
+    for symbol, bucket_ms, candle in _checked_stream(candles, width_ms):
+        last_symbol = symbol
         if current is None:
             current = _Bucket(bucket_ms, candle)
         elif current.open_ms == bucket_ms:
@@ -158,8 +170,8 @@ def aggregate_bars(candles: Iterable[Candle], timeframe: str) -> Iterator[Aggreg
         else:
             yield current.build(symbol, timeframe, width_ms)
             current = _Bucket(bucket_ms, candle)
-    if current is not None and symbol is not None:
-        yield current.build(symbol, timeframe, width_ms)
+    if current is not None:
+        yield current.build(last_symbol, timeframe, width_ms)
 
 
 def aggregate_from_store(
