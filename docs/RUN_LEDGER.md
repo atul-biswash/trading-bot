@@ -8256,3 +8256,99 @@ An **entry event** is a bar on which the candidate's condition is true and was f
 ### The prediction rule in force
 
 A prediction that comes out wrong in either direction is recorded as a finding with its reach diagnosed; none is changed after the fact. A code or test commit passes the full bare gate before it is made (R-DQ clause 2). The commits that follow: the indicators and the gap helper with their tests; the six candidates with theirs; the research config with its test; the count script with its tests; the run; the survey predictions; the survey; the counts.
+
+## 83. M5n N3: the entry-event counts over the in-sample archive, scored against section 82 (P142 C12, R-T, R-DQ, R-DT-3a)
+
+An observation log, so this section only adds. `scripts/n3_entry_counts.py` (`daf8320`, tests `67560d2`) was run ONCE on the canonical store, on `m5n` with a clean tree at `67560d2`: `python scripts/n3_entry_counts.py`, no argument, so the window is the committed `[2017-08-17, 2024-01-01)`. It started at `2026-10-24T18:36:34Z` by the machine's UTC clock and ended at `18:39:41Z`: **3 min 6 s of wall time, exit 0, standard error empty**. The output below is the whole of it, saved outside the repository as `scratch\p142\n3_counts_output.txt`; **its SHA-256 is `909c2f9b3747b0ca2c8e7eaaf969e437a468be87e39c9f49a4717430d96a6eea`**, and every count quoted in this section is a count in that output. It is counts only: no price, no timestamp list and no return. **Every event count is an UPPER BOUND on trades**: a trade needs N4's trailing exit and the one-position-per-pair rule, neither of which exists yet. Nothing here decides anything about S4.
+
+### Halts, checked before the run
+
+| Halt | Observed |
+|---|---|
+| not on `m5n`, `git status` not clean | `m5n`; empty `git status --short` |
+| a command would write under `deploy\45547f107715`, the rehearsal clone or the canonical store, or touch `config.yaml` or `config.s4.yaml` | the one command writes its output to a file under `scratch\`; the script opens no file for writing (pinned by `test_it_opens_nothing_for_writing`) and `HistoricalStore` only reads |
+| any venue request | none: the script has no fetcher (pinned by `test_it_reads_through_the_store_and_has_no_fetcher`) |
+| any bar at or after `2024-01-01T00:00:00Z` read | the store is asked for `end = 2024-01-01T00:00:00Z` and opens no month file at or after it; a month file past the boundary that is not a month file is never opened (pinned by `test_a_month_at_or_after_the_boundary_is_never_opened`) |
+| anything computes a return, P&L, equity, exit or metric | none: a candidate answers whether a condition became true on a bar, and the script counts those answers |
+| a candidate needs a volume input | none: a replaced volume column changes no count (pinned by `test_a_volume_that_differs_changes_nothing`) |
+
+### The output
+
+```
+N3 entry-event counts. Each is an UPPER BOUND on trades: a trade needs N4's trailing exit
+and the one-position-per-pair rule. An event is an edge (true now, false on the bar before).
+
+series             bars  slots  missing  gap_runs
+BTCUSDT 1d         2328   2328        0         0
+ETHUSDT 1d         2328   2328        0         0
+BTCUSDT 4h        13950  13967       17         9
+ETHUSDT 4h        13950  13967       17         9
+
+candidate               pair        events  no_rdz  suppressed  gated_only
+C1 donchian_1d_20       BTCUSDT        104     104           0           0
+C1 donchian_1d_20       ETHUSDT        104     104           0           0
+C2 donchian_1d_55       BTCUSDT         73      73           0           0
+C2 donchian_1d_55       ETHUSDT         68      68           0           0
+C3 sma_cross_1d_50_200  BTCUSDT          6       6           0           0
+C3 sma_cross_1d_50_200  ETHUSDT          6       6           0           0
+C4 donchian_4h_20       BTCUSDT        538     542           4           0
+C4 donchian_4h_20       ETHUSDT        546     551           5           0
+C5 keltner_4h_20_2      BTCUSDT        293     293           2           2
+C5 keltner_4h_20_2      ETHUSDT        291     288           0           3
+C6 tsmom_1d_90          BTCUSDT         45      45           0           0
+C6 tsmom_1d_90          ETHUSDT         40      40           0           0
+```
+
+On every row `events = no_rdz - suppressed + gated_only` (538 = 542 - 4, 293 = 293 - 2 + 2, 291 = 288 + 3), which is also pinned on the test store.
+
+### Section 82's predictions, scored
+
+**(a) Entry events per pair, against the stated range.** Seven of the twelve are inside their range and five are outside it, all five in the direction of the trouble they were reasoned from.
+
+| Candidate | Pair | Predicted (range) | Observed | Against the estimate | Verdict |
+|---|---|---|---|---|---|
+| C1 `donchian_1d_20` | BTCUSDT | 115 (85 to 150) | 104 | -10% | inside |
+| C1 | ETHUSDT | 120 (90 to 155) | 104 | -13% | inside |
+| C2 `donchian_1d_55` | BTCUSDT | 70 (50 to 95) | 73 | +4% | inside |
+| C2 | ETHUSDT | 72 (50 to 95) | 68 | -6% | inside |
+| C3 `sma_cross_1d_50_200` | BTCUSDT | 5 (3 to 8) | 6 | +1 | inside |
+| C3 | ETHUSDT | 6 (3 to 9) | 6 | 0 | inside |
+| C4 `donchian_4h_20` | BTCUSDT | 880 (740 to 1030) | 538 | -39% | **OUTSIDE, 202 under the range** |
+| C4 | ETHUSDT | 900 (760 to 1050) | 546 | -39% | **OUTSIDE, 214 under the range** |
+| C5 `keltner_4h_20_2` | BTCUSDT | 450 (300 to 620) | 293 | -35% | **OUTSIDE, 7 under the range** |
+| C5 | ETHUSDT | 480 (310 to 650) | 291 | -39% | **OUTSIDE, 19 under the range** |
+| C6 `tsmom_1d_90` | BTCUSDT | 25 (15 to 40) | 45 | +80% | **OUTSIDE, 5 over the range** |
+| C6 | ETHUSDT | 27 (15 to 42) | 40 | +48% | inside |
+
+Also predicted in (a): the 4h counts are about seven times the 1d counts. **Observed: C4 is 5.2 times C1** (538 against 104) and C5 is 2.8 times C1, so the statement holds for neither 4h candidate, while the SMA cross is the sparsest, as predicted: 6 against 40 to 546 for the others, 6.7 to 91 times fewer.
+
+**(b) Suppressions and gated-only events.**
+
+| Prediction | Observed | Verdict |
+|---|---|---|
+| C1, C2, C3, C6: no suppression in either pair | 0 in all eight rows | MATCH |
+| C4: about 18 per pair (8 to 30) | 4 (BTCUSDT) and 5 (ETHUSDT) | **OUTSIDE, 4 and 3 under the range** |
+| C5: about 11 per pair (4 to 20) | 2 (BTCUSDT) and 0 (ETHUSDT) | **OUTSIDE, 2 and 4 under the range** |
+| gated-only: none for C1 to C4 and C6 | 0 in all ten rows | MATCH |
+| gated-only: C5 at most 6 per pair | 2 and 3 | inside |
+| missing decision slots: 1d none in either pair; 4h 17 in both | 0 and 0; 17 and 17 | MATCH, exact |
+| the lean that the same slots are missing in both pairs | both 4h series show 13950 bars, 17 missing slots and 9 gap runs | consistent with it; the counts do not prove the slots are the same |
+
+**(c) Indicators.** Reused unchanged: `sma`, `ema`, `atr` and `true_range` inside it. New: `donchian_high`, `keltner_upper` and `momentum`, in `indicators/breakout.py`. MEASURED at `67560d2` against `ee8d485`: `git diff --quiet ee8d485 HEAD -- src/trading_bot/indicators/indicators.py` reports no change, and `indicators/__init__.py` gains four lines of exports. MATCH.
+
+**(d) The script.** Prints counts only: yes. Makes no request: yes. Reads `[2017-08-17, 2024-01-01)` only: yes. Runs in under 10 minutes: **3 min 6 s**. MATCH.
+
+**(e) Warm-up.** No event is counted inside a candidate's warm-up: it holds by construction (the script evaluates a bar only when the history holds the candidate's `warmup_period` rows, and each candidate returns no signal on fewer than its window) and the output cannot show it. It is not a measurement of the run.
+
+### Diagnoses, where a prediction missed
+
+None of these is a rerun: the script was run once, as P142 item 5 says, so each diagnosis uses the printed counts and the arithmetic on them, and is labelled for what it rests on.
+
+* **C4 and C5 came in 35 to 39% under their estimates, and the estimate's driver was the wrong one.** Section 82 reasoned the 4h counts from the share of 4h bars on which each condition holds (about 9% for a 20-bar breakout, about 5% above a 2-ATR channel) divided by a run length. DERIVED from the printed counts: C4 fires on 538 of 13950 bars, 3.9%, against the 6.3% to 6.5% per bar the prediction's estimates imply, and C5 on 2.1% against about 3.2% to 3.4%. The share of bars on which the condition holds is not printed and was not measured; what is measured is that the edge rate is about 60% of the one predicted. The 9% and the 5% were estimates and were not measured. A 20-bar window at 4h spans 3.3 days and not 20, and a close that clears the highs of the last 3.3 days is a weaker event than one that clears the last 20 days, but it also repeats in clusters, so the edge count falls where the share does not. REASONED, not measured.
+* **C6 on BTCUSDT came in 80% over.** 45 events in 2328 days is one rising edge of the 90-day change per 52 days; the prediction's 25 assumed a longer mean cycle. A 90-day change that hovers near zero crosses it several times, and the strict `> 0` after `<= 0` counts each crossing. REASONED.
+* **Suppressions were 4 and 5 against about 18 for C4, and 2 and 0 against about 11 for C5.** Two causes are in the printed counts. First, the 17 missing 4h slots lie in **9 gap runs**, not 17 isolated gaps, and the prediction blocked 22 following bars per slot where a run blocks them once: 9 runs at the observed C4 rate give 9 x 22 x 0.0386 = 7.6, against 14.4 for 17 gaps at the same rate, so the run count alone halves the estimate. Second, the observed 4 and 5 sit under even the 7.6, which fits a suppressed event needing the ungated reading to have one on the same bar and the gaps lying where there was little to suppress; which gaps those are is not printed, and the output carries no timestamp by design. REASONED for the second cause.
+* **C5 has events only its re-seeding creates, as section 82 allowed: 2 on BTCUSDT and 3 on ETHUSDT.** On ETHUSDT it has three and suppresses none, so the gap rule ADDS 3 events there (291 against 288). A recursive indicator seeded again after a gap carries a different EMA and ATR than the one carried across it, and the difference can put a close over the band on a bar where the unbroken series does not. MEASURED as a count; the cause is REASONED.
+
+### What these counts are, and are not
+
+They are the number of times each rule, as ruled, said "enter" over the in-sample window, bar by bar, with the gap rule on. **They are not trades**, which need the one-position-per-pair rule (a candidate that is long cannot enter again) and N4's trailing exit; the counts bound the trades from above and nothing yet says by how much. They make no statement about any return. **C3 has 6 events per pair in 6.4 years**, which is a count of trades the gate will have to work with at most, per pair; whether a rule that sparse can be judged at all is for the owner and not decided here.
