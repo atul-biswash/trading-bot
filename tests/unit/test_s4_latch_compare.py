@@ -296,13 +296,13 @@ class TestAttachingUntrustedLines:
 
     def test_a_line_goes_to_the_nearest_pass_of_its_own_process(self) -> None:
         lines = [
-            recon(t("00:10:00"), 1, 1, "unknown=1"),
             recon(t("00:10:00"), 2, 1, "unknown=1"),
+            recon(t("00:10:00"), 1, 1, "unknown=1"),
             untrusted(t("00:10:01"), 2),
         ]
         attached = self.attach(lines)
-        assert list(attached) == [2]
-        assert attached[2].symbols == {"BTCUSDT"}
+        assert list(attached) == [1]
+        assert attached[1].symbols == {"BTCUSDT"}
 
     def test_a_line_before_its_pass_is_attached_as_well_as_one_after(self) -> None:
         before = self.attach([untrusted(t("00:10:00"), 1), recon(t("00:10:01"), 1, 1, "unknown=1")])
@@ -323,8 +323,10 @@ class TestAttachingUntrustedLines:
             untrusted(t("00:10:01"), 1, "BTCUSDT"),
             untrusted(t("00:10:02"), 1, "ETHUSDT"),
         ]
-        attached = self.attach(lines)[1]
-        assert attached.first_line == 2 and attached.symbols == {"BTCUSDT", "ETHUSDT"}
+        attached = self.attach(lines)
+        assert list(attached) == [1]
+        assert attached[1].first_line == 2
+        assert attached[1].symbols == {"BTCUSDT", "ETHUSDT"}
 
     def test_a_line_with_no_pass_within_fifteen_seconds_is_dropped(self) -> None:
         lines = [recon(t("00:10:00"), 1, 1, "unknown=1"), untrusted(t("00:10:16"), 1)]
