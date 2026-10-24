@@ -47,6 +47,9 @@ only procedures already measured on this machine."*
 | cap | `2026-11-14T06:05:20Z` (`T0` + 35 days); at the cap `M` is `2026-11-14T00:00:00Z` (R-DD) | derived; ruled at P124, see step 1 |
 | S4 commit | `45547f10771543b41db42e1cbcb8b5a0a9cf1776` | the run's `boot_provenance` line |
 | frozen scripts | `s4_compare.py` `b8afa603...af08`, `trade_census.py` `926bdd46...d9bb`, `config.s4.yaml` `0f170bae...2594` | pre-registration section 9; the same bytes at `HEAD` and at `45547f1` (P123) |
+| `s4_latch_compare.py` (E2) | `59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7` | **exploratory and diagnostic, frozen for the stop by P137**; the bytes at `e8c820b` (committed at `c254740`, edited at `5a7891c`) |
+| `s4_wick_annotate.py` (R-DR/R-DS) | `d9381b4c304444a1c3575d8b0cbd77c101ec5837e8bee2498d994888cf5d7d09` | **exploratory and diagnostic, frozen for the stop by P137**; the bytes at `e8c820b` (committed at `526002f`, fixed at `e0c3e1a`) |
+| the commit the stop's E2 and annotation run from | the development tree at `e8c820b`, or a later commit whose diff against `e8c820b` touches neither of the two files above | pinned by P137; step 7b's gate checks it before E2 or the annotation is run |
 
 ## Step 0. The variables (once per PowerShell window)
 
@@ -97,6 +100,26 @@ the cap is reached before step 1 reads `yes`, set `$M = '2026-11-14'`, stop the 
 (`2026-11-14T06:05:20Z`, not at `M`), and run the steps with that `$M`: the bookings made between `M` and the stop are
 in the log and outside the window, and the backtest ends at `M`. S4 is then evaluated only if at least 100 bookings
 exist, and is otherwise NOT MEASURED (R-AY); step 9's arithmetic says which.
+
+**THE PRE-STOP LATCH CHECK (P137), read-only, run with step 1 on each day's capture and once more on the evening before the stop.**
+It counts the four latch events in the latest frozen capture (`F:\trading bot\scratch\s4\<date>\<time>Z-capture.log`) and, separately, any
+`close_halted` or `committed_risk_unknown` line after `2026-10-23T19:04:06Z`, the instant of the last latch episode already on record (list
+`218102`'s, `docs/RUN_LEDGER.md` section 70). Measured at P137 against `...\2026-10-24\051021Z-capture.log`, read-only, no venue call:
+`reconciliation_untrusted` 2021 lines, `close_halted` 66, `committed_risk_unknown` 39 and `exit_unbookable` 110; and 0 lines of
+`close_halted|committed_risk_unknown` after the cutoff (10 lines of all four patterns after it, list `218102`'s, 5 and 5). **The counts are
+of LINES, not of episodes.**
+
+```powershell
+$LATEST = (Get-ChildItem 'F:\trading bot\scratch\s4' -Recurse -Filter '*-capture.log' | Sort-Object LastWriteTime | Select-Object -Last 1).FullName
+$LATEST
+foreach ($e in 'reconciliation_untrusted','close_halted','committed_risk_unknown','exit_unbookable') { "{0,-26} {1}" -f $e, (Select-String -Path $LATEST -Pattern $e | Measure-Object).Count }
+(Select-String -Path $LATEST -Pattern 'close_halted|committed_risk_unknown' | Where-Object { [string]::CompareOrdinal($_.Line.Substring(0, 20), '2026-10-23T19:04:06Z') -gt 0 } | Measure-Object).Count
+```
+
+CHECK: the first line names the capture you meant. **Any `close_halted` or `committed_risk_unknown` line after `2026-10-23T19:04:06Z` is
+reported as an R-DM episode** in the step 8 report, with the capture, its first and last instants and the symbol, beside the `218102` note;
+the last command above prints how many such lines there are, and `0` means none. The check changes nothing and decides nothing: a new
+episode is reported, and no figure, window or verdict is altered by it.
 
 ## Step 2. Stop the bot, gracefully, at `M`
 
@@ -255,7 +278,7 @@ with `install_kind=vcs` and `code_intact=true` over 77 files), and in the same f
 (`M5l-172`). An editable install (`pip install -e`) is never the procedure: the boot would read `install_kind=editable` and the
 record would be ineligible, as section 40's smoke run was.
 
-**Step 6a can be done now, before the stop** (the estimate was 10 to 20 minutes; P131 measured about 1.5 minutes of commands, `pip install` 61 s of them; the network is needed for `git clone` and `pip`):
+**Step 6a can be done now, before the stop** (measured at P131, RUN_LEDGER section 69: about 1.5 minutes of commands, `pip install` 61 s of them, on this machine and its network; the network is needed for `git clone` and `pip`):
 
 ```powershell
 $PYTHON = "$env:LOCALAPPDATA\Microsoft\WindowsApps\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\python.exe"
@@ -383,7 +406,7 @@ The acceptance tests are the pre-registration's section 7 (A gross mean, B count
 owner to those figures; this runbook does not apply them. **Do not edit `scripts\s4_compare.py` or the pre-registration**
 (R-BN): any other reading of the downtime is exploratory under the ratified CHOSEN line 5, and step 9 is where it lives.
 
-**REQUIRED in the step 8 report (P132, extended at P134): four items, written beside the primary's figures and never inside them.**
+**REQUIRED in the step 8 report (P132, extended at P134 and P137): five items, written beside the primary's figures and never inside them.**
 
 1. **The `13:09` BTCUSDT entry.** The entry placed at `2026-10-21T13:09:00Z` (order list `183218`) is labelled `fok-unfilled` by the frozen
    `diagnose` ("the live bot placed and nothing was booked"), and it FILLED IN FULL: the stop leg executed `0.01041000` of the `0.02233000`
@@ -414,6 +437,9 @@ owner to those figures; this runbook does not apply them. **Do not edit `scripts
    the by-hand instruction of P134 (`M5m-682`) and its *no live position* text**, which R-DS made false: a backtest-only entry has an interval.
    The tool takes the primary's arguments plus `--analysis`, and is run like E2: with the backtest clone's interpreter from the development
    tree's script path, after step 7b, so it reads the same capture, run directory and frozen store. E1's `--window-end` is E1's own.
+   **Before the first of the three commands, step 7b's digest gate (P137) is run and must pass for `s4_wick_annotate.py`**: its SHA-256 is
+   `d9381b4c304444a1c3575d8b0cbd77c101ec5837e8bee2498d994888cf5d7d09` and the development tree is at `e8c820b` or at a later commit whose
+   diff against it touches neither tool. If the gate does not pass, the annotation is not run and the report says so.
 
 ```powershell
 Set-Location $BT
@@ -437,6 +463,11 @@ Select-String -Path "$OUT\s4_compare.txt","$OUT\s4_compare_e1.txt","$OUT\s4_latc
    `ANNOTATED DISAGREEMENTS (n)`; the third prints `DISAGREEMENTS (n)` of the primary, E1 and E2, and **each `n` equals the one above it**, in the
    same order (the counts by cause in each file sum to it). An entry whose interval holds no recorded 1m bar reads `unknown`, never `no`; report
    how many.
+5. **The R-DR counts, written down (P137).** The step 8 report carries one line for each of the primary, E1 and E2, **beside the `13:09` note
+   (item 1) and the list `218102` note (item 3) and not inside the primary's figures**: the file's `ANNOTATED DISAGREEMENTS (n)`, how many of
+   the `n` read `wide=yes`, `wide=no` and `unknown`, and the counts by cause. The three lines are read off `s4_wick_primary.txt`,
+   `s4_wick_e1.txt` and `s4_wick_e2.txt` after item 4's CHECK has passed, and each `n` is the one the CHECK matched to `DISAGREEMENTS (n)` of
+   the file above it. A report that carries the notes of items 1 and 3 and not these three lines is incomplete.
 
 ## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
 
@@ -453,6 +484,22 @@ result. **The primary is step 8 unmodified (R-DK); a failure of its test B that 
   install, so the trusted set is the one the live run used) and from the **development tree's script path**, which holds the
   wrapper and the byte-identical frozen scripts. It prints figures and no verdict, under the header `EXPLORATORY E2 (R-DL)`.
 
+**THE DIGEST GATE (P137), run first and by itself, before E1, E2 or the step 8 annotation.** `s4_latch_compare.py` and `s4_wick_annotate.py` are
+frozen for the stop at the digests in the table at the top, and the development tree they run from is `e8c820b` or a later commit whose diff
+against it touches neither. These five lines are NOT joined to the commands below by anything: read their output, then decide.
+
+```powershell
+git -C $DEV merge-base --is-ancestor e8c820b HEAD; "ancestor exit $LASTEXITCODE"
+git -C $DEV diff --stat e8c820b HEAD -- scripts/s4_latch_compare.py scripts/s4_wick_annotate.py
+git -C $DEV status --porcelain -- scripts
+(Get-FileHash "$DEV\scripts\s4_latch_compare.py" -Algorithm SHA256).Hash -eq '59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7'
+(Get-FileHash "$DEV\scripts\s4_wick_annotate.py" -Algorithm SHA256).Hash -eq 'd9381b4c304444a1c3575d8b0cbd77c101ec5837e8bee2498d994888cf5d7d09'
+```
+
+CHECK: `ancestor exit 0`; the `diff --stat` prints NOTHING; `status` prints nothing; the last two print `True`. **If any does not hold, STOP and report: do not run E2 or
+the annotation** (a changed digest means a different tool from the one P130 to P136 tested, surveyed and froze). The frozen `s4_compare.py`
+is checked by the first digest of the CHECK below.
+
 ```powershell
 Set-Location $BT
 & $PY scripts\s4_compare.py --run $RUN --capture $CAPTURE --window-start "${W}T00:00:00Z" --window-end "2026-10-21T13:09:00Z" --store $FROZEN | Out-File -Encoding ascii "$OUT\s4_compare_e1.txt"
@@ -467,9 +514,8 @@ Select-String -Path "$OUT\s4_latch_compare.txt" -SimpleMatch 'EXPLORATORY E2 (R-
 
 CHECK, each its own command: E1 exits `0` and its `capture sha256` equals step 3's (the same refusals as step 8: `2`, `3`); `git status`
 prints nothing for `scripts` (the wrapper that runs is a committed one); the first digest is `b8afa603f3b52687aeb8f62f4d6340d77fd31b893261a12022794965e5c3af08`
-(the frozen tool, pre-registration section 9) and the second is the wrapper's, to be recorded in step 9 (at `5a7891c` it was
-`59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7`; a later commit that edits the wrapper changes it, and the
-run is of whatever `git -C $DEV rev-parse HEAD` names); E2 exits `0`; the `Select-String` prints the header line; the file's `capture sha256` equals step 3's and
+(the frozen tool, pre-registration section 9) and the second is the wrapper's, which must be `59bb70c3c40b0377f8ebf88520c67fa231f5f255e947d297ad2bb32c3e125aa7` (frozen by P137; the gate above
+has already decided; record it, and `git -C $DEV rev-parse HEAD`, in step 9); E2 exits `0`; the `Select-String` prints the header line; the file's `capture sha256` equals step 3's and
 its `run.json sha256` equals step 8's. **The wrapper also prints the episodes it found.** For a capture with no latch it ends with exactly the frozen
 report (pinned by a test), so E2 equals the primary there. Record the two output files' digests in step 9 and report both
 beside step 8's figures; neither replaces it, and the test applied to them is the pre-registration's, by the owner.
@@ -610,6 +656,8 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 9 | `s4_explore.py` on the final capture | N | one run on a copy, section 60 |
 | 7b | `s4_compare.py ... --window-end <inside the day>` (E1), piped to `Out-File -Encoding ascii` | E | section 69 (P131, `--window-end 2026-10-08T13:09:00Z`: exit 0, zero live entries; MECHANICS ONLY, the real-input run stays at the stop); the pipe, section 64 |
 | 7b | `s4_latch_compare.py` (E2) through its real command line, with `$PY` from the development tree's script path | E | section 69 (P131: exit 0, header printed, `trading_bot` from the clone's site-packages, digests equal the primary's; MECHANICS ONLY); 90 tests over fixtures (section 68) |
+| 1 | the pre-stop latch check (`Select-String` of the four latch patterns over the latest capture, and the count after `2026-10-23T19:04:06Z`) | E | P137, read-only on `...\2026-10-24\051021Z-capture.log`: 2021, 66, 39 and 110 lines, and 0 `close_halted`/`committed_risk_unknown` lines after the cutoff; no venue call |
+| 7b | `git -C $DEV merge-base --is-ancestor e8c820b HEAD`, `git -C $DEV diff --stat e8c820b HEAD -- <the two scripts>`, and the two `Get-FileHash ... -eq` comparisons (the P137 digest gate) | N | not run as a block; each command is a single read of the tree, and the digests are the ones P137 measured at `e8c820b` |
 | 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | E | section 69 (empty; `b8afa603...af08` and `59bb70c3...25aa7`; the header line) |
 | 8 | `s4_wick_annotate.py --analysis primary`, `e1` and `e2` through their real command lines, `$PY` from the development tree's script path, piped to `Out-File -Encoding ascii` | E | section 72 (P135, on the P131 rehearsal's run directory, capture and store: exit 0 each, 19 backtest-only rows, two `wide=yes` equal to an independent read of the store; MECHANICS ONLY, zero live entries) |
 | 8 | the three CHECK `Select-String` commands of the R-DR/R-DS item (header, digest and count, and the matching `DISAGREEMENTS (n)`) | E | section 72 (run on the rehearsal's six files: the header three times, the capture digest equal in all three, and the counts 19, 11 and 19 equal to the `DISAGREEMENTS (n)` of the frozen primary, E1 and E2 files; MECHANICS ONLY) |
