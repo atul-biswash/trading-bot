@@ -8819,3 +8819,219 @@ The codes are the tests of each file in collection order, B1 to B26, G1 to G42, 
 | S87 | `TestKeltner::test_both_pairs_and_the_volume_column[ETHUSDT]` |
 | S88 | `TestKeltner::test_a_frame_with_no_low_column_is_a_data_error` |
 | S89 | `TestKeltner::test_a_1d_candle_is_refused` |
+
+## 85. M5n N3: the mutation survey of the N3 tests, scored against section 84 (P142 C15, R-T)
+
+An observation log, so this section only adds. The five surveys ran as section 84 describes, in detached worktrees outside the repository at `6e416a2` (the commit that carries section 84), one per spec, starting at `2026-10-24T18:57:40Z` by the machine's UTC clock, each running only the mutated files' own tests, with the harness of section 80 unchanged (`survey.py` and `p116_hook.py`, SHA-256 as quoted there). Every baseline was green (B 26 passed, G 42, S 89, N 49, Y 12), the import location of `trading_bot` and `tests` was printed inside the worktree before any result, every restore was SHA-equal, and the worktrees were removed afterwards (`git worktree list` shows the main worktree only). Two things differ from the plan and are described below: the N survey **halted at `n15`** (a FEWER) and was resumed after the diagnosis, and its trimming tests were then changed by `f911ef0` and the four mutations they serve re-run. Nothing here decides anything about S4.
+
+### Totals
+
+On the first pass over the 157 mutations, **154 MATCH, 2 MORE and 1 FEWER**; after the diagnosis of the FEWER, the corrected test and a re-run of `n15` on the final bytes, **155 MATCH and 2 MORE, 0 FEWER**. Predicted failures 579; observed 588, the difference being the nine of the two MORE (`s15` three, `c04` six).
+
+| Survey | Mutated against | Mutations | Predicted failures | Observed | First pass MATCH / MORE / FEWER | MATCH at the end |
+|---|---|---|---|---|---|---|
+| B | `indicators/breakout.py` against `test_indicators_breakout.py` | 25 | 47 | 47 | 25 / 0 / 0 | 25 |
+| G | `strategies/m5n/gaps.py` against `test_m5n_gaps.py` | 20 | 98 | 98 | 20 / 0 / 0 | 20 |
+| S | the candidates against `test_m5n_strategies.py` | 45 | 282 | 291 | 43 / 2 / 0 | 43 |
+| N | `scripts/n3_entry_counts.py` against `test_n3_entry_counts.py` | 45 | 123 | 123 | 44 / 0 / 1 | 45 |
+| Y | `config.m5n.yaml` against `test_config_m5n.py` | 22 | 29 | 29 | 22 / 0 / 0 | 22 |
+
+**The declared abstentions held exactly.** Section 84 named ten tests that no mutation in the tables would fail, with a reason for each: B9, B23, S1, N5, N9, N21, N22, N29, N38 and N42. Across the 157 mutations the tests that never failed are those ten and no others. **The 20 mutations predicted to fail nothing failed nothing.** That includes `s12` and the exact-equality test S85, which section 84 named as the likeliest to disagree: a 22-row recursive window gave the same band to the last bit.
+
+**One more test is killed by a crash and by nothing else, which section 84 predicted and counted.** C1 (the file loads under the real model) fails only under `y22`, by the loader's `ValidationError`, which `M5i-115` classes as a crash and not a kill. So by that rule 11 of the 218 tests are not killed by an assertion under any mutation: the ten above and C1.
+
+**Three more failures are crashes and not kills, and only two of them were declared.** `n45` (N12, by a `KeyError`) and `y22` (ten tests, by the loader) were predicted as crashes. **`n14` (N15 and N16) and `n31` (N28) were predicted as failures and fail by a `KeyError` as well**: the test helper that parses the printed series rows matches non-negative integers, and these two mutations print a negative missing-slot count (for example -305 and -1), so the row is not found. The harness counts them, and the predictions were right as sets and wrong as to type. N15, N16 and N28 are still killed by assertion, by `n11`, `n12`, `n13` and `n26`.
+
+### The three misses, diagnosed
+
+* **`s15` (the gated window one row long): MORE, 38 observed against 35.** The three extra are S52 to S54, the Donchian tests for a frame with no `high` column. Their frames hold exactly `period + 2` rows, so with a window of `period + 3` the gated reading returns no window and `evaluate`, which is where the column is read and refused, is never reached: no `DataError`, and `pytest.raises` fails. Section 84 listed S28 to S30 and S34 to S36 as sparing and did not trace the data-error tests through the same fixtures. A reach error; the extra kills are real coverage.
+* **`c04` (the SMA window `SLOW` and not `SLOW + 1`): MORE, 7 observed against 1.** Predicted: S5 (the warm-up). Observed: S5 and also S55, S59, S61, S62, S63 and S64, every SMA test that expects a signal. A 200-row window holds one `SMA(200)` value, so the previous bar's is `NaN`, `last_two` returns nothing, and the candidate **never fires**. Section 84 reasoned the opposite ("behaviourally equal") and was wrong in the direction that matters least: the warm-up property is pinned behaviourally as well as by S5, and `crossed_above` needing a previous slow average is what pins it. REASONED, then MEASURED.
+* **`n15` (the script's `_strategy` builds the candidate without the gap flag): FEWER, 5 observed against 10, and the survey HALTED.** The missing kills were N40, N41, N43, N44 and N45, the ETHUSDT trimming tests. Diagnosis, before anything was resumed: those tests compare the script's counts with `prefix_events`, and `prefix_events` built its strategies through `n3._strategy`, the function the mutation changes; both sides lost the flag together and agreed. It is the oracle sharing the seam under test. The survey was resumed with `n16` to `n45` on the unchanged tests (`survey_n2.json`, 30 mutations, all MATCH), then `f911ef0` made the helper build through the registry (no assertion changed), and **`n15`, `n18`, `n19` and `n20`, the four mutations whose killers include the trimming tests, were re-run at `f911ef0`: all four MATCH, `n15` at 10 observed against 10 predicted**. The full bare gate was green on that commit (4916 passed, 1 skipped).
+
+### What the survey leaves unpinned, and does not fix
+
+Section 84's twenty "fails nothing" mutations are each a property no test holds, and the survey confirmed every one. Seven are equivalent or redundant (`m05`, `k07`, `s13`, `n08`, `n10`, `n16`, `n17`); thirteen are real gaps that a test could close: `m06` (momentum's index), `s11` (the timeframe metadata), `s12` (a recursive window as the last 22 rows), `d09` (the `donchian_high` metadata of the previous bar), `k05` (a close exactly on the Keltner band), `n23` (the candle behind the signal), `n30` (row order), `n32` and `n37` (`--start`), `n39` (the exception base class), `n43` (the candidate type check), `y20` and `y21` (the initial balance and the placeholder sizing fraction). None of them is needed by N3 or N4, and none is closed here.
+
+### Every mutation
+
+#### B: `indicators/breakout.py` against `test_indicators_breakout.py`
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| b01 | the Donchian window includes the current bar (shift 0) | 6 | 6 | MATCH |
+| b02 | the Donchian window takes the minimum, not the maximum | 4 | 4 | MATCH |
+| b03 | the Donchian window accepts a partial window | 3 | 3 | MATCH |
+| b04 | the Donchian series is named without its period | 1 | 1 | MATCH |
+| b05 | the Donchian index is replaced by a range | 1 | 1 | MATCH |
+| b06 | the Donchian period is not checked | 1 | 1 | MATCH |
+| m01 | the momentum lag is one bar short | 4 | 4 | MATCH |
+| m02 | the momentum sign is reversed | 4 | 4 | MATCH |
+| m03 | the momentum series is named without its period | 1 | 1 | MATCH |
+| m04 | the momentum period is not checked | 1 | 1 | MATCH |
+| m05 | momentum is pandas' diff (an equivalent mutation) | 0 | 0 | MATCH |
+| m06 | the momentum index is replaced by a range (its index is asserted nowhere) | 0 | 0 | MATCH |
+| k01 | the Keltner EMA period is 19 | 1 | 1 | MATCH |
+| k02 | the Keltner ATR period is 19 | 1 | 1 | MATCH |
+| k03 | the Keltner multiplier is 3 | 1 | 1 | MATCH |
+| k04 | the Keltner high and low are swapped | 3 | 3 | MATCH |
+| k05 | a close equal to the Keltner band signals (the band is never equal in the fixtures) | 2 | 2 | MATCH |
+| k06 | the Keltner entry is level-triggered | 2 | 2 | MATCH |
+| k07 | the Keltner low is the close | 0 | 0 | MATCH |
+| k08 | the Keltner window is the ATR period + 1 rows | 1 | 1 | MATCH |
+| k09 | the Keltner index is replaced by a range | 2 | 2 | MATCH |
+| k10 | the band carries a constant offset | 4 | 4 | MATCH |
+| v01 | momentum gains a volume parameter | 1 | 1 | MATCH |
+| v02 | keltner_upper gains a volume parameter | 2 | 2 | MATCH |
+| e01 | momentum is dropped from __all__ | 1 | 1 | MATCH |
+
+#### G: `strategies/m5n/gaps.py` against `test_m5n_gaps.py`
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| g01 | the 4h width is one millisecond long | 9 | 9 | MATCH |
+| g02 | the 1d width is one millisecond long | 9 | 9 | MATCH |
+| g03 | the two widths are swapped | 17 | 17 | MATCH |
+| g04 | zero bars is not refused | 2 | 2 | MATCH |
+| g05 | exactly the rows asked for are too few | 4 | 4 | MATCH |
+| g06 | the tail is one row too long | 8 | 8 | MATCH |
+| g07 | any consecutive pair makes a tail gap-free | 10 | 10 | MATCH |
+| g08 | a step of at most one width is consecutive | 3 | 3 | MATCH |
+| g09 | a short frame is not checked for its timeframe | 1 | 1 | MATCH |
+| g10 | the run starts at the row before the last gap | 6 | 6 | MATCH |
+| g11 | the run starts after the first gap | 2 | 2 | MATCH |
+| g12 | a frame without a gap loses its first row | 2 | 2 | MATCH |
+| g13 | the run is read from the spaced pairs, not the broken ones | 8 | 8 | MATCH |
+| g14 | a repeated open time counts as spaced in the run | 2 | 2 | MATCH |
+| g15 | an hourly frame is a decision timeframe | 3 | 3 | MATCH |
+| g16 | the refusal does not say a decision timeframe | 4 | 4 | MATCH |
+| g17 | the tail writes into its input | 2 | 2 | MATCH |
+| g18 | the run writes into its input | 2 | 2 | MATCH |
+| g19 | too few rows are not refused | 2 | 2 | MATCH |
+| g20 | a frame of one row loses it | 2 | 2 | MATCH |
+
+#### S: the candidates against `test_m5n_strategies.py`
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| s01 | enforce_gaps is not checked to be a bool | 1 | 1 | MATCH |
+| s02 | the enforce_gaps attribute is always on | 6 | 6 | MATCH |
+| s03 | the warm-up is one bar short of the window | 6 | 6 | MATCH |
+| s04 | a candle of another timeframe is accepted | 5 | 5 | MATCH |
+| s05 | the refusal names the candle's timeframe as the candidate's | 2 | 2 | MATCH |
+| s06 | a condition that is false still signals | 24 | 24 | MATCH |
+| s07 | the timestamp is the bar's open time | 6 | 6 | MATCH |
+| s08 | the price is the candle's low | 9 | 9 | MATCH |
+| s09 | the action is CLOSE | 6 | 6 | MATCH |
+| s10 | the strategy metadata carries the timeframe | 6 | 6 | MATCH |
+| s11 | the timeframe metadata carries the name (asserted nowhere) | 0 | 0 | MATCH |
+| s12 | a recursive window is the last window_bars rows | 0 | 0 | MATCH |
+| s13 | the ungated window is the whole frame | 0 | 0 | MATCH |
+| s14 | the gated window is one row short | 38 | 38 | MATCH |
+| s15 | the gated window is one row long | 35 | 38 | MORE (see the diagnosis) |
+| s16 | the missing-column message drops the repr quotes | 4 | 4 | MATCH |
+| s17 | the signal's strength is one half | 6 | 6 | MATCH |
+| s18 | the live registry's source mentions the research package | 1 | 1 | MATCH |
+| d01 | the Donchian window is period + 1 rows | 33 | 33 | MATCH |
+| d02 | a close equal to the highest high signals | 3 | 3 | MATCH |
+| d03 | a previous close equal to its threshold counts as above | 3 | 3 | MATCH |
+| d04 | the Donchian entry is level-triggered | 6 | 6 | MATCH |
+| d05 | the Donchian threshold is built from the closes | 15 | 15 | MATCH |
+| d06 | donchian_1d_55 looks back 50 bars | 4 | 4 | MATCH |
+| d07 | donchian_1d_20 looks back 15 bars | 4 | 4 | MATCH |
+| d08 | donchian_4h_20 looks back 15 bars | 4 | 4 | MATCH |
+| d09 | the donchian_high metadata is the previous bar's (equal in the fixtures) | 0 | 0 | MATCH |
+| c01 | the fast average is a 49-bar one | 1 | 1 | MATCH |
+| c02 | the slow average is a 199-bar one | 3 | 3 | MATCH |
+| c03 | the cross is read the wrong way round | 6 | 6 | MATCH |
+| c04 | the SMA window is the slow period, not one more | 1 | 7 | MORE (see the diagnosis) |
+| c05 | the fast_sma metadata is the previous bar's | 1 | 1 | MATCH |
+| t01 | the momentum lookback is 89 bars | 2 | 2 | MATCH |
+| t02 | momentum must rise above 1 | 8 | 8 | MATCH |
+| t03 | momentum must rise from below -1 | 6 | 6 | MATCH |
+| t04 | the momentum metadata is the previous bar's | 1 | 1 | MATCH |
+| t05 | the prev_momentum metadata is the current bar's | 2 | 2 | MATCH |
+| k01 | the Keltner EMA period is 19 | 2 | 2 | MATCH |
+| k02 | the Keltner ATR period is 19 | 4 | 4 | MATCH |
+| k03 | the Keltner multiplier is 3 | 8 | 8 | MATCH |
+| k04 | the Keltner high and low are swapped | 3 | 3 | MATCH |
+| k05 | a close equal to the Keltner band signals (the band is never equal in the fixtures) | 0 | 0 | MATCH |
+| k06 | the Keltner entry is level-triggered | 2 | 2 | MATCH |
+| k07 | the Keltner low is the close | 4 | 4 | MATCH |
+| k08 | the Keltner window is the ATR period + 1 rows | 1 | 1 | MATCH |
+
+#### N: `scripts/n3_entry_counts.py` against `test_n3_entry_counts.py`
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| n01 | a start before the window is accepted | 1 | 1 | MATCH |
+| n02 | an end after the window is accepted | 3 | 3 | MATCH |
+| n03 | an empty or reversed window is accepted | 2 | 2 | MATCH |
+| n04 | the refusal does not name R-DT | 1 | 1 | MATCH |
+| n05 | the window ends on 2024-01-02 | 4 | 4 | MATCH |
+| n06 | the window starts on 2017-08-16 | 2 | 2 | MATCH |
+| n07 | load_series does not check the window | 1 | 1 | MATCH |
+| n08 | a served bar outside the window is not refused | 0 | 0 | MATCH |
+| n09 | an empty series reports one bar | 1 | 1 | MATCH |
+| n10 | the slots are rounded down (the grid is aligned in every fixture) | 0 | 0 | MATCH |
+| n11 | the missing slots are the slots plus the bars | 5 | 5 | MATCH |
+| n12 | the gap runs count the consecutive steps | 5 | 5 | MATCH |
+| n13 | the bars are one more than stored | 5 | 5 | MATCH |
+| n14 | the slots use the daily width | 2 | 2 | MATCH; crash: KeyError |
+| n15 | the candidate is built without the gap flag | 10 | 10 | FEWER on the first run, then MATCH (see the diagnosis) |
+| n16 | every bar is evaluated, warm-up included | 0 | 0 | MATCH |
+| n17 | every candidate is handed the whole prefix | 0 | 0 | MATCH |
+| n18 | the view is one row longer than the window | 2 | 2 | MATCH |
+| n19 | the view is one row shorter than the window | 18 | 18 | MATCH |
+| n20 | the events are the ungated ones | 11 | 11 | MATCH |
+| n21 | the suppressions are the gated-only events | 6 | 6 | MATCH |
+| n22 | the gated-only events are the suppressions | 6 | 6 | MATCH |
+| n23 | the signal is built on the previous candle | 0 | 0 | MATCH |
+| n24 | the report does not say upper bound | 1 | 1 | MATCH |
+| n25 | the events and no-rule columns are swapped | 6 | 6 | MATCH |
+| n26 | the slots and missing columns are swapped | 4 | 4 | MATCH |
+| n27 | the report prints a decimal number | 1 | 1 | MATCH |
+| n28 | the report prints a time of day | 1 | 1 | MATCH |
+| n29 | a series with no bars is not refused | 1 | 1 | MATCH |
+| n30 | the series rows run pair first (order is read nowhere) | 0 | 0 | MATCH |
+| n31 | a narrowed window is read whole | 1 | 1 | MATCH; crash: KeyError |
+| n32 | a narrowed start is read whole (--start is narrowed nowhere) | 0 | 0 | MATCH |
+| n33 | a refused window exits 1 | 5 | 5 | MATCH |
+| n34 | an unreadable store exits 2 | 2 | 2 | MATCH |
+| n35 | the refusal message says denied | 5 | 5 | MATCH |
+| n36 | the unreadable message says broken | 2 | 2 | MATCH |
+| n37 | the default start is 2017-08-18 (--start is exercised nowhere) | 0 | 0 | MATCH |
+| n38 | the default end is 2023-12-31 | 3 | 3 | MATCH |
+| n39 | only a StoredFileError is caught by main | 0 | 0 | MATCH |
+| n40 | the first two candidates swap their names | 1 | 1 | MATCH |
+| n41 | the source mentions a download | 1 | 1 | MATCH |
+| n42 | the source opens a file for writing | 1 | 1 | MATCH |
+| n43 | a non-candidate strategy is accepted | 0 | 0 | MATCH |
+| n44 | candidates C4 and C5 swap their names (their counts are equal on the fixtures) | 1 | 1 | MATCH |
+| n45 | the last report row is dropped (N12 then fails by a KeyError, a crash) | 2 | 2 | MATCH; crash: KeyError |
+
+#### Y: `config.m5n.yaml` against `test_config_m5n.py`
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| y01 | the mode is testnet | 1 | 1 | MATCH |
+| y02 | the stop-loss is enabled | 1 | 1 | MATCH |
+| y03 | the stop-loss and the take-profit are enabled | 1 | 1 | MATCH |
+| y04 | the stop-loss and the trailing stop are enabled | 1 | 1 | MATCH |
+| y05 | Telegram is enabled | 1 | 1 | MATCH |
+| y06 | the log file is enabled | 1 | 1 | MATCH |
+| y07 | a comment names an api_key | 1 | 1 | MATCH |
+| y08 | the mode line ends in a carriage return | 1 | 1 | MATCH |
+| y09 | ETHUSDT is disabled | 1 | 1 | MATCH |
+| y10 | BTCUSDT decides on 4h | 1 | 1 | MATCH |
+| y11 | the window starts on 2017-08-18 | 1 | 1 | MATCH |
+| y12 | the window ends on 2024-01-02 | 1 | 1 | MATCH |
+| y13 | the fee is 0.075 | 1 | 1 | MATCH |
+| y14 | the slippage is 0.10 | 1 | 1 | MATCH |
+| y15 | the stop slippage is 1.00 | 1 | 1 | MATCH |
+| y16 | the data directory is the testnet one | 1 | 1 | MATCH |
+| y17 | the filters are testnet's | 1 | 1 | MATCH |
+| y18 | the strategy is the live SMA crossover | 1 | 1 | MATCH |
+| y19 | the strategy is not registered | 1 | 1 | MATCH |
+| y20 | the initial balance is 5000 (asserted nowhere) | 0 | 0 | MATCH |
+| y21 | the placeholder sizing fraction is 0.05 (asserted nowhere) | 0 | 0 | MATCH |
+| y22 | the mode is not a mode (the loader refuses the file) | 10 | 10 | MATCH; crash: ValidationError |
