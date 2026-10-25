@@ -13,10 +13,11 @@ state internally, because sizing and the risk refusals need them, and **prints, 
 of it** (R-DT-3d).
 
 What it prints. A fixed schema of integers and nothing else: per candidate and pair the signals, the
-trades, the positions OPEN at the end and the clamp counts; the refusal counts by ``RefusalStage``;
+trades, the positions OPEN at the end, the clamp counts and the queued entries whose size
+``max_position_size_percent`` limited (R-DT-3f); the refusal counts by ``RefusalStage``;
 the refusal counts by the ``RiskRule`` that refused, and beside them the executor's four entry
 outcomes (filled, FOK-refused, expired, unaffordable); and the delta quantiles in basis points
-(R-DT-3d, R-DT-3e). The stage ``unaffordable`` is the risk manager's refusal of an order the free
+(R-DT-3d, R-DT-3e, R-DT-3f). The stage ``unaffordable`` is the risk manager's refusal of an order the free
 quote cannot pay for at the signal; the outcome ``unaffordable`` is the executor's, at the fill. There
 is no price, no return, no equity, no balance and no realised figure, and no run record or trade file
 is written: ``write_run`` is never called and this script opens nothing for writing.
@@ -94,7 +95,7 @@ _INTEGER = re.compile(r"\d+")
 
 _I = r"\d{1,5}"
 _LINE_SHAPES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"N5 trade counts \(R-DT-3d and R-DT-3e outputs only\)"),
+    re.compile(r"N5 trade counts \(R-DT-3d to R-DT-3f outputs only\)"),
     re.compile(r"window \[\d{4}-\d{2}-\d{2}, \d{4}-\d{2}-\d{2}\)"),
     re.compile(r"candidate C[1-6] [a-z0-9_]+ \((1d|4h)\)"),
     re.compile(r"  run complete=(yes|no) problems=" + _I),
@@ -108,6 +109,8 @@ _LINE_SHAPES: tuple[re.Pattern[str], ...] = (
         + r" clamp_upper="
         + _I
         + r" clamp_lower="
+        + _I
+        + r" size_capped="
         + _I
     ),
     re.compile(
@@ -172,6 +175,7 @@ class PairCounts:
     unaffordable: int
     clamp_upper: int
     clamp_lower: int
+    size_capped: int
     refusals: tuple[tuple[str, int], ...]
     rules: tuple[tuple[str, int], ...]
     deltas: tuple[int, ...]
@@ -196,7 +200,7 @@ def quantile(sorted_values: Sequence[int], percent: int) -> int:
 def render(window: tuple[date, date], results: Sequence[CandidateCounts]) -> list[str]:
     """The output lines, as the fixed schema; nothing but integers, symbols, stage names and dates."""
     lines = [
-        "N5 trade counts (R-DT-3d and R-DT-3e outputs only)",
+        "N5 trade counts (R-DT-3d to R-DT-3f outputs only)",
         f"window [{window[0].isoformat()}, {window[1].isoformat()})",
     ]
     for result in results:
@@ -208,7 +212,7 @@ def render(window: tuple[date, date], results: Sequence[CandidateCounts]) -> lis
             lines.append(
                 f"  {pair.symbol} signals={pair.signals} trades={pair.trades}"
                 f" open_at_end={pair.open_at_end} clamp_upper={pair.clamp_upper}"
-                f" clamp_lower={pair.clamp_lower}"
+                f" clamp_lower={pair.clamp_lower} size_capped={pair.size_capped}"
             )
             lines.append(
                 f"  {pair.symbol} refusals "
@@ -305,6 +309,7 @@ def _pair_counts(
         unaffordable=by_result[EntryResult.UNAFFORDABLE],
         clamp_upper=0 if tally is None else tally.clamp_upper,
         clamp_lower=0 if tally is None else tally.clamp_lower,
+        size_capped=0 if tally is None else tally.size_capped,
         refusals=tuple((stage, refusals.get(RefusalStage(stage), 0)) for stage in _STAGES),
         rules=tuple((rule, rules.get(RiskRule(rule), 0)) for rule in _RULES),
         deltas=() if tally is None else tuple(tally.deltas),

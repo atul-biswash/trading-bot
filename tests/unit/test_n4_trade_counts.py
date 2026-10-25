@@ -28,7 +28,15 @@ from typing import Any
 
 import pytest
 
-from tests.unit.d1_world import TOUCH, FixedD1, build_minutes, flat, make_settings
+from tests.unit.d1_world import (
+    TOUCH,
+    FixedD1,
+    Minute,
+    ScriptedD1,
+    build_minutes,
+    flat,
+    make_settings,
+)
 from trading_bot.backtesting import engine
 from trading_bot.data.historical import HistoricalStore
 from trading_bot.strategies import registry
@@ -64,7 +72,7 @@ RULES = [
     "cooldown",
     "max_open_positions",
 ]
-HEADER = "N5 trade counts (R-DT-3d and R-DT-3e outputs only)"
+HEADER = "N5 trade counts (R-DT-3d to R-DT-3f outputs only)"
 
 
 def refusals(symbol: str, **counts: int) -> str:
@@ -87,12 +95,12 @@ EXPECTED_BODY = [
     "window [2024-03-01, 2024-03-04)",
     "candidate C1 d1_fixed (4h)",
     "  run complete=yes problems=0",
-    "  BTCUSDT signals=3 trades=1 open_at_end=1 clamp_upper=0 clamp_lower=0",
+    "  BTCUSDT signals=3 trades=1 open_at_end=1 clamp_upper=0 clamp_lower=0 size_capped=0",
     refusals("BTCUSDT", limit_refused=1),
     rules("BTCUSDT", already_in_position=1),
     outcomes("BTCUSDT", filled=2),
     "  BTCUSDT delta_bps n=3 p10=500 p25=500 p50=500 p75=500 p90=500 min=500 max=500",
-    "  ETHUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0",
+    "  ETHUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=0",
     refusals("ETHUSDT"),
     rules("ETHUSDT"),
     outcomes("ETHUSDT", filled=1),
@@ -135,6 +143,151 @@ class World:
 @pytest.fixture
 def world(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> World:
     return World(tmp_path, monkeypatch)
+
+
+GAP_UP: Minute = ("120", "120", "120", "120", "1")
+OUTCOME_SIGNALS = [
+    "2024-03-01T00:00",
+    "2024-03-01T08:00",
+    "2024-03-01T20:00",
+    "2024-03-02T08:00",
+    "2024-03-02T20:00",
+    "2024-03-03T08:00",
+]
+
+
+def outcomes_strategy(delta: int) -> type[ScriptedD1]:
+    """A fixed schedule at ``delta``: the script re-resolves the strategy by name with no parameters."""
+
+    class Outcomes(ScriptedD1):
+        name = "d1_outcomes"
+
+        def __init__(self) -> None:
+            super().__init__(buy={"BTCUSDT": OUTCOME_SIGNALS}, delta=delta)
+
+    return Outcomes
+
+
+class OutcomesWorld(World):
+    """BTCUSDT signals six times on 4h bars, N5 sizing, and every entry meets a different end.
+
+    Bars are numbered from 2024-03-01T00:00, 240 minutes each. The signals on bars 0 and 2 fill on the
+    next bar, which OPENS at 120 against a limit of 100.10, so both are FOK-refused (2). The signals on
+    bars 5, 8 and 11 meet a next slot the archive lacks (decision slots 6, 9 and 12 are omitted), so all
+    three EXPIRE (3). The signal on bar 14 fills on bar 15 and the position is still open at the end (1).
+    No entry is unaffordable (0). The four counts are therefore DISTINCT, so a field mapped to the wrong
+    outcome cannot print the right line. ETHUSDT has no signal. The trail is ``delta`` basis points.
+    """
+
+    def __init__(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, delta: int) -> None:
+        monkeypatch.setitem(registry._REGISTRY, "d1_outcomes", outcomes_strategy(delta))
+        monkeypatch.setattr(n4, "CANDIDATES", (("C1", "d1_outcomes", "4h"),))
+        monkeypatch.setattr(n4, "IN_SAMPLE_START", datetime(2024, 3, 1, tzinfo=UTC))
+        monkeypatch.setattr(n4, "IN_SAMPLE_END", datetime(2024, 3, 4, tzinfo=UTC))
+        self.root = tmp_path / "hist"
+        build_minutes(
+            self.root,
+            "BTCUSDT",
+            count=4320,
+            minutes={240: GAP_UP, 720: GAP_UP},
+            decision="4h",
+            omit_decisions=frozenset({6, 9, 12}),
+        )
+        build_minutes(self.root, "ETHUSDT", count=4320, decision="4h")
+        settings = make_settings(
+            tmp_path,
+            self.root,
+            pairs=[("BTCUSDT", "4h"), ("ETHUSDT", "4h")],
+            strategy="d1_outcomes",
+            params={},
+            start="2024-03-01",
+            end="2024-03-04",
+            n5=True,
+        )
+        self.config = str(settings.config_path)
+        self.tmp = tmp_path
+
+
+def outcome_body(delta: int, capped: int) -> list[str]:
+    return [
+        HEADER,
+        "window [2024-03-01, 2024-03-04)",
+        "candidate C1 d1_outcomes (4h)",
+        "  run complete=yes problems=0",
+        f"  BTCUSDT signals=6 trades=0 open_at_end=1 clamp_upper=0 clamp_lower=0 size_capped={capped}",
+        refusals("BTCUSDT"),
+        rules("BTCUSDT"),
+        outcomes("BTCUSDT", filled=1, fok=2, expired=3, short=0),
+        f"  BTCUSDT delta_bps n=6 p10={delta} p25={delta} p50={delta} p75={delta} p90={delta}"
+        f" min={delta} max={delta}",
+        "  ETHUSDT signals=0 trades=0 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=0",
+        refusals("ETHUSDT"),
+        rules("ETHUSDT"),
+        outcomes("ETHUSDT"),
+        "  ETHUSDT delta_bps n=0",
+    ]
+
+
+class TestEveryEntryOutcomeIsPrintedUnderItsOwnName:
+    """Closes the hole `M5n-149` named: no earlier world had a non-zero FOK-refused or expired entry,
+    so a swap of the two printed the same zeros. Here the four outcomes are 1, 2, 3 and 0."""
+
+    @pytest.mark.parametrize(("delta", "capped"), [(10, 6), (1000, 0)])
+    def test_filled_fok_refused_and_expired_are_distinct_and_in_their_fields(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delta: int, capped: int
+    ) -> None:
+        code, text = OutcomesWorld(tmp_path, monkeypatch, delta=delta).run()
+        assert code == 0, text
+        body = outcome_body(delta, capped)
+        assert text.splitlines()[: len(body)] == body
+        # The three omitted decision slots each log a missing-bar warning, which the script keeps,
+        # scans and never shows: three records, and the scan stays CLEAN.
+        assert f"scan verdict=CLEAN output_lines={len(body)} log_records=3" in text.splitlines()
+
+    def test_the_cap_count_is_the_entries_queued_and_not_the_signals_or_the_fills(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Six entries are queued, one fills, five do not, and all six were sized at the cap."""
+        _, text = OutcomesWorld(tmp_path, monkeypatch, delta=10).run()
+        signals_line = next(line for line in text.splitlines() if "BTCUSDT signals=" in line)
+        assert signals_line.endswith("size_capped=6")
+
+    def test_the_outcomes_map_to_the_executors_results_by_pair(self) -> None:
+        """Four distinct counts for one pair and a different four for the other, through
+        `_pair_counts` with a fake executor, so no field can borrow another's source."""
+        from collections import Counter
+        from types import SimpleNamespace
+
+        from trading_bot.backtesting.d1_executor import SymbolTally
+        from trading_bot.backtesting.simulated_executor import EntryResult
+
+        def attempts(symbol: str, filled: int, fok: int, expired: int, short: int) -> list[Any]:
+            plan = (
+                (EntryResult.FILLED, filled),
+                (EntryResult.REFUSED, fok),
+                (EntryResult.EXPIRED, expired),
+                (EntryResult.UNAFFORDABLE, short),
+            )
+            return [SimpleNamespace(symbol=symbol, result=r) for r, n in plan for _ in range(n)]
+
+        executor: Any = SimpleNamespace(
+            tallies={
+                "BTCUSDT": SymbolTally(signals=20, size_capped=6, deltas=[500]),
+                "ETHUSDT": SymbolTally(signals=9, size_capped=1, deltas=[700]),
+            },
+            attempts=attempts("BTCUSDT", 5, 2, 3, 4) + attempts("ETHUSDT", 1, 7, 8, 9),
+        )
+        trades = Counter({"BTCUSDT": 7, "ETHUSDT": 1})
+        btc = n4._pair_counts("BTCUSDT", executor, trades, {"BTCUSDT"})
+        eth = n4._pair_counts("ETHUSDT", executor, trades, set())
+        assert (btc.entries_filled, btc.fok_refused, btc.expired, btc.unaffordable) == (5, 2, 3, 4)
+        assert (eth.entries_filled, eth.fok_refused, eth.expired, eth.unaffordable) == (1, 7, 8, 9)
+        assert (btc.size_capped, eth.size_capped) == (6, 1)
+        assert (btc.trades, btc.open_at_end, eth.open_at_end) == (7, 1, 0)
+        result = n4.CandidateCounts("C1", "donchian_1d_20", "1d", True, 0, (btc, eth))
+        lines = n4.render((date(2024, 3, 1), date(2024, 3, 4)), [result])
+        assert outcomes("BTCUSDT", filled=5, fok=2, expired=3, short=4) in lines
+        assert outcomes("ETHUSDT", filled=1, fok=7, expired=8, short=9) in lines
 
 
 class TestTheRun:
@@ -286,6 +439,7 @@ class TestTheQuantiles:
             unaffordable=0,
             clamp_upper=0,
             clamp_lower=0,
+            size_capped=0,
             refusals=(),
             rules=(),
             deltas=(30, 10, 40, 20),
@@ -346,7 +500,7 @@ GOOD_LINES = [
     "window [2017-08-17, 2024-01-01)",
     "candidate C4 donchian_4h_20 (4h)",
     "  run complete=yes problems=0",
-    "  BTCUSDT signals=538 trades=255 open_at_end=0 clamp_upper=0 clamp_lower=0",
+    "  BTCUSDT signals=538 trades=255 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=93",
     refusals("BTCUSDT", limit_refused=277, no_mark_price=1, position_stale=2),
     rules("BTCUSDT", already_in_position=250, daily_loss_halt=27, no_mark_price=1),
     outcomes("BTCUSDT", filled=255, fok=5, expired=1, short=0),
@@ -378,7 +532,12 @@ class TestTheScan:
     @pytest.mark.parametrize(
         "line",
         [
-            "  BTCUSDT signals=1.5 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0",
+            "  BTCUSDT signals=1.5 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=0",
+            "  BTCUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=1.5",
+            "  BTCUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=100000",
+            "  BTCUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0",
+            "  BTCUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 size_capped=",
+            "  BTCUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0 capped=1",
             "  BTCUSDT rules loss=1",
             "  BTCUSDT rules daily_loss=1",
             "  BTCUSDT rules daily_loss_halt=1.5",
