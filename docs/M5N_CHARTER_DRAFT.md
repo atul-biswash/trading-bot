@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P144 on branch `m5n` (HEAD `275ffaf`).** Section 17 records R-EB, R-DT-3d and the N4b decisions verbatim, with P143's six readings of R-EA marked complies or corrected under R-EB; the old section 17 is section 18. Section 16 is annotated where R-EB corrects its reading 2.
+
 **Amended at P143 on branch `m5n` (HEAD `70980c6`).** Section 16 records C3, R-EA and R-DT-3c verbatim, with six readings of R-EA marked as the owner's to overrule; the old section 16 is section 17. Section 3 now carries the documentation citation that D1's rules required before anything is modelled, and the N4 row is annotated.
 
 **Amended at P142 on branch `m5n` (HEAD `f840e98`).** Section 15 records R-DX, R-DZ, R-DY and R-DT-3b verbatim, with five readings of them marked as the owner's to overrule. The N3 and N4 rows are annotated; the old section 15 is section 16.
@@ -247,6 +249,31 @@ The project owner's rulings, quoted as the P143 prompt gives them, in the order 
 5. **Prices are not rounded to the tick.** The trigger and the exit price are exact `Decimal` products, as the fill model's R-AB has it; the venue's tick rounding of a real trailing trigger is not modelled.
 6. **A missing minute is the caller's.** The module reads the bars it is given in order and does not know the minutes it was not given. N4b's caller owns what a gap in the 1m path means.
 
-## 17. What this draft does not do
+> **ANNOTATED AT P144 (R-EB): READING 2 IS CORRECTED, AND THE SENTENCE STAYS STANDING BECAUSE IT WAS TRUE OF P143'S MODULE.** Reading 2 and R-EA (1) treat the entry minute's high as outside the peak. R-EB names *"entry-minute trades before the fill"* as a behaviour the documentation does not settle, so it resolves to the earlier exit: the entry minute's high counts toward the peak before that minute's low is tested. **What survives:** the entry minute has no gap case, and its exit price is the trigger less the slippage with the gap flag false. Section 17 holds the six readings under R-EB.
+
+## 17. R-EB, R-DT-3d and the N4b decisions, recorded verbatim at P144
+
+The project owner's rulings, quoted as the P144 prompt gives them, in the order the prompt gives them.
+
+> **R-EB** Where the venue documentation does not settle a trail behaviour (exact touch, entry-minute trades before the fill, intra-minute order, the market fill price), the backtester resolves it to the earlier or worse exit for the long position. P143's readings of R-EA stand where they comply and are corrected where they do not.
+
+> **R-DT-3d** N4b's simulation may compute P&L, equity and risk state internally, as sizing and risk refusals require, but prints, logs and persists none of it. Its outputs are limited to trade counts, clamp counts, refusal counts by stage, OPEN-at-end counts and delta quantiles in basis points per candidate and pair. An automated scan of every output and log asserts that none contains a forbidden figure. This corrects R-DT clause 3, whose "computes" made true trade counts impossible; the error is architect-owned.
+
+> **N4b decisions** delta = floor(10000 x 3 x ATR(20) / signal-bar close), clamped to [10, 2000], fixed at signal time. The RiskManager's initial stop is fill x (1 - delta / 10000), and the RiskManager is unchanged. The entry limit is signal-bar close x (1 + the entry tolerance config.s4.yaml uses), under the existing FOK model, unchanged. The fill is the next decision bar's open (its first traded minute, per R-DV), and the trail walks the 1m path from that minute. Exits are scheduled events processed in time order across both pairs.
+
+**Recorded as architect-owned: R-DT clause 3's "computes" made true trade counts impossible** (R-DT-3d says so itself). The ruling stands as given; this file records the correction and that the error was the architect's, not the executing session's.
+
+**P143's six readings of R-EA, each marked under R-EB.** The marks are the executing session's reading and each is the owner's to overrule. R-EB's rule is *the earlier or worse exit for the long*.
+
+| # | Reading (section 16) | Under R-EB | Why |
+|---|---|---|---|
+| 1 | A bar whose low equals the trigger triggers. | **Complies** | Exact touch is named by R-EB, and triggering at equality is the earlier exit. |
+| 2 | The entry minute has no gap case, and only the fill price is the peak in that minute. | **Corrected** | *Entry-minute trades before the fill* are named by R-EB. The entry minute's high now counts toward the peak before its low is tested, so the trigger is the higher and the exit the earlier. The no-gap-case half stands: the fill is that minute's open (the N4b decision), which cannot be a price a stop traded at. |
+| 3 | The gap test uses the trigger in force before the bar's high is applied. | **Complies** | The open is the first trade of the minute, so it meets the old trigger; a bar that opens above it and trades up applies the high before the low, which is the intra-minute order R-EB resolves to the worse exit. |
+| 4 | An open exactly at the trigger is a gap. | **Complies** | Exact touch again; the gap and non-gap prices are numerically the same and only the flag differs. |
+| 5 | Prices are not rounded to the tick. | **Complies** | Not a case R-EB names. REASONED: the venue's rounding of a real trigger is undocumented, and an upward rounding would be the earlier exit by at most one tick, which is not modelled (R-AB). Flagged for the owner, not decided. |
+| 6 | A missing minute is the caller's. | **Complies** | Not a trail behaviour. N4b's caller treats a minute the archive lacks as no trade and walks to the next traded minute, so a fall inside the gap meets the gap rule at the next open, which is the worse exit. |
+
+## 18. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
