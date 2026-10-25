@@ -12,11 +12,12 @@ same answer.
 * **The trigger** is ``peak x (1 - delta / 10000)`` (R-EA; the Binance trailing-stop FAQ's 700 BIPS
   from 45,500 is 42,315). ``delta`` is an integer number of basis points that the caller has already
   rounded down and clamped (D1); this module only refuses one that cannot make a trigger.
-* **The peak starts at the entry fill price** (R-EA (1)). In the entry minute nothing but the fill
-  price counts toward it: that bar's high and its open are ignored, because trades earlier in the
-  minute may have come before the fill. That minute's low is tested against the trigger from the
-  fill price, and a hit exits at the trigger less the slippage. The open of the entry minute
-  predates the position, so that minute has no gap case.
+* **The peak starts at the entry fill price** (R-EA (1)) and **the entry minute's high counts toward
+  it** (R-EB, which corrects P143's reading that only the fill price counted): trades earlier in the
+  minute may have come before the fill, the documentation does not settle them, and R-EB takes the
+  earlier exit. That minute's low is tested against the trigger from that peak, and a hit exits at
+  the trigger less the slippage. The open of the entry minute predates the position, so that minute
+  has no gap case.
 * **Each later bar** first tests its open against the trigger in force BEFORE the bar: an open at or
   below it is a gap, the fill is the open less the slippage (R-EA (2), the fill model's R-P1 and
   R-W), the gap flag is set, and the bar's high does not enter the peak. Otherwise the peak takes the
@@ -181,6 +182,7 @@ def resolve_trail(
                 raise ValueError(
                     f"entry_time {entry_time} is not inside the first bar's minute {bar.open_time}"
                 )
+            peak = max(peak, bar.high)
             trigger = trigger_price(peak, delta_bps)
             if bar.low <= trigger:
                 return _exited(bar.open_time, _sell_at(trigger, stop_slippage_percent), False, peak)

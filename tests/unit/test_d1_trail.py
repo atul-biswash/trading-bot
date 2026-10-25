@@ -3,7 +3,9 @@
 The bars are literals. Minute 0 is 2023-01-01T00:00Z and the entry fill is 20 seconds into it. A
 trigger is ``peak x (1 - delta / 10000)`` and an exit is that trigger, or a gapped open, times
 ``1 - slippage / 100``. The fixtures A to K are the ones section 86 of ``docs/RUN_LEDGER.md``
-predicted before the module was written.
+predicted before the module was written. R-EB (P144) changed one reading: the entry minute's high
+counts toward the peak, so fixture B2's expected exit is the trigger of its own high, and the tests
+of ``TestTheEntryMinute`` that follow it were written red before the module changed.
 """
 
 from __future__ import annotations
@@ -153,9 +155,39 @@ class TestTheEntryMinute:
 
     def test_an_entry_minute_that_opens_below_the_trigger_is_not_a_gap(self) -> None:
         out = walk("100", 500, "1.20", (0, "90", "101", "90", "100"))
-        assert out.exit_price == Decimal("93.860")
+        assert out.exit_price == Decimal("94.7986")
+        assert out.gap is False
+        assert out.peak == Decimal("101")
+
+    def test_the_entry_minutes_high_counts_toward_the_peak(self) -> None:
+        out = walk("100", 500, "1.00", (0, "100", "110", "100", "105"))
+        assert out.status is TrailStatus.EXITED
+        assert out.exit_minute == at(0)
+        assert out.exit_price == Decimal("103.4550")
+        assert out.gap is False
+        assert out.peak == Decimal("110")
+
+    def test_an_entry_minute_low_exactly_at_the_trigger_triggers(self) -> None:
+        out = walk("100", 500, "1.00", (0, "100", "100", "95", "96"))
+        assert out.status is TrailStatus.EXITED
+        assert out.exit_minute == at(0)
+        assert out.exit_price == Decimal("94.0500")
         assert out.gap is False
         assert out.peak == Decimal("100")
+
+    def test_an_entry_minute_low_exactly_at_the_trigger_of_its_own_high_triggers(self) -> None:
+        out = walk("100", 500, "1.00", (0, "100", "110", "104.5", "105"))
+        assert out.status is TrailStatus.EXITED
+        assert out.exit_price == Decimal("103.4550")
+        assert out.peak == Decimal("110")
+
+    def test_an_entry_minute_low_one_cent_above_the_trigger_leaves_the_position_open(self) -> None:
+        flat = walk("100", 500, "1.00", (0, "100", "100", "95.01", "96"))
+        assert flat.status is TrailStatus.OPEN
+        assert flat.peak == Decimal("100")
+        high = walk("100", 500, "1.00", (0, "100", "110", "104.51", "105"))
+        assert high.status is TrailStatus.OPEN
+        assert high.peak == Decimal("110")
 
     def test_an_entry_time_on_the_minute_boundary_is_inside_that_minute(self) -> None:
         out = walk("100", 500, "1.00", FLAT, entry_time=at(0))
@@ -245,7 +277,7 @@ class TestTheTwoBoundsOfTheClamp:
 
 
 class TestAPathThatEndsOpen:
-    def test_the_peak_is_the_highest_high_after_the_entry_minute(self) -> None:
+    def test_the_peak_is_the_highest_high_from_the_entry_minute_on(self) -> None:
         out = walk(
             "100", 500, "1.00", (0, "100", "101", "100", "101"), (1, "101", "102", "100.5", "101")
         )
