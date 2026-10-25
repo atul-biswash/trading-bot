@@ -11351,3 +11351,163 @@ This is the number for THIS survey's mutations and not a whole-suite figure. Mos
 ### The findings this section carries
 
 See the commit message.
+
+## 104. M5n N7: the predictions for the estimator module's changes and the runner, before any code (P149 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. HEAD is `918ca98` (the charter commit of P149), on `m5n`, `main` at `ee8d485`, and the pre-registration's SHA-256 is still `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e`. P149 step 2 asks for three predictions, and they are committed here before any code, test or script of P149 is drafted. **No recorded bar was read and no backtest was run on recorded data.** Every figure below was derived by scripts in `scratch\p149` (`derive_golden.py`, `derive_worlds.py`, `derive_e1.py`, `derive_e1_judge.py`, `render_w5.py`) that import neither the estimator module nor the runner: statistics are computed in 60-digit `Decimal` from the exact `Decimal` returns, Phi and its inverse by `math.erf` and a bisection, percentiles by hand, and the bootstrap by a plain per-resample loop. **What those scripts share with the module is the numpy generator and the order of its draws** (per batch of 250 resamples, `integers(0, T, size=(batch, T))` and then `random((batch, T))`), because that stream is what a golden value pins.
+
+### What is built (the design the predictions are about)
+
+* **`sharpe_stats.py` (item 3a).** The line `restart[:, 0] = True` is deleted (it is dead code, `M5n-190`, confirmed by the P148 survey's `m15`). A golden-value test pins the bootstrap's stream, which closes `m20` (`M5n-191`). `daily_series` accepts one form of mark and refuses all others, with tests at 23:59:59.999, 00:00:00.000001 and 00:00:00 exactly, which closes `m50` (`M5n-192`). **One defect found while predicting is fixed in the same commit** (`M5n-200`): the bootstrap decides a resample has no variance by `deviation == 0.0`, and numpy's standard deviation of three equal floats is not always zero (`np.std([0.1, 0.1, 0.1], ddof=1)` is `1.6996749443881478e-17`, measured here, a fact about numpy and not about the module), so a constant non-zero resample would give a Sharpe near 1e16 where it must refuse. It becomes `min == max` over the resample, as `_require_spread` already does for the series.
+* **`scripts/n7_evaluate.py` (item 3b).** The N0 guard first, then the evaluation. The pure core is `judge(runs, *, floors, resamples, seed, p)` over `CandidateRun` values (label, name, timeframe, closed trades, open at end, gross, fees, entry notional, daily marks); it applies pre-registration sections 5 to 8 and knows nothing of the backtester, so its worlds are written as returns. `compute_start` finds the first UTC day on which every candidate's indicators are defined for both pairs: the UTC day of the latest, over candidate and pair, of the open time of the first decision bar that ends a gap-free run of the strategy's `warmup_period` bars (`M5n-206`). `run_candidate` runs one candidate through `backtest_system` on the D1 path over `[start, 2024-01-01)` and samples equity at each UTC midnight with its own candle subscriber; the sensitivities re-run it with other costs; the context is the equal-weight buy and hold. `main` writes one result file, refusing to overwrite one, and prints the report and the file's SHA-256.
+* **Constants the runner pins, each read from the pre-registration and pinned by a test:** floors `1d` 30 in sample and 12 out of sample, `4h` 120 and 48; bootstrap `p = 1/20`, 10,000 resamples, seed 20261025; DSR threshold 0.95 with `N` the number of candidates (6); the in-sample span ending `2024-01-01`; fee 0.10 and stop slippage 1.20 percent for the verdict; the sensitivities `fee_0.075` (fee 0.075), `slip_0.66` and `slip_0.10` (stop slippage 0.66 and 0.10).
+* **Readings recorded where they are made.** The 4h candidates are marked at the 4h bar that closes at 00:00, whose close is the 1d archive close of that day (REASONED, and unchecked until N7, `M5n-207`); the buy and hold buys at the open of the first day, so no bar before the span is needed (`M5n-202`); a candidate whose daily returns have no variance has no Sharpe and the run refuses (`M5n-203`); a bootstrap that refuses fails gate (b) and is printed `n/a` (`M5n-204`); the telemetry counts closed round trips only (`M5n-205`).
+
+### Prediction 1. The golden bootstrap bounds
+
+The fixture is 24 typed daily returns (`0.012, -0.007, 0.004, 0.009, -0.011, 0.015, 0.002, -0.004, 0.008, 0.006, -0.009, 0.013, 0.001, -0.002, 0.010, -0.006, 0.005, 0.011, -0.008, 0.003, 0.007, -0.001, 0.009, -0.005`), whose sample Sharpe is `6.413997967427307` annualised, with the pre-registered `p = 1/20` and seed. **G1 and G2 are the tests** (tolerance a relative 1e-9); G1's 600 resamples straddle three batches (250, 250, 100), so the batch size is part of the value.
+
+| Row | p | Resamples | Seed | Batch | p5 | p2_5 | mean | std |
+|---|---|---|---|---|---|---|---|---|
+| G1 | 0.05 | 600 | 20261025 | 250 | `4.927886866519763` | `4.439440781578283` | `6.458913293099271` | `0.9760475595174631` |
+| G2 | 0.05 | 10000 | 20261025 | 250 | `4.838931764884872` | `4.471253881083067` | `6.439681460048089` | `0.9555063041823855` |
+| G3 (not a test: the stream a batch of 100 would draw) | 0.05 | 600 | 20261025 | 100 | `4.81097837508935` | `4.399061271556962` | `6.4141602214840665` | `0.9164827387133547` |
+
+**G3 is what `m20` (a batch of 100) would draw:** its `p5` differs from G1's by 0.117, so the golden test kills `m20`. The same stream is checked at 10,000 resamples (G2) because that is the pre-registered count.
+
+### Prediction 2. The one accepted form of mark
+
+`daily_series(marks)` accepts a sequence of at least two marks, each **a `tuple` of exactly two items `(at, equity)`**, where `type(at) is datetime`, `at.tzinfo is datetime.timezone.utc`, `at` is exactly 00:00:00.000000, `type(equity) is Decimal`, finite and above zero, on consecutive days. It refuses everything else, as follows.
+
+| Input | Refused with |
+|---|---|
+| fewer than two marks | `ValueError` |
+| an element that is not a `tuple` (a list, a `namedtuple`) | `TypeError` |
+| a tuple of length other than 2 | `TypeError` |
+| `at` not exactly a `datetime` (a `date`, a `pandas.Timestamp`, a `str`, an `int`) | `TypeError` |
+| a naive `datetime` | `ValueError` |
+| a `tzinfo` that is not `timezone.utc` (+02:00, `ZoneInfo("UTC")`, `timezone(timedelta(0), "Z")`) | `ValueError` |
+| `at` = 23:59:59.999 (the day before) | `ValueError` |
+| `at` = 00:00:00.000001 | `ValueError` |
+| `at` = 00:00:00 exactly | **accepted** |
+| `equity` not exactly a `Decimal` (a `float`, an `int`, a `str`, a `bool`, a `numpy.float64`) | `TypeError` |
+| a `Decimal` `NaN` or infinity | `ValueError` |
+| an equity of zero or below | `ValueError` |
+| a missing, repeated or backward day | `ValueError` |
+
+This is stricter than the P148 module in two ways, both intended: an `int` equity is refused (it was accepted), and a `tzinfo` that is merely zero-offset but is not `timezone.utc` is refused (it was accepted).
+
+### Prediction 3. The N0 guard
+
+`check_n0_guard(root)` runs before anything is opened, in this order, and refuses with `GuardError`; `main` prints `refused: <code>: <message>` to standard error and exits 2. Every code has a test that builds a throwaway git repository and breaks one condition: `git_unavailable` (no `git` on the path), `charter_unreadable` (no repository, or no charter at HEAD), `tag_missing` (condition a), `n0_line_missing`, `n0_line_duplicated`, `n0_commit_unknown`, `n0_commit_not_ancestor` (condition b), and `digest_line_missing`, `digest_line_duplicated`, `digest_file_unreadable`, `digest_mismatch` (condition c; the mismatch test runs once for each of the three files). Beside them: a repository satisfying all three is accepted; a short hash of 7 characters is accepted; HEAD itself as the N0 commit is accepted; an annotated tag is accepted; a line that appears only in the working copy of the charter is `n0_line_missing`; a line with trailing text or upper-case hexadecimal is `n0_line_missing`; `main` refuses before it reads the config or the store. The guard run against THIS repository must refuse with `tag_missing`, since no `milestone/M5m` tag exists; that is checked by hand in the report and is not a test, because the tag will one day exist.
+
+### Prediction 4. The runner on fixture worlds
+
+**The judge worlds.** Each has three candidates (`C1` and `C2` on `1d` with floor 5, `C4` on `4h` with floor 8), 40 daily returns built from an 8-return pattern repeated five times, marks built in exact `Decimal` from 10,000 and quantised to 8 places at every step, the bootstrap at 400 resamples (p = 0.05, seed 20261025) and the deflated Sharpe at `N = 3`. The patterns: `S1` `0.012, -0.004, 0.009, 0.015, -0.002, 0.011, 0.007, -0.005`; `S2` `0.010, -0.004, 0.008, 0.012, -0.003, 0.009, 0.006, -0.005`; `N1` `0.010, -0.011, 0.008, -0.009, 0.006, -0.007, 0.004, -0.005`; `N2` `0.011, -0.010, 0.009, -0.008, 0.007, -0.006, 0.005, -0.004`.
+
+**W1, no candidate passes** (patterns N1, N2, N1; trades 9, 7, 10).
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | -1.205218 | -2.299758 | 0.217170 | FAILED (bootstrap, dsr) |
+| C2 | 1d | 7 | 5 | 40 | 1.205218 | 0.168780 | 0.502399 | FAILED (dsr) |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.217170 | FAILED (bootstrap, dsr) |
+
+Verdict: **FAIL**.
+
+**W2, one passes** (S1, N2, N1; trades 9, 7, 10).
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | 13.768603 | 12.398619 | 0.977629 | PASS |
+| C2 | 1d | 7 | 5 | 40 | 1.205218 | 0.168780 | 0.032369 | FAILED (dsr) |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.004209 | FAILED (bootstrap, dsr) |
+
+Verdict: **SELECTED** C1.
+
+**W3, a tie in Sharpe broken by more trades** (S1, S1, N1; trades 9, 6, 10): the two identical series tie exactly, and the section 7 rule picks the one with more trades.
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | PASS |
+| C2 | 1d | 6 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | PASS |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.002528 | FAILED (bootstrap, dsr) |
+
+Verdict: **SELECTED** C1.
+
+**W3b, a tie that section 7 does not break** (S1, S1, N1; trades 9, 9, 10): the verdict is INDETERMINATE and the run exits 1; no candidate is selected by an invented rule (`M5n-208`).
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | PASS |
+| C2 | 1d | 9 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | PASS |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.002528 | FAILED (bootstrap, dsr) |
+
+Verdict: **INDETERMINATE** ['C1', 'C2'].
+
+**W4, a floor failure** (S1, S1, N1; trades 4, 7, 10): `C1` has the same Sharpe as `C2` and the lower trade count and is below its floor, so it is excluded and `C2` is selected.
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 4 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | EXCLUDED (below floor) |
+| C2 | 1d | 7 | 5 | 40 | 13.768603 | 12.398619 | 0.968362 | PASS |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.002528 | FAILED (bootstrap, dsr) |
+
+Verdict: **SELECTED** C2.
+
+**W5, a sensitivity that would flip a gate and must not change the verdict.** Base (S2, N2, N1; trades 9, 7, 10), and the sensitivity `fee_0.075` (S2, S1, N1), in which `C2` would pass and `C1` would fail the deflated Sharpe gate because the trial variance moved.
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | 11.956331 | 10.659343 | 0.959230 | PASS |
+| C2 | 1d | 7 | 5 | 40 | 1.205218 | 0.168780 | 0.059473 | FAILED (dsr) |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.009462 | FAILED (bootstrap, dsr) |
+
+Verdict: **SELECTED** C1.
+
+| Candidate | Timeframe | Trades | Floor | Days | Sharpe (annual) | Bootstrap p5 | DSR | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 1d | 9 | 5 | 40 | 11.956331 | 10.659343 | 0.926813 | FAILED (dsr) |
+| C2 | 1d | 7 | 5 | 40 | 13.768603 | 12.398619 | 0.975828 | PASS |
+| C4 | 4h | 10 | 8 | 40 | -1.205218 | -2.299758 | 0.003773 | FAILED (bootstrap, dsr) |
+
+Verdict: **SELECTED** C2.
+
+**The report the runner prints for W5, in full**, with the telemetry supplied as typed (`C1` 9 trades, gross 500, fees 50, entry notional 20,000; `C2` 7 trades, gross -200, fees 20, notional 8,000; `C4` 10 trades, gross 0, fees 10, notional 1,000), the window `[2024-03-01, 2024-04-10)`, and the context taken from the marks of pattern `N2`. The fee telemetry comes first, before any Sharpe. The format: key=value in a fixed order, the share and the basis points `n/a` when their denominator is zero or there is no trade, the flag `gross<=0` when the gross is zero or negative and `no_trades` when there is none.
+
+```
+N7 in-sample evaluation (pre-registration sections 5 to 8)
+window [2024-03-01, 2024-04-10)
+fee telemetry (telemetry only, never a criterion)
+  C1 trades=9 gross=500 fees=50 net=450 entry_notional=20000 fee_share=0.100000 fee_bps=25.0000
+  C2 trades=7 gross=-200 fees=20 net=-220 entry_notional=8000 fee_share=0.100000 fee_bps=25.0000 flag=gross<=0
+  C4 trades=10 gross=0 fees=10 net=-10 entry_notional=1000 fee_share=n/a fee_bps=100.0000 flag=gross<=0
+candidates (bootstrap p=0.05 resamples=400 seed=20261025; deflated Sharpe trials=3)
+  C1 1d trades=9 floor=5 days=40 sharpe_annual=11.956331 boot_p5=10.659343 dsr=0.959230 status=PASS
+  C2 1d trades=7 floor=5 days=40 sharpe_annual=1.205218 boot_p5=0.168780 dsr=0.059473 status=FAILED (dsr)
+  C4 4h trades=10 floor=8 days=40 sharpe_annual=-1.205218 boot_p5=-2.299758 dsr=0.009462 status=FAILED (bootstrap, dsr)
+verdict SELECTED C1
+sensitivity fee_0.075 would_select=C2 flips=2
+  flip C1 dsr pass->fail
+  flip C2 dsr fail->pass
+context buy_and_hold sharpe_annual=1.205218 days=40
+```
+
+**The end-to-end world E1.** Two scripted 1d candidates on BTCUSDT and ETHUSDT over `2024-03-01` to `2024-03-04` (three days of 1m bars), N5 sizing, the real fill model, floors patched to one closed trade, bootstrap 400, `N = 2`. `C1` buys BTCUSDT on the bar of 2024-03-01 (entry at the next open, 100.05; quantity 19.98001, the cap-bound figure `tests/unit/test_backtest_d1.py` pins) and a minute at 90 gaps through the 500-bps trail, selling at 90 x 0.988 = 88.92. `C2` buys ETHUSDT the same way and holds it while the price steps to 102 and then 104. The start day is `2024-03-01` for both pairs and both candidates (`warmup_period` is 1). Base costs:
+
+* `C1`: 1 closed trade, 0 open; gross `-222.37751130`, fees `3.77562248970`, entry notional `1999.0000005`; marks at 03-01, 03-02, 03-03, 03-04 of `10000`, `10000`, `9773.84686621030`, `9773.84686621030`.
+* `C2`: 0 closed trades, 1 open at the end; gross 0, fees 0; marks `10000`, `10000`, `10036.9620194995`, `10076.9220394995` (the open position is marked, not closed).
+* No mark is carried forward (`carried_marks` 0). The context (buy and hold, 5,000 in each pair at the 100 open): marks 10000, 10000, 10100, 10200, annual Sharpe `22.059704`, 3 days.
+
+| Candidate | Closed trades | Days | Sharpe (annual) | Bootstrap p5 | DSR (N = 2) | Status |
+|---|---|---|---|---|---|---|
+| C1 | 1 | 3 | -11.030261 | n/a (a resample has no variance) | 0.015562 | FAILED (bootstrap, dsr) |
+| C2 | 0 | 3 | 22.015038 | 22.015038 | 0.698856 | EXCLUDED (below floor) |
+
+Verdict: **FAIL at N7** (no candidate passes; `C1` meets its floor and fails both gates, `C2` is excluded as below the floor with its one position still open). `C1`'s bootstrap refuses because a resample of its three returns (0, -0.0226, 0) is all zeros, which is the case of `M5n-204`. **The sensitivities change nothing here:** all three print `flips=0` and `would_select=none`. Their figures for `C1`: `fee_0.075` gross `-222.37751130`, fees `2.8317168672750`, final mark `9774.7907718327250`; `slip_0.66` gross `-212.667226440`, fees `3.785332774560`, final mark `9783.547440785440`; `slip_0.10` gross `-202.59730140`, fees `3.79540269960`, final mark `9793.60729590040`. The `C2` marks under `fee_0.075` are `10037.461769499625` and `10077.421789499625`, and under the two slippage sensitivities they equal the base marks (a held position meets no stop).
+
+**What each prediction does not cover, in advance.** The judge worlds do not touch the backtester and E1 touches the judge only through three returns, so E1 cannot show the bootstrap or the deflated Sharpe at a realistic length; the worlds W1 to W5 do, and they cannot show the marking. The 4h marking (`M5n-207`) and the start-day rule on a series with gaps are covered by no world here, and are the first things the survey that follows should ask about.
+
+### The findings this section carries
+
+See the commit message.
