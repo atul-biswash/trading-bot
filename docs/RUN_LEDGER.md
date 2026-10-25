@@ -11232,3 +11232,122 @@ The harness is the repository's `scripts/worktree_survey.py` with `scripts/surve
 ### The findings this section carries
 
 See the commit message. In short: the first-position line of the bootstrap is dead code, nothing pins the draw stream, and three boundaries have no fixture on them.
+
+## 103. M5n N6: the scored result of the estimator module's survey (P148 C5, R-T)
+
+An observation log, so this section only adds. The survey section 102 predicted ran twice, because it HALTED at `m18`. Both runs used the repository's `scripts/worktree_survey.py` and `scripts/survey_hook.py` in a detached worktree outside the repository (`scratch\p148\wt_survey`) at `abb8827`, the commit that carries section 102, with the import location of `trading_bot` and `tests` printed inside the worktree before any result, an unmutated baseline of **92 passed** (2.21 s, then 1.23 s), every restore shown SHA-equal, every copied file intact afterwards, and `git worktree list` showing the main worktree only after each. Nothing here decides anything about S4. No recorded bar was read and no backtest was run.
+
+* **Run 1**, `2026-10-25T14:02:37Z` to `14:03:22Z`, from the committed spec (`survey_p148.json`, SHA-256 `56059b19594a0bc5dbdd1ad0a63f7b9f1368ef361c94c36da7ce03701b02e8da`), exit 1, standard error empty: `m01` to `m17` scored, **`m18` HALTED the survey with a FEWER**.
+* **Run 2**, `2026-10-25T14:03:49Z` to `14:05:09Z`, from `survey_p148_rest.json` (SHA-256 `dab849a1d7518af947551de5976d752c50d9183992d361b206610aea48f60009`), exit 0, standard error empty: `m19` to `m60`. It holds the 42 entries of the committed spec from `m19` on, **byte-for-byte, with no prediction changed**; it was written only because the harness stops at a FEWER, and `m18` was NOT re-run or re-predicted.
+
+### Result
+
+**60 mutations scored: 56 MATCH, 3 MORE (`m05`, `m17`, `m19`), 1 FEWER (`m18`).** 123 failures were predicted and 125 observed; **94 were kills and 31 crashes** (`M5i-115`). The three MOREs are each a test section 102 named in advance as possible and left out of the prediction on purpose (`m05` the bootstrap's constant-series test, `m17` and `m19` the `p = 1` iid test); a MORE is recorded and none is a surprise. The crashes are `ZeroDivisionError` 10, `IndexError` 10, `ValueError` 3, `statistics.StatisticsError` 3, `decimal.DivisionByZero` 3, `TypeError` 1 and `decimal.InvalidOperation` 1.
+
+### The FEWER at `m18`, and why the prediction was wrong (REASONED, for a MEASURED halt)
+
+`m18` changes `rng.random((batch, t)) < p` to `> p`, so a restart happens with probability `1 - p`. Section 102 predicted four failures: the vanishing-restart test, the iid test, the widening test and the no-variance test. Three failed. **The widening test did not.** It runs the bootstrap twice, at `p = 1/20` and at `p = 1.0`, and asserts the first run's spread is more than 1.5 times the second's. Section 102 reasoned about the first arm only, which becomes near-iid under the mutation. **The `p = 1.0` arm is mutated too:** `random > 1.0` is never true, so no position restarts, every resample is a rotation of the whole series, every resample has the sample Sharpe, and that arm's spread is float noise near zero. The ratio is then enormous and the assertion `> 1.5` holds. The prediction was correct for the mutation described and wrong for the mutation applied, which is the error `M5h` names, reasoning from what a test is for and not from what it reaches; and the fact that this test passes under a mutation that turns the ordinary bootstrap into a rotation shows the widening test is satisfied by a ratio of anything large, not by blocks in particular. Also, the vanishing-restart test failed by a `ValueError` crash and not an assertion: at `p = 1e-12` the mutation restarts almost everywhere, so a resample of five values has no variance (`M5n-193`).
+
+### Scored table
+
+| Mutation | The break | Predicted | Observed | Verdict | Kills | Crashes |
+|---|---|---|---|---|---|---|
+| m01 | the Sharpe's variance divides by n (ddof 0) instead of n - 1 | 4 | 4 | MATCH | 4 | 0 |
+| m02 | the annualisation uses 366 days | 5 | 5 | MATCH | 5 | 0 |
+| m03 | the Sharpe is never annualised | 4 | 4 | MATCH | 4 | 0 |
+| m04 | the Sharpe divides by the variance, not the standard deviation | 4 | 4 | MATCH | 4 | 0 |
+| m05 | the no-variance refusal is disabled | 6 | 7 | MORE | 1 | 6 |
+| m06 | a one-return series is no longer refused for its length | 2 | 2 | MATCH | 2 | 0 |
+| m07 | a two-dimensional input is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m08 | a non-finite return is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m09 | the skewness divides by m2 squared | 1 | 1 | MATCH | 1 | 0 |
+| m10 | the kurtosis is the excess kurtosis | 2 | 2 | MATCH | 2 | 0 |
+| m11 | the second moment divides by n - 1 | 2 | 2 | MATCH | 2 | 0 |
+| m12 | the in-sample and out-of-sample percentiles are swapped | 4 | 4 | MATCH | 4 | 0 |
+| m13 | the reported mean is the median | 0 | 0 | MATCH | 0 | 0 |
+| m14 | the reported spread uses ddof 1 | 0 | 0 | MATCH | 0 | 0 |
+| m15 | the first position is not forced to restart | 0 | 0 | MATCH | 0 | 0 |
+| m16 | a block that runs past the end does not wrap | 9 | 9 | MATCH | 0 | 9 |
+| m17 | the wrap is modulo T - 1 | 1 | 2 | MORE | 2 | 0 |
+| m18 | a restart happens with probability 1 - p | 4 | 3 | FEWER | 2 | 1 |
+| m19 | the last day is never a start | 0 | 1 | MORE | 1 | 0 |
+| m20 | the resamples are drawn 100 at a time | 0 | 0 | MATCH | 0 | 0 |
+| m21 | the seed type is not checked | 1 | 1 | MATCH | 1 | 0 |
+| m22 | a restart probability of zero is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m23 | a restart probability of one is refused | 3 | 3 | MATCH | 1 | 2 |
+| m24 | zero resamples is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m25 | the expected maximum is computed for one trial too | 3 | 3 | MATCH | 0 | 3 |
+| m26 | the first inverse-normal term is weighted gamma, not 1 - gamma | 3 | 3 | MATCH | 3 | 0 |
+| m27 | the second inverse-normal argument is 1 - e/n | 6 | 6 | MATCH | 3 | 3 |
+| m28 | the trials' variance divides by N, not N - 1 | 5 | 5 | MATCH | 5 | 0 |
+| m29 | the skewness term has the wrong sign | 2 | 2 | MATCH | 2 | 0 |
+| m30 | the kurtosis term uses kurt - 3 (the excess form) with the non-excess constant | 4 | 4 | MATCH | 4 | 0 |
+| m31 | the scaling is sqrt(T), not sqrt(T - 1) | 4 | 4 | MATCH | 4 | 0 |
+| m32 | the probability is that of the opposite tail | 5 | 5 | MATCH | 5 | 0 |
+| m33 | the Sharpe-list length is not checked against n | 1 | 1 | MATCH | 1 | 0 |
+| m34 | one observation is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m35 | a trial count of zero is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m36 | a variance term of exactly zero is accepted | 0 | 0 | MATCH | 0 | 0 |
+| m37 | the Sharpe list is not checked for finiteness | 1 | 1 | MATCH | 1 | 0 |
+| m38 | net adds the fees | 2 | 2 | MATCH | 2 | 0 |
+| m39 | the share is over the signed gross | 1 | 1 | MATCH | 1 | 0 |
+| m40 | the reported absolute gross and the share are over the signed gross | 1 | 1 | MATCH | 1 | 0 |
+| m41 | the fee per trade divides by trades + 1 | 1 | 1 | MATCH | 1 | 0 |
+| m42 | a basis point is a thousandth | 1 | 1 | MATCH | 1 | 0 |
+| m43 | a zero gross is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m44 | negative fees are accepted | 1 | 1 | MATCH | 1 | 0 |
+| m45 | zero trades is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m46 | a zero notional is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m47 | a float passes the Decimal gate | 5 | 5 | MATCH | 5 | 0 |
+| m48 | a non-finite Decimal is accepted | 1 | 1 | MATCH | 0 | 1 |
+| m49 | a non-UTC offset is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m50 | the microsecond is not part of midnight | 0 | 0 | MATCH | 0 | 0 |
+| m51 | a gap of more than one day is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m52 | the return is the growth factor, not the return | 5 | 5 | MATCH | 5 | 0 |
+| m53 | a zero equity is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m54 | one mark is accepted and yields no return | 1 | 1 | MATCH | 1 | 0 |
+| m55 | a third of the capital buys each asset | 1 | 1 | MATCH | 1 | 0 |
+| m56 | the second asset is normalised by the first asset's first close | 2 | 2 | MATCH | 2 | 0 |
+| m57 | series marked at different instants are accepted | 1 | 1 | MATCH | 1 | 0 |
+| m58 | series of different length are left to zip | 1 | 1 | MATCH | 1 | 0 |
+| m59 | a zero initial capital is accepted | 1 | 1 | MATCH | 1 | 0 |
+| m60 | a zero first close is accepted | 0 | 0 | MATCH | 0 | 0 |
+
+### Tests that fail under none of the 60 mutations: 24 of 92
+
+This is the number for THIS survey's mutations and not a whole-suite figure. Most are the refusal tests of a branch no mutation here weakened, or a `-1`, `nan` or `-3` row beside a mutated `0` row. The list, for the record:
+
+* `TestBuyAndHold::test_a_non_positive_close_refuses`
+* `TestDailySeries::test_a_backward_day_is_refused`
+* `TestDailySeries::test_a_mark_off_midnight_is_refused`
+* `TestDailySeries::test_a_naive_datetime_is_refused`
+* `TestDailySeries::test_a_non_positive_equity_is_refused[-5]`
+* `TestDailySeries::test_a_repeated_day_is_refused`
+* `TestDailySeries::test_fewer_than_two_marks_is_refused[0]`
+* `TestDailySeries::test_the_result_is_float_one_shorter_than_the_marks`
+* `TestDeflatedSharpe::test_a_non_finite_input_refuses[kurt]`
+* `TestDeflatedSharpe::test_a_non_finite_input_refuses[skew]`
+* `TestDeflatedSharpe::test_a_non_finite_input_refuses[sr]`
+* `TestDeflatedSharpe::test_a_trial_count_below_one_refuses[-1]`
+* `TestDeflatedSharpe::test_the_euler_mascheroni_constant`
+* `TestFeeTelemetry::test_a_boolean_trade_count_is_refused`
+* `TestFeeTelemetry::test_a_non_int_trade_count_is_refused`
+* `TestFeeTelemetry::test_a_non_positive_notional_refuses[notional1]`
+* `TestFeeTelemetry::test_fewer_than_one_trade_refuses[-3]`
+* `TestFeeTelemetry::test_the_numerators_and_denominators_are_reported_beside_each_ratio`
+* `TestFeeTelemetry::test_zero_fees_are_a_zero_share`
+* `TestMoments::test_a_symmetric_series_has_no_skew`
+* `TestSharpe::test_fewer_than_two_returns_refuses[returns0]`
+* `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[-0.1]`
+* `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[1.5]`
+* `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[nan]`
+
+**Only 50 of the 92 tests were ever killed by an assertion; 18 more fail only by crash**, and a crash is a test that did not look (`M5i-115`). The clearest case is `m16`: removing the wrap fails nine tests, all by `IndexError`, so a wrap error that does not crash is caught only by the vanishing-restart test, as `m17` shows (`m17`: the wrap modulo `T - 1` is killed by two tests and no others).
+
+### What the survey confirmed of section 102's holes
+
+`m15` (an equivalent mutant: `restart[:, 0] = True` is dead code), `m20` (no test pins the draw stream), `m36`, `m50` and `m60` (a variance term of exactly zero, a microsecond off midnight, a zero first close) each fail **nothing**, as predicted, and `m13` and `m14` too. **None of them is closed in this commit**: changing the module or its tests after the survey would be a change nobody had surveyed, and which of them to close is the owner's. Two class predictions were wrong and are noted without effect on the sets: `m07` was predicted a kill and is a `TypeError` crash (`float()` of an array), and `m27`'s two-trial failures are `statistics.StatisticsError` and not `ValueError`.
+
+### The findings this section carries
+
+See the commit message.
