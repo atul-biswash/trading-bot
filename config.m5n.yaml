@@ -2,9 +2,11 @@
 # M5n research configuration (N3). RESEARCH ONLY: it enables nothing live.
 #
 #   * mode is backtest: no connection to any venue is made under this file.
-#   * no fixed stop, no take-profit and no fixed trailing percent: the exit of every M5n
-#     candidate is the D1 trailing stop (k x ATR(20) at entry), which is N4's, and R-DY
-#     gives the candidates no signal exit and no take-profit.
+#   * no take-profit and no trailing percent: the exit of every M5n candidate is the D1
+#     trailing stop (k x ATR(20) at entry), which is N4's, and R-DY gives the candidates no
+#     signal exit and no take-profit. The stop_loss below is enabled for SIZING only (N5): the
+#     backtest places no order, and the D1 risk manager replaces its percent with each signal's
+#     own clamped trail, so 1 percent of equity is risked at the initial stop.
 #   * no notification, no log file, no secret. Secrets belong in .env, never here.
 #
 # The window is the in-sample span [2017-08-17, 2024-01-01), half-open, and the fee is
@@ -33,10 +35,12 @@ strategy:
 
 risk:
   position_sizing:
-    method: fixed_fraction     # a placeholder: N5 sizes from the clamped trailing distance, and the
-    fraction: 0.02             # risk_per_trade method is refused while stop_loss is disabled
+    method: risk_per_trade     # N5: the quantity risks risk_per_trade of equity at the initial stop
+    risk_per_trade: 0.01       # 1 percent of equity, excluding slippage and fees
   stop_loss:
-    enabled: false
+    enabled: true              # sizing only; nothing is placed in a backtest
+    type: percent
+    percent: 20.0              # a placeholder: replaced per signal by delta / 100 (the upper clamp)
   take_profit:
     enabled: false
   trailing_stop:

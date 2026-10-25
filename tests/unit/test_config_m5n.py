@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 
 from trading_bot.config.models import AppConfig
-from trading_bot.core.enums import TradingMode
+from trading_bot.core.enums import PositionSizingMethod, StopType, TradingMode
 
 REPO = Path(__file__).resolve().parents[2]
 M5N = REPO / "config.m5n.yaml"
@@ -39,11 +39,47 @@ class TestItEnablesNothingLive:
     def test_the_mode_is_backtest(self) -> None:
         assert loaded().mode is TradingMode.BACKTEST
 
-    def test_no_protective_order_is_enabled(self) -> None:
+    def test_no_target_and_no_trailing_percent_is_enabled_and_the_stop_is_for_sizing_only(
+        self,
+    ) -> None:
+        """Overturned at P145 under the N5 decisions (charter section 18), and kept to its subject.
+
+        It asserted ``stop_loss.enabled is False``. N5 sizes 1 percent risk at the initial stop, which
+        the unchanged risk manager refuses to do while the stop is disabled, so the stop is enabled
+        here as a sizing input. What the test existed to say still holds and is still asserted: the
+        file is a backtest (the mode test above), nothing is placed, and the only exit is the D1
+        trail, so no take-profit and no trailing percent.
+        """
         risk = loaded().risk
-        assert risk.stop_loss.enabled is False
+        assert risk.stop_loss.enabled is True
         assert risk.take_profit.enabled is False
         assert risk.trailing_stop.enabled is False
+
+    def test_the_sizing_is_one_percent_risked_at_the_stop(self) -> None:
+        risk = loaded().risk
+        assert risk.position_sizing.method is PositionSizingMethod.RISK_PER_TRADE
+        assert risk.position_sizing.risk_per_trade == Decimal("0.01")
+        assert risk.stop_loss.type is StopType.PERCENT
+
+    def test_every_other_risk_setting_is_a_default(self) -> None:
+        """N5 decision: every other RiskManager setting stays at its default. The file sets only the
+        staleness bound a 1d shortest timeframe needs, which is not a RiskManager limit."""
+        raw = parsed()["risk"]
+        assert set(raw) == {
+            "position_sizing",
+            "stop_loss",
+            "take_profit",
+            "trailing_stop",
+            "max_position_staleness_s",
+        }
+        limits = loaded().risk.limits
+        assert (
+            limits.max_open_positions,
+            limits.max_daily_loss_percent,
+            limits.max_position_size_percent,
+            limits.cooldown_minutes,
+        ) == (3, Decimal("5.0"), Decimal("20"), 15)
+        assert loaded().risk.max_entry_slippage == Decimal("0.001")
 
     def test_no_notification_and_no_log_file(self) -> None:
         config = loaded()
