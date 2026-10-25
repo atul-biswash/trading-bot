@@ -9479,6 +9479,8 @@ None of these is a rerun: the script was run once, as P144 item 5 says. The one 
 * **The 4h upper clamps (3 and 4, predicted 0 or 1) and C6's ETHUSDT clamps (12, predicted at most 10)** say the 20-bar ATR reaches 6.7% of the close more often than estimated: on the 4h series in the 2017 to 2018 spikes, on the 1d in the early 2021 run. REASONED; the dates were not printed.
 * **The `FOK` refusals are far above the estimate on the 4h candidates (ETHUSDT C4 14, C5 9)** and the two expired entries on each of the 1d BTCUSDT candidates C1 and C2 are unexplained. Section 89 named the thin early USDT history as a reason for the former; the count cannot say which bars refused or expired. UNMEASURED.
 * **`limit_refused` cannot be split.** It equals signals less trades, `FOK` refusals and expired entries in every cell, so no refusal beyond a position already being held is NEEDED to explain it, but the by-stage count cannot show whether any of the 65, 62, 40 and so on was the daily-loss limit pricing a not-yet-trailed stop (`M5n-091`). That stays REASONED. Splitting by rule is a refusal count outside R-DT-3d's list and was not printed.
+
+> **ANNOTATED AT P145 (C7): *"That stays REASONED"* IS NO LONGER TRUE OF `M5n-091`, AND IT WAS TRUE OF N4b's RUN.** R-DT-3e puts the refusing rule's name in the counts, and section 94 prints them for the N5 run: `daily_loss_halt` refused 174 of 1,152 signals in 9 of 12 cells, with 3 net trades lost. **What survives:** this bullet's account of N4b, which printed no rule (the N4b rule counts are not recoverable, and the figure `limit_refused` is unchanged). REASONED, not measured: N4b's 2-percent-of-equity notional commits about 0.02 x (gain + delta) of equity to the same untrailed stop, which reaches the 5-percent threshold only after a gain of over 200 percent, so N4b's halt could fire on a rare run and not on the scale N5's does; and the REASONED attribution of each N5 halt to the committed term on the untrailed stop, which section 94 keeps as REASONED.
 * **A diagnostic run after the count run printed dates and not counts.** To explain the zero OPEN count, `scratch\p144\diag_open.py` ran the C3 backtest in the same way and printed, for its twelve trades, the entry date, the exit instant, `touch` or `gap` and a gap flag, and the two last decision-bar dates. It contains no price, return, equity, balance or realised figure and it persisted nothing in the repository, but **it is an output the R-DT-3d list does not name, and the owner may rule on it.** It was not repeated.
 
 ### What these counts are, and are not
@@ -9987,3 +9989,146 @@ All read from `RiskConfig` and its limits, `config/models.py`, with the N5 file'
 ### The findings this section carries
 
 See the commit message. In short, the manager has no supplied-stop parameter (the percent route is the wiring); its affordability step refuses where the owner's wording says caps; the 20 percent position cap applies and binds below 500 bps; `daily_loss_halt` is checked before `already_in_position`; and the cooldown cannot occur in a backtest.
+
+## 94. M5n N5: the counts-only run with 1-percent risk sizing, section 93's predictions scored, and M5n-091 resolved (P145 C7, R-T, R-DQ, R-DT-3d, R-DT-3e)
+
+An observation log, so this section only adds. `scripts/n4_trade_counts.py` (`0a17f02`, with its tests) was run ONCE: `python scripts/n4_trade_counts.py`, no argument, on `m5n` with a clean tree at `1eb0858`, so the config is the committed `config.m5n.yaml` (SHA-256 `c35bea158e6001c56b49c36f31df79ab1d9bb66ffbba50b9d07a89b87a7bec00`, N5 sizing), the store is `data/historical`, and the window is the committed `[2017-08-17, 2024-01-01)`. Standard output went to `scratch\p145\n5_counts_output.txt` and standard error to `n5_counts_stderr.txt`. It started at `2026-10-25T09:48:06Z` by the machine's UTC clock and ended at `09:53:58Z`: **5 min 52 s of wall time, exit 0, and standard error empty (0 bytes)**. Nothing was written under `deploy\45547f107715`, the rehearsal clone or the canonical store, `config.yaml` is still blob `99b0edd005ff5f452681fc554dcc2271d2e6687e` and `config.s4.yaml` still SHA-256 `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594` (both printed by the halt check at the start of the same command), no venue was asked for anything, and no bar at or after `2024-01-01T00:00:00Z` was read (the 1m path is bounded at the window end, as at N4b). **Nothing here decides anything about S4.**
+
+**The digests of the output.** The file as the shell wrote it, with the Windows line endings the redirection produced (76 carriage returns), has SHA-256 `1b338412dab8796e0ca96b688662fa5d1f6493713ebbe66d5417c10c5abe67b0`; with CRLF turned to LF it is `75d37a1a67bd31a3334220929f572cd52a18de3450b4ff2a5f41d9eaa5c734d1`. The script's own last line, `output_sha256=85f55f5710c8eaa7c6fb2fec7b390b85753edf12d1d6a648a1061f27d126933f`, is the SHA-256 of every line before it joined with LF, and it was re-derived outside the script (`scratch\p145\score_n5.py`) and agrees. **The scan's verdict is `CLEAN`: 74 output lines, each in the grammar, none with a forbidden word, a decimal point or an integer over 99,999, and 36 log records kept at WARNING and above, none flagged.** No run record and no trade file was written.
+
+**A procedural slip, recorded.** The halt check (branch, clean tree, HEAD, the two config digests, worktrees, the time) and the run were issued in one command, which is the shape `M5f-094` says is not a gate: the check's verdict was read, but after the run had been started. The check's printed output, read afterwards, shows every condition held (`m5n`, clean, `1eb0858`, the digests above, one worktree), so the result stands. The next run's checks are their own invocation.
+
+### The output
+
+```
+N5 trade counts (R-DT-3d and R-DT-3e outputs only)
+window [2017-08-17, 2024-01-01)
+candidate C1 donchian_1d_20 (1d)
+  run complete=yes problems=0
+  BTCUSDT signals=104 trades=34 open_at_end=0 clamp_upper=5 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=65 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=16 already_in_position=49 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=34 fok_refused=3 expired=2 unaffordable=0
+  BTCUSDT delta_bps n=104 p10=885 p25=980 p50=1289 p75=1591 p90=1806 min=613 max=2000
+  ETHUSDT signals=104 trades=41 open_at_end=0 clamp_upper=22 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=62 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=19 already_in_position=43 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=41 fok_refused=1 expired=0 unaffordable=0
+  ETHUSDT delta_bps n=104 p10=1067 p25=1400 p50=1627 p75=1926 p90=2000 min=759 max=2000
+candidate C2 donchian_1d_55 (1d)
+  run complete=yes problems=0
+  BTCUSDT signals=73 trades=25 open_at_end=0 clamp_upper=3 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=40 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=6 already_in_position=34 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=25 fok_refused=6 expired=2 unaffordable=0
+  BTCUSDT delta_bps n=73 p10=885 p25=1006 p50=1283 p75=1521 p90=1766 min=648 max=2000
+  ETHUSDT signals=68 trades=28 open_at_end=0 clamp_upper=10 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=38 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=7 already_in_position=31 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=28 fok_refused=2 expired=0 unaffordable=0
+  ETHUSDT delta_bps n=68 p10=1030 p25=1362 p50=1598 p75=1834 p90=2000 min=849 max=2000
+candidate C3 sma_cross_1d_50_200 (1d)
+  run complete=yes problems=0
+  BTCUSDT signals=6 trades=6 open_at_end=0 clamp_upper=0 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=0 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=0 already_in_position=0 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=6 fok_refused=0 expired=0 unaffordable=0
+  BTCUSDT delta_bps n=6 p10=883 p25=901 p50=980 p75=1557 p90=1815 min=883 max=1815
+  ETHUSDT signals=6 trades=6 open_at_end=0 clamp_upper=1 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=0 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=0 already_in_position=0 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=6 fok_refused=0 expired=0 unaffordable=0
+  ETHUSDT delta_bps n=6 p10=1165 p25=1350 p50=1517 p75=1924 p90=2000 min=1165 max=2000
+candidate C4 donchian_4h_20 (4h)
+  run complete=yes problems=0
+  BTCUSDT signals=538 trades=216 open_at_end=0 clamp_upper=3 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=318 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=42 already_in_position=276 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=216 fok_refused=4 expired=0 unaffordable=0
+  BTCUSDT delta_bps n=538 p10=308 p25=410 p50=557 p75=738 p90=994 min=153 max=2000
+  ETHUSDT signals=546 trades=215 open_at_end=0 clamp_upper=4 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=314 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=53 already_in_position=261 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=215 fok_refused=14 expired=3 unaffordable=0
+  ETHUSDT delta_bps n=546 p10=416 p25=542 p50=692 p75=872 p90=1169 min=208 max=2000
+candidate C5 keltner_4h_20_2 (4h)
+  run complete=yes problems=0
+  BTCUSDT signals=293 trades=149 open_at_end=0 clamp_upper=0 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=142 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=14 already_in_position=128 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=149 fok_refused=2 expired=0 unaffordable=0
+  BTCUSDT delta_bps n=293 p10=283 p25=405 p50=528 p75=696 p90=862 min=154 max=1615
+  ETHUSDT signals=291 trades=147 open_at_end=0 clamp_upper=0 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=134 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=16 already_in_position=118 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=147 fok_refused=9 expired=1 unaffordable=0
+  ETHUSDT delta_bps n=291 p10=394 p25=512 p50=670 p75=849 p90=1079 min=253 max=1866
+candidate C6 tsmom_1d_90 (1d)
+  run complete=yes problems=0
+  BTCUSDT signals=45 trades=23 open_at_end=0 clamp_upper=4 clamp_lower=0
+  BTCUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=19 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  BTCUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=0 already_in_position=19 cooldown=0 max_open_positions=0
+  BTCUSDT entry_outcomes filled=23 fok_refused=3 expired=0 unaffordable=0
+  BTCUSDT delta_bps n=45 p10=771 p25=872 p50=1243 p75=1540 p90=1939 min=679 max=2000
+  ETHUSDT signals=40 trades=19 open_at_end=0 clamp_upper=12 clamp_lower=0
+  ETHUSDT refusals unknown_pair=0 no_reference_price=0 nothing_to_close=0 unsupported_action=0 no_mark_price=0 position_stale=0 committed_risk_unknown=0 limit_refused=20 live_order_list=0 unmanaged_holding=0 atr_unavailable=0 stop_unplaceable=0 size_not_tradeable=0 unaffordable=0
+  ETHUSDT rules no_mark_price=0 no_equity=0 daily_loss_halt=1 already_in_position=19 cooldown=0 max_open_positions=0
+  ETHUSDT entry_outcomes filled=19 fok_refused=1 expired=0 unaffordable=0
+  ETHUSDT delta_bps n=40 p10=898 p25=1210 p50=1494 p75=2000 p90=2000 min=722 max=2000
+scan verdict=CLEAN output_lines=74 log_records=36
+output_sha256=85f55f5710c8eaa7c6fb2fec7b390b85753edf12d1d6a648a1061f27d126933f
+```
+
+### Section 93's predictions, scored
+
+**(a) Structural predictions.** All seven held except one.
+
+1. **Signals, clamps and delta quantiles are identical to section 90 in all twelve cells, to the digit: HELD** (compared by `score_n5.py` against the block in section 90).
+2. **The identity holds in all twelve cells: HELD.** For example BTCUSDT C1: 104 = 65 (16 + 49) + 34 + 0 + 3 + 2.
+3. **Every stage but `limit_refused` is 0 in all twelve cells: HELD,** so the by-rule split is the whole of the refusals, and the rules sum to the stage in every cell (`score_n5.py`).
+4. **Only `daily_loss_halt` and `already_in_position` are non-zero among the rules: HELD.** `cooldown`, `max_open_positions`, `no_equity` and `no_mark_price` are 0 in all twelve.
+5. **OPEN at the end is 0 in all twelve cells: HELD.**
+6. **The scan is CLEAN with 74 output lines and 36 log records: HELD, both figures exact.**
+7. **The old-path digests hold and the wall time is under 15 minutes: HELD** (the digests by `test_a_strategy_that_does_not_takes_the_simulated_executor_and_its_digest_holds` and its two-pair sibling in every gate of this milestone; 5 min 52 s against a predicted 5 to 8).
+
+**Unaffordable was predicted 0 everywhere: HELD,** both the manager's stage and the executor's outcome. Whether the 20-percent position cap bound is not in the output and stays UNMEASURED.
+
+**(b) Per cell.** "Inside" means inside the range section 93 stated.
+
+| Candidate | Pair | N4b trades | Trades predicted (range) | Observed | Halt predicted (range) | Observed | AIP predicted | Observed |
+|---|---|---|---|---|---|---|---|---|
+| C1 | BTCUSDT | 34 | 31 (26 to 35) | 34 inside | 20 (8 to 35) | 16 inside | 48 | 49 |
+| C1 | ETHUSDT | 41 | 37 (31 to 41) | 41 inside | 18 (6 to 32) | 19 inside | 48 | 43 |
+| C2 | BTCUSDT | 25 | 23 (19 to 25) | 25 inside | 12 (4 to 22) | 6 inside | 30 | 34 |
+| C2 | ETHUSDT | 28 | 26 (22 to 28) | 28 inside | 10 (3 to 20) | 7 inside | 30 | 31 |
+| C3 | BTCUSDT | 6 | 5 (3 to 6) | 6 inside | 1 (0 to 3) | 0 inside | 0 | 0 |
+| C3 | ETHUSDT | 6 | 5 (3 to 6) | 6 inside | 1 (0 to 3) | 0 inside | 0 | 0 |
+| C4 | BTCUSDT | 216 | 205 (175 to 220) | 216 inside | 25 (5 to 60) | 42 inside | 304 | 276 |
+| C4 | ETHUSDT | 217 | 205 (175 to 220) | 215 inside | 30 (6 to 70) | 53 inside | 294 | 261 |
+| C5 | BTCUSDT | 149 | 144 (125 to 150) | 149 inside | 12 (2 to 35) | 14 inside | 135 | 128 |
+| C5 | ETHUSDT | 148 | 143 (125 to 150) | 147 inside | 14 (2 to 40) | 16 inside | 124 | 118 |
+| C6 | BTCUSDT | 23 | 21 (17 to 23) | 23 inside | 9 (2 to 18) | 0 **under the range** | 12 | 19 |
+| C6 | ETHUSDT | 19 | 17 (14 to 19) | 19 inside | 7 (1 to 15) | 1 inside (the edge) | 15 | 19 |
+
+**Totals.** Trades were predicted at 862 (790 to 910) and are **909**, against 912 at N4b: **12 of 12 cells inside their range, and the observed figure is at or above the predicted point in all twelve.** `daily_loss_halt` was predicted at 159 (50 to 350) and is **174: 11 of 12 cells inside.** `already_in_position` was predicted at 1,040 and is **978**. The two rules together are **1,152**, which is section 90's `limit_refused` total of 1,149 plus the 3 trades that did not happen.
+
+**The expected dominant rule: HELD.** `already_in_position` is the largest rule in all ten cells where either fires, and `daily_loss_halt` is second wherever it is non-zero and exceeds it in no cell. The two C3 cells have no refusal of either kind.
+
+**Two predictions missed.** **`daily_loss_halt` is non-zero in 9 of the 12 cells, where 10 or more were predicted:** the zeros are both C3 cells (predicted 0 to 3, the doubt section 93 named) and **C6 BTCUSDT, which was predicted at 9 (2 to 18) and is 0.** And **the trades fell by 3, where 50 were predicted** (1 to 11 a cell): C4 ETHUSDT by 2 and C5 ETHUSDT by 1, and the other ten cells did not move.
+
+### M5n-091, resolved
+
+`M5n-091` asked whether the daily-loss limit, pricing a stop the executor never trails, was refusing entries in section 90's `limit_refused` counts. **It was, and it is now measured: `daily_loss_halt` refused 174 of the 1,152 signals the limits refused (15.1 percent), in 9 of the 12 cells, and it is the second rule everywhere it fires.** The attribution to the untrailed stop is REASONED, not measured, and rests on section 93's bound: realised loss alone cannot reach 5 percent of equity at 1 percent risk on two pairs (about 1.3 percent a stopped-out trade, so about 2.6 percent in one UTC day), so every halt needed the committed term, which prices the executor's untrailed `Position.stop_loss` against the mark. The synthetic world of `test_a_winner_on_an_untrailed_stop_halts_every_entry_including_its_own_pair` shows the mechanism with nothing realised. What the counts do not say is how much of any one halt was the committed term.
+
+**What the halt changed is small, and that is the finding that matters for the pre-registration.** Net of everything, **the halts cost 3 trades out of 912** (C4 ETHUSDT 217 to 215, C5 ETHUSDT 148 to 147): the other 171 halted signals fell where the position was held or would have been refused as `already_in_position` anyway. That is a net figure; a halted signal that would have been a trade and a later one that became a trade because of it cancel inside it, and the counts cannot separate them. FOK-refused (45) and expired (8) entries are unchanged from section 90 in total, so `M5n-111` and `M5n-112` are neither helped nor worsened by N5.
+
+### Diagnoses
+
+* **The halt is larger than predicted on 4h and smaller on 1d.** C4 and C5 halted 42, 53, 14 and 16 against 25, 30, 12 and 14; C1, C2 and C6 halted 16, 19, 6, 7, 0 and 1 against 20, 18, 12, 10, 9 and 7. Section 93 reasoned that the 20-percent position cap lowers a 4h position's committed risk and put the 4h halts low. The cap evidently does not stop a 4h winner from sitting many deltas above its untrailed stop in the 2017 and 2021 runs, where a 4h trade can hold for weeks. REASONED from the counts; the dates and the marks are not printed and were not looked at.
+* **C6 BTCUSDT at 0.** Its 19 refused signals are all `already_in_position`. A time-series-momentum entry on BTCUSDT may be held through trends that never reach about four deltas above the stop, or its held spans may not overlap the other pair's. UNMEASURED, and not diagnosed further, because the diagnostic would print a date or a mark outside R-DT-3e's list.
+* **The trade losses were over-predicted for a reason worth keeping.** Section 93 expected a halted entry to cost its trade. The counts say a halt rarely cost an entry: a signal on a flat pair is halted only while the OTHER pair sits far above its stop, and net of any knock-on that happened on 3 signals in 912. Which halted signals were held-pair signals and which were flat-pair signals is not printed; REASONED from the net figure, not measured.
+* **The owner's clamp note counts signals, not trades.** The charter's clamp note reads *"C1 ETHUSDT, 22 of 41 trades at 2000 bps"*. The line printed here and in section 90 is `ETHUSDT signals=104 trades=41 ... clamp_upper=22`: **22 of 104 SIGNALS were clamped**, and how many of the 41 entered trades were is not printed (a clamp count by entered trade is not on the R-DT-3d or R-DT-3e list). The note's conclusion, that the upper clamp binds often on ETHUSDT 1d, stands on 22 of 104; its fraction does not. The pre-registration should quote it from the line.
+
+### What these counts are, and are not
+
+They are the number of times each rule, as ruled, said "enter" over the in-sample window, the number of times the unchanged risk manager refused it and under which rule, and what the executor did with the rest. **They are not a verdict on any candidate**: no return, equity or P&L was printed, and the simulation's own figures were kept in memory and discarded. A limit that dominates refusals is, by the N5 decisions, settled in the pre-registration with these counts in view and not tuned here; on these counts it is `already_in_position`, which is structural (this system does not add to a position) and not a limit anyone would tune, and the daily-loss halt, which is a limit, accounts for 15 percent of the refusals and 3 trades.
