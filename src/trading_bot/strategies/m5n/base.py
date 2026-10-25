@@ -11,6 +11,10 @@ R-DX, R-DY and R-DZ (``docs/M5N_CHARTER_DRAFT.md`` section 15) fix what a candid
   gap-free. ``enforce_gaps=False`` reads the same rows as though they were consecutive. It exists so
   that the effect of R-DZ can be counted (``scripts/n3_entry_counts.py``); nothing live uses it.
 
+* **The trailing distance is fixed with the signal** (N4b, charter section 17). Every signal carries
+  ``trail_delta_bps`` and ``trail_clamp`` in its metadata, from :func:`~trading_bot.strategies.m5n.trail.trail_delta`,
+  and the class declares ``declares_d1_exit`` so a backtest sequences its orders with the D1 executor.
+
 ``Signal.price`` and ``Signal.timestamp`` come from ``last_candle``, as for every strategy.
 """
 
@@ -25,6 +29,7 @@ from trading_bot.core.exceptions import DataError
 from trading_bot.core.models import Candle, Signal
 from trading_bot.strategies.base import BaseStrategy
 from trading_bot.strategies.m5n.gaps import gap_free_run, gap_free_tail
+from trading_bot.strategies.m5n.trail import TRAIL_CLAMP_KEY, TRAIL_DELTA_KEY, trail_delta
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     import pandas as pd
@@ -51,6 +56,7 @@ class M5nStrategy(BaseStrategy):
 
     timeframe: ClassVar[str]
     recursive: ClassVar[bool] = False
+    declares_d1_exit: ClassVar[bool] = True
 
     def __init__(self, enforce_gaps: bool = True) -> None:
         if not isinstance(enforce_gaps, bool):
@@ -100,11 +106,21 @@ class M5nStrategy(BaseStrategy):
         found = self.evaluate(window)
         if found is None or not found.fired:
             return None
+        run = gap_free_run(candles, self.timeframe) if self.enforce_gaps else candles
+        delta = trail_delta(run, last_candle.close)
+        if delta is None:
+            return None
         return Signal(
             symbol=symbol,
             action=SignalAction.BUY,
             timestamp=last_candle.close_time,
             price=last_candle.close,
             reason=found.reason,
-            metadata={"strategy": self.name, "timeframe": self.timeframe, **found.metadata},
+            metadata={
+                "strategy": self.name,
+                "timeframe": self.timeframe,
+                **found.metadata,
+                TRAIL_DELTA_KEY: delta.bps,
+                TRAIL_CLAMP_KEY: delta.clamp.value,
+            },
         )
