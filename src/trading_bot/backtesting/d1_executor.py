@@ -26,7 +26,8 @@ and fees come from ``fill_model.book_entry`` and ``book_exit``.
   not trailed, because nothing places a trailing level at the venue (CLAUDE.md, the committed-risk
   supersession).
 * **It tallies what the research run prints and nothing else:** per symbol the signals, the refusals by
-  stage and by the rule that refused (R-DT-3e), the clamps and the deltas. It records no figure of money beyond what the ledger needs.
+  stage and by the rule that refused (R-DT-3e), the queued entries whose size the position cap limited
+  (R-DT-3f), the clamps and the deltas. It records no figure of money beyond what the ledger needs.
 
 **What one decision bar does, in this order** (``__call__``): observe the bar; book the exits at or
 before the bar's open; settle a pending entry against it (booking first any exit at or before the entry
@@ -84,6 +85,12 @@ _log = get_logger(__name__)
 #: The metadata keys ``strategies.m5n.trail`` writes; a test pins that the two agree.
 DELTA_KEY = "trail_delta_bps"
 CLAMP_KEY = "trail_clamp"
+#: What ``risk.position_sizing.calculate_position_size`` writes into a sizing reason when the quantity was
+#: cut by ``max_position_size_percent`` (R-DT-3f). The unchanged manager exposes no flag for it:
+#: ``SizingDecision`` carries the requested and the final quantity, but the cap is knowable numerically
+#: only with the equity this executor does not hold. A test calls the real sizer to pin that the marker
+#: is present when the cap binds and absent when it does not.
+CAP_MARKER = ", capped at "
 _MILLISECOND = timedelta(milliseconds=1)
 _MINUTE = timedelta(minutes=1)
 _BASIS_POINTS = Decimal(10000)
@@ -103,6 +110,8 @@ class SymbolTally:
     #: ``limit_refused`` and ``no_mark_price`` under its own stage. A refusal after the limits passed
     #: (sizing, affordability) carries no rule and appears under ``refusals`` only.
     rules: dict[RiskRule, int] = field(default_factory=dict)
+    #: Queued entries whose size ``max_position_size_percent`` limited (R-DT-3f).
+    size_capped: int = 0
     clamp_upper: int = 0
     clamp_lower: int = 0
     deltas: list[int] = field(default_factory=list)
@@ -215,6 +224,7 @@ class D1Executor:
                 signals=tally.signals,
                 refusals=dict(tally.refusals),
                 rules=dict(tally.rules),
+                size_capped=tally.size_capped,
                 clamp_upper=tally.clamp_upper,
                 clamp_lower=tally.clamp_lower,
                 deltas=list(tally.deltas),
@@ -268,6 +278,8 @@ class D1Executor:
             delta_bps=raw,
         )
         self._counts.entries_queued += 1
+        if assessment.sizing is not None and CAP_MARKER in assessment.sizing.reason:
+            tally.size_capped += 1
 
     # -- the candle side --------------------------------------------------------
     async def __call__(self, candle: Candle) -> None:

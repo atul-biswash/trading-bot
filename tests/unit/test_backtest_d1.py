@@ -226,6 +226,27 @@ class TestN5SizingThroughTheWholeChain:
         # 0.00001 step; the other three quantities here are exact at that step too.
         assert position.quantity == D("19.98001")
 
+    @pytest.mark.parametrize(("delta", "expected"), [(10, 1), (500, 1), (501, 0), (1000, 0)])
+    async def test_the_tally_counts_an_entry_only_when_the_cap_limited_its_size(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, delta: int, expected: int
+    ) -> None:
+        """R-DT-3f through the real manager, sizer and executor: the cap binds at 500 and below."""
+        system, result = await run_world(
+            tmp_path,
+            monkeypatch,
+            timeframe="4h",
+            count=4320,
+            start="2024-03-01",
+            end="2024-03-04",
+            buy={"BTCUSDT": ["2024-03-01T00:00"]},
+            paths={},
+            delta=delta,
+            n5=True,
+        )
+        assert result.complete, result.problems
+        assert d1(system).tallies["BTCUSDT"].size_capped == expected
+        assert d1(system).counts.entries_queued == 1
+
     async def test_the_same_world_without_n5_is_sized_by_the_fixed_fraction(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

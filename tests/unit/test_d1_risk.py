@@ -22,10 +22,12 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from decimal import Decimal
+from typing import ClassVar
 
 import pandas as pd
 import pytest
 
+from trading_bot.backtesting.d1_executor import CAP_MARKER
 from trading_bot.backtesting.d1_risk import D1RiskManager
 from trading_bot.config.models import (
     PositionSizingConfig,
@@ -373,3 +375,93 @@ class TestWhatItLeavesToTheBaseClass:
         assert the_manager._manager_for(1000) is first
         assert the_manager._manager_for(1001) is not first
         assert type(first) is RiskManager
+
+
+class TestTheCapMarkerIsTheManagersOwn:
+    """R-DT-3f. The executor counts a capped entry by a marker in the sizing reason, because the
+    unchanged manager exposes no flag; these call the REAL sizer so the marker cannot drift from it."""
+
+    def test_the_marker_is_in_the_reason_when_the_cap_binds(self) -> None:
+        assessment = manager().evaluate(buy(10), portfolio=flat_portfolio())
+        assert assessment.sizing is not None
+        assert CAP_MARKER in assessment.sizing.reason
+        assert assessment.sizing.requested_quantity > assessment.sizing.quantity
+
+    def test_the_marker_is_absent_when_it_does_not(self) -> None:
+        for delta in (600, 1000, 2000):
+            assessment = manager().evaluate(buy(delta), portfolio=flat_portfolio())
+            assert assessment.sizing is not None
+            assert CAP_MARKER not in assessment.sizing.reason, delta
+
+    def test_a_delta_of_exactly_five_hundred_binds_on_the_tick(self) -> None:
+        """The stop rounds toward the entry, shrinking the distance below 5 percent, so the 1 percent
+        risk asks for a hair over 20 percent of equity: delta 500 is capped and 501 is not."""
+        at = manager().evaluate(buy(500), portfolio=flat_portfolio())
+        above = manager().evaluate(buy(501), portfolio=flat_portfolio())
+        assert at.sizing is not None and above.sizing is not None
+        assert CAP_MARKER in at.sizing.reason
+        assert CAP_MARKER not in above.sizing.reason
+
+
+class TestTheManagersHoldNoStateThatEvaluateChanges:
+    """P146 step 1 (M5n-152): the owner's acceptance of D1RiskManager rests on this, so it is pinned."""
+
+    ATTRIBUTES: ClassVar[set[str]] = {"_config", "_provider", "_pairs", "_clock"}
+
+    @staticmethod
+    def snapshot(
+        target: RiskManager,
+    ) -> tuple[dict[str, int], dict[str, object], dict[str, object]]:
+        identities = {name: id(value) for name, value in vars(target).items()}
+        return identities, dict(target._pairs), target._config.model_dump()
+
+    def scenarios(self) -> list[tuple[Portfolio, str]]:
+        halted = Portfolio(free_quote=D("9000"), positions={ETH: held()})
+        realised = flat_portfolio()
+        realised.record_realised_pnl(D("-600"), now=NOW)
+        cooling = flat_portfolio()
+        cooling.start_cooldown(BTC, now=NOW, minutes=15)
+        return [
+            (flat_portfolio(), "100"),
+            (flat_portfolio("0"), "100"),
+            (halted, "200"),
+            (Portfolio(free_quote=D("9000"), positions={BTC: held(BTC)}), "100"),
+            (realised, "100"),
+            (cooling, "100"),
+            (flat_portfolio(), "100"),
+        ]
+
+    def test_a_plain_manager_changes_nothing_across_every_kind_of_verdict(self) -> None:
+        for portfolio, eth_close in self.scenarios():
+            target = RiskManager(
+                config=config(),
+                provider=ScriptedProvider({BTC: "100", ETH: eth_close}),
+                pairs={s: PairContext(timeframe="1d", symbol_info=info(s)) for s in (BTC, ETH)},
+                clock=lambda: NOW,
+            )
+            before = self.snapshot(target)
+            assert set(vars(target)) == self.ATTRIBUTES
+            for _ in range(3):
+                target.evaluate(buy(1000), portfolio=portfolio)
+            target.evaluate(buy(None), portfolio=portfolio)
+            assert self.snapshot(target) == before
+            assert set(vars(target)) == self.ATTRIBUTES
+
+    def test_the_per_delta_instances_differ_only_in_the_stop(self) -> None:
+        base = manager()
+        before = self.snapshot(base)[2]
+        for delta in (10, 1000, 2000):
+            base.evaluate(buy(delta), portfolio=flat_portfolio())
+        assert set(base._by_delta) == {10, 1000, 2000}
+        for delta, instance in base._by_delta.items():
+            assert set(vars(instance)) == self.ATTRIBUTES
+            assert instance._provider is base._provider
+            assert instance._clock is base._clock
+            assert instance._pairs == base._pairs
+            assert all(instance._pairs[s] is base._pairs[s] for s in base._pairs)
+            shared = [f for f in type(base._config).model_fields if f != "stop_loss"]
+            assert all(getattr(instance._config, f) is getattr(base._config, f) for f in shared)
+            assert instance._config.stop_loss.percent == D(delta) / D(100)
+        # and the base configuration, placeholder included, is exactly as it was
+        assert base._config.model_dump() == before
+        assert base._config.stop_loss.percent == D("20.0")

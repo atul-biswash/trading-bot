@@ -37,7 +37,14 @@ from trading_bot.core.enums import (
     SignalAction,
 )
 from trading_bot.core.interfaces import Dispatcher
-from trading_bot.core.models import Candle, Position, ProtectiveLevels, RiskDecision, Signal
+from trading_bot.core.models import (
+    Candle,
+    Position,
+    ProtectiveLevels,
+    RiskDecision,
+    Signal,
+    SizingDecision,
+)
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.data.historical import HistoricalStore
 from trading_bot.strategies.m5n import trail
@@ -85,6 +92,19 @@ def entry_assessment(symbol: str = "BTCUSDT", *, limit: str = "100.10") -> RiskA
     return RiskAssessment(
         symbol=symbol, approved=True, reason="approved", stage=None, intent=intent
     )
+
+
+def sized_entry(reason: str, symbol: str = "BTCUSDT") -> RiskAssessment:
+    """An approved entry whose sizing carries ``reason``, as the manager's approval does."""
+    approved = entry_assessment(symbol)
+    sizing = SizingDecision(
+        symbol=symbol, quantity=D("0.5"), requested_quantity=D("0.9"), reason=reason
+    )
+    return approved.model_copy(update={"sizing": sizing})
+
+
+CAPPED = "risk_per_trade, capped at 20% of equity: 0.5 at 100.10 = 50.05 quote"
+UNCAPPED = "risk_per_trade: 0.5 at 100.10 = 50.05 quote"
 
 
 def refused(stage: RefusalStage, symbol: str = "BTCUSDT") -> RiskAssessment:
@@ -504,6 +524,73 @@ class TestTheTally:
         rig = Rig(tmp_path)
         await rig.buy(bar(0))
         assert rig.executor.tallies["BTCUSDT"].rules == {}
+
+    async def test_a_queued_entry_whose_size_the_cap_limited_is_counted(
+        self, tmp_path: Path
+    ) -> None:
+        """R-DT-3f. The marker is in the sizing reason, because the manager exposes no flag."""
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), sized_entry(CAPPED))
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 1
+        assert rig.executor.counts.entries_queued == 1
+
+    async def test_a_size_the_cap_did_not_limit_is_not_counted(self, tmp_path: Path) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), sized_entry(UNCAPPED))
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 0
+        assert rig.executor.counts.entries_queued == 1
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "risk_per_trade, limited to 20% of equity: 0.5 at 100.10",
+            "risk_per_trade; capped at 20% of equity: 0.5 at 100.10",
+            "capped: 0.5 at 100.10",
+            "risk_per_trade, uncapped at 20% of equity: 0.5 at 100.10",
+        ],
+    )
+    async def test_a_reworded_reason_is_not_the_marker(self, tmp_path: Path, reason: str) -> None:
+        """The near miss (M5c-AA): a reason that merely resembles the manager's is not counted."""
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), sized_entry(reason))
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 0
+
+    async def test_an_approved_entry_with_no_sizing_is_not_counted(self, tmp_path: Path) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0))
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 0
+
+    async def test_a_refusal_carrying_a_capped_sizing_is_not_an_entry(self, tmp_path: Path) -> None:
+        """An unaffordable order was sized and capped and was never queued."""
+        rig = Rig(tmp_path)
+        capped = refused_after_the_limits(RefusalStage.UNAFFORDABLE).model_copy(
+            update={
+                "sizing": SizingDecision(
+                    symbol="BTCUSDT", quantity=D("0.5"), requested_quantity=D("0.9"), reason=CAPPED
+                )
+            }
+        )
+        await rig.buy(bar(0), capped)
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 0
+        assert rig.executor.counts.entries_queued == 0
+
+    async def test_an_entry_ignored_for_a_pending_one_is_not_counted(self, tmp_path: Path) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), sized_entry(CAPPED))
+        await rig.buy(bar(0), sized_entry(CAPPED))
+        assert rig.executor.counts.entries_ignored == 1
+        assert rig.executor.tallies["BTCUSDT"].size_capped == 1
+
+    async def test_the_cap_count_is_per_pair_and_the_snapshot_is_a_copy(
+        self, tmp_path: Path
+    ) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), sized_entry(CAPPED))
+        await rig.buy(bar(0, symbol="ETHUSDT"), sized_entry(UNCAPPED, "ETHUSDT"))
+        snapshot = rig.executor.tallies
+        snapshot["BTCUSDT"].size_capped = 99
+        again = rig.executor.tallies
+        assert (again["BTCUSDT"].size_capped, again["ETHUSDT"].size_capped) == (1, 0)
 
     async def test_rules_are_tallied_per_pair_and_the_snapshot_is_a_copy(
         self, tmp_path: Path
