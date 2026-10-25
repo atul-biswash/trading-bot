@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P149 on branch `m5n` (HEAD `b7d6407`).** Section 22 records the survey practice, the fee telemetry definitions and the N0 guard verbatim, with the executing session's readings of each marked as the owner's to overrule. The old section 22 is section 23.
+
 **Amended at P148 on branch `m5n` (HEAD `48c4199`).** Section 21 records four readings of the pre-registration, the owner's rulings on `M5n-178` and the `M5n-173` note verbatim; section 20 is annotated where the rulings settle what it left open. The old section 21 is section 22.
 
 **Amended at P147 on branch `m5n` (HEAD `ede21a3`).** Section 20 points to the M5n pre-registration, `docs/M5N_PREREGISTRATION.md`, with its SHA-256, and records three places where its wording and this file's differ, none reconciled. The N7 row of the item table is marked superseded by sections 6 to 8 of the pre-registration. The old section 20 is section 21.
@@ -346,6 +348,23 @@ The project owner's text, quoted as the P148 prompt gives it, in the order the p
 
 **Recorded by the executing session.** These are readings, not amendments, so the pre-registration's digest `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e` is unchanged. Reading (3) writes the standard Bailey and Lopez de Prado form with `g3` the daily skewness and `g4` the daily non-excess kurtosis; reading (1) fixes `ddof` 1 for the Sharpe and the DSR's `V`, and the choice of `ddof` for the skewness and kurtosis inside the DSR is not stated, so N6 takes the moment estimators (population moments about the sample mean) and says so; that choice is recorded as a finding where it is made.
 
-## 22. What this draft does not do
+## 22. Survey practice, fee telemetry and the N0 guard, recorded verbatim at P149
+
+The project owner's text, quoted as the P149 prompt gives it, in the order the prompt gives it.
+
+> **Survey practice** After a FEWER is explained, the survey resumes at the next mutation with its committed predictions unchanged (precedents r05, n40, m18).
+
+> **Fee telemetry** Fees per trade in bps = total fees / total entry notional x 10000. Fee share = fees / |gross|, always reported, with a flag when gross <= 0. Telemetry only, never a criterion.
+
+> **N0 guard** The N7 runner refuses unless all hold: (a) the tag milestone/M5m exists; (b) this charter carries a line "N0 complete: S4 result recorded at <sha>" whose commit is an ancestor of HEAD; (c) the pre-registration, the estimator module and the runner match their digests recorded in this charter. There is no override flag.
+
+**Readings the executing session records so they are not settled by accident; each is the owner's to overrule.**
+
+1. **Survey practice is what P148 did at `m18`.** The harness stops at a FEWER, so resuming is a second invocation of `scripts/worktree_survey.py` from a spec holding the committed entries from the next mutation on, byte for byte, with no prediction changed; the FEWER stays on record beside its explanation (ledger section 103, `M5n-193` and `M5n-194`).
+2. **The fee telemetry text confirms both departures `M5n-183` flagged, and displaces two rows of section 6.** Fee share over `|gross|`, and fees per trade in basis points over entry notional, are now the owner's definitions; section 6's `fee_share` row (reported only when the gross sum is positive) and its `fee_bps_per_trade` row are displaced for the aggregate figures, and its other rows stand. *"Always reported"* is read so that a ratio whose denominator is exactly zero (a gross of 0, or no trade) is printed as `n/a` with its numerator and its flag, because nothing can be divided; no number is invented for it. The flag is set when the gross is zero or negative.
+3. **The guard's three conditions are read as follows.** (a) The tag `milestone/M5m` resolves to a commit, annotated or not. (b) The charter, read from the commit at HEAD and not from the working file, carries exactly one line that is exactly `N0 complete: S4 result recorded at ` followed by 7 to 40 lowercase hexadecimal characters and nothing else; that commit must exist and be an ancestor of HEAD, HEAD itself counting. This section quotes the owner's wording inside a sentence and with a placeholder, which is not such a line. (c) The charter, read the same way, carries exactly one line of the form `N7 frozen digest <path> <sha256>` for each of `docs/M5N_PREREGISTRATION.md`, `src/trading_bot/backtesting/sharpe_stats.py` and `scripts/n7_evaluate.py`; the SHA-256 of each file's bytes in the working tree must equal its line. So the runner's own digest is recorded after its last edit, in a docs commit, and any edit to it, to the estimator module or to the pre-registration after that is an amendment that the guard refuses. A condition that cannot be evaluated (no `git`, no repository, an unreadable file) refuses, because the guard fails closed.
+4. **There is no override: no flag, no environment variable, no config key.** The guard runs first in `main`, before the config or the store is opened. The tests reach it through a function parameter naming the repository root and a module constant, and no command line does.
+
+## 23. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
