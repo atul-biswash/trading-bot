@@ -9883,3 +9883,107 @@ The 103 tests killed by no mutation are, by file, the same families as section 9
 | n53 | any delta is accepted | 4 | 5 | MORE (see the diagnosis); crash: TypeError |
 | n54 | the committed window starts a day late | 1 | 1 | MATCH |
 | n55 | C1 is a different candidate | 1 | 1 | MATCH |
+
+## 93. M5n N5: how the unchanged RiskManager sizes, and the predictions for the N5 count run, before any code (P145 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. P145 item 2 is a read, and item 3 is the predictions; both are committed before any code, test or script is drafted. HEAD is `b6759a1` (the charter commit of P145), on `m5n`, `main` at `ee8d485`. Nothing here decides anything about S4, and no run has been made.
+
+### Item 2a. How the RiskManager sizes when `stop_loss` is enabled (MEASURED, by reading `src/trading_bot/risk/`)
+
+`RiskManager.evaluate` (`manager.py:272`) is the composed path, with the signature `evaluate(self, signal, *, portfolio)`: **it has no parameter for a supplied stop.** The stop reaches the sizer only through the manager's own config:
+
+1. `stop_loss = self._config.stop_loss` (`manager.py:471`). The `atr` type reads the manager's own ATR (`manager.py:473-482`); the `percent` type needs nothing else.
+2. `entry_limit = derive_entry_limit(price, max_slippage=self._config.max_entry_slippage, tick_size=...)` (`manager.py:487-491`; `rules.py:317-349`): the signal close widened by `max_entry_slippage` and rounded UP to the tick.
+3. `compute_protective_levels(... entry_price=entry_limit, stop_loss=stop_loss ...)` (`manager.py:493-501`) calls `stop_loss_level` (`rules.py:253-276`), whose distance is `entry_price * config.percent / 100` for `percent` (`rules.py:241-242`) and `atr_multiplier * ATR` for `atr` (`rules.py:243-249`). The level is rounded TOWARD the entry, which for a long's stop is `ROUND_CEILING` (`rules.py:181-203`), and is `None` when the distance is sub-tick.
+4. The stop gate (`manager.py:507-514`): `stop_loss.enabled` with no placeable level is a refusal at `STOP_UNPLACEABLE`.
+5. `self.size_position(signal, equity=equity, price=entry_limit, stop_price=levels.stop_loss)` (`manager.py:519-521`; the method is `manager.py:236-269`), then `calculate_position_size` (`position_sizing.py:196-288`). For `risk_per_trade` (`position_sizing.py:179-191`) the quantity is `equity * risk_fraction / |entry - stop|` (`size_by_risk_per_trade`, `position_sizing.py:135-163`, the division at `:163`). It is then capped at `max_position_size_percent` of equity (`position_sizing.py:246-249`), rounded DOWN to the effective step (`:253`), and refused if under `min_qty` (`:271`) or if the notional at `min(price, stop)` is under `min_notional` (`:276-281`). `equity` is `portfolio.equity(marks)`, the total portfolio value (`manager.py:430`).
+6. Affordability (`manager.py:534-543`): `cost = quantity * entry_limit`, and `cost > portfolio.free_quote` is a REFUSAL at `RefusalStage.UNAFFORDABLE`. **It does not shrink the quantity.**
+7. `config/models.py:507-515` refuses `risk_per_trade` while `stop_loss.enabled` is false, which is the placeholder note in `config.m5n.yaml`.
+
+**What this means for the N5 decisions.** Three things are true of the unchanged class and the owner's wording should be read against them.
+
+* *The stop is `entry_limit x (1 - delta / 10000)` at the tick, not `fill x (1 - delta / 10000)`.* The manager sizes at the signal bar, before any fill exists, so the basis is the entry limit (the close widened by 0.1 percent), exactly as the prompt's "per the existing RiskManager definition" says. The executor's `Position.stop_loss` stays `fill x (1 - delta / 10000)` (N4b), which is what committed risk prices from. The two differ by the entry slippage and a tick.
+* *"Notional is capped by the free quote balance" is a refusal, not a cap.* The manager refuses at `UNAFFORDABLE` (item 6) and the executor refuses again at fill time (`entries_unaffordable`, `d1_executor.py:337-338`). The only thing that SHRINKS a notional is `max_position_size_percent`.
+* *`max_position_size_percent` defaults to 20 and applies.* The prompt says every other setting stays at its default, so the 1-percent risk is capped at 20 percent of equity: **it binds whenever `delta < 500` bps** (1 percent / 5 percent = 20 percent). On the 1d candidates it rarely binds (the lowest delta in section 90 is 613); on C4 and C5 it binds on roughly a fifth to a half of entries (the p25 of the delta is 405 to 542 bps and the p50 is 528 to 692). The counts do not show it (a capped size is not on the R-DT-3d or R-DT-3e list), so how often it binds is UNMEASURED and stays so.
+
+**The HALT clause, read.** "The RiskManager cannot size from a supplied initial stop without a code change" is not met, on this reading: `RiskManager` is a class over a frozen config, it holds no state beyond config, provider, pairs and clock, and its `percent` stop is exactly a stop supplied as a distance. A manager whose `stop_loss.percent` is `delta / 100`, an exact `Decimal` for every integer delta from 10 to 2000, sizes from the clamped trail. **The wiring is therefore a subclass of `RiskManager` that overrides nothing in the base class's code: it keeps one unchanged base manager per delta (config copied with `stop_loss.percent = delta / 100`) and `evaluate` delegates to the one for the signal's `trail_delta_bps`.** It is chosen only on the D1 path, next to the D1 executor. If the owner reads the HALT clause as requiring that `evaluate` itself accept a supplied stop, that is a code change to the manager and N5 stops here; this is flagged for that ruling and nothing is built on the other reading until the code step, which comes after these predictions.
+
+### Item 2b. The `config.m5n.yaml` keys that change
+
+| Key | Now | N5 |
+|---|---|---|
+| `risk.position_sizing.method` | `fixed_fraction` | `risk_per_trade` |
+| `risk.position_sizing.fraction` | `0.02` | removed (unused by the new method) |
+| `risk.position_sizing.risk_per_trade` | absent (default `0.01`, `config/models.py:178`) | `0.01`, written out |
+| `risk.stop_loss.enabled` | `false` | `true` |
+| `risk.stop_loss.type` / `percent` | absent (defaults `percent`, `2.0`) | `percent`, `20.0`: a placeholder that the D1 risk manager replaces with each signal's delta; 20.0 is the upper clamp, so a failure to replace it would show as a clamp-sized stop and not as a 2 percent one |
+
+`take_profit.enabled` and `trailing_stop.enabled` stay `false`, and `max_position_staleness_s` stays `259200.0`. **The file loads with these**, checked in memory with no file written: `protective_legs` becomes 1 and the reconciliation call cap stays 3, so the coherence validators are unmoved.
+
+### Item 2c. Every RiskManager setting that applies, with its value
+
+All read from `RiskConfig` and its limits, `config/models.py`, with the N5 file's own values.
+
+| Setting | Value | Where | Note |
+|---|---|---|---|
+| `position_sizing.method` | `risk_per_trade` | set in the file | |
+| `position_sizing.risk_per_trade` | `0.01` | `models.py:178`, written out | 1 percent of equity |
+| `stop_loss` | enabled, `percent`, placeholder `20.0` | set in the file | replaced per signal |
+| `take_profit.enabled` | `false` | set in the file | default is `true` (`models.py:206`) |
+| `trailing_stop.enabled` | `false` | default (`models.py:220`) | |
+| `limits.max_open_positions` | `3` | default (`models.py:238`) | two pairs are enabled, so it cannot bind |
+| `limits.max_daily_loss_percent` | `5.0` | default (`models.py:239`) | realised today plus committed risk |
+| `limits.max_position_size_percent` | `20` | default (`models.py:240`) | binds below 500 bps |
+| `limits.cooldown_minutes` | `15` | default (`models.py:241`) | **never started in a backtest**: `Portfolio.start_cooldown` has no caller on the backtest path (`simulated_executor.py:60` says so; the D1 executor calls `close_position` and nothing else), so no cooldown refusal can occur |
+| `max_entry_slippage` | `0.001` | default (`models.py:284`) | equal to `config.s4.yaml`'s |
+| `max_position_staleness_s` | `259200.0` | set in the file | the executor stamps every held position on every bar |
+| `price_band_margin` | `0.02` | default (`models.py:296`) | REASONED to be unread on the backtest path (it prices a venue band at dispatch) |
+
+### Item 3. The predictions (R-T, R-DQ), committed before any code
+
+**What the rules do, so the predictions can be checked against the reasoning.** `_approve` (`manager.py:159-233`) checks, in this order, `NO_EQUITY`, `DAILY_LOSS_HALT`, `ALREADY_IN_POSITION`, `COOLDOWN`, `MAX_OPEN_POSITIONS`. **`DAILY_LOSS_HALT` is checked BEFORE `ALREADY_IN_POSITION`**, so while the halt holds, a signal on a pair that is held is counted as the halt and not as a position already held; the by-rule split is not "held versus not held". The halt fires when `realised_today + committed <= -5 percent of equity now`, and `committed` is the sum over open positions of `min(0, (stop - mark) x quantity)` with `stop` the executor's untrailed `Position.stop_loss` (`portfolio.py:1112-1149`). With risk sized at 1 percent, a position whose mark is `g` above its entry and whose delta is `d` commits about `1 percent x (1 + g / d)` of equity, so one position alone reaches 5 percent when it has gained about four deltas (60 percent at a 1500 bps trail) and two positions reach it when the sums of `g / d` reach about 3. **That is M5n-091**: the stop is never trailed, so a large winner commits a large amount of risk to a stop far below the mark.
+
+**Structural predictions (the ones I am most sure of).**
+
+1. **Signals, clamps and delta quantiles are identical to section 90 in all twelve cells**, to the digit (a strategy's output does not depend on the risk manager, and neither do its deltas).
+2. **The identity holds exactly in every cell:** signals = sum of refusals + trades + OPEN-at-end + FOK-refused + expired + unaffordable (the executor's).
+3. **Every stage other than `limit_refused` is 0 in all twelve cells**, so the by-rule split of `limit_refused` is the whole of the refusals: `unaffordable` (both the manager's stage and the executor's), `size_not_tradeable`, `stop_unplaceable`, `committed_risk_unknown`, `position_stale`, `atr_unavailable`, `live_order_list` and `unmanaged_holding` are all 0.
+4. **By rule, `cooldown`, `max_open_positions`, `no_equity` and `no_mark_price` are 0 in all twelve cells**; only `daily_loss_halt` and `already_in_position` are non-zero.
+5. **OPEN at the end is 0 in all twelve cells**, as at N4b (a trade's entry minute and trail are unchanged by sizing).
+6. **The scan is CLEAN, with 74 output lines** (the 50 of N4b plus two new lines per pair, 24) **and 36 log records** at WARNING and above (nothing in the risk manager logs above INFO; the `IntentLogger` logs a refusal at INFO, which the script's root-logger handling drops).
+7. The old-path digests `77421e42...9d10` and `3626ae33...6a6d` stay byte-identical, and the whole-run wall time stays under 15 minutes (predicted 5 to 8).
+
+**Per cell.** The N4b columns are section 90's. "Halt" is `daily_loss_halt`, "AIP" is `already_in_position`; FOK and expired are predicted at section 90's values except where a trade lost to the halt takes its FOK or expiry with it, which I do not predict and leave inside the range. Each row satisfies the identity.
+
+| Candidate | Pair | Signals | N4b trades | Trades N5 (range) | Halt (range) | AIP | FOK | Expired | Unaffordable |
+|---|---|---|---|---|---|---|---|---|---|
+| C1 | BTCUSDT | 104 | 34 | 31 (26 to 35) | 20 (8 to 35) | 48 | 3 | 2 | 0 |
+| C1 | ETHUSDT | 104 | 41 | 37 (31 to 41) | 18 (6 to 32) | 48 | 1 | 0 | 0 |
+| C2 | BTCUSDT | 73 | 25 | 23 (19 to 25) | 12 (4 to 22) | 30 | 6 | 2 | 0 |
+| C2 | ETHUSDT | 68 | 28 | 26 (22 to 28) | 10 (3 to 20) | 30 | 2 | 0 | 0 |
+| C3 | BTCUSDT | 6 | 6 | 5 (3 to 6) | 1 (0 to 3) | 0 | 0 | 0 | 0 |
+| C3 | ETHUSDT | 6 | 6 | 5 (3 to 6) | 1 (0 to 3) | 0 | 0 | 0 | 0 |
+| C4 | BTCUSDT | 538 | 216 | 205 (175 to 220) | 25 (5 to 60) | 304 | 4 | 0 | 0 |
+| C4 | ETHUSDT | 546 | 217 | 205 (175 to 220) | 30 (6 to 70) | 294 | 14 | 3 | 0 |
+| C5 | BTCUSDT | 293 | 149 | 144 (125 to 150) | 12 (2 to 35) | 135 | 2 | 0 | 0 |
+| C5 | ETHUSDT | 291 | 148 | 143 (125 to 150) | 14 (2 to 40) | 124 | 9 | 1 | 0 |
+| C6 | BTCUSDT | 45 | 23 | 21 (17 to 23) | 9 (2 to 18) | 12 | 3 | 0 | 0 |
+| C6 | ETHUSDT | 40 | 19 | 17 (14 to 19) | 7 (1 to 15) | 15 | 1 | 0 | 0 |
+
+**Totals.** Trades 862 (790 to 910), against 912 at N4b. `daily_loss_halt` 159 in all (50 to 350). `already_in_position` 1,040 by the rows above, so the two rules together are 1,199, against section 90's `limit_refused` total of 1,149 (the 50 more are the trades predicted lost). **`daily_loss_halt` is non-zero in at least 10 of the 12 cells** (the two C3 cells carry the doubt, at 0 to 3 each).
+
+**The expected dominant rule: `already_in_position`, in 10 of 12 cells** (all but the two C3 cells, where it is 0), **with `daily_loss_halt` second everywhere it is non-zero.** `daily_loss_halt` is expected to exceed `already_in_position` in no cell; the cell where it is closest is C6 BTCUSDT (9 against 12).
+
+**What the halt count settles, and what it cannot (M5n-091).** A non-zero `daily_loss_halt` means the rule fired. Realised loss alone cannot reach 5 percent of equity: a stopped-out position loses about 1 percent (the risk) plus at most 0.28 percent more (the 1.2 percent stop slippage and the exit fee on a notional capped at 20 percent), so two stop-outs inside one UTC day cost about 2.6 percent (REASONED). So every halt needs the committed term, which prices the executor's UNTRAILED stop against the mark, and a non-zero count answers M5n-091 in the affirmative: the daily-loss limit does refuse entries on the strength of a stop the executor never trails. The count cannot say how much of any one halt was the committed term, and it does not say the limit is wrong; whether to settle it differently is the pre-registration's, with the counts in view (the N5 decisions).
+
+**The places a prediction is most likely wrong, named in advance.**
+
+* *The halt counts.* They rest on how long a trend holds a winner far above its stop, which I estimated from the shape of the deltas and not from any count; the ranges are wide on purpose, and the 1d cells could be well above (a bull run holds one position for months at a mark many deltas above the stop, so all of its signals and the other pair's become halts). If the halt is 2 to 3 times my figure, the trades fall with it.
+* *The trade counts.* A trade lost to the halt frees later same-pair signals that were `already_in_position`, which can add trades; I predicted a net loss of 1 to 11 per cell and did not model the knock-on.
+* *C3.* Six signals a cell and one trend can hold the other pair for months; 0 to 3 halts a cell and 3 to 6 trades.
+* *`unaffordable`.* Predicted 0 everywhere because a 20 percent cap leaves free cash above any notional unless another position's mark has run above about 80 percent of equity; a bull run could do that once.
+* *The 4h halts.* Sizing is capped at 20 percent of equity below 500 bps, which lowers the committed risk of a 4h position, so I put them at a few percent of refusals; the range is wide.
+
+### The findings this section carries
+
+See the commit message. In short, the manager has no supplied-stop parameter (the percent route is the wiring); its affordability step refuses where the owner's wording says caps; the 20 percent position cap applies and binds below 500 bps; `daily_loss_halt` is checked before `already_in_position`; and the cooldown cannot occur in a backtest.
