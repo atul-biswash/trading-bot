@@ -25,47 +25,19 @@ import pytest
 
 import trading_bot.strategies.m5n  # noqa: F401  (registers the six candidates)
 from tests.unit.backtest_world import CODE, build_world
-from tests.unit.d1_world import Minute, at, build_minutes, flat, make_settings
+from tests.unit.d1_world import TOUCH, Minute, ScriptedD1, at, build_minutes, flat, make_settings
 from trading_bot.backtesting import engine
 from trading_bot.backtesting.d1_executor import D1Executor
 from trading_bot.backtesting.engine import BacktestResult, BacktestSystem, backtest_system
 from trading_bot.backtesting.simulated_executor import SimulatedExecutor
-from trading_bot.core.enums import RefusalStage, SignalAction
-from trading_bot.core.models import Candle, Signal
+from trading_bot.core.enums import RefusalStage
+from trading_bot.core.models import Candle
 from trading_bot.data.historical import HistoricalStore
 from trading_bot.strategies import registry
-from trading_bot.strategies.base import BaseStrategy
 
 D = Decimal
-TOUCH: Minute = ("100", "100", "94", "95", "1")
 OLD_DIGEST_ONE = "77421e427e840ca1f1482fed3a6f46792051d99a67dcdac2ae5affdaefbb9d10"
 OLD_DIGEST_TWO = "3626ae33cc4a955cfa68db307de1ccb822145d383f076bec978705d3c7be4a6d"
-
-
-class ScriptedD1(BaseStrategy):
-    """Emits ``BUY`` on the named decision bars, each carrying the D1 trail; declares the D1 exit."""
-
-    name = "d1_scripted"
-    declares_d1_exit = True
-
-    def __init__(
-        self, buy: dict[str, list[str]] | None = None, delta: int = 500, clamp: str = "none"
-    ) -> None:
-        super().__init__(buy=buy, delta=delta, clamp=clamp)
-        self._buy = {symbol: set(times) for symbol, times in (buy or {}).items()}
-        self._delta = delta
-        self._clamp = clamp
-
-    def generate_signal(self, symbol: str, candles: Any, *, last_candle: Candle) -> Signal | None:
-        if last_candle.open_time.strftime("%Y-%m-%dT%H:%M") not in self._buy.get(symbol, set()):
-            return None
-        return Signal(
-            symbol=symbol,
-            action=SignalAction.BUY,
-            timestamp=last_candle.close_time,
-            price=last_candle.close,
-            metadata={"trail_delta_bps": self._delta, "trail_clamp": self._clamp},
-        )
 
 
 async def run_world(

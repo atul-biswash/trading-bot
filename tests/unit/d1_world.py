@@ -22,7 +22,10 @@ from typing import Any
 from tests.unit.backtest_world import exchange_info
 from trading_bot.backtesting.exchange_info import store_snapshot
 from trading_bot.config.settings import Settings, get_settings
+from trading_bot.core.enums import SignalAction
+from trading_bot.core.models import Candle, Signal
 from trading_bot.data.historical import HistoricalStore, ingest_zip, month_bounds_ms
+from trading_bot.strategies.base import BaseStrategy
 
 MONTH = "2024-03"
 START_MS, _ = month_bounds_ms(MONTH)
@@ -31,6 +34,7 @@ STEP_MINUTES = {"1m": 1, "4h": 240, "1d": 1440}
 T0 = datetime(2024, 3, 1, tzinfo=timezone.utc)
 
 Minute = tuple[str, str, str, str, str]
+TOUCH: Minute = ("100", "100", "94", "95", "1")
 
 
 def at(minute: int) -> datetime:
@@ -142,3 +146,58 @@ def make_settings(
     )
     get_settings.cache_clear()
     return get_settings(str(path))
+
+
+class ScriptedD1(BaseStrategy):
+    """Emits ``BUY`` on the named decision bars, each carrying the D1 trail; declares the D1 exit."""
+
+    name = "d1_scripted"
+    declares_d1_exit = True
+
+    def __init__(
+        self, buy: dict[str, list[str]] | None = None, delta: int = 500, clamp: str = "none"
+    ) -> None:
+        super().__init__(buy=buy, delta=delta, clamp=clamp)
+        self._buy = {symbol: set(times) for symbol, times in (buy or {}).items()}
+        self._delta = delta
+        self._clamp = clamp
+
+    def generate_signal(self, symbol: str, candles: Any, *, last_candle: Candle) -> Signal | None:
+        if last_candle.open_time.strftime("%Y-%m-%dT%H:%M") not in self._buy.get(symbol, set()):
+            return None
+        return Signal(
+            symbol=symbol,
+            action=SignalAction.BUY,
+            timestamp=last_candle.close_time,
+            price=last_candle.close,
+            metadata={"trail_delta_bps": self._delta, "trail_clamp": self._clamp},
+        )
+
+
+class FixedD1(ScriptedD1):
+    """The scripted strategy with a fixed schedule, for a caller that cannot hand it parameters."""
+
+    name = "d1_fixed"
+
+    def __init__(self) -> None:
+        super().__init__(
+            buy={
+                "BTCUSDT": ["2024-03-01T00:00", "2024-03-01T04:00", "2024-03-02T00:00"],
+                "ETHUSDT": ["2024-03-01T00:00"],
+            }
+        )
+
+
+class BrokenD1(FixedD1):
+    """A D1 strategy whose signals forget the trail, which the executor refuses."""
+
+    def generate_signal(self, symbol: str, candles: Any, *, last_candle: Candle) -> Signal | None:
+        found = super().generate_signal(symbol, candles, last_candle=last_candle)
+        if found is None:
+            return None
+        return Signal(
+            symbol=symbol,
+            action=SignalAction.BUY,
+            timestamp=last_candle.close_time,
+            price=last_candle.close,
+        )

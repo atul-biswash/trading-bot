@@ -265,7 +265,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · normalize_ledger_exponents.py · trade_census.py
                  · regime_labels.py
                  · record_testnet_klines.py (+ recorder_task.xml)
-                 · n2_archive_check.py · n2_verify_bars.py · n3_entry_counts.py
+                 · n2_archive_check.py · n2_verify_bars.py · n3_entry_counts.py · n4_trade_counts.py
                  · s4_compare.py · s4_daily.py · s4_explore.py · s4_latch_compare.py · s4_wick_annotate.py · s5_report.py · s6_mark_read.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
                  · s7_gate.py · s7_null.py · store_check.py
 ```
