@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P146 on branch `m5n` (HEAD `4454ea4`).** Section 19 records R-DT-3f, the acceptance of `D1RiskManager`, the halt note and the clamp correction verbatim; the old section 19 is section 20. Section 18's clamp note is annotated where the correction made its figure false.
+
 **Amended at P145 on branch `m5n` (HEAD `a19c723`).** Section 18 records R-DT-3e, the tick reading, the N5 decisions and the clamp note verbatim; the old section 18 is section 19. Nothing else is corrected: R-DT-3e extends R-DT-3d and does not displace its text.
 
 **Amended at P144 on branch `m5n` (HEAD `275ffaf`).** Section 17 records R-EB, R-DT-3d and the N4b decisions verbatim, with P143's six readings of R-EA marked complies or corrected under R-EB; the old section 17 is section 18. Section 16 is annotated where R-EB corrects its reading 2.
@@ -292,6 +294,22 @@ The project owner's rulings, quoted as the P145 prompt gives them, in the order 
 
 **Recorded by the executing session.** The Ticks ruling settles reading 5 of section 16, which section 17 marked as flagged and not decided: it is now decided, and it complies. The clamp note's figure (22 of 41 trades) is the owner's, quoted as given; the executing session has not re-derived it and the count run of N5 reports the clamp counts it measures.
 
-## 19. What this draft does not do
+> **ANNOTATED AT P146: THE CLAMP NOTE'S *"22 of 41 trades"* IS 22 OF 104 SIGNALS, AND THE OWNER CORRECTS IT AS ARCHITECT-OWNED (section 19, `M5n-141`).** The paragraph above, which says the figure is quoted as given, stays standing because it was true when written. **What survives:** the note's conclusion, that the upper clamp binds often on ETHUSDT 1d, which rests on 22 of 104 signals, and its instruction that the pre-registration states it.
+
+## 19. R-DT-3f, D1RiskManager, the halt note and the clamp correction, recorded verbatim at P146
+
+The project owner's rulings, quoted as the P146 prompt gives them, in the order the prompt gives them.
+
+> **R-DT-3f** The count of entries whose size is limited by max_position_size_percent may be printed per candidate and pair.
+
+> **D1RiskManager** Accepted, provided RiskManager holds no decision-relevant per-instance state (P146 step 1).
+
+> **Halt note** The daily-loss limit prices an open position's committed risk to its entry-time stop, not its trailed stop. This cost 3 of 909 trades at N5 (M5n-139) and is accepted unchanged; N9 records that a live path faces the same choice.
+
+> **Clamp correction** ARCHITECT-OWNED: the P145 clamp note's "22 of 41 trades" is 22 of 104 signals (M5n-141).
+
+**Recorded by the executing session.** The acceptance of `D1RiskManager` is conditional on P146 step 1, which found no per-instance state in `RiskManager`: it assigns four attributes, all in `__init__`, and nothing `evaluate` calls mutates one (ledger section 97 has the list with file and line). The halt note settles what section 18 left to the pre-registration, *"A limit that dominates refusals is settled in the M5n pre-registration with the counts in view"*: on the N5 counts the limit that fires is the daily-loss halt at 15.1 percent of the limit refusals, it is accepted unchanged, and `already_in_position`, which dominates, is structural.
+
+## 20. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
