@@ -197,6 +197,32 @@ class TestTheRun:
         captured = capfd.readouterr()
         assert captured.err == ""
 
+    def test_a_warning_logged_during_the_run_is_kept_and_counted_and_never_shown(
+        self,
+        world: World,
+        monkeypatch: pytest.MonkeyPatch,
+        capfd: pytest.CaptureFixture[str],
+    ) -> None:
+        real = n4.run_candidate
+
+        async def chatty(*args: Any, **kwargs: Any) -> Any:
+            logging.getLogger("probe").warning("BTCUSDT/4h: 1 bar(s) missing between a and b")
+            return await real(*args, **kwargs)
+
+        monkeypatch.setattr(n4, "run_candidate", chatty)
+        spy_stream = io.StringIO()
+        spy = logging.StreamHandler(spy_stream)
+        root = logging.getLogger()
+        root.addHandler(spy)
+        try:
+            code, text = world.run()
+        finally:
+            root.removeHandler(spy)
+        assert code == 0, text
+        assert "scan verdict=CLEAN output_lines=10 log_records=1" in text.splitlines()
+        assert spy_stream.getvalue() == ""
+        assert capfd.readouterr().err == ""
+
     def test_a_narrower_window_is_accepted_and_named(self, world: World) -> None:
         code, text = world.run("--start", "2024-03-02")
         assert code == 0, text
@@ -212,6 +238,36 @@ class TestTheRun:
         assert code == 1
         assert "  run complete=no problems=" in text
         assert "scan verdict=CLEAN" in text
+
+
+class TestTheQuantiles:
+    def test_nearest_rank_on_ten_values(self) -> None:
+        values = list(range(1, 11))
+        assert [n4.quantile(values, p) for p in n4.QUANTILES] == [1, 3, 5, 8, 9]
+
+    def test_a_single_value_is_every_quantile(self) -> None:
+        assert [n4.quantile([700], p) for p in n4.QUANTILES] == [700] * 5
+
+    def test_the_line_sorts_its_values_and_prints_the_extremes(self) -> None:
+        pair = n4.PairCounts(
+            symbol="BTCUSDT",
+            signals=4,
+            trades=0,
+            open_at_end=0,
+            entries_filled=0,
+            fok_refused=0,
+            expired=0,
+            unaffordable=0,
+            clamp_upper=0,
+            clamp_lower=0,
+            refusals=(),
+            deltas=(30, 10, 40, 20),
+        )
+        result = n4.CandidateCounts("C1", "donchian_1d_20", "1d", True, 0, (pair,))
+        lines = n4.render((date(2024, 3, 1), date(2024, 3, 4)), [result])
+        assert lines[-1] == (
+            "  BTCUSDT delta_bps n=4 p10=10 p25=10 p50=20 p75=30 p90=40 min=10 max=40"
+        )
 
 
 class TestTheWindow:
