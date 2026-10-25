@@ -9303,3 +9303,79 @@ The harness prints an `exception types` line per mutation by scanning for names 
 | m46 | the module carries a comment | 1 | 1 | MATCH |
 | m47 | the first minute lasts two minutes | 1 | 1 | MATCH |
 | m48 | a missing minute is refused | 1 | 1 | MATCH; crash: ValueError |
+
+## 89. M5n N4b: P144's halts, the step 2 answers and the predictions for the counts-only run, before any code (P144 C2, R-T, R-DQ, R-DT-3d, R-EB)
+
+An observation log, so this section only adds. P144 builds N4b: the D1 trail (`resolve_trail`, section 86) wired into the backtester replay, and one counts-only run of the six candidates over `[2017-08-17, 2024-01-01)`. Under R-DQ clause (1) this section is committed BEFORE any code or test is drafted, in scratch or in the repository. **No recorded bar was read, no backtest was run, and nothing here decides anything about S4.** Every figure below is a hand estimate from the N3 counts of section 83 and from what the market did, remembered and not looked up; none was measured, and the ranges are wide for that reason.
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `m5n`, `git status` not clean, HEAD is not `275ffaf` | `git branch --show-current`, `git status --porcelain`, `git rev-parse --short HEAD` | `m5n`, empty, `275ffaf` (then `944a705` after the charter commit) |
+| a command would write under `deploy\45547f107715`, the rehearsal clone or the canonical store, or touch `config.yaml` or `config.s4.yaml` | every command in the plan | none: the count run opens nothing for writing; `HistoricalStore` only reads. `config.yaml` is blob `99b0edd`, `config.s4.yaml` SHA-256 `0f170baefb7b41c87d9f3bc5220a484ce9fa20b0a62758e15cb485e9b0712594`, neither touched |
+| any venue request | the plan | none: `ReplayClient` refuses every call but `get_klines`, and the run never builds a real client |
+| any bar at or after `2024-01-01T00:00:00Z` is read | the plan | none yet; the run's window end is the committed boundary and the store opens no month file at or after it, as `scripts/n3_entry_counts.py` does (section 83) |
+| any existing strategy's backtest path changes behaviour | the plan | none by construction: the new executor is chosen only for a strategy that declares the D1 exit, and a regression test, in a later commit, pins that every other strategy takes `SimulatedExecutor` |
+| any output, log or file the count run produces contains a price, P&L, return, equity, balance or realised figure | the plan | the script prints a fixed schema of integers and passes every line through the scan before it prints (a later commit) |
+| the count run would write a run record or trade file | `backtesting/engine.py` | it cannot: `write_run` is the only writer of `run.json` and `trades.csv`, and `BacktestSystem.run` returns an in-memory `BacktestResult` and writes nothing. The script does not call `write_run` |
+
+### Step 2: the answers the prompt asked for, read-only
+
+**P143's six readings of R-EA, each marked under R-EB**, are in `docs/M5N_CHARTER_DRAFT.md` section 17 (`944a705`): 1 complies, **2 is corrected** (the entry minute's high now counts toward the peak before that minute's low is tested), 3 complies, 4 complies, 5 complies (not an R-EB case, flagged), 6 complies.
+
+**The entry tolerance `config.s4.yaml` uses** is `risk.max_entry_slippage: 0.001` (line 79, *"(exact) 0.1%, a FRACTION not a percent"*). It is also the `RiskConfig` default, so `config.m5n.yaml`, which does not set it, already inherits the same 0.001. The entry limit is therefore the signal-bar close x 1.001 under the existing `FOK` model.
+
+**`config.m5n.yaml`'s risk values:** `position_sizing.method: fixed_fraction` with `fraction: 0.02` (a placeholder, per the file's own comment); `stop_loss`, `take_profit` and `trailing_stop` all `enabled: false`; `max_position_staleness_s: 259200.0`. Everything else is the default: `max_open_positions: 3`, `max_daily_loss_percent: 5.0`, `cooldown_minutes: 15` (which the simulation never starts). The backtest block: initial balance 10000, fee 0.10 percent, entry slippage 0.05 percent, stop slippage 1.20 percent. The two pairs are BTCUSDT and ETHUSDT, both on `1d`; the script changes the pair timeframes and the strategy per candidate in memory and edits no file.
+
+**Whether the backtester can run with no run record, no trade file and no P&L log line: yes, so no HALT.** (a) `write_run` is the only writer of a run record or trade file, and `BacktestSystem.run` returns a `BacktestResult` in memory. (b) The `INFO` records that carry a balance, a price or a size (`Backtest ready ... free` and `IntentLogger`'s `risk_refused` and `intent_dispatched`) are emitted only at `INFO`, and a process that has not configured logging reports `WARNING` and above. The script configures none and attaches an in-memory handler to the root logger at `WARNING`, whose records the scan reads. (c) The `WARNING` records the executor can emit carry a symbol and no figure. (d) `_describe` computes metrics internally and the script prints none of them.
+
+### What is built, and the decisions the executing session makes
+
+* **The delta is computed where the signal is made.** `M5nStrategy.generate_signal` adds `trail_delta_bps` (an `int`) and `trail_clamp` (`"none"`, `"upper"` or `"lower"`) to the signal's metadata, from the Wilder ATR(20) of the gap-free run that ends at the decision bar (the R-DZ run, as for the recursive indicators), through `risk.rules._atr_to_decimal`, the named float-to-Decimal boundary: `floor(10000 x 3 x ATR / close)` clamped to `[10, 2000]`, close being the signal bar's. A signal is "fixed at signal time" because it is made then. A candidate that cannot form the ATR returns no signal; every candidate's window is at least 22 rows, so this is predicted never to happen, and it is pinned.
+* **A strategy declares its exit.** `BaseStrategy.declares_d1_exit` is `False`; `M5nStrategy` sets it `True`. The engine chooses the executor from the registered strategy class: `D1Executor` for a declaring one, `SimulatedExecutor` for every other. The regression test pins that all the registry's strategies take the old path and that the old path's trade-log digest is unchanged.
+* **`D1Executor` is a drop-in for `SimulatedExecutor`**: the same `dispatch` and `__call__` and `finish`, the same `trades`, `attempts` and `counts`, the same unchanged `RiskManager` and `Portfolio`. An approved entry fills on the next decision bar at the open plus the entry slippage if that is within the entry limit (the existing `fill_entry`, unchanged). The fill's instant is the open of that bar's first TRADED 1m minute (a minute with nonzero volume, section 80 and R-DV), the position's `stop_loss` is `fill x (1 - delta / 10000)` (what the unchanged `RiskManager` prices committed risk from), and `resolve_trail` walks the traded 1m minutes from there, read through `HistoricalStore.candles` and bounded at the window end. Because every candidate emits `BUY` and never `CLOSE`, the exit is a function of the path alone, so the walk is done once at fill time and the exit is **scheduled**, not discovered: a heap of exits keyed by the exit minute, booked at that minute's open plus one minute, in time order across both pairs, before any decision bar whose nominal end is at or after it is evaluated. A decision never sees an exit that is in its future.
+* **A gap in the 1m path while a position is open** is skipped over: the walk reads the traded minutes it is given, so a fall inside the gap meets the gap rule at the next traded open, the worse exit (R-EB, section 17 reading 6).
+* **The script** (`scripts/n4_trade_counts.py`) runs the six candidates, one backtest each over both pairs, and prints, per candidate and pair, the fixed schema of R-DT-3d and nothing else. **It prints entry outcomes beside the refusal counts** (filled, refused by the `FOK`, expired, unaffordable) because a trade count without them cannot be reconciled with the signal count; that is a reading of "refusal counts by stage" the owner may overrule, and it adds no figure of money. It prints refusal counts by `RefusalStage` and does not split `LIMIT_REFUSED` by rule.
+
+### The definitions the predictions use
+
+* **signals**: `BUY` signals the strategy emitted in the window, refused or not. **trades**: closed round trips. **OPEN at end**: filled and not exited when the path ends at `2024-01-01`. **clamp**: a signal whose raw delta fell outside `[10, 2000]`, counted per signal. **median delta**: the median of the signals' final (clamped) delta, in basis points.
+* A signal is, in order, refused by the risk manager at some stage; or approved and queued; a queued entry then FILLS, is REFUSED by the `FOK`, EXPIRES (no next slot, or the data ended) or is UNAFFORDABLE. So **signals = refusals (all stages) + filled + `FOK`-refused + expired + unaffordable**, and **filled = trades + OPEN at end**.
+
+### The predictions
+
+Hand estimates. The signal count is the N3 event count of section 83; the backtest sees the same bars through a 1000-bar buffer, which the recursive indicators forget to well under any comparison's resolution, so **signals are predicted to equal the N3 counts within 2, and within 6 for C5**.
+
+| Candidate | Pair | Signals (N3) | Trades (range) | OPEN at end | Upper clamps (range) | Median delta bps (range) | `FOK` refused | `LIMIT_REFUSED` |
+|---|---|---|---|---|---|---|---|---|
+| C1 `donchian_1d_20` | BTCUSDT | 104 | 46 (32 to 62) | 1 | 5 (1 to 12) | 1100 (900 to 1350) | 1 | 56 |
+| C1 | ETHUSDT | 104 | 46 (32 to 62) | 1 | 18 (8 to 32) | 1450 (1150 to 1800) | 1 | 56 |
+| C2 `donchian_1d_55` | BTCUSDT | 73 | 40 (28 to 52) | 1 | 3 (0 to 9) | 1100 (900 to 1400) | 1 | 31 |
+| C2 | ETHUSDT | 68 | 38 (26 to 50) | 1 | 12 (4 to 22) | 1500 (1200 to 1850) | 1 | 28 |
+| C3 `sma_cross_1d_50_200` | BTCUSDT | 6 | 6 (5 to 6) | 0 | 0 (0 to 1) | 1000 (750 to 1300) | 0 | 0 |
+| C3 | ETHUSDT | 6 | 6 (5 to 6) | 0 | 0 (0 to 2) | 1350 (1000 to 1800) | 0 | 0 |
+| C4 `donchian_4h_20` | BTCUSDT | 538 | 255 (190 to 330) | 0 | 0 (0 to 1) | 470 (370 to 600) | 5 | 278 |
+| C4 | ETHUSDT | 546 | 255 (190 to 330) | 0 | 0 (0 to 1) | 620 (500 to 800) | 5 | 286 |
+| C5 `keltner_4h_20_2` | BTCUSDT | 293 | 175 (120 to 225) | 0 | 0 (0 to 1) | 480 (380 to 620) | 3 | 115 |
+| C5 | ETHUSDT | 291 | 175 (120 to 225) | 0 | 0 (0 to 1) | 640 (510 to 820) | 3 | 113 |
+| C6 `tsmom_1d_90` | BTCUSDT | 45 | 41 (33 to 45) | 1 | 2 (0 to 6) | 1000 (800 to 1300) | 1 | 2 |
+| C6 | ETHUSDT | 40 | 35 (28 to 40) | 1 | 4 (0 to 10) | 1350 (1050 to 1750) | 1 | 3 |
+
+`LIMIT_REFUSED` is the arithmetic of the identity above with 0 expired: signals less trades, OPEN and `FOK` refusals. **Every other stage is predicted 0 in all twelve cells:** `UNKNOWN_PAIR`, `NO_REFERENCE_PRICE`, `NO_MARK_PRICE`, `POSITION_STALE`, `SIZE_NOT_TRADEABLE`, `UNAFFORDABLE`, `NOTHING_TO_CLOSE`, `UNSUPPORTED_ACTION`, and the three stages that need a stop to be enabled (`ATR_UNAVAILABLE`, `STOP_UNPLACEABLE`, `COMMITTED_RISK_UNKNOWN`). Expired entries are predicted 0 for the four 1d candidates and 0 to 2 per pair for C4 and C5 (an entry settled into one of the 17 missing 4h slots, or the last bar). Lower clamps are predicted 0 everywhere.
+
+**By candidate, the totals that carry the prediction.** Trades: C1 92, C2 78, C3 12, C4 510, C5 350, C6 76 (all pairs). OPEN at end: 6 across the twelve cells (range 3 to 10), all from the 1d family; the 4h candidates are predicted flat at the end of 2023 and that is the least certain call here. Upper clamps: 1d candidates only, concentrated on ETHUSDT and in the late-2017 to early-2018 run and early 2021, where a 20-day ATR is over 6.67 percent of the close.
+
+**Structural predictions, each near-certain.** Trades are at most the N3 bound in every cell and **strictly below it in ten of twelve**; C3 is predicted to meet its bound (6 and 6), because a golden cross while the previous position is still open cannot happen under a 3-ATR trail, so it is the one cell in which "below the bound" is not predicted. No clamp is a lower clamp. The scan passes and prints `CLEAN`. No halt fires. The run's wall time is predicted under 40 minutes in all and under 15 minutes for any one candidate.
+
+**Where a prediction is most likely to be wrong, named in advance:**
+
+* **The trade counts of C1, C2, C4 and C5**, because they rest on one number I have not measured, the share of time a 3-ATR trail leaves a pair long. I assumed 55 to 60 percent of the time for the 4h family and 45 to 50 percent for the 1d breakouts, and the predicted trades are the events not blocked by that. If the share is 30 percent the 4h trade counts are about 400 and the `LIMIT_REFUSED` counts about 130; if it is 80 percent they are about 180 and 360.
+* **`LIMIT_REFUSED` in the 1d family may exceed the in-position arithmetic.** The unchanged risk manager prices committed risk from `Position.stop_loss`, the INITIAL stop, which is never trailed. A position that has gained several fold carries committed risk of about `2 percent x (mark / fill - 0.9)` of equity, and two such positions can reach the 5 percent daily-loss threshold in 2020 and 2021, refusing an entry of the other pair under the same stage name. The stage count cannot show it. I predict it fires in few or no signals; if `LIMIT_REFUSED` exceeds the identity by more than a handful in C1 or C2, this is the first suspect, and it would be an artefact of the placeholder sizing and not a property of the candidate.
+* **The median deltas**, which are ATR-over-price levels I remember and did not compute; a factor of 1.3 either way is inside the stated ranges.
+* **OPEN at end for the 4h candidates**, which turns on where a handful of late-December entries stand on the last bar.
+* **The `FOK` refusals**, a rare event in a liquid pair that the early, thin USDT history may raise.
+
+### The commits that follow
+
+The code and its tests (the gate run bare before each, the order: the entry-minute fix and the m13 test, the survey harness fix, the strategy's delta and declaration, the executor, the engine selection, the script); the survey predictions, committed before the survey; the one count run; the scoring section; the survey results; the gate counts. Findings begin at `M5n-090` and are gapless; `M5n-090` is in the charter commit.
