@@ -11880,3 +11880,115 @@ The harness is the repository's `scripts/worktree_survey.py` with `scripts/surve
 ### The findings this section carries
 
 See the commit message. In short: eleven holes in the new tests are declared before they are measured, and the m15 equivalence is to be demonstrated by putting the line back.
+
+## 106. M5n N7: the scored result of the survey of the estimator module and the N7 runner (P149 C9, R-T)
+
+An observation log, so this section only adds. The survey section 105 predicted ran in a detached worktree outside the repository (`scratch\p149\wt_survey`) at `5cb0d55`, the commit that carries section 105, with the repository's `scripts/worktree_survey.py` and `scripts/survey_hook.py`, the import location of `trading_bot` and `tests` printed inside the worktree before any result, an unmutated baseline each time (231 passed for spec a, 105 for spec b), every restore shown SHA-equal, and `git worktree list` showing the main worktree only after each. Nothing here decides anything about S4. No recorded bar was read and no backtest was run on recorded data.
+
+### The runs, and why there are eight of them
+
+**The machine was out of committed memory for most of the survey, and for a reason this project caused.** MEASURED at the time: `Committed Bytes` 56,983 MB against a `Commit Limit` of 57,238 MB, free physical memory 1.1 GB. The cause was **821 `git fsmonitor--daemon` processes**, about 30 GB of commit, found by listing the processes: Git for Windows switches `core.fsmonitor` on in its system config (`C:/Program Files/Git/etc/gitconfig`), and every `add` or `commit` in one of the throwaway repositories the guard tests build started a daemon that outlived the repository and the test, so each gate run since `b5deb42` left about sixty. Killed (headroom rose to 15 GB), and fixed in the tests by `-c core.fsmonitor=false` (`M5n-223`, with the commit that carries it). The surveyed tests are the committed ones, which lack the flag, so runs `b1` to `b4` set `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false` in the survey's environment. **Results taken while the memory was exhausted are not results**: a pytest subprocess died silently, raised `MemoryError` while formatting a traceback, or could not start `git`. Those are recorded as such and the mutations re-run.
+
+| Run | Spec | UTC | Exit | What it gave |
+|---|---|---|---|---|
+| `a1` | `survey_a_p149.json` (SHA-256 `0eadd4fb9d7861679a0dc6fd8801628d42bd0b21139afa639f33d25e022b96f5`) | `2026-10-25T16:40:58Z` to `2026-10-25T16:46:21Z` | 1 | `a01` to `a06` and `a09` valid. `a07` and `a08` showed MOREs made of crashes in the guard tests' own `git` calls (`CalledProcessError`, `OSError`, 29 of them for `a08`): **environmental, not reach**, and re-run. HALTED at `a10`: pytest exited 3, so no verdict. |
+| `a2` (first attempt) | `survey_a2_p149.json` | `2026-10-25T17:51:05Z` to `17:51:26Z` | 2 | No result: the unmutated baseline did not run (exit 2). Kept as `survey_a2_failed_out.txt`. |
+| `a2` | `survey_a2_p149.json` (`a07`, `a08`, `a10` to `a13`; SHA-256 `4322d84ea5a7d912ca92983742ab7ffe2c34bb0cf8d07e06bc367885125c686a`) | `2026-10-25T17:55:09Z` to `2026-10-25T17:56:31Z` | 1 | `a07` MATCH. `a08` MORE, again one `git` crash in the main test. HALTED at `a10` with **FEWER, 0 of 4 observed**: explained below. |
+| `a3` | `survey_a3_p149.json` (`a08`, `a10` to `a13`; SHA-256 `9848a79bc543b41d0584596750247276513788d1b9b24281970409435d7b5d1e`) | `2026-10-25T18:33:49Z` to `2026-10-25T18:44:41Z` | 0 | `a08`, `a10`, `a11`, `a12` MATCH; `a13` MORE. |
+| `b1` | `survey_b_p149.json` (SHA-256 `32e2a519a38801e58149a66a85cceaea4884bdf8641b35cceafafc0ce9b812b2`) | `2026-10-25T19:05:24Z` to `2026-10-25T19:14:24Z` | 1 | `b01` to `b25`; HALTED at `b26`, FEWER. |
+| `b2` | `survey_b2_p149.json` (`b27` to `b29`; SHA-256 `b7b99d12b46729e95eb3716b6db8b446dcda6cc35700f5bf3b222f18d7c01f7f`) | `2026-10-25T19:15:27Z` to `2026-10-25T19:16:44Z` | 1 | `b27`, `b28` MATCH; HALTED at `b29`, FEWER. |
+| `b3` | `survey_b3_p149.json` (`b30` to `b49`; SHA-256 `98e454e773aa61bc2354171d13736ab5ee841f474e05ce39c45b1fef49d15cab`) | `2026-10-25T19:16:46Z` to `2026-10-25T19:22:46Z` | 1 | `b30` to `b46`; HALTED at `b47`, FEWER. |
+| `b4` | `survey_b4_p149.json` (`b48`, `b49`; SHA-256 `372816df124c28608dc62cdc13199488b83df1baa6ea669dfdee86caf8f106d9`) | `2026-10-25T19:23:32Z` to `2026-10-25T19:24:30Z` | 0 | `b48`, `b49` MATCH. |
+
+Every spec after the first holds entries of the committed one byte for byte, with no prediction changed (the charter's survey practice, section 22); each FEWER stays on record beside its explanation. Standard error is empty for every run but the failed `a2` attempt, whose one line says the unmutated baseline is not green.
+
+### Result
+
+**62 mutations scored: 55 MATCH, 4 MORE (`a13`, `b15`, `b19`, `b43`), 3 FEWER (`b26`, `b29`, `b47`).** 147 failures were predicted and 133 observed; **124 were kills and 9 were crashes** (`AttributeError` 2, `FileExistsError` 1, `ValueError` 1, `decimal.InvalidOperation` 5). **All thirteen mutations predicted to fail nothing failed nothing** (`a01`, `a02`, `b10`, `b11`, `b14`, `b30`, `b34`, `b35`, `b36`, `b37`, `b38`, `b48`, `b49`), so the eleven holes of section 105 are confirmed, and the two equivalent mutants `a01` and `a02` prove that deleting `restart[:, 0] = True` changed no behaviour.
+
+**The three holes of section 103 that P149 closed are closed.** `a03` (the batch of 100, `m20`) is killed by the two golden-value tests, the six judge-world tests that compare a bootstrap bound and the W5 report test (nine failures, predicted nine); `a04` (the microsecond, `m50`) is killed by the 00:00:00.000001 test alone; `a01` and `a02` (`m15`) fail nothing.
+
+### The three FEWERs, each explained
+
+* **`b26` (13 predicted, 5 observed) and `b29` (9 predicted, 1 observed): the eight tests of world E1 were not counted, and the reason is the harness and not the mutation.** Both mutations make `evaluate` raise before the E1 world is built, so the eight tests that share its module-scoped fixture **error at setup**, and `worktree_survey.py` keeps only failures `when == "call"` (line 324). The raw pytest output shows the errors; the survey does not count them as kills. The prediction counted a setup error as a failure and the harness does not (`M5n-226`). The call-phase tests of both mutations failed as predicted.
+* **`b47` (6 predicted, 2 observed): the guard tests were parametrised over the runner's own `FROZEN_PATHS`.** With the third path removed from that tuple the four tests that would have noticed it were never generated, so they could not fail. The constants test and the wrong-length test did (`M5n-227`). **The tests are now parametrised over their own literal list of the three paths**, in the commit that carries the fsmonitor fix; that change is unsurveyed.
+* **`a10` (4 predicted, 0 observed), in run `a2`: environmental, and reproduced by hand.** The raw output ends in a `MemoryError` raised inside pytest's traceback formatter. Reproduced by hand in a throwaway worktree with the mutation applied: `NaN` raises `decimal.InvalidOperation`, `Infinity` is accepted, `-Infinity` is refused as not positive, and the four tests fail, which is the prediction. Re-run in `a3` with memory available: MATCH, 4 of 4 (`M5n-228`).
+
+### The four MOREs
+
+All four are tests that use a world the prediction did not trace. `a13` (only a naive datetime refused for its zone) also fails the older `test_a_non_utc_offset_is_refused`. `b15` (the gate at 0.5) and `b19` (a tie selects the first) each also fail `test_would_select_names_none_and_indeterminate_too`, which builds its verdicts from worlds W1 and W3b. `b43` (the block probability 1/10) fails three more tests than predicted: W1's test that its `C2` clears the bootstrap, and the two tests that list the W5 sensitivity's flips, because a different block length turns over a bootstrap gate there as well as moving the bounds. A MORE is a reach error and the extra kills are real coverage (`M5n-229`).
+
+### Tests the survey could and could not see
+
+231 tests ran. **75 were killed by an assertion, 6 fail only by crash, and 150 failed under none of these 62 mutations.** That last figure is for THIS survey's mutations and is not a whole-suite figure: the survey mutated the mark form, the bootstrap guard and the runner, and the tests of the fee-telemetry arithmetic of `sharpe_stats.py`, the moments, the Sharpe and the deflated Sharpe ratio were surveyed at section 103. By file, tests that failed under no mutation here: `test_sharpe_stats.py` 109 of 126, `test_n7_evaluate.py` 41 of 105.
+
+### Scored table
+
+| Mutation | The break | Predicted | Observed | Verdict | Kills | Crashes | Run |
+|---|---|---|---|---|---|---|---|
+| a01 | the deleted line is put back as it was (m15's equivalent mutant, re-surveyed) | 0 | 0 | MATCH | 0 | 0 | a1 |
+| a02 | the first position is forced NOT to restart (m15 as it was surveyed) | 0 | 0 | MATCH | 0 | 0 | a1 |
+| a03 | the resamples are drawn 100 at a time (m20, re-surveyed) | 9 | 9 | MATCH | 9 | 0 | a1 |
+| a04 | the microsecond is not part of midnight (m50, re-surveyed) | 1 | 1 | MATCH | 1 | 0 | a1 |
+| a05 | a subclass of tuple is a tuple | 1 | 1 | MATCH | 1 | 0 | a1 |
+| a06 | a tuple longer than two is not refused for its length | 1 | 1 | MATCH | 0 | 1 | a1 |
+| a07 | a subclass of datetime is a datetime | 1 | 1 | MATCH | 1 | 0 | a2 |
+| a08 | any zone with a zero offset is UTC | 1 | 1 | MATCH | 1 | 0 | a3 |
+| a09 | an int, and so a bool, is an equity | 2 | 2 | MATCH | 0 | 2 | a1 |
+| a10 | a non-finite Decimal is accepted | 4 | 4 | MATCH | 2 | 2 | a3 |
+| a11 | a zero equity is accepted | 1 | 1 | MATCH | 1 | 0 | a3 |
+| a12 | the no-variance guard is the standard deviation being exactly zero again (M5n-200) | 1 | 1 | MATCH | 1 | 0 | a3 |
+| a13 | only a naive datetime is refused for its zone | 2 | 3 | MORE | 3 | 0 | a3 |
+| b01 | the tag is not required | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b02 | two 'N0 complete' lines are accepted | 1 | 1 | MATCH | 1 | 0 | b1 |
+| b03 | the N0 commit need not be an ancestor of HEAD | 1 | 1 | MATCH | 1 | 0 | b1 |
+| b04 | git's 'not an ancestor' is read as an ancestor | 1 | 1 | MATCH | 1 | 0 | b1 |
+| b05 | a digest recorded twice is accepted | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b06 | a file that does not match its digest is accepted | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b07 | only the first frozen file is checked | 9 | 9 | MATCH | 9 | 0 | b1 |
+| b08 | the charter is read from the working copy, in text mode | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b09 | the N0 line need only begin as the form does | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b10 | a digest line need only begin as the form does | 0 | 0 | MATCH | 0 | 0 | b1 |
+| b11 | the tag is looked up by its bare name, which a branch of that name would also satisfy | 0 | 0 | MATCH | 0 | 0 | b1 |
+| b12 | main does not call the guard | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b13 | an existing result file is not refused | 1 | 1 | MATCH | 0 | 1 | b1 |
+| b14 | an INDETERMINATE verdict exits 0 | 0 | 0 | MATCH | 0 | 0 | b1 |
+| b15 | the deflated Sharpe gate is 0.5 | 8 | 9 | MORE | 9 | 0 | b1 |
+| b16 | a floor is met only above it | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b17 | a candidate below its floor is judged on its gates alone | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b18 | ties are decided by the Sharpe alone | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b19 | a tie section 7 does not break selects the first | 2 | 3 | MORE | 3 | 0 | b1 |
+| b20 | a sensitivity that would select nothing says n/a | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b21 | only a gate that turns from pass to fail is a flip | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b22 | a gross of exactly zero is not flagged | 3 | 3 | MATCH | 3 | 0 | b1 |
+| b23 | the basis points of a zero-gross candidate are a thousandth, not a ten-thousandth | 2 | 2 | MATCH | 2 | 0 | b1 |
+| b24 | a candidate with no trade is not given the no-trade line | 3 | 3 | MATCH | 0 | 3 | b1 |
+| b25 | net adds the fees | 4 | 4 | MATCH | 4 | 0 | b1 |
+| b26 | a run of exactly the warm-up is not yet defined | 13 | 5 | FEWER | 5 | 0 | b1 |
+| b27 | the last midnight has no mark | 7 | 7 | MATCH | 7 | 0 | b2 |
+| b28 | a carried midnight is counted twice | 1 | 1 | MATCH | 1 | 0 | b2 |
+| b29 | a trade's gross omits what it cost | 9 | 1 | FEWER | 1 | 0 | b2 |
+| b30 | the check that a trade's books add up to the ledger's realised figure is removed | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b31 | an open position is not counted | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b32 | a sensitivity does not change the fee | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b33 | a sensitivity does not change the stop slippage | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b34 | an incomplete run is judged anyway | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b35 | the buy and hold buys at the first day's close | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b36 | the equity probe samples every bar, not only those ending at midnight | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b37 | the result file's keys are not sorted | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b38 | floats in the result file are rounded to six places | 0 | 0 | MATCH | 0 | 0 | b3 |
+| b39 | money is written as str, with the exponent the fill model gave it | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b40 | C3 decides on 4h | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b41 | the 1d floor is 31 | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b42 | the bootstrap seed is 20261026 | 8 | 8 | MATCH | 8 | 0 | b3 |
+| b43 | the expected block length is 10 days | 8 | 11 | MORE | 11 | 0 | b3 |
+| b44 | 5,000 resamples | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b45 | the in-sample span ends a day late | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b46 | the sensitivities are run at the base costs | 1 | 1 | MATCH | 1 | 0 | b3 |
+| b47 | the runner's own digest is not one of those the guard checks | 6 | 2 | FEWER | 2 | 0 | b3 |
+| b48 | a candidate starts on the earlier pair's first defined day | 0 | 0 | MATCH | 0 | 0 | b4 |
+| b49 | the span starts on the earliest candidate's first defined day | 0 | 0 | MATCH | 0 | 0 | b4 |
+
+### The findings this section carries
+
+See the commit message.
