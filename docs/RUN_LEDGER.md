@@ -9793,3 +9793,93 @@ The codes are the tests in collection order, N1 to N215.
 | N213 | `n4_trade_counts`: `TestAForbiddenFigureNeverReachesTheOutput::test_a_log_record_that_carries_a_figure_fails_the_scan_and_is_not_printed` |
 | N214 | `n4_trade_counts`: `TestAForbiddenFigureNeverReachesTheOutput::test_an_exception_is_reported_by_class_and_place_and_never_by_message` |
 | N215 | `n4_trade_counts`: `TestTheScript::test_it_has_no_fetcher_and_never_writes` |
+
+## 92. M5n N4b: the arming-audit survey of the N4b code, scored against section 91 (P144 C12, R-T)
+
+An observation log, so this section only adds. The survey ran as section 91 describes, with the repository's `scripts/worktree_survey.py` and `scripts/survey_hook.py` (`92e63e3`), in a detached worktree outside the repository at `836c21d` (the commit that carries section 91), the import location of `trading_bot` and `tests` printed inside the worktree before any result, an unmutated baseline of 215 passed in 13.27 s, every restore SHA-equal, and `git worktree list` showing the main worktree only afterwards. **It halted once, at `n40`, on a FEWER, and was resumed after the missing kill was explained**: the first run was `n01` to `n40` (`2026-10-25T05:35:27Z` to `05:44:50Z`, exit 1), the second `n41` to `n55` from the same commit with a spec that is the committed one cut at `n41` (`survey_n4_rest.json`, SHA-256 `866c84bbd0ed0ee52085d8c13581ec76c4c66692ce162c0827ab32cd769e5bbf`; the committed spec's is `1de3cc4e5749a138921c6f7dc32789dbc9b03e4a13e76ffce5de9e2fef399c02`) and its own worktree and baseline (`05:45:13Z` to `05:48:50Z`, exit 0). Nothing here decides anything about S4.
+
+### Totals
+
+**55 mutations: 49 MATCH, 5 MORE, 1 FEWER. Predicted failures 174, observed 188.** The five MOREs are `n04`, `n23`, `n25`, `n38` and `n53`; the FEWER is `n40`. The two mutations predicted to fail nothing (`n08`, `n35`) failed nothing.
+
+**Tests killed by no mutation: 103 of 215, against 102 predicted.** The one more is the FEWER's: the `equity` row of the scan test (see the diagnosis). By file, 53 of `test_d1_trail.py` (surveyed at P143), 13 of `test_m5n_trail.py`, 7 of `test_d1_executor.py`, 2 of `test_backtest_d1.py` and 28 of `test_n4_trade_counts.py`; the declared reasons in section 91 stand.
+
+**Seven tests are killed only by crashes and not by an assertion**, so by `M5i-115` they are not killed: the two overlap tests (`KeyError`, under `n38`), `test_a_signal_without_a_distance_is_no_signal` (`AttributeError`, under `n12`), the two non-finite-ATR tests (`ValueError`, under `n09`), the zero-close case (`decimal.DivisionByZero`, under `n10`) and `test_the_whole_committed_window_is_accepted` (`n4_trade_counts.WindowError`, under `n43`, where it is a must-not-raise test that raises). Six of the seven were predicted as crashes; the seventh was predicted to fail and not as a crash. **Every other test that any mutation failed was failed by an assertion at least once**: 105 of the 112.
+
+### The miss that halted the survey
+
+* **`n40` (the vocabulary of forbidden words is not applied to the output): FEWER, 2 observed against 3 predicted.** The test missing is `test_a_line_outside_the_grammar_or_with_a_figure_is_counted[candidate C1 donchian_1d_20 (1d) equity]`. Section 91 reasoned that the row reached the vocabulary check. It does not: its extra word `equity` after the closing bracket makes it fail the GRAMMAR (the candidate line is a full match of `candidate C[1-6] name (tf)`), so it is counted by the first guard and the vocabulary guard is never consulted. The other two rows (`price_1d`, `realised_1d`) fit the grammar and are killed. So the mutation DID load and the missing kill is a wrong prediction about reach, not an absent mutation: the survey was resumed. **That row pins the grammar and not the vocabulary**, which is one more test killed by none, and it was a prediction made from the row's text and not from the grammar's `fullmatch`.
+
+### The MOREs, diagnosed
+
+Each is a reach error, and the extra kills are real coverage.
+
+* **`n04` (round half up): 3 observed against 2.** The extra is `test_below_the_lower_bound_clamps_to_it` (0.01 over 31): its raw distance is 9.68, which rounds up to 10 and is then not a clamp, so the expected LOWER becomes NONE. Section 91 named the third test as the likely miss but guessed the wrong one.
+* **`n23` (no position is ever stamped): 6 observed against 5.** The extra is `test_the_output_is_exactly_the_schema`: the counts script's own test world holds the same two positions, so its `limit_refused` line becomes `position_stale`. Section 91 listed the two backtest limit tests and not the script's.
+* **`n25` (the deltas are not kept): 5 observed against 3.** The extra two are the real-candidate tests, which assert `tally.deltas == [10]` and `== [2000]`.
+* **`n38` (the executor chosen the wrong way round): 26 observed against 16.** The extra ten are the counts script's tests that run its world: with the simulated executor the script raises its own "did not take the D1 executor" error, exits 2 and prints nothing, so nine tests fail by an assertion on the exit code or the output and `test_the_last_line_is_the_hash_of_every_line_before_it` fails by a `ValueError` at its unpack. Section 91 named only `test_backtest_d1.py` as downstream of the choice and missed the script, which is downstream of it too.
+* **`n53` (any delta is accepted): 5 observed against 4.** The extra is `test_a_run_that_is_not_complete_says_so_and_exits_one`, which fails by a `TypeError`: with the integer check gone, the broken strategy's delta of `None` reaches the output's `sorted` and the run raises where it should say the run is incomplete. A crash, and a real consequence of the check.
+
+### What the survey leaves unpinned, and does not fix
+
+The 103 tests killed by no mutation are, by file, the same families as section 91 declared: the 53 `d1_trail` tests surveyed at P143, the per-candidate window checks, the key-agreement, determinism, port and wall-clock tests, and the scan's accepted and refused rows, which are guarded twice. **Two things are worth knowing rather than fixing here.** The `equity` row pins the grammar and not the vocabulary (above). And the seven crash-only tests are each a "raises" or "must not raise" test that no one-line mutation can make fail by an assertion; none is needed by N4b's counts.
+
+### Every mutation
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| n01 | the entry minute's high is not part of the peak (R-EB reverted) | 5 | 5 | MATCH |
+| n02 | the entry minute's low must be strictly below the trigger | 2 | 2 | MATCH |
+| n03 | the multiple is 2, not 3 | 10 | 10 | MATCH |
+| n04 | the raw distance rounds half up instead of down | 2 | 3 | MORE (see the diagnosis) |
+| n05 | a distance exactly at the lower bound is a clamp | 1 | 1 | MATCH |
+| n06 | a distance exactly at the upper bound is a clamp | 1 | 1 | MATCH |
+| n07 | a lower clamp is not reported as one | 4 | 4 | MATCH |
+| n08 | twenty rows are enough for the ATR guard | 0 | 0 | MATCH |
+| n09 | a non-finite ATR is not refused | 2 | 2 | MATCH; crash: ValueError |
+| n10 | a close of zero is not refused | 1 | 1 | MATCH; crash: decimal.DivisionByZero |
+| n11 | the ATR reads the whole frame, not the gap-free run | 1 | 1 | MATCH |
+| n12 | a missing distance does not stop the signal | 1 | 1 | MATCH; crash: AttributeError |
+| n13 | the signal always says the distance was not clamped | 2 | 2 | MATCH |
+| n14 | the M5n candidates stop declaring the D1 exit | 8 | 8 | MATCH |
+| n15 | every strategy declares the D1 exit | 4 | 4 | MATCH |
+| n16 | the exits due by the end of the bar are booked only up to its open | 7 | 7 | MATCH |
+| n17 | an exit due exactly at the clock waits | 1 | 1 | MATCH |
+| n18 | an exit is booked at the open of its minute, not its end | 8 | 8 | MATCH |
+| n19 | a zero-volume minute is walked as a trade | 2 | 2 | MATCH |
+| n20 | a first traded minute at the next bar's open still fills | 1 | 1 | MATCH |
+| n21 | the initial stop sits twice the trail below the fill | 4 | 4 | MATCH |
+| n22 | a stamped position is untrusted | 2 | 2 | MATCH |
+| n23 | no position is ever stamped | 5 | 6 | MORE (see the diagnosis) |
+| n24 | a trail exit is reported as a CLOSE | 1 | 1 | MATCH |
+| n25 | the deltas are not kept | 3 | 5 | MORE (see the diagnosis) |
+| n26 | an upper clamp is counted as a lower one | 2 | 2 | MATCH |
+| n27 | no refusal is tallied by stage | 20 | 20 | MATCH |
+| n28 | a bool is accepted as the delta | 1 | 1 | MATCH |
+| n29 | an approved exit is ignored and not refused | 1 | 1 | MATCH |
+| n30 | a second entry replaces a pending one | 1 | 1 | MATCH |
+| n31 | finish books nothing | 1 | 1 | MATCH |
+| n32 | a gap in the decision bars is read the wrong way round | 2 | 2 | MATCH |
+| n33 | a gapped exit is not flagged | 4 | 4 | MATCH |
+| n34 | the reported trigger is the exit price | 3 | 3 | MATCH |
+| n35 | the exits due by the bar's open are not booked first | 0 | 0 | MATCH |
+| n36 | the 1m path is read past the window end | 2 | 2 | MATCH |
+| n37 | a mix of declaring and other strategies is allowed | 1 | 1 | MATCH |
+| n38 | the executor is chosen the wrong way round | 16 | 26 | MORE (see the diagnosis); crash: KeyError, ValueError |
+| n39 | the D1 executor's window ends a day late | 1 | 1 | MATCH |
+| n40 | the vocabulary of forbidden words is not applied to the output | 3 | 2 | FEWER (see the diagnosis); the survey halted here and resumed |
+| n41 | a four-digit integer in a log record is not a figure | 1 | 1 | MATCH |
+| n42 | timestamps are not removed before the log scan | 1 | 1 | MATCH |
+| n43 | a window that starts exactly at the committed start is refused | 11 | 11 | MATCH; crash: ValueError, n4_trade_counts.WindowError |
+| n44 | an empty window is accepted | 1 | 1 | MATCH |
+| n45 | the hash does not cover the verdict line | 1 | 1 | MATCH |
+| n46 | an incomplete run exits zero | 1 | 1 | MATCH |
+| n47 | the store named on the command line is ignored | 10 | 10 | MATCH; crash: ValueError |
+| n48 | the quantile rank rounds down instead of up | 2 | 2 | MATCH |
+| n49 | the root logger's own handlers are left in place | 1 | 1 | MATCH |
+| n50 | an unaffordable entry is counted as a refused one | 1 | 1 | MATCH |
+| n51 | a FOK refusal is counted as an expiry | 1 | 1 | MATCH |
+| n52 | finish leaves no record of the entry it expires | 1 | 1 | MATCH |
+| n53 | any delta is accepted | 4 | 5 | MORE (see the diagnosis); crash: TypeError |
+| n54 | the committed window starts a day late | 1 | 1 | MATCH |
+| n55 | C1 is a different candidate | 1 | 1 | MATCH |
