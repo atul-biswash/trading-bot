@@ -26,7 +26,7 @@ and fees come from ``fill_model.book_entry`` and ``book_exit``.
   not trailed, because nothing places a trailing level at the venue (CLAUDE.md, the committed-risk
   supersession).
 * **It tallies what the research run prints and nothing else:** per symbol the signals, the refusals by
-  stage, the clamps and the deltas. It records no figure of money beyond what the ledger needs.
+  stage and by the rule that refused (R-DT-3e), the clamps and the deltas. It records no figure of money beyond what the ledger needs.
 
 **What one decision bar does, in this order** (``__call__``): observe the bar; book the exits at or
 before the bar's open; settle a pending entry against it (booking first any exit at or before the entry
@@ -69,7 +69,7 @@ from trading_bot.backtesting.simulated_executor import (
     SimulatedTrade,
 )
 from trading_bot.core.assessment import EntryIntent, RiskAssessment
-from trading_bot.core.enums import PositionSide, ProtectionState, RefusalStage
+from trading_bot.core.enums import PositionSide, ProtectionState, RefusalStage, RiskRule
 from trading_bot.core.exceptions import TradingBotError
 from trading_bot.core.models import Candle, Fee, Position, Signal
 from trading_bot.core.portfolio import Portfolio
@@ -99,6 +99,10 @@ class SymbolTally:
 
     signals: int = 0
     refusals: dict[RefusalStage, int] = field(default_factory=dict)
+    #: The rule that refused, for a refusal that carries one (R-DT-3e): the five limit rules under
+    #: ``limit_refused`` and ``no_mark_price`` under its own stage. A refusal after the limits passed
+    #: (sizing, affordability) carries no rule and appears under ``refusals`` only.
+    rules: dict[RiskRule, int] = field(default_factory=dict)
     clamp_upper: int = 0
     clamp_lower: int = 0
     deltas: list[int] = field(default_factory=list)
@@ -210,6 +214,7 @@ class D1Executor:
             symbol: SymbolTally(
                 signals=tally.signals,
                 refusals=dict(tally.refusals),
+                rules=dict(tally.rules),
                 clamp_upper=tally.clamp_upper,
                 clamp_lower=tally.clamp_lower,
                 deltas=list(tally.deltas),
@@ -242,6 +247,9 @@ class D1Executor:
             self._counts.refused_by_risk += 1
             if assessment.stage is not None:
                 tally.refusals[assessment.stage] = tally.refusals.get(assessment.stage, 0) + 1
+            rule = None if assessment.decision is None else assessment.decision.rule
+            if rule is not None:
+                tally.rules[rule] = tally.rules.get(rule, 0) + 1
             return
         if not isinstance(intent, EntryIntent):
             raise D1ExecutorError(f"{signal.symbol}: a D1 strategy never asks to close")

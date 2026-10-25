@@ -31,7 +31,7 @@ from trading_bot.backtesting.d1_executor import D1Executor
 from trading_bot.backtesting.d1_risk import D1RiskManager
 from trading_bot.backtesting.engine import BacktestResult, BacktestSystem, backtest_system
 from trading_bot.backtesting.simulated_executor import SimulatedExecutor
-from trading_bot.core.enums import RefusalStage
+from trading_bot.core.enums import RefusalStage, RiskRule
 from trading_bot.core.models import Candle
 from trading_bot.data.historical import HistoricalStore
 from trading_bot.risk.manager import RiskManager
@@ -231,6 +231,63 @@ class TestN5SizingThroughTheWholeChain:
     ) -> None:
         position = await self._position(tmp_path, monkeypatch, delta=1000, n5=False)
         assert position.quantity == D("1.998")
+
+
+class TestRefusalsByRuleThroughTheWholeChain:
+    """R-DT-3e: the executor's tally names the rule the real manager fired, on the real chain."""
+
+    async def test_a_second_signal_while_held_is_already_in_position(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system, result = await run_world(
+            tmp_path,
+            monkeypatch,
+            timeframe="4h",
+            count=4320,
+            start="2024-03-01",
+            end="2024-03-04",
+            buy={"BTCUSDT": ["2024-03-01T00:00", "2024-03-01T04:00"]},
+            paths={},
+            delta=500,
+            n5=True,
+        )
+        assert result.complete, result.problems
+        tally = d1(system).tallies["BTCUSDT"]
+        assert tally.refusals == {RefusalStage.LIMIT_REFUSED: 1}
+        assert tally.rules == {RiskRule.ALREADY_IN_POSITION: 1}
+
+    async def test_a_winner_on_an_untrailed_stop_halts_every_entry_including_its_own_pair(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """M5n-091 on the real chain. BTCUSDT is bought at 100 and jumps to 300 inside a 2000 bps trail
+        (trigger 240), so it is never stopped; its executor stop stays at 80.04 and commits about
+        1,099 against a threshold of 5 percent of about 11,000. Nothing is realised. The next day's
+        signals on BOTH pairs are halted, and the one on BTCUSDT, which is held, is counted as the
+        halt and not as a position already held (M5n-126)."""
+        system, result = await run_world(
+            tmp_path,
+            monkeypatch,
+            timeframe="4h",
+            count=4320,
+            start="2024-03-01",
+            end="2024-03-04",
+            buy={
+                "BTCUSDT": ["2024-03-01T00:00", "2024-03-02T00:00"],
+                "ETHUSDT": ["2024-03-02T00:00"],
+            },
+            paths={"BTCUSDT": {minute: flat("300") for minute in range(400, 4320)}},
+            delta=2000,
+            n5=True,
+        )
+        assert result.complete, result.problems
+        assert result.trades == ()
+        tallies = d1(system).tallies
+        assert tallies["BTCUSDT"].refusals == {RefusalStage.LIMIT_REFUSED: 1}
+        assert tallies["BTCUSDT"].rules == {RiskRule.DAILY_LOSS_HALT: 1}
+        assert tallies["ETHUSDT"].refusals == {RefusalStage.LIMIT_REFUSED: 1}
+        assert tallies["ETHUSDT"].rules == {RiskRule.DAILY_LOSS_HALT: 1}
+        assert d1(system).unsettled["open_positions"] == ("BTCUSDT",)
+        assert system.portfolio.realised_today(at(4319)) == 0
 
 
 def _pair(symbol: str) -> Any:

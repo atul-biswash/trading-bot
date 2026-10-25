@@ -29,9 +29,15 @@ from trading_bot.backtesting.simulated_executor import (
     trade_log_digest,
 )
 from trading_bot.core.assessment import EntryIntent, ExitIntent, RiskAssessment
-from trading_bot.core.enums import PositionSide, ProtectionState, RefusalStage, SignalAction
+from trading_bot.core.enums import (
+    PositionSide,
+    ProtectionState,
+    RefusalStage,
+    RiskRule,
+    SignalAction,
+)
 from trading_bot.core.interfaces import Dispatcher
-from trading_bot.core.models import Candle, Position, ProtectiveLevels, Signal
+from trading_bot.core.models import Candle, Position, ProtectiveLevels, RiskDecision, Signal
 from trading_bot.core.portfolio import Portfolio
 from trading_bot.data.historical import HistoricalStore
 from trading_bot.strategies.m5n import trail
@@ -83,6 +89,24 @@ def entry_assessment(symbol: str = "BTCUSDT", *, limit: str = "100.10") -> RiskA
 
 def refused(stage: RefusalStage, symbol: str = "BTCUSDT") -> RiskAssessment:
     return RiskAssessment(symbol=symbol, approved=False, reason="refused", stage=stage)
+
+
+def refused_by(
+    rule: RiskRule, symbol: str = "BTCUSDT", *, stage: RefusalStage = RefusalStage.LIMIT_REFUSED
+) -> RiskAssessment:
+    """A refusal that names the rule that fired, as the manager's limit check and mark check do."""
+    decision = RiskDecision(symbol=symbol, approved=False, reason="refused", rule=rule)
+    return RiskAssessment(
+        symbol=symbol, approved=False, reason="refused", stage=stage, decision=decision
+    )
+
+
+def refused_after_the_limits(stage: RefusalStage, symbol: str = "BTCUSDT") -> RiskAssessment:
+    """A refusal after the limits passed (sizing, affordability): a decision with no rule."""
+    decision = RiskDecision(symbol=symbol, approved=True, reason="within all risk limits")
+    return RiskAssessment(
+        symbol=symbol, approved=False, reason="refused", stage=stage, decision=decision
+    )
 
 
 def signal_for(
@@ -443,6 +467,55 @@ class TestTheTally:
         assert rig.executor.tallies["BTCUSDT"].refusals == {stage: 1}
         assert rig.executor.counts.refused_by_risk == 1
         assert rig.executor.unsettled["pending_entries"] == ()
+
+    @pytest.mark.parametrize("rule", list(RiskRule))
+    async def test_a_refusal_is_counted_under_the_rule_that_fired(
+        self, tmp_path: Path, rule: RiskRule
+    ) -> None:
+        """R-DT-3e. ``no_mark_price`` refuses at its own stage and the other five under the limits."""
+        stage = (
+            RefusalStage.NO_MARK_PRICE
+            if rule is RiskRule.NO_MARK_PRICE
+            else RefusalStage.LIMIT_REFUSED
+        )
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), refused_by(rule, stage=stage))
+        await rig.buy(bar(4), refused_by(rule, stage=stage))
+        tally = rig.executor.tallies["BTCUSDT"]
+        assert tally.rules == {rule: 2}
+        assert tally.refusals == {stage: 2}
+
+    @pytest.mark.parametrize("stage", [RefusalStage.SIZE_NOT_TRADEABLE, RefusalStage.UNAFFORDABLE])
+    async def test_a_refusal_after_the_limits_carries_no_rule(
+        self, tmp_path: Path, stage: RefusalStage
+    ) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), refused_after_the_limits(stage))
+        tally = rig.executor.tallies["BTCUSDT"]
+        assert tally.rules == {}
+        assert tally.refusals == {stage: 1}
+
+    async def test_a_refusal_with_no_decision_carries_no_rule(self, tmp_path: Path) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), refused(RefusalStage.UNKNOWN_PAIR))
+        assert rig.executor.tallies["BTCUSDT"].rules == {}
+
+    async def test_an_approved_entry_adds_no_rule(self, tmp_path: Path) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0))
+        assert rig.executor.tallies["BTCUSDT"].rules == {}
+
+    async def test_rules_are_tallied_per_pair_and_the_snapshot_is_a_copy(
+        self, tmp_path: Path
+    ) -> None:
+        rig = Rig(tmp_path)
+        await rig.buy(bar(0), refused_by(RiskRule.DAILY_LOSS_HALT))
+        await rig.buy(bar(0, symbol="ETHUSDT"), refused_by(RiskRule.COOLDOWN, "ETHUSDT"))
+        snapshot = rig.executor.tallies
+        snapshot["BTCUSDT"].rules.clear()
+        again = rig.executor.tallies
+        assert again["BTCUSDT"].rules == {RiskRule.DAILY_LOSS_HALT: 1}
+        assert again["ETHUSDT"].rules == {RiskRule.COOLDOWN: 1}
 
     async def test_pairs_are_tallied_apart(self, tmp_path: Path) -> None:
         rig = Rig(tmp_path)
