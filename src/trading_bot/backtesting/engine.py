@@ -5,7 +5,9 @@ the buffered market-data provider, the trading engine, the risk manager, the int
 the one signal handler -- and swaps only the three things a backtest has no business sharing
 with a venue: a :class:`~trading_bot.backtesting.replay.ReplayClient` for the REST seed, a
 :class:`~trading_bot.backtesting.replay.ReplayStream` for the feed, and a
-:class:`~trading_bot.backtesting.simulated_executor.SimulatedExecutor` for the order placer. The
+:class:`~trading_bot.backtesting.simulated_executor.SimulatedExecutor` for the order placer, or
+the :class:`~trading_bot.backtesting.d1_executor.D1Executor` when the strategy declares the D1 exit
+(``declares_d1_exit``, the M5n candidates; :func:`uses_d1_executor`). The
 risk manager reads the replay's simulated instant, never the wall clock. No venue call is
 possible: the replay client refuses all but ``get_klines``, the filters come from stored
 ``exchangeInfo`` files (the owner's R-Z), and the credentials are never read.
@@ -60,6 +62,7 @@ from importlib import metadata
 from pathlib import Path
 
 from trading_bot.backtesting.candidate import candidate_digest, effective_settings, settings_digest
+from trading_bot.backtesting.d1_executor import D1Executor
 from trading_bot.backtesting.evidence import (
     EVIDENCE_KEY,
     RUN_RECORD_NAME,
@@ -256,7 +259,7 @@ class BacktestSystem:
     risk: RiskManager
     portfolio: Portfolio
     pairs: Mapping[str, PairContext]
-    executor: SimulatedExecutor
+    executor: SimulatedExecutor | D1Executor
     snapshots: Mapping[str, Snapshot]
     equity: EquityCurve
     regimes: RegimeTable | None
@@ -341,6 +344,26 @@ def select_pairs(settings: Settings, symbols: Sequence[str] | None) -> list[Pair
     return [pair for pair in enabled if pair.symbol in wanted]
 
 
+def uses_d1_executor(engine: TradingEngine, pairs: Sequence[PairConfig]) -> bool:
+    """Whether the run's strategies declare the D1 exit, so the D1 executor sequences its orders.
+
+    Every pair runs the one configured strategy, so the answers agree; a mix is refused rather than
+    run on an executor half of it was not written for. A strategy that says nothing about its exit
+    (every strategy but the M5n candidates) takes the simulated executor, as before.
+
+    :raises ConfigError: some of the pairs' strategies declare the D1 exit and some do not.
+    """
+    flags = {
+        getattr(engine.strategy_for(pair.symbol, pair.timeframe), "declares_d1_exit", False) is True
+        for pair in pairs
+    }
+    if len(flags) > 1:
+        raise ConfigError(
+            "some strategies declare the D1 exit and some do not; a backtest runs one executor"
+        )
+    return flags == {True}
+
+
 @asynccontextmanager
 async def backtest_system(
     settings: Settings,
@@ -423,7 +446,19 @@ async def backtest_system(
                 risk = RiskManager(
                     config=config.risk, provider=provider, pairs=pairs, clock=stream.now
                 )
-                executor = SimulatedExecutor(portfolio=portfolio, params=params, clock=stream.now)
+                executor: SimulatedExecutor | D1Executor
+                if uses_d1_executor(engine, selected):
+                    executor = D1Executor(
+                        portfolio=portfolio,
+                        params=params,
+                        clock=stream.now,
+                        store=store,
+                        window_end=resolved_window.window_end,
+                    )
+                else:
+                    executor = SimulatedExecutor(
+                        portfolio=portfolio, params=params, clock=stream.now
+                    )
                 engine.on_signal(
                     _build_signal_handler(
                         risk=risk,
