@@ -789,6 +789,11 @@ class Repo:
                 "commit.gpgsign=false",
                 "-c",
                 "core.autocrlf=false",
+                # Git for Windows switches fsmonitor on in its system config, and every `add` or
+                # `commit` in a throwaway repository then starts a daemon that outlives the repository
+                # and the test. 821 of them held about 30 GB of committed memory (M5n-223).
+                "-c",
+                "core.fsmonitor=false",
                 *args,
             ],
             capture_output=True,
@@ -980,14 +985,14 @@ class TestTheGuardRefusesConditionB:
 
 
 class TestTheGuardRefusesConditionC:
-    @pytest.mark.parametrize("path", n7.FROZEN_PATHS)
+    @pytest.mark.parametrize("path", list(FILES))
     def test_a_missing_digest_line_for_each_file(self, tmp_path: Path, path: str) -> None:
         repo, _, _ = make_repo(
             tmp_path, charter=lambda c1, side: good_charter(c1, side, drop=(path,))
         )
         assert refusal(repo.path) == "digest_line_missing"
 
-    @pytest.mark.parametrize("path", n7.FROZEN_PATHS)
+    @pytest.mark.parametrize("path", list(FILES))
     def test_a_repeated_digest_line_for_each_file(self, tmp_path: Path, path: str) -> None:
         def charter(c1: str, side: str | None) -> list[str]:
             return good_charter(c1, side, extra=(f"N7 frozen digest {path} {digests()[path]}",))
@@ -995,14 +1000,14 @@ class TestTheGuardRefusesConditionC:
         repo, _, _ = make_repo(tmp_path, charter=charter)
         assert refusal(repo.path) == "digest_line_duplicated"
 
-    @pytest.mark.parametrize("path", n7.FROZEN_PATHS)
+    @pytest.mark.parametrize("path", list(FILES))
     def test_an_edited_file_for_each_of_the_three(self, tmp_path: Path, path: str) -> None:
         repo, _, _ = make_repo(tmp_path)
         target = repo.path / path
         target.write_bytes(target.read_bytes() + b"# an amendment\n")
         assert refusal(repo.path) == "digest_mismatch"
 
-    @pytest.mark.parametrize("path", n7.FROZEN_PATHS)
+    @pytest.mark.parametrize("path", list(FILES))
     def test_a_file_that_is_gone_for_each_of_the_three(self, tmp_path: Path, path: str) -> None:
         repo, _, _ = make_repo(tmp_path)
         (repo.path / path).unlink()
