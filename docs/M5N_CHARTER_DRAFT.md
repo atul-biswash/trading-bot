@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P145 on branch `m5n` (HEAD `a19c723`).** Section 18 records R-DT-3e, the tick reading, the N5 decisions and the clamp note verbatim; the old section 18 is section 19. Nothing else is corrected: R-DT-3e extends R-DT-3d and does not displace its text.
+
 **Amended at P144 on branch `m5n` (HEAD `275ffaf`).** Section 17 records R-EB, R-DT-3d and the N4b decisions verbatim, with P143's six readings of R-EA marked complies or corrected under R-EB; the old section 17 is section 18. Section 16 is annotated where R-EB corrects its reading 2.
 
 **Amended at P143 on branch `m5n` (HEAD `70980c6`).** Section 16 records C3, R-EA and R-DT-3c verbatim, with six readings of R-EA marked as the owner's to overrule; the old section 16 is section 17. Section 3 now carries the documentation citation that D1's rules required before anything is modelled, and the N4 row is annotated.
@@ -274,6 +276,22 @@ The project owner's rulings, quoted as the P144 prompt gives them, in the order 
 | 5 | Prices are not rounded to the tick. | **Complies** | Not a case R-EB names. REASONED: the venue's rounding of a real trigger is undocumented, and an upward rounding would be the earlier exit by at most one tick, which is not modelled (R-AB). Flagged for the owner, not decided. |
 | 6 | A missing minute is the caller's. | **Complies** | Not a trail behaviour. N4b's caller treats a minute the archive lacks as no trade and walks to the next traded minute, so a fall inside the gap meets the gap rule at the next open, which is the worse exit. |
 
-## 18. What this draft does not do
+> **ANNOTATED AT P145: ROW 5's *"Flagged for the owner, not decided"* IS NO LONGER TRUE.** The owner's Ticks ruling (section 18) decides it: the trail trigger is not rounded to the tick. **What survives:** the row's mark, Complies, and its reasoning.
+
+## 18. R-DT-3e, the tick reading, the N5 decisions and the clamp note, recorded verbatim at P145
+
+The project owner's rulings, quoted as the P145 prompt gives them, in the order the prompt gives them.
+
+> **R-DT-3e** "Refusal counts by stage" includes the refusing rule's name, and the executor's four entry outcomes (filled, FOK-refused, expired, unaffordable) are printed beside them. Any output outside the R-DT-3d list requires a ruling before it is run. The C3 date and touch diagnostic (M5n-109) is recorded as a disclosed one-off breach, low severity, not to be repeated.
+
+> **Ticks** The trail trigger is not rounded to the tick (P143 reading 5): the market sell fills at book prices, and a 0.01 tick is immaterial at these price levels.
+
+> **N5 decisions** Risk per trade is 1 percent of equity at the initial stop fill x (1 - delta / 10000), excluding slippage and fees, per the existing RiskManager definition. Notional is capped by the free quote balance, with no leverage. Every other RiskManager setting stays at its default, in an unchanged RiskManager, and each value is reported. A limit that dominates refusals is settled in the M5n pre-registration with the counts in view, not tuned here.
+
+> **Clamp note** On 1d bars the upper clamp binds often (for example C1 ETHUSDT, 22 of 41 trades at 2000 bps), so on ETHUSDT C1, C2 and C6 are partly fixed-20-percent trails; the pre-registration states this.
+
+**Recorded by the executing session.** The Ticks ruling settles reading 5 of section 16, which section 17 marked as flagged and not decided: it is now decided, and it complies. The clamp note's figure (22 of 41 trades) is the owner's, quoted as given; the executing session has not re-derived it and the count run of N5 reports the clamp counts it measures.
+
+## 19. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
