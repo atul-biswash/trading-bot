@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P148 on branch `m5n` (HEAD `48c4199`).** Section 21 records four readings of the pre-registration, the owner's rulings on `M5n-178` and the `M5n-173` note verbatim; section 20 is annotated where the rulings settle what it left open. The old section 21 is section 22.
+
 **Amended at P147 on branch `m5n` (HEAD `ede21a3`).** Section 20 points to the M5n pre-registration, `docs/M5N_PREREGISTRATION.md`, with its SHA-256, and records three places where its wording and this file's differ, none reconciled. The N7 row of the item table is marked superseded by sections 6 to 8 of the pre-registration. The old section 20 is section 21.
 
 **Amended at P146 on branch `m5n` (HEAD `4454ea4`).** Section 19 records R-DT-3f, the acceptance of `D1RiskManager`, the halt note and the clamp correction verbatim; the old section 19 is section 20. Section 18's clamp note is annotated where the correction made its figure false.
@@ -326,6 +328,24 @@ The project owner's rulings, quoted as the P146 prompt gives them, in the order 
 
 **Citation correction, architect-owned.** The P146 prompt cited the outcomes-line hole as `M5n-148`. It is `M5n-149`; `M5n-148` is the finding that ten tests fail only by a crash, declared in the commit that carries ledger section 96. The commit message of P146's C4 already notes the slip; it is recorded here too, so a reader of the charter alone is not misled.
 
-## 21. What this draft does not do
+> **ANNOTATED AT P148: THE THREE READINGS ABOVE ARE SETTLED, AND SO IS THE RATIFICATION'S COUNT (section 21).** *"Each is the owner's to overrule"* is discharged: the owner's rulings on `M5n-178` adopt the first reading's labels, the second reading's naming and the third reading's single read, and say that the P147 paste ratified **all twelve sections**, where the paragraph above quotes the prompt's *"nine points as reviewed"*. **What survives:** the readings as the executing session's record of what was ruled on, and the quoted sentence as what P147's prompt said.
+
+## 21. Readings of the pre-registration, the rulings on M5n-178 and the M5n-173 note, recorded verbatim at P148
+
+The project owner's text, quoted as the P148 prompt gives it, in the order the prompt gives it.
+
+> **Readings of the pre-registration (not amendments):**
+> (1) Sharpe: mean / sample standard deviation (ddof 1) of daily net returns, no risk-free rate, annualised by sqrt(365). In the DSR, the Sharpe ratios, skewness and kurtosis are daily and unannualised; kurtosis is non-excess.
+> (2) Stationary bootstrap: geometric block lengths with p = 1/20, circular wrap, the Sharpe recomputed per resample, numpy.random.default_rng(20261025). The in-sample "95 percent percentile lower bound" is the 5th percentile; the out-of-sample "two-sided 95 percent percentile lower bound" is the 2.5th percentile.
+> (3) DSR: Phi((SR - SR0) sqrt(T - 1) / sqrt(1 - g3 SR + (g4 - 1) / 4 SR^2)), with SR0 = sqrt(V) ((1 - gamma) PhiInv(1 - 1/N) + gamma PhiInv(1 - 1/(N e))), gamma the Euler-Mascheroni constant, V the sample variance of the six daily Sharpe ratios, N = 6, and Phi from statistics.NormalDist.
+> (4) Estimators use float64, converted from Decimal equity at one boundary.
+
+> **Rulings on M5n-178:** the pre-registration's labels govern (CONFIRMED / NOT CONFIRMED, insufficient trades), and C3 is reported as excluded. N7's selection names the candidate and N8's freeze records it. The out-of-sample bootstrap is part of the single read. The owner's paste of P147 ratified all twelve sections.
+
+> **M5n-173 note:** "no metric computed" was false; "none read" is true. N6 must prove by test that any reused metrics.py path equals pre-registration section 1, or implement its own.
+
+**Recorded by the executing session.** These are readings, not amendments, so the pre-registration's digest `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e` is unchanged. Reading (3) writes the standard Bailey and Lopez de Prado form with `g3` the daily skewness and `g4` the daily non-excess kurtosis; reading (1) fixes `ddof` 1 for the Sharpe and the DSR's `V`, and the choice of `ddof` for the skewness and kurtosis inside the DSR is not stated, so N6 takes the moment estimators (population moments about the sample mean) and says so; that choice is recorded as a finding where it is made.
+
+## 22. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
