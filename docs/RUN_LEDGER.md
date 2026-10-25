@@ -10890,3 +10890,47 @@ The codes are the tests in collection order, N1 to N205.
 | N204 | `n4_trade_counts`: `TestAForbiddenFigureNeverReachesTheOutput::test_an_exception_is_reported_by_class_and_place_and_never_by_message` |
 | N205 | `n4_trade_counts`: `TestTheScript::test_it_has_no_fetcher_and_never_writes` |
 
+
+## 100. M5n P146: the re-survey of the outcomes line and the capped-entry count, scored against section 99 (P146 C7, R-T)
+
+An observation log, so this section only adds. The survey ran as section 99 describes, with the repository's `scripts/worktree_survey.py` and `scripts/survey_hook.py`, in a detached worktree outside the repository (`scratch\p146\wt_survey`) at `24bf718` (the commit that carries section 99), the import location of `trading_bot` and `tests` printed inside the worktree before any result, an unmutated baseline of **205 passed in 15.53 s**, every restore shown SHA-equal, every copied file intact afterwards, and `git worktree list` showing the main worktree only. It ran once, `2026-10-25T10:58:32Z` to `11:03:02Z` (4 min 30 s), exit 0, standard error empty, from the committed spec (`survey_p146.json`, SHA-256 as section 99 records it). Nothing here decides anything about S4.
+
+### Totals
+
+**16 mutations: 16 MATCH, 0 MORE, 0 FEWER. Predicted failures 63, observed 63.** The one mutation predicted to fail nothing (`s09`) failed nothing. No halt fired, and **every failure is a kill by an assertion: there is no crash**, so nothing in this survey is credited by a crash. 22 distinct tests failed under at least one mutation, and 183 of the 205 failed under none of these 16, which is this survey's number and not a whole-suite one (section 99).
+
+### The hole of M5n-149 is closed, and the survey measures it
+
+**`s01`, the swap of the FOK-refused and expired fields that failed no test at section 96, is now killed by exactly the three tests section 99 predicted** (the two outcomes worlds and the mapping test), **and not by the schema world,** whose counts for both fields are still zero: that world remains blind to the swap and the three new tests carry the closing alone. The same three kill `s02` (unaffordable printed as expired), `s03` and `s04` (the expired and unaffordable outcomes read from the wrong result), so **the four fields of the outcomes line are each now pinned by a test that gives them distinct non-zero values** (`filled` 5 or 1, `fok_refused` 2, `expired` 3, `unaffordable` 4 in the mapping test). `s05` and `s06` (FOK-refused counting the filled entries, filled printing the trade count) are killed by those and by the schema world, as predicted, four each.
+
+### The capped-entry count
+
+* `s11` (every sized entry counted as capped) 10, `s12` (counted twice) 7, `s13` (the snapshot reports none) 7 and `s14` (a marker the sizer does not write) 9 all failed exactly the tests predicted, across the executor, the chain through the real manager and sizer, and the script's worlds. **`s14` is the one that ties the executor's constant to the sizer's own text:** it is killed in the risk file by the two canary tests that call the real sizer, which is the pin on the text contract of `M5n-155`.
+* **`s07` and `s08` (the signal count printed or read as the capped count) are killed by exactly the tests section 99 predicted and by NO test of the delta-10 world or the cap-count test,** as declared: in that world all six signals are queued and capped, so the numbers coincide. **The hole of `M5n-166` stands:** a world with queued entries that are not all capped, and signals that are not all queued, would close it. It was not written, because a test added after the survey is a test the survey did not see.
+* `s09` (the grammar widened to nine digits) fails nothing: the integer bound still refuses the oversized row, which is guarded twice. `s10` (the capped count optional) is killed by the one row that omits it.
+
+### The state pins, aimed at the unchanged class
+
+**`s15` (evaluate writes a new attribute on the manager) and `s16` (evaluate writes into the pairs mapping) are each killed by the two state-pin tests and by nothing else,** as predicted. The mutations were made to `risk/manager.py` in the disposable worktree only; the repository's copy is untouched. So **the tests behind the owner's acceptance of `D1RiskManager` do catch a future change to `RiskManager` that gives it per-instance state `evaluate` writes** (an attribute, or a write to the mapping), which is the condition the acceptance is made under. What they cannot catch is a write of an unchanged value to the shared config (the config dump is equal) and a write to a shared object that the tests do not compare; both are REASONED, not surveyed.
+
+### Every mutation
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| s01 | the outcomes line swaps the FOK-refused and expired counts (section 96's q17) | 3 | 3 | MATCH |
+| s02 | the unaffordable outcome prints the expired count | 3 | 3 | MATCH |
+| s03 | the expired outcome counts the FOK-refused entries | 3 | 3 | MATCH |
+| s04 | the unaffordable outcome counts the expired entries | 3 | 3 | MATCH |
+| s05 | the FOK-refused outcome counts the filled entries | 4 | 4 | MATCH |
+| s06 | the filled outcome prints the trade count | 4 | 4 | MATCH |
+| s07 | the signals line prints the signal count as the capped count | 2 | 2 | MATCH |
+| s08 | the pair's capped count is read from the signal count | 3 | 3 | MATCH |
+| s09 | the grammar accepts a capped count of up to nine digits | 0 | 0 | MATCH |
+| s10 | the grammar makes the capped count optional | 1 | 1 | MATCH |
+| s11 | every sized, queued entry is counted as capped | 10 | 10 | MATCH |
+| s12 | a capped entry counts twice | 7 | 7 | MATCH |
+| s13 | the tally snapshot reports no capped entry | 7 | 7 | MATCH |
+| s14 | the marker is not the one the sizer writes | 9 | 9 | MATCH |
+| s15 | evaluate records the last symbol on the manager, a new attribute | 2 | 2 | MATCH |
+| s16 | evaluate writes into the manager's pairs mapping | 2 | 2 | MATCH |
+
