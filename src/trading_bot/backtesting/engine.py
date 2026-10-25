@@ -7,7 +7,9 @@ with a venue: a :class:`~trading_bot.backtesting.replay.ReplayClient` for the RE
 :class:`~trading_bot.backtesting.replay.ReplayStream` for the feed, and a
 :class:`~trading_bot.backtesting.simulated_executor.SimulatedExecutor` for the order placer, or
 the :class:`~trading_bot.backtesting.d1_executor.D1Executor` when the strategy declares the D1 exit
-(``declares_d1_exit``, the M5n candidates; :func:`uses_d1_executor`). The
+(``declares_d1_exit``, the M5n candidates; :func:`uses_d1_executor`), in which case the risk manager
+is the :class:`~trading_bot.backtesting.d1_risk.D1RiskManager`, which sizes from each signal's own
+trail and changes no rule of the base class (N5). The
 risk manager reads the replay's simulated instant, never the wall clock. No venue call is
 possible: the replay client refuses all but ``get_klines``, the filters come from stored
 ``exchangeInfo`` files (the owner's R-Z), and the credentials are never read.
@@ -63,6 +65,7 @@ from pathlib import Path
 
 from trading_bot.backtesting.candidate import candidate_digest, effective_settings, settings_digest
 from trading_bot.backtesting.d1_executor import D1Executor
+from trading_bot.backtesting.d1_risk import D1RiskManager
 from trading_bot.backtesting.evidence import (
     EVIDENCE_KEY,
     RUN_RECORD_NAME,
@@ -443,11 +446,13 @@ async def backtest_system(
                     quote_asset=quote_asset, free_quote=resolved_window.initial_balance
                 )
                 params = FillParameters.from_config(resolved_window)
-                risk = RiskManager(
+                take_d1 = uses_d1_executor(engine, selected)
+                risk_type = D1RiskManager if take_d1 else RiskManager
+                risk = risk_type(
                     config=config.risk, provider=provider, pairs=pairs, clock=stream.now
                 )
                 executor: SimulatedExecutor | D1Executor
-                if uses_d1_executor(engine, selected):
+                if take_d1:
                     executor = D1Executor(
                         portfolio=portfolio,
                         params=params,

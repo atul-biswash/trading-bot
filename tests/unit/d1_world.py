@@ -119,9 +119,27 @@ def make_settings(
     params: Mapping[str, Any],
     start: str,
     end: str,
+    n5: bool = False,
+    max_open_positions: int | None = None,
 ) -> Settings:
     """A backtest config over ``root`` with a snapshot of ``exchangeInfo`` per symbol: fixed-fraction
-    sizing at 2 percent, every protective order off, the fee and slippage defaults."""
+    sizing at 2 percent, every protective order off, the fee and slippage defaults.
+
+    ``n5`` is the N5 sizing of ``config.m5n.yaml``: 1 percent risked at the stop, the stop enabled as a
+    percent whose placeholder the D1 risk manager replaces with each signal's trail, and no other
+    protective order. ``max_open_positions`` narrows the one limit a two-pair world can reach."""
+    sizing = (
+        "  position_sizing:\n    method: risk_per_trade\n    risk_per_trade: 0.01\n"
+        "  stop_loss:\n    enabled: true\n    type: percent\n    percent: 20.0\n"
+        if n5
+        else "  position_sizing:\n    method: fixed_fraction\n    fraction: 0.02\n"
+        "  stop_loss:\n    enabled: false\n"
+    )
+    limits = (
+        ""
+        if max_open_positions is None
+        else f"  limits:\n    max_open_positions: {max_open_positions}\n"
+    )
     for symbol in sorted({symbol for symbol, _ in pairs}):
         store_snapshot(root, "mainnet", symbol, exchange_info(symbol))
     pair_block = "".join(
@@ -134,8 +152,7 @@ def make_settings(
         f"trading:\n  base_currency: USDT\n  pairs:\n{pair_block}"
         f"strategy:\n  name: {strategy}\n  params: {json.dumps(dict(params))}\n"
         "risk:\n"
-        "  position_sizing:\n    method: fixed_fraction\n    fraction: 0.02\n"
-        "  stop_loss:\n    enabled: false\n"
+        f"{sizing}{limits}"
         "  take_profit:\n    enabled: false\n"
         "  trailing_stop:\n    enabled: false\n"
         "  max_position_staleness_s: 259200.0\n"
