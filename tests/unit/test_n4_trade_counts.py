@@ -56,22 +56,46 @@ STAGES = [
 ]
 
 
+RULES = [
+    "no_mark_price",
+    "no_equity",
+    "daily_loss_halt",
+    "already_in_position",
+    "cooldown",
+    "max_open_positions",
+]
+HEADER = "N5 trade counts (R-DT-3d and R-DT-3e outputs only)"
+
+
 def refusals(symbol: str, **counts: int) -> str:
     return f"  {symbol} refusals " + " ".join(f"{s}={counts.get(s, 0)}" for s in STAGES)
 
 
+def rules(symbol: str, **counts: int) -> str:
+    return f"  {symbol} rules " + " ".join(f"{r}={counts.get(r, 0)}" for r in RULES)
+
+
+def outcomes(symbol: str, filled: int = 0, fok: int = 0, expired: int = 0, short: int = 0) -> str:
+    return (
+        f"  {symbol} entry_outcomes filled={filled} fok_refused={fok} expired={expired}"
+        f" unaffordable={short}"
+    )
+
+
 EXPECTED_BODY = [
-    "N4b trade counts (R-DT-3d outputs only)",
+    HEADER,
     "window [2024-03-01, 2024-03-04)",
     "candidate C1 d1_fixed (4h)",
     "  run complete=yes problems=0",
-    "  BTCUSDT signals=3 trades=1 open_at_end=1 entries_filled=2 fok_refused=0 expired=0"
-    " unaffordable=0 clamp_upper=0 clamp_lower=0",
+    "  BTCUSDT signals=3 trades=1 open_at_end=1 clamp_upper=0 clamp_lower=0",
     refusals("BTCUSDT", limit_refused=1),
+    rules("BTCUSDT", already_in_position=1),
+    outcomes("BTCUSDT", filled=2),
     "  BTCUSDT delta_bps n=3 p10=500 p25=500 p50=500 p75=500 p90=500 min=500 max=500",
-    "  ETHUSDT signals=1 trades=1 open_at_end=0 entries_filled=1 fok_refused=0 expired=0"
-    " unaffordable=0 clamp_upper=0 clamp_lower=0",
+    "  ETHUSDT signals=1 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0",
     refusals("ETHUSDT"),
+    rules("ETHUSDT"),
+    outcomes("ETHUSDT", filled=1),
     "  ETHUSDT delta_bps n=1 p10=500 p25=500 p50=500 p75=500 p90=500 min=500 max=500",
 ]
 
@@ -119,7 +143,7 @@ class TestTheRun:
         assert code == 0, text
         lines = text.splitlines()
         assert lines[: len(EXPECTED_BODY)] == EXPECTED_BODY
-        assert lines[len(EXPECTED_BODY)] == "scan verdict=CLEAN output_lines=10 log_records=0"
+        assert lines[len(EXPECTED_BODY)] == "scan verdict=CLEAN output_lines=14 log_records=0"
         assert len(lines) == len(EXPECTED_BODY) + 2
 
     def test_the_last_line_is_the_hash_of_every_line_before_it(self, world: World) -> None:
@@ -134,7 +158,9 @@ class TestTheRun:
         assert not re.search(r"\d\.\d", text)
         assert not re.search(
             r"price|return|equity|balance|realis|profit|pnl",
-            text.replace("no_mark_price", "").replace("no_reference_price", ""),
+            text.replace("no_mark_price", "")
+            .replace("no_reference_price", "")
+            .replace("no_equity", ""),
             re.I,
         )
 
@@ -219,7 +245,7 @@ class TestTheRun:
         finally:
             root.removeHandler(spy)
         assert code == 0, text
-        assert "scan verdict=CLEAN output_lines=10 log_records=1" in text.splitlines()
+        assert "scan verdict=CLEAN output_lines=14 log_records=1" in text.splitlines()
         assert spy_stream.getvalue() == ""
         assert capfd.readouterr().err == ""
 
@@ -261,6 +287,7 @@ class TestTheQuantiles:
             clamp_upper=0,
             clamp_lower=0,
             refusals=(),
+            rules=(),
             deltas=(30, 10, 40, 20),
         )
         result = n4.CandidateCounts("C1", "donchian_1d_20", "1d", True, 0, (pair,))
@@ -315,16 +342,17 @@ class TestTheWindow:
 
 
 GOOD_LINES = [
-    "N4b trade counts (R-DT-3d outputs only)",
+    HEADER,
     "window [2017-08-17, 2024-01-01)",
     "candidate C4 donchian_4h_20 (4h)",
     "  run complete=yes problems=0",
-    "  BTCUSDT signals=538 trades=255 open_at_end=0 entries_filled=255 fok_refused=5 expired=1"
-    " unaffordable=0 clamp_upper=0 clamp_lower=0",
+    "  BTCUSDT signals=538 trades=255 open_at_end=0 clamp_upper=0 clamp_lower=0",
     refusals("BTCUSDT", limit_refused=277, no_mark_price=1, position_stale=2),
+    rules("BTCUSDT", already_in_position=250, daily_loss_halt=27, no_mark_price=1),
+    outcomes("BTCUSDT", filled=255, fok=5, expired=1, short=0),
     "  ETHUSDT delta_bps n=0",
     "  ETHUSDT delta_bps n=546 p10=412 p25=498 p50=620 p75=781 p90=1002 min=10 max=2000",
-    "scan verdict=CLEAN output_lines=10 log_records=0",
+    "scan verdict=CLEAN output_lines=14 log_records=0",
     "output_sha256=" + "ab12" * 16,
 ]
 
@@ -336,11 +364,29 @@ class TestTheScan:
     def test_a_stage_named_for_a_price_is_a_stage_and_not_a_figure(self) -> None:
         assert n4.scan_lines([refusals("BTCUSDT", no_mark_price=3, no_reference_price=1)]) == 0
 
+    @pytest.mark.parametrize("rule", RULES)
+    def test_every_rule_name_is_a_label_and_not_a_figure(self, rule: str) -> None:
+        """R-DT-3e. ``daily_loss_halt`` holds the word ``loss`` and ``no_equity`` the word ``equity``."""
+        assert n4.scan_lines([f"  BTCUSDT rules {rule}=1"]) == 0
+
+    def test_the_rule_names_are_the_risk_managers(self) -> None:
+        from trading_bot.core.enums import RiskRule
+
+        assert [rule.value for rule in RiskRule] == RULES
+        assert tuple(RULES) == n4._RULES
+
     @pytest.mark.parametrize(
         "line",
         [
-            "  BTCUSDT signals=1.5 trades=1 open_at_end=0 entries_filled=1 fok_refused=0 expired=0"
-            " unaffordable=0 clamp_upper=0 clamp_lower=0",
+            "  BTCUSDT signals=1.5 trades=1 open_at_end=0 clamp_upper=0 clamp_lower=0",
+            "  BTCUSDT rules loss=1",
+            "  BTCUSDT rules daily_loss=1",
+            "  BTCUSDT rules daily_loss_halt=1.5",
+            "  BTCUSDT rules daily_loss_halt=100000",
+            "  BTCUSDT rules equity=1",
+            "  BTCUSDT entry_outcomes filled=1 fok_refused=0 expired=0 unaffordable=0 fee=1",
+            "  BTCUSDT entry_outcomes filled=1 fok_refused=0",
+            "  BTCUSDT rules",
             "  BTCUSDT mean_return=1",
             "  BTCUSDT delta_bps n=1 p10=100000 p25=1 p50=1 p75=1 p90=1 min=1 max=1",
             "candidate C1 price_1d (1d)",
@@ -400,7 +446,7 @@ class TestAForbiddenFigureNeverReachesTheOutput:
         code, text = world.run()
         assert code == 1
         assert "mean_return" not in text and "42000" not in text
-        assert text.strip() == "scan verdict=FAILED output_lines=11 log_records=0 violations=1"
+        assert text.strip() == "scan verdict=FAILED output_lines=15 log_records=0 violations=1"
 
     def test_a_log_record_that_carries_a_figure_fails_the_scan_and_is_not_printed(
         self, world: World, monkeypatch: pytest.MonkeyPatch
@@ -415,7 +461,7 @@ class TestAForbiddenFigureNeverReachesTheOutput:
         code, text = world.run()
         assert code == 1
         assert "42000" not in text
-        assert text.strip() == "scan verdict=FAILED output_lines=10 log_records=1 violations=1"
+        assert text.strip() == "scan verdict=FAILED output_lines=14 log_records=1 violations=1"
 
     def test_an_exception_is_reported_by_class_and_place_and_never_by_message(
         self, world: World, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

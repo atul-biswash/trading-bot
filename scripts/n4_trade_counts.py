@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Count the trades of the six M5n candidates over the in-sample span, and print counts only (N4b, P144).
+"""Count the trades of the six M5n candidates over the in-sample span, and print counts only (N4b, N5).
 
 Usage:
     python scripts/n4_trade_counts.py                    # config.m5n.yaml, data/historical, the committed window
@@ -13,10 +13,13 @@ state internally, because sizing and the risk refusals need them, and **prints, 
 of it** (R-DT-3d).
 
 What it prints. A fixed schema of integers and nothing else: per candidate and pair the signals, the
-trades, the positions OPEN at the end, the entry outcomes, the clamp counts, the refusal counts by
-``RefusalStage`` and the delta quantiles in basis points. There is no price, no return, no equity, no
-balance and no realised figure, and no run record or trade file is written: ``write_run`` is never
-called and this script opens nothing for writing.
+trades, the positions OPEN at the end and the clamp counts; the refusal counts by ``RefusalStage``;
+the refusal counts by the ``RiskRule`` that refused, and beside them the executor's four entry
+outcomes (filled, FOK-refused, expired, unaffordable); and the delta quantiles in basis points
+(R-DT-3d, R-DT-3e). The stage ``unaffordable`` is the risk manager's refusal of an order the free
+quote cannot pay for at the signal; the outcome ``unaffordable`` is the executor's, at the fill. There
+is no price, no return, no equity, no balance and no realised figure, and no run record or trade file
+is written: ``write_run`` is never called and this script opens nothing for writing.
 
 Logging. ``trading_bot.utils.logger.get_logger`` configures the root logger at INFO with a stderr handler
 the first time any module asks for a logger, and at INFO the risk manager and the intent logger write the
@@ -56,7 +59,7 @@ from trading_bot.backtesting.engine import backtest_system
 from trading_bot.backtesting.overrides import apply_overrides, build_overrides
 from trading_bot.backtesting.simulated_executor import EntryResult
 from trading_bot.config.settings import Secrets, Settings, get_settings
-from trading_bot.core.enums import RefusalStage
+from trading_bot.core.enums import RefusalStage, RiskRule
 from trading_bot.core.exceptions import TradingBotError
 
 DEFAULT_CONFIG = "config.m5n.yaml"
@@ -77,6 +80,7 @@ CANDIDATES: tuple[tuple[str, str, str], ...] = (
 )
 
 _STAGES = tuple(stage.value for stage in RefusalStage)
+_RULES = tuple(rule.value for rule in RiskRule)
 _MAX_INTEGER = 99_999
 _WORDS = re.compile(
     r"(?<![A-Za-z])(prices?|pnl|p&l|returns?|equity|balances?|realis\w*|profits?|loss(es)?|fees?|"
@@ -90,7 +94,7 @@ _INTEGER = re.compile(r"\d+")
 
 _I = r"\d{1,5}"
 _LINE_SHAPES: tuple[re.Pattern[str], ...] = (
-    re.compile(r"N4b trade counts \(R-DT-3d outputs only\)"),
+    re.compile(r"N5 trade counts \(R-DT-3d and R-DT-3e outputs only\)"),
     re.compile(r"window \[\d{4}-\d{2}-\d{2}, \d{4}-\d{2}-\d{2}\)"),
     re.compile(r"candidate C[1-6] [a-z0-9_]+ \((1d|4h)\)"),
     re.compile(r"  run complete=(yes|no) problems=" + _I),
@@ -101,14 +105,6 @@ _LINE_SHAPES: tuple[re.Pattern[str], ...] = (
         + _I
         + r" open_at_end="
         + _I
-        + r" entries_filled="
-        + _I
-        + r" fok_refused="
-        + _I
-        + r" expired="
-        + _I
-        + r" unaffordable="
-        + _I
         + r" clamp_upper="
         + _I
         + r" clamp_lower="
@@ -116,6 +112,19 @@ _LINE_SHAPES: tuple[re.Pattern[str], ...] = (
     ),
     re.compile(
         r"  [A-Z]{6,12} refusals( [a-z_]+=" + _I + r")+",
+    ),
+    re.compile(
+        r"  [A-Z]{6,12} rules( [a-z_]+=" + _I + r")+",
+    ),
+    re.compile(
+        r"  [A-Z]{6,12} entry_outcomes filled="
+        + _I
+        + r" fok_refused="
+        + _I
+        + r" expired="
+        + _I
+        + r" unaffordable="
+        + _I
     ),
     re.compile(r"  [A-Z]{6,12} delta_bps n=0"),
     re.compile(
@@ -164,6 +173,7 @@ class PairCounts:
     clamp_upper: int
     clamp_lower: int
     refusals: tuple[tuple[str, int], ...]
+    rules: tuple[tuple[str, int], ...]
     deltas: tuple[int, ...]
 
 
@@ -186,7 +196,7 @@ def quantile(sorted_values: Sequence[int], percent: int) -> int:
 def render(window: tuple[date, date], results: Sequence[CandidateCounts]) -> list[str]:
     """The output lines, as the fixed schema; nothing but integers, symbols, stage names and dates."""
     lines = [
-        "N4b trade counts (R-DT-3d outputs only)",
+        "N5 trade counts (R-DT-3d and R-DT-3e outputs only)",
         f"window [{window[0].isoformat()}, {window[1].isoformat()})",
     ]
     for result in results:
@@ -197,14 +207,21 @@ def render(window: tuple[date, date], results: Sequence[CandidateCounts]) -> lis
         for pair in result.pairs:
             lines.append(
                 f"  {pair.symbol} signals={pair.signals} trades={pair.trades}"
-                f" open_at_end={pair.open_at_end} entries_filled={pair.entries_filled}"
-                f" fok_refused={pair.fok_refused} expired={pair.expired}"
-                f" unaffordable={pair.unaffordable} clamp_upper={pair.clamp_upper}"
+                f" open_at_end={pair.open_at_end} clamp_upper={pair.clamp_upper}"
                 f" clamp_lower={pair.clamp_lower}"
             )
             lines.append(
                 f"  {pair.symbol} refusals "
                 + " ".join(f"{stage}={count}" for stage, count in pair.refusals)
+            )
+            lines.append(
+                f"  {pair.symbol} rules "
+                + " ".join(f"{rule}={count}" for rule, count in pair.rules)
+            )
+            lines.append(
+                f"  {pair.symbol} entry_outcomes filled={pair.entries_filled}"
+                f" fok_refused={pair.fok_refused} expired={pair.expired}"
+                f" unaffordable={pair.unaffordable}"
             )
             ordered = sorted(pair.deltas)
             if not ordered:
@@ -238,11 +255,13 @@ def scan_lines(lines: Sequence[str]) -> int:
 
 
 def _forbidden_word(text: str) -> bool:
-    """A forbidden word outside a stage name: ``no_mark_price`` is a stage, ``price`` is a figure."""
-    without_stages = text
-    for stage in _STAGES:
-        without_stages = without_stages.replace(f"{stage}=", "=")
-    return _WORDS.search(without_stages) is not None
+    """A forbidden word outside a stage or rule name: ``no_mark_price`` is a stage and a rule,
+    ``daily_loss_halt`` and ``no_equity`` are rules, and ``price``, ``loss`` and ``equity`` alone are
+    figures. A name is exempt only when it is a label, which is to say followed by ``=``."""
+    without_names = text
+    for name in (*_STAGES, *_RULES):
+        without_names = without_names.replace(f"{name}=", "=")
+    return _WORDS.search(without_names) is not None
 
 
 def scan_log(message: str) -> bool:
@@ -274,6 +293,7 @@ def _pair_counts(
     attempts = [a for a in executor.attempts if a.symbol == symbol]
     by_result = Counter(a.result for a in attempts)
     refusals = tally.refusals if tally is not None else {}
+    rules = tally.rules if tally is not None else {}
     return PairCounts(
         symbol=symbol,
         signals=0 if tally is None else tally.signals,
@@ -286,6 +306,7 @@ def _pair_counts(
         clamp_upper=0 if tally is None else tally.clamp_upper,
         clamp_lower=0 if tally is None else tally.clamp_lower,
         refusals=tuple((stage, refusals.get(RefusalStage(stage), 0)) for stage in _STAGES),
+        rules=tuple((rule, rules.get(RiskRule(rule), 0)) for rule in _RULES),
         deltas=() if tally is None else tuple(tally.deltas),
     )
 
@@ -341,7 +362,7 @@ def _midnight(day: date) -> datetime:
 
 def main(argv: Sequence[str] | None = None, out: TextIO | None = None) -> int:
     stream = out if out is not None else sys.stdout
-    parser = argparse.ArgumentParser(description="Count M5n trades; counts only (N4b).")
+    parser = argparse.ArgumentParser(description="Count M5n trades; counts only (N4b, N5).")
     parser.add_argument("--config", default=DEFAULT_CONFIG)
     parser.add_argument("--data-dir", default=DEFAULT_DATA_DIR)
     parser.add_argument("--start")
