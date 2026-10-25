@@ -10934,3 +10934,57 @@ An observation log, so this section only adds. The survey ran as section 99 desc
 | s15 | evaluate records the last symbol on the manager, a new attribute | 2 | 2 | MATCH |
 | s16 | evaluate writes into the manager's pairs mapping | 2 | 2 | MATCH |
 
+
+## 101. M5n N6: what metrics.py does, the design of the estimator module, and the hand-worked values of its fixtures, before any code (P148 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. HEAD is `73a7abe` (the charter commit of P148), on `m5n`, `main` at `ee8d485`, and the pre-registration's SHA-256 is still `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e`. P148 item 2 is a read and item 3 is the predictions; both are committed before any code, test or script of N6 is drafted. **No recorded bar was read and no backtest was run**: every number below comes from a synthetic fixture, and the derivation script (`scratch\p148\derive_fixtures.py`) uses exact `Decimal` arithmetic and `math.erf`, so it shares no code with the module it predicts. Nothing here decides anything about S4.
+
+### Item 2. What `metrics.py` builds, against pre-registration section 1 and reading (1) (MEASURED, by reading)
+
+* **The Sharpe formula equals reading (1) exactly.** `sharpe_ratio` (`metrics.py:449-459`) returns the mean of the daily returns over their sample standard deviation with `n - 1` (`:455-456`), times `sqrt(365)` (`_annualiser`, `:445-446`, with `DAYS_PER_YEAR = 365` at `:93`), with no risk-free rate; it is `None` below two days (`:452`) or at a zero standard deviation (`:457`).
+* **The daily series equals section 1 under two conditions, and differs in three ways.** `EquityCurve.observe` (`metrics.py:333-355`) records the equity after every bar of any pair and keeps the LAST sample of each UTC day (`self._daily[(at - _MICROSECOND).date()] = equity`, `:355`, so a sample exactly at 00:00 belongs to the day it closes); `daily_returns` (`:423-442`) divides each day's close by the previous day's, the first by the initial balance (`previous = summary.initial`, `:434`), and carries a day with no sample forward (`closes.get(day, previous)`, `:438`). The equity itself is the engine's `_EquityProbe` (`engine.py:191-225`): cash plus every held symbol marked at the last close the provider holds, exact `Decimal`. So it equals section 1's "equity at each UTC 00:00, positions marked at the 1d archive close" **when** the last sample of the day is at the day's last bar (the 4h bar that closes at 00:00 shares its close with the 1d bar of that minute), **and** when the series starts at the span's first midnight with a flat book at the initial balance. **It differs in:** (1) it is `Decimal` where reading (4) fixes float64 estimators; (2) it returns `None` where the pre-registration needs a refusal ("must refuse, not divide"), so a caller can ignore the answer; (3) it carries a missing day forward as a zero return, which manufactures a flat day where the data had none.
+* **The answer to the prompt's question: they are equal where it matters and N6 does not reuse the path.** The M5n-173 note allows reusing it with a proving test, or implementing its own. N6 implements its own pure module in float64 (reading (4)), takes its input as equity marks at consecutive UTC midnights rather than an `EquitySummary` (which is coupled to the engine's per-bar loop), refuses where `metrics.py` returns `None` or carries forward, and **proves the equality by a parity test**: the same marks through `EquityCurve` -> `daily_returns` -> `sharpe_ratio` and through the new module agree to a relative 1e-12.
+
+### The design (what is built, and what was decided where the prompt is silent)
+
+One pure module, `src/trading_bot/backtesting/sharpe_stats.py`: no file, no store, no clock, no network; `numpy` for the bootstrap only; the `Decimal` to `float` conversion happens in one place, `daily_series`, as the quotient of two exact `Decimal` marks. All functions raise `ValueError` (or `TypeError` for a `float` money input) rather than return a number they cannot stand behind.
+
+| Function | Contract |
+|---|---|
+| `daily_series(marks)` | `marks` is a sequence of `(datetime, Decimal)`, each at 00:00:00 UTC, timezone-aware, on consecutive days, equity positive. Returns the daily net returns as `float`, one fewer than the marks. **A missing, repeated or backward day, a non-midnight, a naive datetime or a non-positive equity is refused** (decision, `M5n-184`). A day with the same equity is a return of exactly 0.0. |
+| `sharpe(returns, annualise=True)` | Mean over the sample standard deviation (`ddof` 1), times `sqrt(365)` when annualised. **Refuses** fewer than two returns and a series whose values are all equal (decided by `min == max`, because the mean of identical floats need not be exact and a rounding residue would otherwise divide). |
+| `skewness_kurtosis(returns)` | Moment estimators about the sample mean, divided by `n` (population moments), skewness `m3 / m2^1.5` and **non-excess** kurtosis `m4 / m2^2` (reading (1); the estimator is the executing session's choice, `M5n-180`). Refuses below two returns and a zero variance. |
+| `stationary_bootstrap_bounds(returns, *, p, resamples, seed)` | Politis-Romano, as reading (2): a start uniform on `[0, T)`, then at each step a new uniform start with probability `p` and otherwise the next index, wrapping circularly; `numpy.random.default_rng(seed)`; the annualised Sharpe recomputed per resample; returns the 5th percentile, the 2.5th percentile and the mean of the bootstrap Sharpe ratios (numpy's linear interpolation, `M5n-185`). The draw order and a fixed batch of 250 resamples are part of the algorithm, so the result is a function of `(returns, p, resamples, seed)` alone. **Refuses** `p` outside `(0, 1]`, fewer than two returns, `resamples < 1`, and a resample with zero variance. |
+| `deflated_sharpe(sr, srs, t, skew, kurt, n)` | Reading (3), with `SR0 = 0` for `n = 1` (the inverse normal of 0 is undefined, and no deflation is the definition, so the DSR is the probabilistic Sharpe ratio). **Refuses** `len(srs) != n`, `t < 2`, `n < 1`, and a non-positive `1 - g3 SR + (g4 - 1) / 4 SR^2`. The Sharpe ratios, skewness and kurtosis are daily and unannualised. |
+| `fee_telemetry(gross, fees, trades, *, entry_notional)` | `Decimal` throughout. Returns `net = gross - fees`, `fee_share = fees / |gross|` with its numerator and denominator beside it, `fees_per_trade = fees / trades` and `fee_bps = fees / entry_notional x 10,000`. **Refuses** `gross == 0`, `trades < 1`, a non-positive `entry_notional`, negative fees and a `float` input. **The fourth argument is added by this session** (`M5n-183`). |
+| `buy_and_hold_marks(a, b, *, initial)` | Equal-weight, bought once at the first mark and held, no fee and no rebalance; the marks of the two series must be at the same instants; returns equity marks that `daily_series` takes. |
+
+### Item 3. The hand-worked values (R-T, R-DQ), committed before any code
+
+**F1, a constant series.** Ten returns of 0.01 (and ten of 0.0): `sharpe` **refuses** with `ValueError` (the sample sd is 0). The same refusal for `skewness_kurtosis`.
+
+**F2, a known small series.** Marks `1000`, `1010.00`, `999.9000`, `1019.898000`, `1019.898000`, `1030.09698000`, which are the exact returns `0.01, -0.01, 0.02, 0, 0.01`. Mean `0.006`, sample variance `0.000130` (squared deviations `1.6e-5, 2.56e-4, 1.96e-4, 3.6e-5, 1.6e-5`, sum `5.2e-4`, over 4), sd `0.011401754250991380`. **Daily Sharpe `0.5262348115842175`; annualised `10.053701958827061`.** The fourth return is exactly `0.0`.
+
+**F3, the moments.** The series `1, 2, 3, 4, 10`: mean 4, `m2 = 10`, `m3 = 36`, `m4 = 278.8`; **skewness `36 / 10^1.5 = 1.1384199576606166`, non-excess kurtosis `2.788`**.
+
+**D1, N = 1 (SR0 = 0, so the DSR is the PSR).** `sr = 0.1`, `T = 101`, `g3 = 0`, `g4 = 3`: `z = 0.1 x 10 / sqrt(1.005) = 0.9975093361076329`, **DSR `0.8407413278013518`**; the same value with `srs = [0.1]`.
+
+**D2, N = 6.** `srs = [0.02, 0.03, 0.04, 0.05, 0.06, 0.07]`: `V = 0.00035`, `PhiInv(1 - 1/6) = 0.9674215661017014`, `PhiInv(1 - 1/(6e)) = 1.5438425504501443`, **`SR0 = 0.024323406913442605`**. For `sr = 0.07`, `T = 2300`, `g3 = -0.5`, `g4 = 6`: **DSR `0.9840796754055363`**; for `sr = 0.05`, the same other inputs: **`0.8876609553599609`**.
+
+**D4, N = 2.** `srs = [0.01, 0.03]`: `V = 0.0002`, the first inverse-normal term is `PhiInv(0.5) = 0`, `PhiInv(1 - 1/(2e)) = 0.9004525966377899`, **`SR0 = 0.007350450569975128`**; for `sr = 0.03`, `T = 500`, `g3 = 0`, `g4 = 3`: **DSR `0.6935150938004597`**.
+
+**D5, monotone in SR.** With `g3 = 0`, `g4 = 3`, `T = 1000` and the six Sharpe ratios of D2, the DSR is strictly increasing over `sr = 0.00, 0.01, ..., 0.20`, from `0.22100929595628976` to `0.9999999807825788`. (Analytically, the derivative's sign is that of `1 + SR x SR0 / 2`, positive for non-negative `SR` and `SR0`.)
+
+**F7, fee telemetry.** `gross 500`, `fees 50`, `trades 10`, `entry_notional 20000`: **net `450`, fee share `0.1` (50 over 500), fees per trade `5`, fee bps `25`**. With `gross -200`, `fees 20`: net `-220`, share `0.1` (over `|gross|`, the prompt's form; the charter's section 6 reports the share only when gross is positive, `M5n-183`). `gross 0`: **refuses**.
+
+**F8, buy and hold.** Initial 1000, `A = 100, 110, 99` and `B = 50, 50, 60`: marks **`1000, 1050, 1095`**, returns **`0.05` and `0.0428571428571...` (3/70)**.
+
+**The bootstrap has no hand-worked value; its predictions are properties.** (1) The same inputs and seed give bit-identical bounds; a different seed gives different ones. (2) The bounds order `p2_5 <= p5 <= mean` on a positive-mean, a negative-mean and an autocorrelated fixture. (3) With `p = 1` (a block length of 1) the distribution matches an independent iid bootstrap (a per-resample loop with its own generator, `scratch\p148\derive_bootstrap.py`) to within a mean difference of 0.15 and a standard-deviation ratio in `[0.97, 1.03]` at 20,000 resamples of a 60-day series; the reference measured 0.023 and 0.995 for two iid runs. (4) On a series of long runs (30 days up, 30 days down, four times) the `p = 1/20` bootstrap has a larger Sharpe spread than `p = 1`: the reference measured a ratio of 2.5, and the test asserts above 1.5. (5) The in-sample lower bound is the 5th percentile and the out-of-sample one the 2.5th, never swapped.
+
+**Parity with `metrics.py` (the M5n-173 note).** The marks of F2 pushed through `EquityCurve` (samples at each midnight, which `:355` assigns to the day just ended), `daily_returns` and `sharpe_ratio` give the same annualised Sharpe as `sharpe(daily_series(marks))`, to a relative 1e-12.
+
+**Refusals, each predicted to raise `ValueError`:** a missing day, a repeated day, a mark not at midnight, a naive datetime, a non-positive equity, fewer than two marks; `p = 0`, `p = 1.5`, `resamples = 0`, a one-return series; `n = 0`, `len(srs) != n`, `t = 1`, a non-positive DSR denominator; `trades = 0`, a non-positive notional, negative fees; and a `float` handed to `fee_telemetry`, which raises `TypeError`.
+
+### The findings this section carries
+
+See the commit message. In short: `metrics.py`'s formula equals reading (1) and its daily series equals section 1 under two conditions, N6 builds its own module and proves the parity by test, the fee-telemetry signature needs a notional the prompt did not give, and several choices the readings leave open are recorded where made.
