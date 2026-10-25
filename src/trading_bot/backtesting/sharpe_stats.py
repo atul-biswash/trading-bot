@@ -25,7 +25,10 @@ variance, a ratio over a zero gross, a deflation over a trial count that does no
 given. ``metrics.py`` returns ``None`` for the first, which a caller can ignore; here the pre-registration's
 *"must refuse, not divide"* is a raise. A missing, repeated or backward day in the marks is refused too,
 where ``metrics.py`` carries a missing day forward as a zero return: carrying it forward would manufacture a
-flat day the data did not have, and that lowers the standard deviation and raises the Sharpe.
+flat day the data did not have, and that lowers the standard deviation and raises the Sharpe. A mark has
+**one accepted form** (``_check_mark``): a two-item ``tuple`` of an exact ``datetime`` on
+``timezone.utc`` at exactly 00:00:00.000000 and an exact ``Decimal`` above zero; anything else, an ``int``
+equity and a zero-offset zone that is not ``timezone.utc`` included, is refused.
 
 **The choices the readings leave open**, fixed here and recorded in the ledger (``M5n-180``, ``M5n-185``):
 skewness and kurtosis are the moment estimators about the sample mean divided by ``n``; the percentile is
@@ -38,7 +41,7 @@ from __future__ import annotations
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from statistics import NormalDist
 from typing import Final
@@ -87,11 +90,40 @@ def _require_decimal(name: str, value: object) -> Decimal:
     return number
 
 
-def _require_midnight(index: int, at: datetime) -> None:
-    if at.tzinfo is None or at.utcoffset() != timedelta(0):
-        raise ValueError(f"mark {index} at {at!r} is not timezone-aware UTC")
+def _check_mark(index: int, mark: object) -> tuple[datetime, Decimal]:
+    """The one accepted form of a mark, or a refusal (``M5n-192``).
+
+    A ``tuple`` of exactly two items, ``(at, equity)``, with ``type(at) is datetime`` (a subclass such as
+    ``pandas.Timestamp`` is another form), ``at.tzinfo is timezone.utc`` (a zero-offset zone that is some
+    other object is another form), ``at`` exactly 00:00:00.000000, and ``type(equity) is Decimal``, finite
+    and above zero. Every check is on the exact type, because each wider type is a way for a figure to
+    arrive that this module did not mean to take: an ``int`` or ``float`` equity, a naive or shifted
+    clock, an instant a moment off midnight.
+    """
+    if type(mark) is not tuple:
+        raise TypeError(
+            f"mark {index} must be a tuple (datetime, Decimal), got {type(mark).__name__}"
+        )
+    if len(mark) != 2:
+        raise TypeError(f"mark {index} must have exactly two items, got {len(mark)}")
+    at, equity = mark
+    if type(at) is not datetime:
+        raise TypeError(f"mark {index} must be at a datetime, got {type(at).__name__}")
+    if at.tzinfo is not timezone.utc:
+        raise ValueError(
+            f"mark {index} at {at!r} is not timezone-aware UTC (datetime.timezone.utc)"
+        )
     if (at.hour, at.minute, at.second, at.microsecond) != (0, 0, 0, 0):
         raise ValueError(f"mark {index} at {at.isoformat()} is not at 00:00:00 UTC")
+    if type(equity) is not Decimal:
+        raise TypeError(
+            f"the equity of mark {index} must be a Decimal, got {type(equity).__name__}"
+        )
+    if not equity.is_finite():
+        raise ValueError(f"the equity of mark {index} must be finite, got {equity}")
+    if equity <= 0:
+        raise ValueError(f"the equity of mark {index} must be positive, got {equity}")
+    return at, equity
 
 
 def daily_series(marks: Sequence[Mark]) -> tuple[float, ...]:
@@ -99,22 +131,22 @@ def daily_series(marks: Sequence[Mark]) -> tuple[float, ...]:
 
     One return per day after the first mark: ``equity / previous equity - 1``, computed on the exact
     ``Decimal`` marks and converted to ``float`` only then (the one ``Decimal`` to ``float`` boundary of
-    this module). A day on which equity did not move is a return of exactly ``0.0``.
+    this module). A day on which equity did not move is a return of exactly ``0.0``. Each mark must be of
+    the one form :func:`_check_mark` describes.
 
-    :raises ValueError: fewer than two marks; a mark that is not at 00:00:00 UTC or is naive; a day that
-        is missing, repeated or out of order; an equity that is not positive.
-    :raises TypeError: an equity that is not a ``Decimal`` (a ``float`` included).
+    :raises ValueError: fewer than two marks; a mark that is naive, not on ``timezone.utc`` or not at
+        00:00:00.000000; a day that is missing, repeated or out of order; an equity that is not finite or
+        not positive.
+    :raises TypeError: a mark that is not a two-item ``tuple``; an instant that is not exactly a
+        ``datetime``; an equity that is not exactly a ``Decimal`` (a ``float`` or an ``int`` included).
     """
     if len(marks) < 2:
         raise ValueError(f"at least two marks are needed for one daily return, got {len(marks)}")
     returns: list[float] = []
     previous_at: datetime | None = None
     previous_equity = Decimal(0)
-    for index, (at, raw) in enumerate(marks):
-        equity = _require_decimal(f"the equity of mark {index}", raw)
-        _require_midnight(index, at)
-        if equity <= 0:
-            raise ValueError(f"the equity of mark {index} must be positive, got {equity}")
+    for index, mark in enumerate(marks):
+        at, equity = _check_mark(index, mark)
         if previous_at is not None:
             if at - previous_at != _DAY:
                 raise ValueError(
@@ -131,8 +163,10 @@ def buy_and_hold_marks(
 ) -> tuple[Mark, ...]:
     """Equity marks of an equal-weight buy-and-hold of two closes series (the pre-registration's context).
 
-    Half of ``initial`` buys each asset at its first close and is held: no fee and no rebalance, because
-    it is context and never a criterion. The two series must be marked at the same instants.
+    Half of ``initial`` buys each asset at the first price of its series and is held: no fee and no
+    rebalance, because it is context and never a criterion. The runner makes that first price the open of
+    the first day of the span, so no bar before the span is needed (``M5n-202``). The two series must be
+    marked at the same instants.
 
     :raises ValueError: the series differ in length or in instants, or hold fewer than one mark, or a
         close or ``initial`` is not positive.
@@ -267,16 +301,20 @@ def stationary_bootstrap_bounds(
         batch = min(_BATCH, resamples - done)
         starts = rng.integers(0, t, size=(batch, t))
         restart = rng.random((batch, t)) < p
-        restart[:, 0] = True
+        # Position 0 always opens a block: ``last`` is 0 there whether or not the draw restarts, because
+        # the position index 0 is also what ``np.where`` returns for a non-restart (``M5n-190``).
         last = np.maximum.accumulate(np.where(restart, positions, 0), axis=1)
         base = np.take_along_axis(starts, last, axis=1)
         index = (base + (positions - last)) % t
         sample = values[index]
-        deviation = sample.std(axis=1, ddof=1)
-        if bool((deviation == 0.0).any()):
+        # Constant means ``min == max``, not a zero ``std``: numpy's standard deviation of three equal floats
+        # is not always zero (``np.std([0.1] * 3, ddof=1)`` is 1.7e-17), and a Sharpe over that is 1e16
+        # (``M5n-200``).
+        if bool((sample.min(axis=1) == sample.max(axis=1)).any()):
             raise ValueError(
                 "a bootstrap resample has no variance, so its Sharpe ratio is undefined"
             )
+        deviation = sample.std(axis=1, ddof=1)
         sharpes[done : done + batch] = sample.mean(axis=1) / deviation * _ANNUALISER
         done += batch
     p5, p2_5 = np.percentile(sharpes, [5.0, 2.5])

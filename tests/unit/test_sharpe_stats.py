@@ -1,7 +1,8 @@
 """The M5n estimators (N6) on synthetic fixtures, each value worked before the module existed.
 
-The expected numbers are the ones committed in ``docs/RUN_LEDGER.md`` section 101 (P148 C2), derived
-in exact ``Decimal`` arithmetic and with ``math.erf`` and a bisection, so they share no code with
+The expected numbers are the ones committed in ``docs/RUN_LEDGER.md`` section 101 (P148 C2) and, for the
+golden bootstrap bounds and the one accepted form of mark, section 104 (P149 C2), derived in exact
+``Decimal`` arithmetic and with ``math.erf`` and a bisection, so they share no code with
 ``sharpe_stats``. No recorded bar is read and no backtest is run: every series below is typed in or drawn
 from a seeded generator of this file.
 """
@@ -9,13 +10,16 @@ from a seeded generator of this file.
 from __future__ import annotations
 
 import math
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from itertools import pairwise
+from typing import NamedTuple
 
 import numpy as np
+import pandas as pd
 import pytest
 
+from trading_bot.backtesting import sharpe_stats
 from trading_bot.backtesting.metrics import EquityCurve, daily_returns, sharpe_ratio
 from trading_bot.backtesting.sharpe_stats import (
     DAYS_PER_YEAR,
@@ -118,6 +122,104 @@ class TestDailySeries:
         marks: list[Mark] = [(_DAY0, D(1000)), (_DAY0 + timedelta(days=1), 1010.0)]  # type: ignore[list-item]
         with pytest.raises(TypeError, match="must be a Decimal"):
             daily_series(marks)
+
+
+class _NamedMark(NamedTuple):
+    at: datetime
+    equity: Decimal
+
+
+def _two(at: object, equity: object = D(1010)) -> list[object]:
+    """Two marks: a valid first day, and a second whose instant and equity the test chooses."""
+    return [(_DAY0, D(1000)), (at, equity)]
+
+
+_NEXT = _DAY0 + timedelta(days=1)
+
+
+class TestTheOneAcceptedFormOfMark:
+    """Section 104 (P149 C2): a tuple of an exact datetime on ``timezone.utc`` at exactly 00:00:00.000000
+    and an exact ``Decimal`` above zero, on consecutive days; everything else is refused."""
+
+    def test_midnight_exactly_is_accepted(self) -> None:
+        assert daily_series(_two(_NEXT)) == pytest.approx((0.01,), rel=1e-12)  # type: ignore[arg-type]
+
+    def test_one_millisecond_before_midnight_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="00:00:00 UTC"):
+            daily_series(_two(_NEXT - timedelta(milliseconds=1)))  # type: ignore[arg-type]
+
+    def test_one_microsecond_after_midnight_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="00:00:00 UTC"):
+            daily_series(_two(_NEXT + timedelta(microseconds=1)))  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "offset",
+        [timedelta(seconds=1), timedelta(minutes=1), timedelta(hours=1)],
+        ids=["second", "minute", "hour"],
+    )
+    def test_any_later_instant_in_the_day_is_refused(self, offset: timedelta) -> None:
+        with pytest.raises(ValueError, match="00:00:00 UTC"):
+            daily_series(_two(_NEXT + offset))  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "instant",
+        [
+            date(2026, 1, 2),
+            pd.Timestamp("2026-01-02", tz="UTC"),
+            "2026-01-02T00:00:00Z",
+            1767312000,
+        ],
+        ids=["date", "timestamp", "str", "int"],
+    )
+    def test_an_instant_that_is_not_exactly_a_datetime_is_refused(self, instant: object) -> None:
+        with pytest.raises(TypeError, match="must be at a datetime"):
+            daily_series(_two(instant))  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "zone",
+        [None, timezone(timedelta(hours=2)), timezone(timedelta(0), "Z")],
+        ids=["naive", "plus-two", "named-zero-offset"],
+    )
+    def test_a_zone_that_is_not_timezone_utc_is_refused(self, zone: timezone | None) -> None:
+        with pytest.raises(ValueError, match="timezone-aware UTC"):
+            daily_series(_two(datetime(2026, 1, 2, tzinfo=zone)))  # type: ignore[arg-type]
+
+    def test_timezone_utc_itself_is_the_accepted_zone(self) -> None:
+        assert _DAY0.tzinfo is timezone.utc
+        assert len(daily_series(_two(datetime(2026, 1, 2, tzinfo=timezone.utc)))) == 1  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize(
+        "mark",
+        [[_DAY0, D(1000)], _NamedMark(_DAY0, D(1000)), {"at": _DAY0}],
+        ids=["list", "namedtuple", "dict"],
+    )
+    def test_an_element_that_is_not_a_plain_tuple_is_refused(self, mark: object) -> None:
+        with pytest.raises(TypeError, match="must be a tuple"):
+            daily_series([mark, (_NEXT, D(1010))])  # type: ignore[list-item]
+
+    @pytest.mark.parametrize("mark", [(_DAY0,), (_DAY0, D(1000), "x")], ids=["one", "three"])
+    def test_a_tuple_of_the_wrong_length_is_refused(self, mark: tuple[object, ...]) -> None:
+        with pytest.raises(TypeError, match="exactly two items"):
+            daily_series([mark, (_NEXT, D(1010))])  # type: ignore[list-item]
+
+    @pytest.mark.parametrize(
+        "equity",
+        [1010.0, 1010, "1010", True, np.float64(1010.0)],
+        ids=["float", "int", "str", "bool", "numpy-float64"],
+    )
+    def test_an_equity_that_is_not_exactly_a_decimal_is_refused(self, equity: object) -> None:
+        with pytest.raises(TypeError, match="must be a Decimal"):
+            daily_series(_two(_NEXT, equity))  # type: ignore[arg-type]
+
+    @pytest.mark.parametrize("equity", [D("NaN"), D("Infinity"), D("-Infinity")])
+    def test_a_decimal_that_is_not_finite_is_refused(self, equity: Decimal) -> None:
+        with pytest.raises(ValueError, match="must be finite"):
+            daily_series(_two(_NEXT, equity))  # type: ignore[arg-type]
+
+    def test_a_refusal_names_the_mark_that_broke_the_form(self) -> None:
+        marks = [(_DAY0, D(1000)), (_NEXT, D(1010)), (_NEXT + timedelta(days=1), 1020.0)]
+        with pytest.raises(TypeError, match="mark 2"):
+            daily_series(marks)  # type: ignore[arg-type]
 
 
 class TestParityWithMetrics:
@@ -319,6 +421,79 @@ class TestStationaryBootstrap:
     def test_a_float_seed_refuses(self) -> None:
         with pytest.raises(TypeError, match="seed must be an int"):
             stationary_bootstrap_bounds(_POSITIVE, p=0.05, resamples=10, seed=1.5)  # type: ignore[arg-type]
+
+
+_GOLDEN_RETURNS = [
+    0.012, -0.007, 0.004, 0.009, -0.011, 0.015, 0.002, -0.004,
+    0.008, 0.006, -0.009, 0.013, 0.001, -0.002, 0.010, -0.006,
+    0.005, 0.011, -0.008, 0.003, 0.007, -0.001, 0.009, -0.005,
+]  # fmt: skip
+
+# Section 104 (P149 C2), derived by a plain loop over the generator's draws, exact Decimal Sharpe ratios
+# and a hand-written percentile; the module's vectorised index construction is not in it.
+_G1 = {
+    "p5": 4.927886866519763,
+    "p2_5": 4.439440781578283,
+    "mean": 6.458913293099271,
+    "std": 0.9760475595174631,
+}
+_G2 = {
+    "p5": 4.838931764884872,
+    "p2_5": 4.471253881083067,
+    "mean": 6.439681460048089,
+    "std": 0.9555063041823855,
+}
+# The stream a batch of 100 resamples would draw at 600 resamples.
+_G3 = {
+    "p5": 4.81097837508935,
+    "p2_5": 4.399061271556962,
+    "mean": 6.4141602214840665,
+    "std": 0.9164827387133547,
+}
+
+
+class TestTheBootstrapStreamIsPinned:
+    """``M5n-191``: the P148 survey's ``m20`` (a batch of 100) failed nothing, because every statistical test
+    was indifferent to the draw stream. These values are the stream: a change to the batch, the draw order
+    or the index construction moves them."""
+
+    @staticmethod
+    def _check(bounds: sharpe_stats.BootstrapBounds, expected: dict[str, float]) -> None:
+        assert bounds.p5 == pytest.approx(expected["p5"], rel=1e-9)
+        assert bounds.p2_5 == pytest.approx(expected["p2_5"], rel=1e-9)
+        assert bounds.mean == pytest.approx(expected["mean"], rel=1e-9)
+        assert bounds.std == pytest.approx(expected["std"], rel=1e-9)
+
+    def test_g1_six_hundred_resamples_across_three_batches(self) -> None:
+        bounds = stationary_bootstrap_bounds(_GOLDEN_RETURNS, p=0.05, resamples=600, seed=20261025)
+        self._check(bounds, _G1)
+        assert bounds.resamples == 600
+
+    def test_g2_the_pre_registered_ten_thousand_resamples(self) -> None:
+        bounds = stationary_bootstrap_bounds(
+            _GOLDEN_RETURNS, p=0.05, resamples=10000, seed=20261025
+        )
+        self._check(bounds, _G2)
+
+    def test_the_batch_size_is_part_of_the_value(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(sharpe_stats, "_BATCH", 100)
+        bounds = stationary_bootstrap_bounds(_GOLDEN_RETURNS, p=0.05, resamples=600, seed=20261025)
+        self._check(bounds, _G3)
+        assert abs(bounds.p5 - _G1["p5"]) > 0.1
+
+    def test_the_sample_sharpe_the_fixture_has(self) -> None:
+        assert sharpe(_GOLDEN_RETURNS) == pytest.approx(6.413997967427307, rel=1e-12)
+
+    def test_a_constant_resample_of_non_zero_returns_refuses(self) -> None:
+        """``M5n-200``: ``np.std`` of three equal 0.1 is 1.7e-17, not zero, so a ``std == 0`` guard let
+        a constant resample through with a Sharpe near 1e16. The series is three returns, so with
+        ``p = 1`` a third of the resamples are 0.1 three times over."""
+        with pytest.raises(ValueError, match="resample has no variance"):
+            stationary_bootstrap_bounds([0.1, 0.1, 0.2], p=1.0, resamples=250, seed=1)
+
+    def test_numpy_does_give_a_non_zero_std_for_three_equal_floats(self) -> None:
+        """The fact the guard above rests on, so that a numpy that changed it would say so here."""
+        assert float(np.array([[0.1, 0.1, 0.1]]).std(axis=1, ddof=1)[0]) > 0.0
 
 
 # ---- the deflated Sharpe ratio ----------------------------------------------------------------------
