@@ -10454,3 +10454,60 @@ The assertion changed at P145's commit C6, in `test_config_m5n.py`, is killed by
 | q26 | a take-profit is enabled | 1 | 1 | MATCH |
 | q27 | the placeholder percent is 2.0 | 0 | 0 | MATCH |
 
+
+## 97. M5n P146: what a RiskManager keeps after construction, and the predictions for the cap-binding count, before any code (P146 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. HEAD is `06fa1f8` (the charter commit of P146), on `m5n`, `main` at `ee8d485`. P146 item 1 is a read and item 3 is the predictions; both are committed before any code, test or script of P146 is drafted. Nothing here decides anything about S4, and no run has been made.
+
+### Item 1. Every attribute `RiskManager`, or anything `evaluate` calls, sets or mutates after construction (MEASURED, by reading `src/` and by an AST pass over the called `Portfolio` methods)
+
+**`RiskManager` itself: four attributes, all assigned in `__init__`, none after.** `self._config` (`manager.py:153`), `self._provider` (`:154`), `self._pairs` (`:155`, a `dict` copy of the mapping given) and `self._clock` (`:156`). A grep of `manager.py` for any other assignment to a `self` attribute, an augmented assignment, a subscript assignment, a mutating method call on one (`append`, `add`, `update`, `pop`, `clear`, `setdefault`, `extend`, `remove`, `discard`), `global`, `nonlocal`, `setattr`, `lru_cache` and `cache` finds exactly those four lines and nothing else.
+
+| What `evaluate` calls | Where | Mutates state that outlives the call? |
+|---|---|---|
+| `_mark_prices`, `_last_close` | `manager.py:717`, `:741` | No: a local `dict` and `list` |
+| `_stale_positions` | `manager.py:674` | No: a local `list` |
+| `_approve` | `manager.py:159-233` | No: reads limits, calls the `Portfolio` reads below |
+| `_atr_value` | `manager.py:753` | No, on the manager; it reads the provider (`is_ready`, `get_dataframe`), whose `get_dataframe` memoises the PROVIDER's own `_frames[key]` (`market_data.py:390-404`). **Not reached on the D1 path**: it runs only for `stop_loss.type='atr'` (`manager.py:473`), and every D1 stop is `percent` |
+| `size_position` | `manager.py:236-269` | No: delegates to `calculate_position_size` |
+| `derive_entry_limit`, `compute_protective_levels` and its callees `stop_loss_level`, `take_profit_level`, `_protective_level`, `_atr_to_decimal` | `rules.py:317`, `:352`, `:253`, `:279`, `:192`, `:215` | No: pure functions, no module-level state (grep for `global`, `nonlocal`, caches and module-level collections in `rules.py` and `position_sizing.py` finds none) |
+| `calculate_position_size` | `position_sizing.py:196` | No: pure |
+| `Portfolio.open_positions`, `position_count`, `has_position`, `has_unmanaged_holding`, `is_blocked` | `portfolio.py:485`, `:490`, `:494`, `:499`, `:503` | No (AST: no attribute or subscript assignment, no mutating call) |
+| `Portfolio.marked_symbols` | `portfolio.py:512` | Only the locals `seen` and `symbols` (`:523-524`) |
+| `Portfolio.equity`, `realised_today`, `committed_risk` (with `_binding_stop`), `daily_loss_exceeded`, `in_cooldown`, `cooldown_expiry` | `portfolio.py:874`, `:933`, `:1112` (`:1071`), `:1151`, `:1210`, `:1206` | No. `realised_today` is *"derived, never assigned"*: a ledger whose date is stale reads as zero without being rewritten |
+| `_log.info` | `manager.py:557` | Logging only; no decision reads it |
+
+**Not called by `evaluate`, and the only writers in the class:** `check_exit` (`manager.py:607`) and `advance_trailing_stop` (`:615`), which write the `Position`; the second has zero call sites in `src/` (the comment at `manager.py:637` says so) and the first is not on the D1 path, whose exits are scheduled.
+
+**Does a `D1RiskManager`'s per-delta instance diverge in any state that affects a decision? No.** The instances share the provider and the clock (the same objects), hold a `dict` copy of the pairs whose values are the same frozen `PairContext`s (`assessment.py:43`, `_Frozen`) over frozen `SymbolInfo`s (`models.py:232`), and take the `Portfolio` as a per-call argument. They differ in `_config.stop_loss` alone, which is the input they exist to vary. `D1RiskManager`'s own `_by_delta` is a cache of managers, and a miss builds an equivalent one, so it cannot change a decision.
+
+**Two caveats, both about convention and not about state.** (1) The config models are `validate_assignment` and are **not frozen** (`config/models.py:63`: `extra="forbid", populate_by_name=True, validate_assignment=True`), and `model_copy(update=...)` is shallow, so a per-delta config shares every sub-object but `stop_loss` with the base config; that is safe because nothing in `src/` assigns to a config (the comment at `config/models.py:58-62` says so), which is a convention. (2) The cap count of item 3 reads the sizing reason, because the unchanged manager exposes no flag for it; see the prediction section.
+
+### Item 3. The predictions (R-T, R-DQ), committed before any code
+
+**What is counted.** The entries whose size was limited by `max_position_size_percent` (R-DT-3f): of the entries the executor queues (an approved entry, before its fill outcome), those whose sizing reason says the quantity was *"capped at"* the percent of equity. The unchanged manager caps when the quantity the method asked for exceeds `equity x 20 / 100 / entry_limit` (`position_sizing.py:246-249`). At 1 percent risk that is when the stop distance is under 5 percent of the entry limit, which is a delta of 500 bps or below (a delta of exactly 500 rounds its stop toward the entry on the tick, shrinks the distance, and binds). The count is a tally and changes no decision.
+
+**Structural predictions.**
+
+1. **Every 1d cell is 0.** The lowest delta over every SIGNAL of the 1d candidates is 613 (C1 BTCUSDT), 648 (C2), 883 (C3), 679 (C6 BTCUSDT) and 722 or more elsewhere, section 90's `min=`, all above 500, so no entry of C1, C2, C3 or C6 can be capped. (This is near-certain, not a statistic.)
+2. **Trades are unchanged from section 94 in all twelve cells (909 in all),** and so are the FOK-refused, expired, `daily_loss_halt` and `already_in_position` counts and every line of the output except the signals lines, which differ only by the appended field. The count adds a tally to the executor and a field to the script and changes no decision.
+3. **The scan is CLEAN with 74 output lines and 36 log records,** the old-path digests hold, and the wall time is 5 to 8 minutes.
+4. **In each cell the count is at most the entries queued** (filled, FOK-refused, expired and unaffordable together): C4 BTCUSDT 220, C4 ETHUSDT 232, C5 BTCUSDT 151, C5 ETHUSDT 157.
+
+**The cap-binding counts for the four 4h cells.** Estimated from section 90's delta quantiles, by interpolating the fraction of SIGNALS at or below 500 bps (C4 BTCUSDT about 40 percent, C4 ETHUSDT about 20 percent, C5 BTCUSDT about 44 percent, C5 ETHUSDT about 24 percent), nudged up because an entry can only be queued while the pair is flat, which skews entries toward quieter markets and so toward smaller deltas.
+
+| Candidate | Pair | Entries queued | Capped predicted (range) |
+|---|---|---|---|
+| C1, C2, C3, C6 | both pairs | 25 to 41 each | 0 (0 to 0) |
+| C4 | BTCUSDT | 220 | 92 (70 to 130) |
+| C4 | ETHUSDT | 232 | 51 (35 to 80) |
+| C5 | BTCUSDT | 151 | 69 (50 to 95) |
+| C5 | ETHUSDT | 157 | 39 (25 to 60) |
+
+**Total: 251 (180 to 365).** The four 1d candidates' 8 cells are predicted at 0 exactly.
+
+**The places a prediction is most likely wrong, named in advance.** The 4h counts, all four: the quantile interpolation treats the signals' deltas as if they were the entries', and an entry's delta is drawn from the pair's flat periods only. If the skew is larger than I allowed, C4 BTCUSDT could reach the top of its range; if the entries were drawn uniformly, it would be near 90. The sizing-reason route is the other risk: if the marker is absent from an approved sizing reason, every cell reads 0, which the tests of the code step are written to refuse.
+
+### The findings this section carries
+
+See the commit message. In short, nothing in `RiskManager` holds per-instance state that evaluate changes, the cap count has to read the sizing reason because the unchanged manager exposes no flag, and the prediction for the 1d cells is exact while the 4h ones are interpolated.
