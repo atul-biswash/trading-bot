@@ -11511,3 +11511,372 @@ Verdict: **FAIL at N7** (no candidate passes; `C1` meets its floor and fails bot
 ### The findings this section carries
 
 See the commit message.
+
+## 105. M5n N7: the predictions for the survey of the estimator module's closed holes and of the runner, before it is run (P149 C7, R-T, R-DQ)
+
+An observation log, so this section only adds. P149 re-surveys the three holes of section 103 that it closes in `src/trading_bot/backtesting/sharpe_stats.py` (`m15`, `m20`, `m50`; section 103's `m36` and `m60` stay open and unclosed) and the new mark form and bootstrap guard of `05678b6`, and surveys `scripts/n7_evaluate.py` (`C4`, tests at `C5`). It runs once, after this section is committed. **No recorded bar is read and no backtest is run on recorded data**: the mutations are of two files and the tests are fixtures. Nothing here decides anything about S4.
+
+### The method
+
+The harness is the repository's `scripts/worktree_survey.py` with `scripts/survey_hook.py`, as in sections 91, 95, 99 and 102: a detached worktree outside the repository at the commit that carries this section, the import location of `trading_bot` and `tests` proven inside it before any result counts, an unmutated baseline predicted green, every mutation byte-exact with exactly one match, asserted both when the specs were generated and when they run, every restore shown SHA-equal, and the worktree removed afterwards. A MORE is recorded and a FEWER halts the survey; **after a FEWER is explained the survey resumes at the next mutation with its committed predictions unchanged** (charter section 22, the survey practice the owner ruled at P149). There are two specs, because the two files have different tests to run. **Spec a** (`survey_a_p149.json`, SHA-256 `0eadd4fb9d7861679a0dc6fd8801628d42bd0b21139afa639f33d25e022b96f5`) holds the 13 mutations of `sharpe_stats.py` and runs both test files, baseline predicted **231 passed**. **Spec b** (`survey_b_p149.json`, SHA-256 `32e2a519a38801e58149a66a85cceaea4884bdf8641b35cceafafc0ce9b812b2`) holds the 49 mutations of the runner and runs `tests/unit/test_n7_evaluate.py`, baseline predicted **105 passed**. Both come from the same program as the tables below, with the test list from `pytest --collect-only` at the commit before this one (231 node ids). Every anchor was asserted to match exactly once when they were generated. No test was run on a mutated tree. The survey worktree holds no `data` directory, which is why a runner mutated to skip its guard (`b12`) finds nothing to read.
+
+**Where a prediction rested on a float, a seed or a numpy internal, the test is left out of the prediction and named below**: a test wrongly included is a FEWER and halts the survey, a test wrongly left out is a MORE and is recorded, so the cheap error is the one made on purpose.
+
+### Totals
+
+**62 mutations and 147 predicted failures.** The predictions come from enumerating every test that reaches the mutated point and asking of each whether its fixture can express the mutation and whether its assertion looks at what it moves (`M5h`, `M5e-079`); several were traced twice, and **`b15` was re-derived from 5 failures to 8 on a second pass** (the W5 sensitivity's `C1` has a deflated Sharpe of 0.93, between the two gates, so the flips and the report move too).
+
+**13 mutations are predicted to fail nothing: a01, a02, b10, b11, b14, b30, b34, b35, b36, b37, b38, b48, b49.** Each is declared with its reason in the notes beneath the table. Two are the **equivalent mutants of `m15`**: the deleted line `restart[:, 0] = True` and its opposite are both no-ops, so putting either back must fail nothing, which is the proof that deleting it changed no behaviour. The other eleven are **holes in the new tests, declared in advance**: a digest line with text after its hash (`b10`), a tag looked up by bare name (`b11`), an INDETERMINATE verdict's exit code (`b14`), the check that a trade's books add up (`b30`), an incomplete run (`b34`), the buy and hold's choice of the open or the close (`b35`), the probe's midnight test on a 4h candidate (`b36`), the canonical order of the result file's keys (`b37`), the precision its floats are rounded to (`b38`), and the min and max of two pairs' or two candidates' first defined days (`b48`, `b49`). None is closed by this survey: a change to the runner after it would be a change nobody had surveyed, and the runner is frozen by digest.
+
+**Where a prediction is most likely to be wrong, named in advance.**
+
+* `b26` (a run of exactly the warm-up is not yet defined), 13 failures. Four are the unit tests of the start day. Nine are world E1, because moving the start to 2024-03-02 leaves `C1` with no signal, so its returns have no variance and `evaluate` refuses at the fixture of eight tests and `main` returns 1 in the ninth. If a refusal is caught somewhere I did not read, the count is lower.
+* `b15` (the deflated Sharpe gate at 0.5), 8, and `b21` (only pass-to-fail is a flip), 3: both depend on the W5 sensitivity's numbers, which are the independent derivation's.
+* `a03` (a batch of 100) and `b42`, `b43` (the seed, the block probability): they move every bootstrap figure of the W worlds, and **world E1's judgement test is left out of all three predictions**, because `C2`'s lower bound on three returns equals its sample Sharpe whenever fewer than 5 percent of its resamples restart, and a changed stream may change that. A MORE of one is possible.
+* `b09` (the N0 line need only begin as the form does), 2: the upper-case line is matched too if the upper-cased hash happens to start with seven digits, about one run in thirty.
+* `b27` (the last midnight has no mark), 7, and `b24` (no-trade candidates not given their line), 3: the second fails three tests by a crash and not an assertion.
+
+**Classes.** The mutations expected to fail by a crash and not an assertion are `a06`, `a09`, `a10` (most of it), `b13`, `b24` and `b29`. The survey reports kill and crash separately and the score will say how many of the 147 were kills.
+
+### Predicted failures
+
+| Mutation | The break | Predicted failures | Tests |
+|---|---|---|---|
+| a01 | the deleted line is put back as it was (m15's equivalent mutant, re-surveyed) | 0 | none |
+| a02 | the first position is forced NOT to restart (m15 as it was surveyed) | 0 | none |
+| a03 | the resamples are drawn 100 at a time (m20, re-surveyed) | 9 | U186, U187, U1, U2, U3, U4, U5, U6, U29 |
+| a04 | the microsecond is not part of midnight (m50, re-surveyed) | 1 | U123 |
+| a05 | a subclass of tuple is a tuple | 1 | U136 |
+| a06 | a tuple longer than two is not refused for its length | 1 | U139 |
+| a07 | a subclass of datetime is a datetime | 1 | U128 |
+| a08 | any zone with a zero offset is UTC | 1 | U133 |
+| a09 | an int, and so a bool, is an equity | 2 | U141, U143 |
+| a10 | a non-finite Decimal is accepted | 4 | U145, U146, U147, U119 |
+| a11 | a zero equity is accepted | 1 | U117 |
+| a12 | the no-variance guard is the standard deviation being exactly zero again (M5n-200) | 1 | U190 |
+| a13 | only a naive datetime is refused for its zone | 2 | U132, U133 |
+| b01 | the tag is not required | 3 | U64, U65, U93 |
+| b02 | two 'N0 complete' lines are accepted | 1 | U73 |
+| b03 | the N0 commit need not be an ancestor of HEAD | 1 | U76 |
+| b04 | git's 'not an ancestor' is read as an ancestor | 1 | U76 |
+| b05 | a digest recorded twice is accepted | 3 | U80, U81, U82 |
+| b06 | a file that does not match its digest is accepted | 3 | U83, U84, U85 |
+| b07 | only the first frozen file is checked | 9 | U78, U79, U81, U82, U84, U85, U87, U88, U89 |
+| b08 | the charter is read from the working copy, in text mode | 2 | U74, U63 |
+| b09 | the N0 line need only begin as the form does | 2 | U67, U63 |
+| b10 | a digest line need only begin as the form does | 0 | none |
+| b11 | the tag is looked up by its bare name, which a branch of that name would also satisfy | 0 | none |
+| b12 | main does not call the guard | 2 | U94, U95 |
+| b13 | an existing result file is not refused | 1 | U105 |
+| b14 | an INDETERMINATE verdict exits 0 | 0 | none |
+| b15 | the deflated Sharpe gate is 0.5 | 8 | U19, U1, U7, U13, U14, U27, U29, U40 |
+| b16 | a floor is met only above it | 2 | U18, U101 |
+| b17 | a candidate below its floor is judged on its gates alone | 3 | U5, U17, U101 |
+| b18 | ties are decided by the Sharpe alone | 2 | U9, U15 |
+| b19 | a tie section 7 does not break selects the first | 2 | U10, U16 |
+| b20 | a sensitivity that would select nothing says n/a | 2 | U30, U102 |
+| b21 | only a gate that turns from pass to fail is a flip | 3 | U27, U29, U40 |
+| b22 | a gross of exactly zero is not flagged | 3 | U34, U29, U36 |
+| b23 | the basis points of a zero-gross candidate are a thousandth, not a ten-thousandth | 2 | U34, U29 |
+| b24 | a candidate with no trade is not given the no-trade line | 3 | U35, U104, U105 |
+| b25 | net adds the fees | 4 | U32, U33, U29, U104 |
+| b26 | a run of exactly the warm-up is not yet defined | 13 | U49, U50, U51, U54, U97, U98, U99, U100, U101, U102, U103, U104, U105 |
+| b27 | the last midnight has no mark | 7 | U56, U57, U58, U99, U100, U101, U102 |
+| b28 | a carried midnight is counted twice | 1 | U57 |
+| b29 | a trade's gross omits what it cost | 9 | U97, U98, U99, U100, U101, U102, U103, U104, U105 |
+| b30 | the check that a trade's books add up to the ledger's realised figure is removed | 0 | none |
+| b31 | an open position is not counted | 1 | U100 |
+| b32 | a sensitivity does not change the fee | 1 | U102 |
+| b33 | a sensitivity does not change the stop slippage | 1 | U102 |
+| b34 | an incomplete run is judged anyway | 0 | none |
+| b35 | the buy and hold buys at the first day's close | 0 | none |
+| b36 | the equity probe samples every bar, not only those ending at midnight | 0 | none |
+| b37 | the result file's keys are not sorted | 0 | none |
+| b38 | floats in the result file are rounded to six places | 0 | none |
+| b39 | money is written as str, with the exponent the fill model gave it | 1 | U104 |
+| b40 | C3 decides on 4h | 1 | U45 |
+| b41 | the 1d floor is 31 | 1 | U41 |
+| b42 | the bootstrap seed is 20261026 | 8 | U42, U1, U2, U3, U4, U5, U6, U29 |
+| b43 | the expected block length is 10 days | 8 | U42, U1, U2, U3, U4, U5, U6, U29 |
+| b44 | 5,000 resamples | 1 | U42 |
+| b45 | the in-sample span ends a day late | 1 | U43 |
+| b46 | the sensitivities are run at the base costs | 1 | U102 |
+| b47 | the runner's own digest is not one of those the guard checks | 6 | U79, U82, U85, U88, U89, U47 |
+| b48 | a candidate starts on the earlier pair's first defined day | 0 | none |
+| b49 | the span starts on the earliest candidate's first defined day | 0 | none |
+
+### Declared abstentions, classes and reservations
+
+| Mutation | Declared abstentions, classes and reservations |
+|---|---|
+| a01 | position 0 has last = 0 whether or not it restarts, so the line changes nothing: the deletion is behaviour-preserving |
+| a02 | the same reason as a01 |
+| a03 | the batch-size test sets the batch itself and so passes; world E1's judgement test is left out of the prediction because C2's bootstrap bound on three returns may or may not move with the stream (a possible MORE) |
+| a06 | it fails by ValueError from the unpacking, a crash; the one-item tuple is still refused |
+| a09 | both fail by AttributeError (an int has no is_finite), a crash |
+| a10 | NaN fails by decimal.InvalidOperation (a crash); Infinity is not refused at all; minus Infinity is refused as not positive, with a message that does not match |
+| a12 | the zeros-and-0.01 test still refuses, because an all-zero resample has an exactly zero deviation |
+| a13 | the +02:00 mark is then refused as not one day after the first, with a message that does not match |
+| b09 | the upper-case line is matched only if the upper-cased hash happens to start with seven digits, about one run in thirty (a possible MORE) |
+| b10 | no test has a digest line with text after its hash; the 64 hexadecimal characters are the end of every fixture line (a hole) |
+| b11 | no test has a branch named milestone/M5m (a hole) |
+| b12 | the survey worktree holds no data directory, so a main that runs finds nothing to read |
+| b13 | it fails by FileExistsError from the exclusive open, a crash |
+| b14 | no test drives main to an INDETERMINATE verdict (a hole) |
+| b15 | W1's C2 has a deflated Sharpe of 0.50 and the W5 sensitivity's C1 has 0.93, both between the two gates |
+| b16 | E1's floor is one closed trade and C1 has exactly one |
+| b17 | W4's verdict still selects C2, because C1 has fewer trades |
+| b24 | all three fail by decimal.InvalidOperation (0 / 0), a crash |
+| b26 | the start moves to 2024-03-02, so C1 sees no signal, its returns have no variance and the evaluation refuses: the eight E1 tests fail at their fixture and main returns 1 |
+| b29 | the book no longer adds up, so the evaluation refuses (RunnerError) and the E1 fixture fails, a crash |
+| b30 | no fixture trade fails to add up (a hole) |
+| b34 | no fixture world is incomplete (a hole) |
+| b35 | world E1's first day opens and closes at 100 on both pairs, so the two cannot be told apart (a hole) |
+| b36 | every E1 bar is a 1d bar and ends at midnight; no world has a 4h candidate (the 4h marking, M5n-207, is unexercised) |
+| b37 | the document is built in one order in every run, so the digest is stable without sorting; nothing pins that the order is canonical (a hole) |
+| b38 | the test asserts the value equals its own rounding to ten places, which a six-place rounding also satisfies (a hole) |
+| b42 | world E1's judgement test is left out because C2's bound on three returns may not move with the seed (a possible MORE) |
+| b43 | the same reservation as b42 about world E1 |
+| b44 | every world passes its resample count explicitly or has it patched |
+| b48 | both pairs of world E1 are defined on the same day (a hole) |
+| b49 | both candidates of world E1 are defined on the same day (a hole) |
+
+### Key to the test codes
+
+| Code | Test |
+|---|---|
+| U1 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W1]` |
+| U2 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W2]` |
+| U3 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W3]` |
+| U4 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W3b]` |
+| U5 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W4]` |
+| U6 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_every_candidate_matches_the_independent_derivation[W5]` |
+| U7 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W1]` |
+| U8 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W2]` |
+| U9 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W3]` |
+| U10 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W3b]` |
+| U11 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W4]` |
+| U12 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_verdict_matches_the_derivation[W5]` |
+| U13 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_w1_no_candidate_passes_so_the_run_fails_at_n7` |
+| U14 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_w1_a_candidate_can_clear_the_bootstrap_and_fail_the_deflated_sharpe` |
+| U15 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_w3_a_tie_in_sharpe_goes_to_the_candidate_with_more_trades` |
+| U16 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_w3b_a_tie_section_7_does_not_break_is_indeterminate_and_selects_nothing` |
+| U17 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_w4_a_candidate_below_its_floor_is_excluded_though_it_ties_the_winner` |
+| U18 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_a_floor_is_met_at_exactly_the_floor_and_not_below` |
+| U19 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_deflated_sharpe_gate_is_strictly_above_0_95` |
+| U20 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_a_candidate_with_no_variance_has_no_sharpe_and_the_run_refuses` |
+| U21 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_a_bootstrap_that_refuses_fails_the_gate_and_is_recorded` |
+| U22 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_the_trial_count_is_the_number_of_runs` |
+| U23 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_nothing_to_judge_is_refused` |
+| U24 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_invalid_bootstrap_settings_are_refused_before_any_work[0.0-10]` |
+| U25 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_invalid_bootstrap_settings_are_refused_before_any_work[1.5-10]` |
+| U26 | `test_n7_evaluate.py`: `TestTheJudgeWorlds::test_invalid_bootstrap_settings_are_refused_before_any_work[0.05-0]` |
+| U27 | `test_n7_evaluate.py`: `TestTheSensitivityThatFlipsAGateAndDecidesNothing::test_the_flips_are_listed_in_candidate_then_gate_order` |
+| U28 | `test_n7_evaluate.py`: `TestTheSensitivityThatFlipsAGateAndDecidesNothing::test_the_sensitivity_would_select_another_candidate_and_the_verdict_does_not_change` |
+| U29 | `test_n7_evaluate.py`: `TestTheSensitivityThatFlipsAGateAndDecidesNothing::test_the_whole_report_is_the_predicted_text_with_the_fee_telemetry_first` |
+| U30 | `test_n7_evaluate.py`: `TestTheSensitivityThatFlipsAGateAndDecidesNothing::test_would_select_names_none_and_indeterminate_too` |
+| U31 | `test_n7_evaluate.py`: `TestTheSensitivityThatFlipsAGateAndDecidesNothing::test_a_sensitivity_listing_other_candidates_cannot_be_compared` |
+| U32 | `test_n7_evaluate.py`: `TestFeeTelemetry::test_a_positive_gross_gives_both_ratios_and_no_flag` |
+| U33 | `test_n7_evaluate.py`: `TestFeeTelemetry::test_a_negative_gross_is_over_its_absolute_value_and_flagged` |
+| U34 | `test_n7_evaluate.py`: `TestFeeTelemetry::test_a_zero_gross_has_no_share_but_has_basis_points_and_is_flagged` |
+| U35 | `test_n7_evaluate.py`: `TestFeeTelemetry::test_no_trade_has_no_ratio_and_says_so` |
+| U36 | `test_n7_evaluate.py`: `TestFeeTelemetry::test_the_report_prints_n_a_where_a_ratio_is_undefined` |
+| U37 | `test_n7_evaluate.py`: `TestTheResultFile::test_the_document_is_canonical_ascii_json_ending_in_one_line_feed` |
+| U38 | `test_n7_evaluate.py`: `TestTheResultFile::test_money_is_a_string_and_a_float_is_rounded_to_ten_places` |
+| U39 | `test_n7_evaluate.py`: `TestTheResultFile::test_the_same_evaluation_gives_the_same_bytes_and_so_the_same_digest` |
+| U40 | `test_n7_evaluate.py`: `TestTheResultFile::test_the_document_records_the_sensitivities_and_what_they_would_select` |
+| U41 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_floors_are_section_5` |
+| U42 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_bootstrap_is_section_6_b` |
+| U43 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_span_ends_on_2024_01_01_and_the_archive_begins_on_2017_08_17` |
+| U44 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_costs_are_section_3` |
+| U45 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_candidates_are_the_six_of_r_dy_and_all_are_registered` |
+| U46 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_every_candidate_window_holds_the_atr_the_trail_needs` |
+| U47 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_frozen_paths_and_the_tag` |
+| U48 | `test_n7_evaluate.py`: `TestTheConstantsAreThePreRegistrations::test_the_guard_reads_the_repository_this_script_lives_in` |
+| U49 | `test_n7_evaluate.py`: `TestTheStartDay::test_a_run_of_enough_consecutive_bars_ends_at_the_first_defined_bar` |
+| U50 | `test_n7_evaluate.py`: `TestTheStartDay::test_one_bar_is_defined_at_the_first_bar` |
+| U51 | `test_n7_evaluate.py`: `TestTheStartDay::test_a_gap_restarts_the_count` |
+| U52 | `test_n7_evaluate.py`: `TestTheStartDay::test_a_repeated_open_time_restarts_the_count` |
+| U53 | `test_n7_evaluate.py`: `TestTheStartDay::test_a_series_too_short_is_never_defined` |
+| U54 | `test_n7_evaluate.py`: `TestTheStartDay::test_a_4h_series_counts_four_hour_bars` |
+| U55 | `test_n7_evaluate.py`: `TestTheStartDay::test_an_empty_series_is_never_defined` |
+| U56 | `test_n7_evaluate.py`: `TestAssembleMarks::test_the_start_is_the_initial_balance_and_each_midnight_is_its_sample` |
+| U57 | `test_n7_evaluate.py`: `TestAssembleMarks::test_a_midnight_nobody_sampled_carries_the_previous_mark_and_is_counted` |
+| U58 | `test_n7_evaluate.py`: `TestAssembleMarks::test_the_marks_are_of_the_one_form_the_estimator_accepts` |
+| U59 | `test_n7_evaluate.py`: `TestTheGuardAccepts::test_a_repository_that_satisfies_all_three_conditions` |
+| U60 | `test_n7_evaluate.py`: `TestTheGuardAccepts::test_an_annotated_tag` |
+| U61 | `test_n7_evaluate.py`: `TestTheGuardAccepts::test_a_seven_character_hash` |
+| U62 | `test_n7_evaluate.py`: `TestTheGuardAccepts::test_a_commit_is_its_own_ancestor` |
+| U63 | `test_n7_evaluate.py`: `TestTheGuardAccepts::test_a_charter_with_crlf_line_endings_is_not_read_as_a_match` |
+| U64 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionA::test_no_tag` |
+| U65 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionA::test_a_tag_of_another_name` |
+| U66 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_no_line` |
+| U67 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[trailing-text]` |
+| U68 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[upper-case]` |
+| U69 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[placeholder]` |
+| U70 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[six-characters]` |
+| U71 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[quoted]` |
+| U72 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_not_exactly_the_form[lower-case-words]` |
+| U73 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_two_lines` |
+| U74 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_line_that_is_only_in_the_working_copy` |
+| U75 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_commit_the_repository_does_not_have` |
+| U76 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionB::test_a_commit_that_is_not_an_ancestor_of_head` |
+| U77 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_missing_digest_line_for_each_file[docs/M5N_PREREGISTRATION.md]` |
+| U78 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_missing_digest_line_for_each_file[src/trading_bot/backtesting/sharpe_stats.py]` |
+| U79 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_missing_digest_line_for_each_file[scripts/n7_evaluate.py]` |
+| U80 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_repeated_digest_line_for_each_file[docs/M5N_PREREGISTRATION.md]` |
+| U81 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_repeated_digest_line_for_each_file[src/trading_bot/backtesting/sharpe_stats.py]` |
+| U82 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_repeated_digest_line_for_each_file[scripts/n7_evaluate.py]` |
+| U83 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_an_edited_file_for_each_of_the_three[docs/M5N_PREREGISTRATION.md]` |
+| U84 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_an_edited_file_for_each_of_the_three[src/trading_bot/backtesting/sharpe_stats.py]` |
+| U85 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_an_edited_file_for_each_of_the_three[scripts/n7_evaluate.py]` |
+| U86 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_file_that_is_gone_for_each_of_the_three[docs/M5N_PREREGISTRATION.md]` |
+| U87 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_file_that_is_gone_for_each_of_the_three[src/trading_bot/backtesting/sharpe_stats.py]` |
+| U88 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_file_that_is_gone_for_each_of_the_three[scripts/n7_evaluate.py]` |
+| U89 | `test_n7_evaluate.py`: `TestTheGuardRefusesConditionC::test_a_digest_of_the_wrong_length_is_not_a_digest_line` |
+| U90 | `test_n7_evaluate.py`: `TestTheGuardFailsClosed::test_a_directory_that_is_not_a_repository` |
+| U91 | `test_n7_evaluate.py`: `TestTheGuardFailsClosed::test_a_repository_without_the_charter_at_head` |
+| U92 | `test_n7_evaluate.py`: `TestTheGuardFailsClosed::test_no_git_on_the_path` |
+| U93 | `test_n7_evaluate.py`: `TestTheGuardFailsClosed::test_conditions_are_checked_in_the_owners_order_after_the_charter_is_read` |
+| U94 | `test_n7_evaluate.py`: `TestMainRunsTheGuardFirstAndHasNoOverride::test_main_refuses_before_it_reads_a_config_or_a_store` |
+| U95 | `test_n7_evaluate.py`: `TestMainRunsTheGuardFirstAndHasNoOverride::test_there_is_no_flag_and_no_environment_variable_that_skips_it` |
+| U96 | `test_n7_evaluate.py`: `TestMainRunsTheGuardFirstAndHasNoOverride::test_the_only_options_are_config_data_dir_and_out` |
+| U97 | `test_n7_evaluate.py`: `TestWorldE1::test_the_span_starts_on_the_first_day_every_indicator_is_defined` |
+| U98 | `test_n7_evaluate.py`: `TestWorldE1::test_c1_closes_one_trade_at_the_gapped_open_and_its_books_are_the_hand_arithmetic` |
+| U99 | `test_n7_evaluate.py`: `TestWorldE1::test_c1_marks_are_flat_until_the_position_is_booked_at_the_next_midnight` |
+| U100 | `test_n7_evaluate.py`: `TestWorldE1::test_c2_holds_an_open_position_that_is_marked_and_not_counted_as_a_trade` |
+| U101 | `test_n7_evaluate.py`: `TestWorldE1::test_the_judgement_is_the_derivations` |
+| U102 | `test_n7_evaluate.py`: `TestWorldE1::test_the_sensitivities_run_at_their_own_costs_and_flip_nothing` |
+| U103 | `test_n7_evaluate.py`: `TestWorldE1::test_the_context_is_the_equal_weight_buy_and_hold` |
+| U104 | `test_n7_evaluate.py`: `TestWorldE1::test_the_report_puts_the_fee_telemetry_first` |
+| U105 | `test_n7_evaluate.py`: `TestMainOnTheFixtureWorldWithTheGuardSatisfied::test_it_writes_one_result_file_prints_its_digest_and_refuses_a_second_run` |
+| U106 | `test_sharpe_stats.py`: `TestDailySeries::test_the_marks_become_the_exact_daily_returns` |
+| U107 | `test_sharpe_stats.py`: `TestDailySeries::test_the_result_is_float_one_shorter_than_the_marks` |
+| U108 | `test_sharpe_stats.py`: `TestDailySeries::test_a_day_with_no_position_and_no_change_is_a_zero_return` |
+| U109 | `test_sharpe_stats.py`: `TestDailySeries::test_fewer_than_two_marks_is_refused[0]` |
+| U110 | `test_sharpe_stats.py`: `TestDailySeries::test_fewer_than_two_marks_is_refused[1]` |
+| U111 | `test_sharpe_stats.py`: `TestDailySeries::test_a_missing_day_is_refused_not_carried_forward` |
+| U112 | `test_sharpe_stats.py`: `TestDailySeries::test_a_repeated_day_is_refused` |
+| U113 | `test_sharpe_stats.py`: `TestDailySeries::test_a_backward_day_is_refused` |
+| U114 | `test_sharpe_stats.py`: `TestDailySeries::test_a_mark_off_midnight_is_refused` |
+| U115 | `test_sharpe_stats.py`: `TestDailySeries::test_a_naive_datetime_is_refused` |
+| U116 | `test_sharpe_stats.py`: `TestDailySeries::test_a_non_utc_offset_is_refused` |
+| U117 | `test_sharpe_stats.py`: `TestDailySeries::test_a_non_positive_equity_is_refused[0]` |
+| U118 | `test_sharpe_stats.py`: `TestDailySeries::test_a_non_positive_equity_is_refused[-5]` |
+| U119 | `test_sharpe_stats.py`: `TestDailySeries::test_a_non_finite_equity_is_refused` |
+| U120 | `test_sharpe_stats.py`: `TestDailySeries::test_a_float_equity_is_the_leak_the_money_rule_stops` |
+| U121 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_midnight_exactly_is_accepted` |
+| U122 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_one_millisecond_before_midnight_is_refused` |
+| U123 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_one_microsecond_after_midnight_is_refused` |
+| U124 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_any_later_instant_in_the_day_is_refused[second]` |
+| U125 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_any_later_instant_in_the_day_is_refused[minute]` |
+| U126 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_any_later_instant_in_the_day_is_refused[hour]` |
+| U127 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_instant_that_is_not_exactly_a_datetime_is_refused[date]` |
+| U128 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_instant_that_is_not_exactly_a_datetime_is_refused[timestamp]` |
+| U129 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_instant_that_is_not_exactly_a_datetime_is_refused[str]` |
+| U130 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_instant_that_is_not_exactly_a_datetime_is_refused[int]` |
+| U131 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_zone_that_is_not_timezone_utc_is_refused[naive]` |
+| U132 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_zone_that_is_not_timezone_utc_is_refused[plus-two]` |
+| U133 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_zone_that_is_not_timezone_utc_is_refused[named-zero-offset]` |
+| U134 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_timezone_utc_itself_is_the_accepted_zone` |
+| U135 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_element_that_is_not_a_plain_tuple_is_refused[list]` |
+| U136 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_element_that_is_not_a_plain_tuple_is_refused[namedtuple]` |
+| U137 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_element_that_is_not_a_plain_tuple_is_refused[dict]` |
+| U138 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_tuple_of_the_wrong_length_is_refused[one]` |
+| U139 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_tuple_of_the_wrong_length_is_refused[three]` |
+| U140 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_equity_that_is_not_exactly_a_decimal_is_refused[float]` |
+| U141 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_equity_that_is_not_exactly_a_decimal_is_refused[int]` |
+| U142 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_equity_that_is_not_exactly_a_decimal_is_refused[str]` |
+| U143 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_equity_that_is_not_exactly_a_decimal_is_refused[bool]` |
+| U144 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_an_equity_that_is_not_exactly_a_decimal_is_refused[numpy-float64]` |
+| U145 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_decimal_that_is_not_finite_is_refused[equity0]` |
+| U146 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_decimal_that_is_not_finite_is_refused[equity1]` |
+| U147 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_decimal_that_is_not_finite_is_refused[equity2]` |
+| U148 | `test_sharpe_stats.py`: `TestTheOneAcceptedFormOfMark::test_a_refusal_names_the_mark_that_broke_the_form` |
+| U149 | `test_sharpe_stats.py`: `TestParityWithMetrics::test_the_f2_marks_give_the_same_annualised_sharpe_both_ways` |
+| U150 | `test_sharpe_stats.py`: `TestParityWithMetrics::test_the_daily_returns_agree_too` |
+| U151 | `test_sharpe_stats.py`: `TestSharpe::test_the_known_small_series_by_hand` |
+| U152 | `test_sharpe_stats.py`: `TestSharpe::test_the_annualiser_is_the_square_root_of_365` |
+| U153 | `test_sharpe_stats.py`: `TestSharpe::test_the_standard_deviation_is_the_sample_one` |
+| U154 | `test_sharpe_stats.py`: `TestSharpe::test_a_constant_series_refuses_rather_than_divides[0.01]` |
+| U155 | `test_sharpe_stats.py`: `TestSharpe::test_a_constant_series_refuses_rather_than_divides[0.0]` |
+| U156 | `test_sharpe_stats.py`: `TestSharpe::test_a_constant_series_refuses_rather_than_divides[0.1]` |
+| U157 | `test_sharpe_stats.py`: `TestSharpe::test_a_constant_series_refuses_rather_than_divides[-0.003]` |
+| U158 | `test_sharpe_stats.py`: `TestSharpe::test_a_constant_series_whose_float_mean_is_inexact_still_refuses` |
+| U159 | `test_sharpe_stats.py`: `TestSharpe::test_fewer_than_two_returns_refuses[returns0]` |
+| U160 | `test_sharpe_stats.py`: `TestSharpe::test_fewer_than_two_returns_refuses[returns1]` |
+| U161 | `test_sharpe_stats.py`: `TestSharpe::test_a_non_finite_return_refuses` |
+| U162 | `test_sharpe_stats.py`: `TestSharpe::test_a_two_dimensional_input_refuses` |
+| U163 | `test_sharpe_stats.py`: `TestMoments::test_skewness_and_non_excess_kurtosis_by_hand` |
+| U164 | `test_sharpe_stats.py`: `TestMoments::test_a_symmetric_series_has_no_skew` |
+| U165 | `test_sharpe_stats.py`: `TestMoments::test_a_two_point_series_has_kurtosis_one` |
+| U166 | `test_sharpe_stats.py`: `TestMoments::test_a_constant_series_refuses` |
+| U167 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_same_inputs_and_seed_give_identical_bounds` |
+| U168 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_different_seed_gives_different_bounds` |
+| U169 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_result_does_not_depend_on_the_input_container` |
+| U170 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_bounds_order_2_5th_below_5th_below_the_mean[positive]` |
+| U171 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_bounds_order_2_5th_below_5th_below_the_mean[negative]` |
+| U172 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_bounds_order_2_5th_below_5th_below_the_mean[runs]` |
+| U173 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_the_bootstrap_mean_has_the_sign_of_the_sample_sharpe` |
+| U174 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_vanishing_restart_probability_rotates_the_whole_series` |
+| U175 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_block_length_of_one_matches_an_independent_iid_bootstrap` |
+| U176 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_blocks_widen_the_distribution_of_an_autocorrelated_series` |
+| U177 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[0.0]` |
+| U178 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[-0.1]` |
+| U179 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[1.5]` |
+| U180 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_restart_probability_outside_the_unit_interval_refuses[nan]` |
+| U181 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_zero_resamples_refuses` |
+| U182 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_one_return_series_refuses` |
+| U183 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_constant_series_refuses` |
+| U184 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_resample_with_no_variance_refuses` |
+| U185 | `test_sharpe_stats.py`: `TestStationaryBootstrap::test_a_float_seed_refuses` |
+| U186 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_g1_six_hundred_resamples_across_three_batches` |
+| U187 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_g2_the_pre_registered_ten_thousand_resamples` |
+| U188 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_the_batch_size_is_part_of_the_value` |
+| U189 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_the_sample_sharpe_the_fixture_has` |
+| U190 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_a_constant_resample_of_non_zero_returns_refuses` |
+| U191 | `test_sharpe_stats.py`: `TestTheBootstrapStreamIsPinned::test_numpy_does_give_a_non_zero_std_for_three_equal_floats` |
+| U192 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_one_trial_has_no_deflation_so_it_is_the_probabilistic_sharpe_ratio` |
+| U193 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_one_trial_ignores_what_the_single_sharpe_list_says_beyond_its_length` |
+| U194 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_the_expected_maximum_for_six_trials_by_hand` |
+| U195 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_the_expected_maximum_for_two_trials_by_hand` |
+| U196 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_the_euler_mascheroni_constant` |
+| U197 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_six_trials_with_skew_and_fat_tails_by_hand` |
+| U198 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_two_trials_by_hand` |
+| U199 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_it_is_strictly_increasing_in_the_sharpe_for_a_symmetric_case` |
+| U200 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_more_trials_deflate_the_same_sharpe` |
+| U201 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_trial_count_below_one_refuses[0]` |
+| U202 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_trial_count_below_one_refuses[-1]` |
+| U203 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_sharpe_list_not_matching_n_refuses` |
+| U204 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_fewer_than_two_observations_refuses` |
+| U205 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_non_positive_variance_term_refuses` |
+| U206 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_non_finite_input_refuses[sr]` |
+| U207 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_non_finite_input_refuses[skew]` |
+| U208 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_non_finite_input_refuses[kurt]` |
+| U209 | `test_sharpe_stats.py`: `TestDeflatedSharpe::test_a_non_finite_input_refuses[srs]` |
+| U210 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_net_share_per_trade_and_basis_points_by_hand` |
+| U211 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_the_numerators_and_denominators_are_reported_beside_each_ratio` |
+| U212 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_the_share_is_over_the_absolute_gross` |
+| U213 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_zero_gross_refuses` |
+| U214 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_zero_fees_are_a_zero_share` |
+| U215 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_fewer_than_one_trade_refuses[0]` |
+| U216 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_fewer_than_one_trade_refuses[-3]` |
+| U217 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_non_positive_notional_refuses[notional0]` |
+| U218 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_non_positive_notional_refuses[notional1]` |
+| U219 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_negative_fees_refuse` |
+| U220 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_float_figure_is_refused[gross]` |
+| U221 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_float_figure_is_refused[fees]` |
+| U222 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_float_figure_is_refused[notional]` |
+| U223 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_non_int_trade_count_is_refused` |
+| U224 | `test_sharpe_stats.py`: `TestFeeTelemetry::test_a_boolean_trade_count_is_refused` |
+| U225 | `test_sharpe_stats.py`: `TestBuyAndHold::test_equal_weight_marks_by_hand` |
+| U226 | `test_sharpe_stats.py`: `TestBuyAndHold::test_its_daily_returns_by_hand` |
+| U227 | `test_sharpe_stats.py`: `TestBuyAndHold::test_series_of_different_length_refuse` |
+| U228 | `test_sharpe_stats.py`: `TestBuyAndHold::test_series_marked_at_different_instants_refuse` |
+| U229 | `test_sharpe_stats.py`: `TestBuyAndHold::test_a_non_positive_close_refuses` |
+| U230 | `test_sharpe_stats.py`: `TestBuyAndHold::test_a_non_positive_initial_refuses` |
+| U231 | `test_sharpe_stats.py`: `TestBuyAndHold::test_a_float_close_is_refused` |
+
+### The findings this section carries
+
+See the commit message. In short: eleven holes in the new tests are declared before they are measured, and the m15 equivalence is to be demonstrated by putting the line back.
