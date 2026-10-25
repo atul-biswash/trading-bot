@@ -10399,3 +10399,58 @@ The codes are the tests in collection order, N1 to N191.
 | N190 | `config_m5n`: `TestThePairsAndTheWindow::test_the_data_directory_is_the_mainnet_archive` |
 | N191 | `config_m5n`: `TestTheStrategyIsACandidate::test_it_names_one_of_the_six` |
 
+
+## 96. M5n N5: the arming-audit survey of the N5 code, scored against section 95 (P145 C9, R-T)
+
+An observation log, so this section only adds. The survey ran as section 95 describes, with the repository's `scripts/worktree_survey.py` and `scripts/survey_hook.py`, in a detached worktree outside the repository (`scratch\p145\wt_survey`) at `1ffed99` (the commit that carries section 95), the import location of `trading_bot` and `tests` printed inside the worktree before any result (`...\wt_survey\src\trading_bot\__init__.py` and `...\wt_survey\tests\__init__.py`), an unmutated baseline of **191 passed in 14.40 s**, every restore shown SHA-equal, every copied file intact afterwards, and `git worktree list` showing the main worktree only. It ran once, `2026-10-25T10:02:25Z` to `10:09:34Z` (7 min 9 s), exit 0, standard error empty, from the committed spec (`survey_n5.json`, SHA-256 as section 95 records it). Nothing here decides anything about S4.
+
+### Totals
+
+**27 mutations: 27 MATCH, 0 MORE, 0 FEWER. Predicted failures 89, observed 89.** The four mutations predicted to fail nothing (`q02`, `q03`, `q17`, `q27`) failed nothing. No halt fired.
+
+**Tests killed by no mutation: 131 of 191, exactly as predicted.** 60 distinct tests failed under at least one mutation, and **10 of them fail only by a crash and not by an assertion**: ten of `q24`'s twelve, each a `pydantic_core.ValidationError` raised by the loader inside `loaded()` (the two it shares with `q23`, `q25` and `q26` are also killed by an assertion). By `M5i-115` those ten are not credited as kills, so **50 tests were killed by an assertion at least once and 141 were not**: the 131 and the ten. By file, the unkilled counts are the ones section 95 gave (9, 54, 17, 49 and 2), and the survey adds nothing to them.
+
+**A clean sweep is not evidence the tests are good, and the reason is worth stating.** Every prediction was made after the tests were written and from their fixtures, which section 91's `M5e-051` says is the case in which the prediction is least independent of the result. The two things that make this survey more than a transcript of the tests are the ones section 95 declared before it ran: the equivalents (`q02`, `q03`) and the holes (`q17`, `q27`), which the survey confirmed rather than closed.
+
+### What the survey leaves unpinned, and does not fix
+
+* **`q17` is a hole, and it is the one that matters for N5's own output.** Swapping the `fok_refused` and `expired` fields of the entry-outcomes line fails no test, because no test world has a non-zero FOK-refused or expired entry. The N5 run printed 45 FOK-refused and 8 expired entries (section 94); the executor's own entry-outcome tests (`TestAnEntryThatDoesNotFill`, not re-read for this section) stand behind how the two are counted, but the script's mapping of them onto the printed line is pinned for `filled` (`q19`) and for `fok_refused` only as a mislabelled field (`q20`, which reads the filled count), and for `expired` and `unaffordable` by nothing. A test world with one FOK-refused and one expired entry would close it. It was not written here, because a test added after the survey is a test the survey did not see.
+* **`q08` shows the loss-at-the-stop test cannot see the width of a stop** (section 95's `M5n-146`), and `q08` is the only mutation in this survey that hands every signal the same stop; the tests that kill it are the ones that assert a stop level or a quantity.
+* **`q27`: nothing depends on the placeholder percent of 20.0**, which is what the file's comment says and what the survey now shows.
+
+### The ruled-overturn authority, discharged
+
+The assertion changed at P145's commit C6, in `test_config_m5n.py`, is killed by assertion through `q25` (a trailing stop enabled) and `q26` (a take-profit enabled), and the file's new sizing test by `q23`. The owner's condition, *"the mutation survey still kills through it"*, is met.
+
+### Every mutation
+
+| Mutation | The break | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| q01 | a bool counts as an integer delta (isinstance in place of the exact type) | 1 | 1 | MATCH |
+| q02 | a non-BUY signal with an integer delta is evaluated by a per-delta manager as well | 0 | 0 | MATCH |
+| q03 | a signal is delegated to a per-delta manager while stops are off | 0 | 0 | MATCH |
+| q04 | a delta of zero is not refused | 1 | 1 | MATCH |
+| q05 | the percent is delta / 1000, a tenth of the trail | 10 | 10 | MATCH |
+| q06 | the file's stop type is kept, so an ATR file sizes from an ATR stop | 1 | 1 | MATCH |
+| q07 | no per-delta manager is kept | 1 | 1 | MATCH |
+| q08 | the per-delta manager is built over the unchanged config, so every stop is the file's placeholder | 7 | 7 | MATCH |
+| q09 | the D1 path is built a plain manager and every other path a D1 manager | 5 | 5 | MATCH |
+| q10 | a per-delta manager reads the wall clock and not the injected one | 10 | 10 | MATCH |
+| q11 | no rule is ever tallied | 10 | 10 | MATCH |
+| q12 | a rule is tallied only under the limit_refused stage, so no_mark_price loses its rule | 1 | 1 | MATCH |
+| q13 | the snapshot hands out the live rules dict | 1 | 1 | MATCH |
+| q14 | a rule's count is set to one and not added to | 6 | 6 | MATCH |
+| q15 | rule names are not exempt from the forbidden-word scan | 13 | 13 | MATCH |
+| q16 | the grammar accepts a rules line with no count | 1 | 1 | MATCH |
+| q17 | the outcomes line swaps the FOK-refused and expired counts | 0 | 0 | MATCH |
+| q18 | every rule count is printed as zero | 1 | 1 | MATCH |
+| q19 | the filled outcome prints the trade count | 1 | 1 | MATCH |
+| q20 | the FOK-refused outcome counts the filled entries | 1 | 1 | MATCH |
+| q21 | the last rule is not printed | 1 | 1 | MATCH |
+| q22 | the rules are printed in reverse of the enum's order | 2 | 2 | MATCH |
+| q23 | the file risks 2 percent of equity | 1 | 1 | MATCH |
+| q24 | the stop is disabled while risk_per_trade sizing is on, which the config refuses at load | 12 | 12 | MATCH; crash: ValidationError |
+| q25 | a trailing stop is enabled | 1 | 1 | MATCH |
+| q26 | a take-profit is enabled | 1 | 1 | MATCH |
+| q27 | the placeholder percent is 2.0 | 0 | 0 | MATCH |
+
