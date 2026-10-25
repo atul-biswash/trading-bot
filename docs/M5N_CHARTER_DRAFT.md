@@ -4,7 +4,7 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
-**Amended at P149 on branch `m5n` (HEAD `b7d6407`).** Section 22 records the survey practice, the fee telemetry definitions and the N0 guard verbatim, with the executing session's readings of each marked as the owner's to overrule. The old section 22 is section 23.
+**Amended at P149 on branch `m5n` (HEAD `b7d6407`).** Section 22 records the survey practice, the fee telemetry definitions and the N0 guard verbatim, with the executing session's readings of each marked as the owner's to overrule. The old section 22 is section 24, and the new section 23 records the three frozen digests of the guard's condition (c).
 
 **Amended at P148 on branch `m5n` (HEAD `48c4199`).** Section 21 records four readings of the pre-registration, the owner's rulings on `M5n-178` and the `M5n-173` note verbatim; section 20 is annotated where the rulings settle what it left open. The old section 21 is section 22.
 
@@ -365,6 +365,18 @@ The project owner's text, quoted as the P149 prompt gives it, in the order the p
 3. **The guard's three conditions are read as follows.** (a) The tag `milestone/M5m` resolves to a commit, annotated or not. (b) The charter, read from the commit at HEAD and not from the working file, carries exactly one line that is exactly `N0 complete: S4 result recorded at ` followed by 7 to 40 lowercase hexadecimal characters and nothing else; that commit must exist and be an ancestor of HEAD, HEAD itself counting. This section quotes the owner's wording inside a sentence and with a placeholder, which is not such a line. (c) The charter, read the same way, carries exactly one line of the form `N7 frozen digest <path> <sha256>` for each of `docs/M5N_PREREGISTRATION.md`, `src/trading_bot/backtesting/sharpe_stats.py` and `scripts/n7_evaluate.py`; the SHA-256 of each file's bytes in the working tree must equal its line. So the runner's own digest is recorded after its last edit, in a docs commit, and any edit to it, to the estimator module or to the pre-registration after that is an amendment that the guard refuses. A condition that cannot be evaluated (no `git`, no repository, an unreadable file) refuses, because the guard fails closed.
 4. **There is no override: no flag, no environment variable, no config key.** The guard runs first in `main`, before the config or the store is opened. The tests reach it through a function parameter naming the repository root and a module constant, and no command line does.
 
-## 23. What this draft does not do
+## 23. The N7 frozen digests, recorded at P149
+
+The three files the N0 guard checks (section 22, reading 3 (c)) are frozen for N7 by the three lines below, each the SHA-256 of the file's bytes as committed at `b5deb42` (the pre-registration at `ede21a3`, unchanged since). **They are the whole of what the guard compares.** Any later change to the estimator module or to the runner is an amendment: the guard then refuses the edited tree, and the results it would have produced are exploratory (pre-registration section 12). The pre-registration's own digest is the one section 20 records.
+
+```
+N7 frozen digest docs/M5N_PREREGISTRATION.md e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e
+N7 frozen digest src/trading_bot/backtesting/sharpe_stats.py 2b55991c0207fc2938e6f03b33e0b9cfec3754d486af7002d5adee4ee88dda82
+N7 frozen digest scripts/n7_evaluate.py 1f307de67f5aebd7af39a3d8fb5cd22a78d9fa671cfdf5353b894beacbadcfff
+```
+
+The estimator module is `05678b6`'s (after `58ad896`), the runner is `57588ee`'s, and the survey of both (ledger sections 105 and 106) is run on exactly these bytes, so a change the survey prompts is an amendment too. **No `N0 complete` line exists in this file**, so the guard still refuses at `tag_missing` on this tree, which is the correct state until N0 records the S4 result and the tag `milestone/M5m` exists.
+
+## 24. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
