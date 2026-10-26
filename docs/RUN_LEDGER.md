@@ -7424,3 +7424,150 @@ An observation log, so this section only adds. P150a records S4's latch episode 
 ### Order of work
 
 C1 (this section) commits the predictions with `Findings: none`. Then the capture is measured read-only; C2 appends the measured section (episode 4, the owner's sale, the release, boot #8, the fault analysis and the fault-window table); C3 adds `docs/S4_CORRECTION_P150A.md` (R-EC and R-ED verbatim); C4 adds R-ED's listing to `docs/S4_STOP_RUNBOOK.md` step 8; C5 adds order 7022204 as U10's sixth Testnet case in `docs/NEXT_MILESTONE.md`. One bare gate at the end; no push.
+
+## 75. M5m S4: latch episode 4, the owner's sale, the release, boot #8 and the pid 20100 resource fault, MEASURED from the capture (P150a C2)
+
+An observation log, so this section only adds. It scores the predictions of section 74, which were committed at `24eab08` before the capture was read for anything but its digest. **Everything is read from one capture** (`F:\trading bot\scratch\s4\2026-10-26\034946Z-capture.log`, 4,617,242 bytes, 20,689 lines, SHA-256 `07464736fb840a996387b728caec5b86912daeade2c3843a134223827a987a65`, equal to the prompt's, to `034946Z-trading_bot.log` and to `034946Z-SHA256SUMS.txt`), read-only, with no venue call, nothing written under `deploy\45547f107715`, and no survey or parallel test run (R-EC, ruled in this prompt). **The actual main HEAD at the start was `ee8d485`; section 74 is `24eab08`.** Scripts, read-only, in `scratch\p150a`: `tb.py`, `windows.py`, `windows2.py`, `windows3.py`, `build_frags.py` (the two tables below). **Everything here decides nothing about S4.**
+
+### 1. The predictions of section 74, scored
+
+| | Predicted | Observed | Verdict |
+|---|---|---|---|
+| a | the 31 pid 20100 reconciliation-pass tracebacks lie in `2026-10-25T17:41:25Z` to `18:01:25Z` (at least 27) and all in `16:40:58Z` to `18:35:00Z`; the final lines name an allocation or a process start | **0 of 31 in the narrow window and 0 in the wide one.** They lie between `2026-10-24T04:39:03Z` and `2026-10-25T13:13:01Z` (14 on 10-24, 17 on 10-25), the last 4 h 38 min 24 s before the MemoryError. Each is a chain of three tracebacks (94 heads in pid 20100 = 31 x 3 + the MemoryError), whose final lines are `CancelledError`, `TimeoutError`, `ExchangeConnectionError` (30 passes) or `socket.gaierror`, `ClientConnectorDNSError`, `ExchangeConnectionError` (the pass of `13:13:01Z`). **None is a MemoryError, and none names an allocation.** | **FALSIFIED.** The prompt's premise that the 31 cluster in the squeeze was wrong, and the prediction took it as given |
+| b | a websocket drop and reconnect within ten minutes after the MemoryError | the drop is **at the MemoryError's own second**, `17:51:25Z`: two library ERROR records and two `stream_transient_error` WARNINGs. **No line says the stream reconnected**; the library "is reconnecting itself" and no `Failed to connect` line follows. The next successful pass is `17:53:01Z` and a BUY signal is processed at `17:57:00Z` | **MATCH on the stated test** (a `stream_transient_error` WARNING at +0 s); the reconnect itself is INFERRED from the pipeline running again, not read |
+| c | a per-candle count of processed closed candles is not measurable from the INFO log; a hole followed by a later candle is, by `bars_gap_detected`; none predicted inside the squeeze | per-candle lines are DEBUG and the capture holds none (`Ignored non-advancing candle` and the like occur zero times). **Zero feed-health events of the eight kinds in all of pid 20100's 2 d 8 h 40 min 45 s** (section 3). The drop of `17:51:25Z` produced no `bars_gap_detected`, no `feed_silent`, no `feed_resumed` | **HELD** |
+| d | the stop's comparison will show R-ED's listing in place of a count | unchanged; section 4 | HELD |
+
+### 2. The pid 20100 traceback heads, and the MemoryError
+
+The 31 failed passes, one row each (each row stands for three chained tracebacks under one `ERROR` record from `trading_bot.execution.reconciliation_driver`, "Reconciliation phase reconciliation_pass failed on ...; continuing"). 28 are BTCUSDT/1m and 3 are ETHUSDT/5m. The "next successful pass" is the next `event=reconciliation_pass` INFO line of pid 20100.
+
+| # | fault line (UTC) | pair | the three tracebacks' final lines, in order | next successful pass | s |
+|---|---|---|---|---|---|
+| 1 | 2026-10-24T04:39:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T04:40:02Z | 59 |
+| 2 | 2026-10-24T04:45:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T04:45:05Z | 2 |
+| 3 | 2026-10-24T05:01:04Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:02:03Z | 59 |
+| 4 | 2026-10-24T05:03:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:04:03Z | 60 |
+| 5 | 2026-10-24T05:05:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:05:05Z | 2 |
+| 6 | 2026-10-24T05:07:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:09:02Z | 119 |
+| 7 | 2026-10-24T05:08:02Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:09:02Z | 60 |
+| 8 | 2026-10-24T05:11:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:12:03Z | 60 |
+| 9 | 2026-10-24T05:15:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:19:03Z | 240 |
+| 10 | 2026-10-24T05:15:07Z | ETHUSDT/5m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:19:03Z | 236 |
+| 11 | 2026-10-24T05:16:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:19:03Z | 180 |
+| 12 | 2026-10-24T05:17:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:19:03Z | 120 |
+| 13 | 2026-10-24T05:18:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T05:19:03Z | 60 |
+| 14 | 2026-10-24T06:25:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-24T06:25:06Z | 3 |
+| 15 | 2026-10-25T12:24:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 358 |
+| 16 | 2026-10-25T12:25:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 298 |
+| 17 | 2026-10-25T12:25:06Z | ETHUSDT/5m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 295 |
+| 18 | 2026-10-25T12:26:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 238 |
+| 19 | 2026-10-25T12:27:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 178 |
+| 20 | 2026-10-25T12:28:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 118 |
+| 21 | 2026-10-25T12:29:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:30:01Z | 58 |
+| 22 | 2026-10-25T12:33:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:34:02Z | 59 |
+| 23 | 2026-10-25T12:35:04Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:35:05Z | 1 |
+| 24 | 2026-10-25T12:50:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:54:01Z | 238 |
+| 25 | 2026-10-25T12:50:06Z | ETHUSDT/5m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:54:01Z | 235 |
+| 26 | 2026-10-25T12:51:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:54:01Z | 178 |
+| 27 | 2026-10-25T12:52:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:54:01Z | 118 |
+| 28 | 2026-10-25T12:53:03Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T12:54:01Z | 58 |
+| 29 | 2026-10-25T13:11:04Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T13:14:02Z | 178 |
+| 30 | 2026-10-25T13:12:04Z | BTCUSDT/1m | CancelledError > TimeoutError > ExchangeConnectionError | 2026-10-25T13:14:02Z | 118 |
+| 31 | 2026-10-25T13:13:01Z | BTCUSDT/1m | socket.gaierror > ClientConnectorDNSError > ExchangeConnectionError | 2026-10-25T13:14:02Z | 61 |
+
+**The MemoryError is a different record and is alone.** Capture lines 20109 to 20118, verbatim in substance (the Windows Store interpreter's paths shortened to `...\Lib`):
+
+```
+2026-10-25T17:51:25Z | ERROR | pid=20100 | asyncio | Fatal error on SSL protocol
+protocol: <asyncio.sslproto.SSLProtocol object at 0x00000229DEEF6360>
+transport: <_ProactorSocketTransport closing fd=2648>
+Traceback (most recent call last):
+  File "...\Lib\asyncio\sslproto.py", line 740, in _do_read
+    self._do_read__copied()
+  File "...\Lib\asyncio\sslproto.py", line 785, in _do_read__copied
+    chunk = self._sslobj.read(self.max_size)
+  File "...\Lib\ssl.py", line 858, in read
+    v = self._sslobj.read(len)
+MemoryError
+```
+
+It is logged by the `asyncio` logger, from the SSL read of one socket transport, and it is not a reconciliation pass. In the same second (lines 20119 to 20122): `binance.ws.reconnecting_websocket` ERROR "ConnectionClosedError (no close frame received or sent)", ERROR "BinanceWebsocketClosed (Connection closed. Reconnecting...)", and the bot's two WARNINGs `event=stream_transient_error` (`ConnectionClosedError`, `BinanceWebsocketClosed`), "the library is reconnecting itself". **Whether the survey caused it is the owner's attribution (R-EC) and the capture does not say**: the capture holds no memory figure, and the two events share a time, not a cause.
+
+### 3. Every websocket drop in the capture, and the bot's own gap record
+
+Ten drop episodes, in five pids. Eight were followed by `bars_gap_detected`; **two were not**: `2026-10-22T09:01:07Z` (pid 14600, `ConnectionClosedOK`, "received 1001 (going away)") and `2026-10-25T17:51:25Z` (pid 20100). The eight are in the window table below, with the first lost bar. Eight of the eight BTCUSDT holes began with a bar that **closed 0 to 31 s before the logged fault line** (31, 21, 6, 8, 0, 15, 20 and 13 s; the `2026-10-19T00:50:20Z` ETHUSDT 5m hole also, 20 s): a dead socket is logged when the keepalive times out, after the bar was lost. The fault line is therefore a lower bound on where the damage starts and not the start (`M5m-719`). The three watchdog and gap events that bracket a hole (`feed_silent`, `bars_gap_detected`, `feed_resumed`) all fired in each of the eight, and **none of the eight kinds fired in pid 20100 at any time**.
+
+### 4. The R-ED windows (R-ED, ruled in this prompt: a fault line to the next successful reconciliation pass or reconnect)
+
+The ruling's rule is applied to **every pid in the capture**, not only pid 20100, because R-ED lists every disagreement of the whole S4 window. Two choices are mine and are not the ruling's, and the owner may overrule them: **(1)** overlapping windows are merged; **(2)** where no reconciliation pass follows (no position is held, so none runs) or the stream's own `feed_resumed` comes first, the window ends at the earlier of the two, and the column "end taken from" says which. A window with no end of either kind would end at its pid's last line (none occurs: all 32 ended at a pass or a `feed_resumed`). The "first closed" figure is the close of the first bar the bot itself reports missing.
+
+| # | pid | window start | window end | s | end taken from | fault lines | the bot's own gap record |
+|---|---|---|---|---|---|---|---|
+| 1 | 16076 | 2026-10-11T03:37:02Z | 2026-10-11T03:38:01Z | 59 | pass | 1 failed pass | none |
+| 2 | 16076 | 2026-10-11T03:59:31Z | 2026-10-11T04:00:00Z | 29 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-11T03:59:00Z (31 s before the fault line) |
+| 3 | 16076 | 2026-10-11T13:29:21Z | 2026-10-11T13:30:00Z | 39 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-11T13:29:00Z (21 s before the fault line) |
+| 4 | 25352 | 2026-10-14T12:28:06Z | 2026-10-14T12:44:02Z | 956 | pass | 23 websocket | BTCUSDT/1m 16 missing, first closed 2026-10-14T12:28:00Z (6 s before the fault line); ETHUSDT/5m 3 missing, first closed 2026-10-14T12:30:00Z (-114 s before the fault line) |
+| 5 | 25352 | 2026-10-14T12:48:08Z | 2026-10-14T12:49:01Z | 53 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-14T12:48:00Z (8 s before the fault line) |
+| 6 | 5224 | 2026-10-16T05:22:03Z | 2026-10-16T05:23:01Z | 58 | pass | 1 failed pass | none |
+| 7 | 5224 | 2026-10-17T07:02:00Z | 2026-10-17T07:03:01Z | 61 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-17T07:02:00Z (0 s before the fault line) |
+| 8 | 5224 | 2026-10-18T09:24:15Z | 2026-10-18T09:25:00Z | 45 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-18T09:24:00Z (15 s before the fault line) |
+| 9 | 5224 | 2026-10-19T00:50:20Z | 2026-10-19T00:51:00Z | 40 | pass | 2 websocket | BTCUSDT/1m 1 missing, first closed 2026-10-19T00:50:00Z (20 s before the fault line); ETHUSDT/5m 1 missing, first closed 2026-10-19T00:50:00Z (20 s before the fault line) |
+| 10 | 5224 | 2026-10-19T14:16:13Z | 2026-10-19T14:18:00Z | 107 | feed_resumed | 5 websocket | BTCUSDT/1m 2 missing, first closed 2026-10-19T14:16:00Z (13 s before the fault line) |
+| 11 | 14600 | 2026-10-21T16:09:03Z | 2026-10-21T16:10:03Z | 60 | pass | 1 failed pass | none |
+| 12 | 14600 | 2026-10-22T09:01:07Z | 2026-10-22T09:03:01Z | 114 | pass | 2 websocket | none |
+| 13 | 14600 | 2026-10-22T15:35:03Z | 2026-10-22T15:35:06Z | 3 | pass | 1 failed pass | none |
+| 14 | 14600 | 2026-10-22T17:02:03Z | 2026-10-22T17:03:06Z | 63 | pass | 1 failed pass | none |
+| 15 | 14600 | 2026-10-22T17:05:03Z | 2026-10-22T17:05:07Z | 4 | pass | 1 failed pass | none |
+| 16 | 14600 | 2026-10-22T17:07:02Z | 2026-10-22T17:08:02Z | 60 | pass | 1 failed pass | none |
+| 17 | 14600 | 2026-10-22T22:50:03Z | 2026-10-22T22:51:02Z | 59 | pass | 2 failed pass | none |
+| 18 | 20100 | 2026-10-24T04:39:03Z | 2026-10-24T04:40:02Z | 59 | pass | 1 failed pass | none |
+| 19 | 20100 | 2026-10-24T04:45:03Z | 2026-10-24T04:45:05Z | 2 | pass | 1 failed pass | none |
+| 20 | 20100 | 2026-10-24T05:01:04Z | 2026-10-24T05:02:03Z | 59 | pass | 1 failed pass | none |
+| 21 | 20100 | 2026-10-24T05:03:03Z | 2026-10-24T05:04:03Z | 60 | pass | 1 failed pass | none |
+| 22 | 20100 | 2026-10-24T05:05:03Z | 2026-10-24T05:05:05Z | 2 | pass | 1 failed pass | none |
+| 23 | 20100 | 2026-10-24T05:07:03Z | 2026-10-24T05:09:02Z | 119 | pass | 2 failed pass | none |
+| 24 | 20100 | 2026-10-24T05:11:03Z | 2026-10-24T05:12:03Z | 60 | pass | 1 failed pass | none |
+| 25 | 20100 | 2026-10-24T05:15:03Z | 2026-10-24T05:19:03Z | 240 | pass | 5 failed pass | none |
+| 26 | 20100 | 2026-10-24T06:25:03Z | 2026-10-24T06:25:06Z | 3 | pass | 1 failed pass | none |
+| 27 | 20100 | 2026-10-25T12:24:03Z | 2026-10-25T12:30:01Z | 358 | pass | 7 failed pass | none |
+| 28 | 20100 | 2026-10-25T12:33:03Z | 2026-10-25T12:34:02Z | 59 | pass | 1 failed pass | none |
+| 29 | 20100 | 2026-10-25T12:35:04Z | 2026-10-25T12:35:05Z | 1 | pass | 1 failed pass | none |
+| 30 | 20100 | 2026-10-25T12:50:03Z | 2026-10-25T12:54:01Z | 238 | pass | 5 failed pass | none |
+| 31 | 20100 | 2026-10-25T13:11:04Z | 2026-10-25T13:14:02Z | 178 | pass | 3 failed pass | none |
+| 32 | 20100 | 2026-10-25T17:51:25Z | 2026-10-25T17:53:01Z | 96 | pass | 1 MemoryError, 2 websocket | none |
+
+32 windows, 3,344 s (55 min 44 s) in all, from 40 failed passes, one MemoryError and 10 drop episodes. Pid 20100 holds 15 of them, 1,534 s: **14 failed-pass windows (request timeouts, and one DNS failure at `13:13:01Z`; none names a memory fault) and the one MemoryError and drop window (96 s)**. Pids 16076, 5224, 14600 and 25352 hold the other 17.
+
+### 5. The per-candle answer, window by window (pid 20100)
+
+For every fault window in pid 20100 the number of closed BTCUSDT 1m candles, and of ETHUSDT 5m candles, whose close falls in (window start, window end], and how many of them the INFO log shows a pid 20100 record for within 10 s after the close (a pass line or a failed-pass line, which is the candle subscriber having run; for ETHUSDT 5m only a record naming ETHUSDT counts):
+
+| Windows | BTCUSDT 1m closes | with a record within 10 s | ETHUSDT 5m closes | with an ETHUSDT-named record |
+|---|---|---|---|---|
+| the 14 failed-pass windows | 24 | 24 | 3 | 1 |
+| the MemoryError and drop window (96 s) | 2 | 1 | 0 | 0 |
+| **all 15** | **26** | **25** | **3** | **1** |
+
+**Whether the engine processed EVERY closed candle in a fault window is UNMEASURED, and is marked so.** The INFO log shows a record for 25 of 26 BTCUSDT 1m closes and 1 of 3 ETHUSDT 5m closes in these windows, and for the rest it shows nothing either way, which is not evidence of a lost candle. The two ETHUSDT 5m closes with no record are `2026-10-24T04:40:00Z` and `2026-10-25T12:30:00Z`; the one BTCUSDT 1m close with none is **`2026-10-25T17:52:00Z`, inside the MemoryError window**. For that one there is positive evidence of another kind: the BTC BUY of `17:57:00Z` was emitted and not refused, and `LiveEngine._window_spans_a_gap` (`live_engine.py`, the check ahead of `_emit`) refuses a BUY when the 51-bar window ending at the signal bar spans a hole; the window of that BUY runs back from the `17:56:00` bar and includes the `17:52:00` bar, so **the provider's buffer was contiguous across it** (REASONED from the source, positive in the log as a BUY that was not refused). That is a statement about the buffer the candle hook reads, not that the hook ran for that bar, and for the 14 network windows no equivalent test was made. **What the stop's comparison will show instead of a count** is R-ED's listing: each disagreement whose entry bar lies in one of these windows, with the window beside it. It says what to doubt and proves nothing about a candle.
+
+### 6. Episode 4, as the capture records it (pid 20100)
+
+| Fact | Capture |
+|---|---|
+| BTCUSDT entry order list | `order_list_id=243279`, `list_client_order_id=tb1-BTCUSDT-1792974239999-0-L`, `entry_bar_time=2026-10-26T00:23:59.999000+00:00`, 0.02327000 at a limit of 80200.12000000 with the stop at 78596.12000000, "Order list placed" at `00:24:01Z` (line 20303) |
+| the stop leg | order **7022204**; `SL reports EXPIRED with 0.00387000 executed` and `TP ... EXPIRED`, first read at **`00:51:01Z`** (line 20322, the first untrusted pass of the episode); 0.00387000 of 0.02327000 is 16.63%, and the remainder is **0.01940000** BTC by subtraction |
+| the refusal to book | `exit_book_refused` for order 7022204, "the fill is partial -- 0.00387000 executed against a position of 0.02327000", **112 times** from `00:51:01Z`, and 112 `reconciliation_untrusted` warnings over the same lines |
+| `close_halted` | **6 lines**: 3 `close_planned` with `decision=halt` ("leg(s) SL executed 0.00387000 of 0.02327000. A partially executed protective leg is UNMEASURED (Q-C section 10) and is never sold against") and 3 `dispatch_refused ... reason=close_halted`, at `00:53:02Z`, `02:30:01Z` and `03:44:02Z` |
+| `committed_risk_unknown` | **2** BUY refusals, `02:15:01Z` and `03:08:01Z` |
+| the stop | `Trading engine stopped event=engine_stopped clean_shutdown=True` at **`2026-10-26T03:44:50Z`** (line 20674, the last pid 20100 line): 2 h 53 min 49 s after the first untrusted pass |
+
+**Given by the owner in P150a and NOT read from the venue or from any file here** (UNMEASURED by this section, as the ledger has treated the owner's earlier sales, sections 49 and 67): the owner's sale of **0.01940000** BTC, whose dry run matched 0.02327000 - 0.00387000 (that subtraction is exact: 0.02327000 - 0.00387000 = 0.01940000); **the sale's order id: not supplied**; `check_testnet` afterwards, BTC 0, ETH 0, 0 open orders, 236 order lists `ALL_DONE`, USDT free 93281.61775370; and the release at `2026-10-26T03:48:20.550551Z`, store SHA-256 `62569e3836ad205d4410773eecde68b6af40c3bbef0a3c3aa5ddbc57ecbe09f6` to `fdf8e02e7525935371584f8c5d36fe015e3bb25803157a5a5cd141ef7f21bc20`. **One of those figures is checked against the capture**: boot #8 reports `Composition root ready: 2 pair(s), 93281.61775370 USDT free` at `03:48:48Z`, equal to the owner's USDT free, to the last digit.
+
+### 7. Boot #8
+
+Pid **24884** booted at **`2026-10-26T03:48:43Z`** (the banner) and the provenance line is at `03:48:44Z`: `verdict=accepted`, `install_kind=vcs`, `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776`, `code_intact=true` over 77 files, `checkout_dirty=false`, `commits_agree=true`, `config_tracked=true`, `config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`, the same config digest as pid 20100's boot (`2026-10-23T19:04:06Z`). It ran `Starting in TESTNET mode`, the `514 asset(s) are EXCLUDED FROM EQUITY` warning, `Composition root ready ... 93281.61775370 USDT free`, seeded BTCUSDT/1m and ETHUSDT/5m with 499 closed candles each and started at `03:48:48Z`, the last line of the capture. The capture's own report (`034946Z-report.txt`, written `2026-10-26T03:49:46Z`) counts **8 boots since T0** (`2026-10-10T06:05:20Z`), 233 bookings, and the earliest stop `2026-11-01T00:00:00Z`; this section adds boot #8 to the restart record R-BN asks for, and R-BN's frozen tool is unchanged.
+
+### 8. What this section changes, and what it does not
+
+R-EC and R-ED are recorded verbatim in `docs/S4_CORRECTION_P150A.md` (C3), the runbook's step 8 gains R-ED's listing (C4), and order 7022204 is U10's sixth Testnet case (C5). No frozen label, figure, tool or digest changes. **The leading-edge observation in section 3 is not R-ED's and changes nothing in it**: R-ED's windows start at the fault line, and the eight measured holes began up to 31 s earlier; the owner may wish to widen the start, and an entry bar closing in the minute before a fault line is the case it would affect.
