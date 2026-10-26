@@ -7571,3 +7571,46 @@ Pid **24884** booted at **`2026-10-26T03:48:43Z`** (the banner) and the provenan
 ### 8. What this section changes, and what it does not
 
 R-EC and R-ED are recorded verbatim in `docs/S4_CORRECTION_P150A.md` (C3), the runbook's step 8 gains R-ED's listing (C4), and order 7022204 is U10's sixth Testnet case (C5). No frozen label, figure, tool or digest changes. **The leading-edge observation in section 3 is not R-ED's and changes nothing in it**: R-ED's windows start at the fault line, and the eight measured holes began up to 31 s earlier; the owner may wish to widen the start, and an entry bar closing in the minute before a fault line is the case it would affect.
+
+## 76. M5m S4: section 75's windows re-started under R-ED-1 (P150b C2)
+
+An observation log, so this section only adds; **section 75 is not edited**. R-ED-1 (`docs/S4_CORRECTION_P150B.md`, ruled at P150b) moves an R-ED window's start to 60 seconds before its fault line, keeps the end at the earlier of the next successful reconciliation pass and `feed_resumed`, and merges overlapping windows. This section computes that from section 75's table alone: no capture is read, no venue is called, and nothing here decides anything about S4. Script, read-only, in `scratch\p150a`: `restart60.py`, which parses section 75's window table out of this file and asserts it holds 32 rows numbered 1 to 32.
+
+**Method.** Each section 75 window keeps its end and its "end taken from"; its start becomes its start minus 60 s. Windows of one pid are then merged where a start falls at or before the previous window's end (one merged window keeps the later end and that end's source). The script asserts that no window of one pid reaches into another pid's. Section 75's windows were already merged on its own rule, so the only merges that can occur are between neighbours that the 60 s now bridges.
+
+**Result: 30 windows, from 32, 5,264 s in all (from 3,344 s).** One merge: section 75's windows 20, 21 and 22 (pid 20100, `2026-10-24T05:01:04Z`, `05:03:03Z` and `05:05:03Z`) become one window from `05:00:04Z` to `05:05:05Z`. Every other pair of neighbours keeps a gap. The 60 s lead is wider than every lag section 75 measured (the first lost bar closed 0 to 31 s before the fault line, 20 s for the ETHUSDT hole), so each of the eight holes' first lost bars now lies inside its window.
+
+| # | pid | window start (R-ED-1) | window end | s | section 75 window(s) | end taken from |
+|---|---|---|---|---|---|---|
+| 1 | 16076 | 2026-10-11T03:36:02Z | 2026-10-11T03:38:01Z | 119 | 1 | pass |
+| 2 | 16076 | 2026-10-11T03:58:31Z | 2026-10-11T04:00:00Z | 89 | 2 | pass |
+| 3 | 16076 | 2026-10-11T13:28:21Z | 2026-10-11T13:30:00Z | 99 | 3 | pass |
+| 4 | 25352 | 2026-10-14T12:27:06Z | 2026-10-14T12:44:02Z | 1016 | 4 | pass |
+| 5 | 25352 | 2026-10-14T12:47:08Z | 2026-10-14T12:49:01Z | 113 | 5 | pass |
+| 6 | 5224 | 2026-10-16T05:21:03Z | 2026-10-16T05:23:01Z | 118 | 6 | pass |
+| 7 | 5224 | 2026-10-17T07:01:00Z | 2026-10-17T07:03:01Z | 121 | 7 | pass |
+| 8 | 5224 | 2026-10-18T09:23:15Z | 2026-10-18T09:25:00Z | 105 | 8 | pass |
+| 9 | 5224 | 2026-10-19T00:49:20Z | 2026-10-19T00:51:00Z | 100 | 9 | pass |
+| 10 | 5224 | 2026-10-19T14:15:13Z | 2026-10-19T14:18:00Z | 167 | 10 | feed_resumed |
+| 11 | 14600 | 2026-10-21T16:08:03Z | 2026-10-21T16:10:03Z | 120 | 11 | pass |
+| 12 | 14600 | 2026-10-22T09:00:07Z | 2026-10-22T09:03:01Z | 174 | 12 | pass |
+| 13 | 14600 | 2026-10-22T15:34:03Z | 2026-10-22T15:35:06Z | 63 | 13 | pass |
+| 14 | 14600 | 2026-10-22T17:01:03Z | 2026-10-22T17:03:06Z | 123 | 14 | pass |
+| 15 | 14600 | 2026-10-22T17:04:03Z | 2026-10-22T17:05:07Z | 64 | 15 | pass |
+| 16 | 14600 | 2026-10-22T17:06:02Z | 2026-10-22T17:08:02Z | 120 | 16 | pass |
+| 17 | 14600 | 2026-10-22T22:49:03Z | 2026-10-22T22:51:02Z | 119 | 17 | pass |
+| 18 | 20100 | 2026-10-24T04:38:03Z | 2026-10-24T04:40:02Z | 119 | 18 | pass |
+| 19 | 20100 | 2026-10-24T04:44:03Z | 2026-10-24T04:45:05Z | 62 | 19 | pass |
+| 20 | 20100 | 2026-10-24T05:00:04Z | 2026-10-24T05:05:05Z | 301 | 20, 21, 22 | pass |
+| 21 | 20100 | 2026-10-24T05:06:03Z | 2026-10-24T05:09:02Z | 179 | 23 | pass |
+| 22 | 20100 | 2026-10-24T05:10:03Z | 2026-10-24T05:12:03Z | 120 | 24 | pass |
+| 23 | 20100 | 2026-10-24T05:14:03Z | 2026-10-24T05:19:03Z | 300 | 25 | pass |
+| 24 | 20100 | 2026-10-24T06:24:03Z | 2026-10-24T06:25:06Z | 63 | 26 | pass |
+| 25 | 20100 | 2026-10-25T12:23:03Z | 2026-10-25T12:30:01Z | 418 | 27 | pass |
+| 26 | 20100 | 2026-10-25T12:32:03Z | 2026-10-25T12:34:02Z | 119 | 28 | pass |
+| 27 | 20100 | 2026-10-25T12:34:04Z | 2026-10-25T12:35:05Z | 61 | 29 | pass |
+| 28 | 20100 | 2026-10-25T12:49:03Z | 2026-10-25T12:54:01Z | 298 | 30 | pass |
+| 29 | 20100 | 2026-10-25T13:10:04Z | 2026-10-25T13:14:02Z | 238 | 31 | pass |
+| 30 | 20100 | 2026-10-25T17:50:25Z | 2026-10-25T17:53:01Z | 156 | 32 | pass |
+
+**Reading the column "section 75 window(s)".** It names the row or rows of section 75's table the window comes from, so a reader can set the two tables side by side. The windows after the capture of `2026-10-26T03:49:46Z` are not here; they are measured later, by the same rules and with R-ED-1's start from the outset.
