@@ -468,19 +468,23 @@ Select-String -Path "$OUT\s4_compare.txt","$OUT\s4_compare_e1.txt","$OUT\s4_latc
    the `n` read `wide=yes`, `wide=no` and `unknown`, and the counts by cause. The three lines are read off `s4_wick_primary.txt`,
    `s4_wick_e1.txt` and `s4_wick_e2.txt` after item 4's CHECK has passed, and each `n` is the one the CHECK matched to `DISAGREEMENTS (n)` of
    the file above it. A report that carries the notes of items 1 and 3 and not these three lines is incomplete.
-6. **The R-ED listing (P150a, `docs/S4_CORRECTION_P150A.md`), required.** For each of the primary, E1 and E2, the report lists every
-   disagreement whose entry bar lies in a resource-fault window, **with the window beside it**. R-ED's definition: a window runs from a fault
-   line (MemoryError, websocket drop, failed reconciliation pass) to the next successful reconciliation pass or reconnect, and *"Nothing is
-   excluded, no frozen label or figure changes, and the windows are those measured in RUN_LEDGER."* The windows are `docs/RUN_LEDGER.md`
-   section 75 (32 windows over the capture of `2026-10-26T03:49:46Z`, whose SHA-256 is
+6. **The R-ED listing (P150a, `docs/S4_CORRECTION_P150A.md`, amended by R-ED-1 in P150b, `docs/S4_CORRECTION_P150B.md`), required.** For
+   each of the primary, E1 and E2, the report lists every disagreement whose entry bar lies in a resource-fault window, **with the window
+   beside it**. R-ED's definition: a window is anchored on a fault line (MemoryError, websocket drop, failed reconciliation pass), and
+   *"Nothing is excluded, no frozen label or figure changes, and the windows are those measured in RUN_LEDGER."* **R-ED-1 sets the window's
+   start and end**: it starts 60 seconds before its fault line, it ends at the earlier of the next successful reconciliation pass and
+   `feed_resumed`, and overlapping windows merge; R-ED stays reporting-only. The windows are `docs/RUN_LEDGER.md` section 76 (section 75's 32
+   windows re-started under R-ED-1: 30 windows, over the capture of `2026-10-26T03:49:46Z`, whose SHA-256 is
    `07464736fb840a996387b728caec5b86912daeade2c3843a134223827a987a65`) **and the later ledger section or sections that measure the windows
-   after that capture by the same rules, which must exist before the stop is run**; a window the ledger does not hold is not one the report
-   may list. The file's section 4 is the executing session's operational reading, overrulable by the owner: overlapping windows are merged,
-   and "entry bar lies in a window" is the disagreement's `signal_close` in the closed interval from the window's start to its end. There is
-   **no tool** for the join (the file's section 4, point 5): it is made by hand from the `DISAGREEMENTS (n)` lists of `s4_compare.txt`,
-   `s4_compare_e1.txt` and `s4_latch_compare.txt` and the ledger's window tables, and the report gives, for each file, how many of its `n`
-   are listed. **An empty listing is written as "none"**, never an absent section, and the list goes beside the lines of items 4 and 5 and not
-   inside the primary's figures. A report that carries items 1 to 5 and not this list is incomplete.
+   after that capture by the same rules, with R-ED-1's start, which must exist before the stop is run**; a window the ledger does not hold is
+   not one the report may list. Section 4 of P150a's file, points 3 and 4, remains the executing session's reading and overrulable by the
+   owner: "entry bar lies in a window" is the disagreement's `signal_close` in the closed interval from the window's start to its end. **The
+   join is by hand, made twice, independently, the two compared and every difference resolved before the report (P150b's Listing ruling); no
+   script is built before the stop (R-EC).** It is made from the `DISAGREEMENTS (n)` lists of `s4_compare.txt`, `s4_compare_e1.txt` and
+   `s4_latch_compare.txt` and the ledger's window tables, and the report gives, for each file, how many of its `n` are listed, **and that the
+   join was made twice and how many differences the comparison found**. **An empty listing is written as "none"**, never an absent section,
+   and the list goes beside the lines of items 4 and 5 and not inside the primary's figures. A report that carries items 1 to 5 and not this
+   list is incomplete.
 
 ## Step 7b. The two exploratory comparisons of R-DL, run AFTER step 8's primary and reported beside it (P130)
 
@@ -674,7 +678,7 @@ E = executed on this machine in this form; R = executed in a related form (anoth
 | 7b | `git -C $DEV status --porcelain -- scripts`, `Get-FileHash` of the two scripts, the `Select-String` of the header | E | section 69 (empty; `b8afa603...af08` and `59bb70c3...25aa7`; the header line) |
 | 8 | `s4_wick_annotate.py --analysis primary`, `e1` and `e2` through their real command lines, `$PY` from the development tree's script path, piped to `Out-File -Encoding ascii` | E | section 72 (P135, on the P131 rehearsal's run directory, capture and store: exit 0 each, 19 backtest-only rows, two `wide=yes` equal to an independent read of the store; MECHANICS ONLY, zero live entries) |
 | 8 | the three CHECK `Select-String` commands of the R-DR/R-DS item (header, digest and count, and the matching `DISAGREEMENTS (n)`) | E | section 72 (run on the rehearsal's six files: the header three times, the capture digest equal in all three, and the counts 19, 11 and 19 equal to the `DISAGREEMENTS (n)` of the frozen primary, E1 and E2 files; MECHANICS ONLY) |
-| 8 | the R-ED listing: the by-hand join of the three `DISAGREEMENTS` lists with the ledger's window tables (item 6) | N | P150a: no tool, no run; the windows exist (section 75) and the lists do not until the stop |
+| 8 | the R-ED listing: the by-hand join, made twice, of the three `DISAGREEMENTS` lists with the ledger's window tables (item 6) | N | P150a and P150b: no tool, no run; the windows exist (sections 75 and 76) and the lists do not until the stop |
 
 **ANNOTATED AT P124 (C2), BY APPENDIX A'S EXECUTION (RUN_LEDGER section 62): both were executed over the whole day
 2026-10-11 and ran to exit 0; the rows above that read E now were N or R at P123.** What the sentence below says was
