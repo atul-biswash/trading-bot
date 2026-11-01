@@ -2151,6 +2151,23 @@ research log's variant count are recorded in `docs/PHASE_HISTORY.md` at M5m's cl
 > named. **What survives:** the gate and unit tests for all M5m code, and no other S1
 > code surveyed.
 
+> **ADDED AT M5m P152 (C4), BY THE OWNER'S INSTRUCTION IN PROMPT P152: THE S4 RESULT, RECORDED VERBATIM.** The instruction's text, as the owner gave it:
+>
+> "S4 result (pre-registered, R-DK): A PASS (backtest mean -0.3064 percent inside the live 95 percent interval [-0.4583, -0.0736]); B FAIL (latch-caused) (321 vs 271, 18.45 percent; 41 of 51 backtest-only entries are live committed_risk_unknown refusals); C PASS (270 of 271, 99.63 percent). Exploratory, figures only: E1 +5.59 percent, 100 percent reproduced, mean inside; E2 +3.33 percent, 99.63 percent reproduced, mean inside. Diagnostic: all 7 fill-model different-exit disagreements are R-DR wide=yes. R-DU branch 1 applies to M5n."
+>
+> **Where each figure lives.** `docs/RUN_LEDGER.md` section 79 (the step 8 report, with the commands, exit codes and output digests; the capture is SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`, the run `20261101T183301538998Z-e7ed287be238` with `run.json` `7a3e1b2f6e3f9c51a43cd7d66cc1285dd8e4cb641dc2b7fcf0681dcdabf5279c`), and section 81 (the four `unexplained` entries, all diagnosed as holes in the live feed's closed-candle buffer). **What stops being true:** any sentence above that says no S4 comparison figure exists; those describe the state before the stop and stay as written. **What survives:** R-DK, the pre-registration, and its section 7 D condition that S5 does not start until the `unexplained` disagreements are diagnosed, which `docs/RUN_LEDGER.md` section 81 meets (nothing in it changes a frozen label).
+>
+> **THE FROZEN TOOL'S `fok-unfilled` MISLABEL, ONE RECORD, FOUR ENTRIES.** The frozen `diagnose` labels a placement with no booking `fok-unfilled` ("the live bot placed and nothing was booked") while the venue shows it filled. The `13:09` BTCUSDT entry was the first (list 183218, `M5m-596`, `M5m-647`); the step 8 report (`docs/RUN_LEDGER.md` section 79) lists **four**, all `backtest FILLED`, none with its label altered:
+>
+> | Entry bar | Order list | What happened at the venue |
+> |---|---|---|
+> | BTCUSDT `2026-10-21T13:09:00Z` | 183218 | the stop leg executed `0.01041000` of `0.02233000` and expired; the owner sold the `0.01192000` remainder (owner-reported) |
+> | ETHUSDT `2026-10-13T02:30:00Z` | 71012; the stop leg is **order** 1867449 | the stop leg executed `0.0756` of `0.764` (9.9%) and expired; the owner sold the remainder |
+> | BTCUSDT `2026-10-26T00:24:00Z` | 243279; the stop leg is **order** 7022204 | the stop leg executed `0.00387000` of `0.02327000` (16.6%) and expired; the owner sold the `0.01940000` remainder (owner-reported) |
+> | BTCUSDT `2026-10-29T08:12:00Z` | 282240 | filled; its fill read failed with a venue "Internal error", the entry was debited at the requested limit, and the later `CLOSE` sell filled and was dropped unbooked (`close_sold_unbooked`); see U13 |
+>
+> The prompt called `1867449` and `243279` lists; `1867449` is an order id (list 71012) and `243279` a list id, and the table gives both.
+
 ---
 
 ## M5m's SCOPE — NOT DECIDED; reserved to the project owner
@@ -3210,6 +3227,18 @@ gate by the owner's P87 ruling: marked for review before live trading.
 > **What stops being true:** nothing in this item. R-BV's *"three Testnet cases"*, the P128 annotation's *"the count is four"* and the P133 annotation's *"the count is five"* are records of those rulings and stand; the count is six from this annotation. **What survives:** R-BO's no-change ruling for S4 and S7 parameters, the review's question about `STOP_LOSS_LIMIT`, and the item's status as not a gate.
 
 *Arming condition:* **whoever next edits `build_placement` in `execution/placement.py`, which fixes the protective leg types, or rules on N6's preconditions.**
+
+### U13. OPEN: `close_sold_unbooked` after a venue "Internal error" on the entry fill read -- added at M5m P152 (post-M5m)
+
+**Numbered U13, not U11.** The owner's instruction named it U11; U11 and U12 were taken at M5l P91 (the reconciliation timer and the REST backfill), and a label that names two things is a citation nobody can follow, so this is the next free number.
+
+The owner's text, as given: *"close_sold_unbooked after a venue Internal error on the entry fill read (list 282240, 2026-10-29): the position was sold but neither leg was booked, so the live ledger omits the trade. Fail-safe at the venue, a ledger gap in the books. Post-M5m."*
+
+**What the capture shows, MEASURED (`docs/RUN_LEDGER.md` sections 77 and 79; capture SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`).** At `2026-10-29T08:12:01Z` pid 3152 placed the BTCUSDT entry of list 282240 (0.02326000 at 80189.69); the `entry-fill-query` failed with `ExchangeAPIError` *"Internal error; unable to process your request. Please try again."* (a `collaborator_failed` line, the first of the S4 capture), so the bot logged `debit_from_requested_limit` and carried the position without a known fill price. At `09:45:01Z` a death cross closed it; both legs read `NEW` with nothing executed, the sell was dispatched, and at `09:45:02Z` a CRITICAL `close_sold_unbooked` followed, *"the close sell FILLED and was DROPPED UNBOOKED -- this bot has no cost basis for the position"* (`outcome=filled_and_released`). The ledger omits the trade; the venue's figures are in that line (sell order `8448295`, quantity `0.02326000`, `quote_total=1865.73112000`). The comparison sees a placement with nothing booked (`fok-unfilled`, the mislabel record above).
+
+**The two halves.** The fail-safe is at the venue: protection was in place until the sell, the sell was a normal `CLOSE`, and no position was left. The gap is in the books: a read that failed once, at placement, cost the cost basis for good, and the bot's own response is to drop the booking rather than retry the read or reconstruct the basis from the venue's trades. Whether the entry fill should be re-read later (by `get_order` or `get_my_trades`, as boot does for a restored record), or the close booked from the venue's own figures, is the item's question and is not decided here.
+
+*Arming condition:* **whoever next edits the entry-fill read and the debit estimate in `OrderExecutor._open_position` (`execution/executor.py`, the `entry-fill-query` phase and `debit_from_requested_limit`), or `_book_resolved_close`.**
 
 ### U8. The harness: refuse, or report? — `M5i-096`
 
