@@ -458,6 +458,17 @@ exactly this and read a contradiction.
 > **What survives:** everything above. No limit gates a `CLOSE`; these, like
 > Class E, refuse to act on a venue state the bot already knows.
 
+> **ANNOTATED AT M5m's CLOSE (P153): CLASS E HAS FIRED IN PRODUCTION, ONCE, AND DID WHAT IT SPECIFIES.** MEASURED in the S4
+> capture (SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`, pid 3152): at `2026-10-29T08:53:01Z`
+> a `CLOSE` for BTCUSDT met two `collaborator_failed` reads (`phase=close-confirm`, `ExchangeAPIError`, *"Internal error;
+> unable to process your request. Please try again."*, one per leg), the plan was `decision=halt` (*"leg(s) SL, TP could not be
+> read, so the venue state is unknown. An unread leg is not a leg that executed nothing"*), the dispatch was refused as
+> `close_halted`, and nothing was sold. No untrusted pass followed and the position kept both legs (both read `NEW`, nothing
+> executed, at the next `CLOSE`, `09:45:01Z`), which sold it. It was the first `collaborator_failed` line in any capture
+> this file knows of (`CLAUDE.md` records zero in the earlier ones). **What survives:** everything above. This was a Class E
+> halt on an unreadable leg and not a partial-leg halt: the 36 other `decision=halt` plans of the run are partly executed
+> stop legs under `docs/QC_PROTECTIVE_ORDERS.md` section 4b (33 on pid 14600, 3 on pid 20100).
+
 > **M5h ADDS A PROPERTY THIS DOCUMENT'S MODEL OF `CRITICAL` DOES NOT HAVE: THE
 > WORDING IS PART OF THE CONTROL.** Nothing above is withdrawn — Class E is
 > implemented as specified, the confirming query still decides, and "do not sell
