@@ -347,6 +347,24 @@ each leg, not merely `status`:
 > response -- decides what happens next. The partial-leg line is unchanged:
 > still UNMEASURED, still `CRITICAL`, still "do not sell".
 
+> **ANNOTATED AT M5m's CLOSE (P153): "A leg executed partially → UNMEASURED (§10)" IS NO LONGER TRUE OF A TRIGGERED STOP LEG,
+> AND THE RULE BESIDE IT IS UNCHANGED.** MEASURED in the S4 run (capture SHA-256
+> `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`): a stop leg of an OTOCO list ended `EXPIRED` having
+> executed part of the quantity placed **three times in 22 days** -- order `1867449` (ETHUSDT, list `71012`, `0.0756` of
+> `0.764`, 9.9%, 2026-10-13), order `5431129` (BTCUSDT, list `183218`, `0.01041000` of `0.02233000`, 46.6%, 2026-10-21) and
+> order `7022204` (BTCUSDT, list `243279`, `0.00387000` of `0.02327000`, 16.6%, 2026-10-26) -- and a fourth time in an earlier
+> capture (order `300642`, `0.3623` of `0.7329`, the M5k annotation under §10). The same run measured a fifth shape, list
+> `218102`, whose stop leg executed **nothing** after the stop was crossed by 436.05 (2026-10-23). The legs are market-type
+> `STOP_LOSS` (a stop price and no limit price; `docs/RUN_LEDGER.md` section 71), and the mechanism, **REASONED and not
+> observed at the venue**, is a triggered market order that finds too little book inside the venue's price bounds, executes
+> what it can and expires the rest (`M5m-685`). So §10's open question under *Pending-leg partial fill* -- "a pending-leg
+> partial or a quantity mismatch" -- is answered for these cases: the executed figure was a fraction of the quantity placed.
+> Each of the three S4 cases did what this section prescribes: the bot logged `CRITICAL`, refused to book the fill, refused entries
+> portfolio-wide (`committed_risk_unknown`), refused the `CLOSE` signals that came (`close_halted`) and sold nothing, until
+> the process was stopped and the owner sold the remainder by hand. **What survives:** the rule entire -- halt entries, do not
+> sell against a partially executed leg -- and the question of whether a limit-type stop would bound the fill, which is
+> `docs/NEXT_MILESTONE.md` U10's.
+
 **The discretionary SELL is `MARKET`.** A `CLOSE` is a decision that the position
 should not be held; a limit that misses would leave it held and unprotected, which
 is the state this sequence exists to minimise. This is the one place the design
