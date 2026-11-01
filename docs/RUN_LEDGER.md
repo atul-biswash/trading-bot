@@ -7871,3 +7871,36 @@ The windows are sections 76 and 77: 30 re-started windows and 6 more, **36 in al
 | k | the frozen store verifies clean | 0 problems, 0 gaps | **hit** |
 
 **What the misses say.** Both sets over-predicted path dependence: reproduction on symbol and bar is 99.63%, and the disagreement lists are a third of the predicted length, because the live bot and the backtest kept the same positions through almost every exit (the 11 live stop-outs mostly matched a backtest stop-out, and only 7 matched pairs differ). The lists are short because the surplus is almost all one cause, the latch: 41 of the 59.
+
+## 80. M5m S4: P152's halts and the predictions for diagnosing the four unexplained entries, before any measurement (P152 C1, R-T, R-DQ)
+
+An observation log, so this section only adds. P152 closes S4 out. Under R-T and R-DQ this section is committed BEFORE the four `unexplained` entries are read in the live log, and before the 2026-10-29 feed gap is measured or `scripts/s4_explore.py` is run. **Everything here decides nothing about S4.**
+
+### Halts, checked before anything was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `c001f8b` | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `c001f8b` |
+| the capture or an archived output differs from its recorded digest | `Get-FileHash` against sections 77 and 79 | equal: the capture `94201d91...bae9`, `run.json`, `trades.csv`, `backtest.log` (in the archive under `F:\trading bot\evidence\s4\run\`), `s4_compare.txt`, `s4_compare_e1.txt`, `s4_latch_compare.txt`, `s4_wick_primary.txt`, `trade_census.txt` |
+| a frozen file or P137-frozen tool differs | `Get-FileHash` | equal: `s4_compare.py`, `trade_census.py`, `config.s4.yaml`, `s4_latch_compare.py`, `s4_wick_annotate.py`, `docs/S4_PREREGISTRATION.md` |
+| a command would write under `deploy\`, call the venue, start a survey or read the reserved window | every command in the plan | none: the diagnosis reads the capture, the archived run and the frozen store (`2026-10-07` onward); `s4_explore.py` reads the capture and prints; no process runs but the ones named |
+| a bot or python process is running | `Win32_Process` | none |
+
+### What was read before these predictions
+
+Only what earlier sections already printed: the feed-health events of sections 75 and 77 (the websocket drops of `2026-10-11T03:59:31Z` and `13:29:21Z` and `2026-10-19T14:16:13Z`, each with a `bars_gap_detected` line, and the `buy_refused_bars_gap` lines at `2026-10-11T04:32:00Z`, `10-11T13:39:00Z` and `10-19T14:49:00Z`), and the primary's list of the four entries (section 79). **The predictions are therefore informed by that, and not blind.** The live log around each signal bar has NOT been read for this prompt.
+
+### The predictions
+
+The four are the BTCUSDT backtest-only entries the frozen tool calls `unexplained` (`wide=no` in all four). The class vocabulary is the prompt's: *missed candle*, *refusal not logged*, *a data difference between the recorder store and the live feed*, *a strategy-state difference after a restart*, *other*.
+
+| | Signal bar (entry bar) | Predicted class | Predicted evidence |
+|---|---|---|---|
+| 1 | `2026-10-11T04:31:59.999Z` (`04:32:00Z`) | **other: the refusal IS logged, under an event the tool does not read**, rooted in a missed candle. About 90% | a `buy_refused_bars_gap` WARNING at `04:32:00Z` (`bars_since_gap=33`): the live indicator window spans the hole the `03:59:31Z` drop left (the bar opening `03:58`), which the recorder store does not have, so the backtest filled. The frozen tool's refusal vocabulary is `committed_risk_unknown` and `limit_refused` |
+| 2 | `2026-10-11T13:36:59.999Z` (`13:37:00Z`) | **missed candle / a recorder-store versus live-feed difference**, with no live signal. About 65% (the alternative, about 35%, is a logged `buy_refused_bars_gap` at `13:37:00Z`) | the `13:29:21Z` drop lost the bar opening `13:28`; the live buffer is shorter by that bar, its SMAs differ and its cross falls on another bar, so the live engine logs no BUY signal at `13:37:00Z`; the live refusal at `13:39:00Z` (`bars_since_gap=10`) belongs to a different signal bar |
+| 3 | `2026-10-19T14:31:59.999Z` (`14:32:00Z`) | **missed candle / a data difference**, with no live signal. About 60% (alternative: a logged `buy_refused_bars_gap`) | the `14:16:13Z` drop lost two bars (`14:15` and `14:16`, `bars_gap_detected` 2 missing); at `14:32:00Z` the window is 14 bars past the hole |
+| 4 | `2026-10-19T14:48:59.999Z` (`14:49:00Z`) | **other: the refusal is logged, under `buy_refused_bars_gap`**, rooted in the same two missed candles. About 95% | the WARNING at `14:49:00Z` with `bars_since_gap=32`, already printed in section 75 |
+
+**Together:** all four trace to a hole in the live feed's closed candles (three websocket drops in two days), which the recorder store does not have; none is a restart state difference, a data difference of another kind or UNDIAGNOSED. About 80% that this holds for all four, and about 85% that none is left UNDIAGNOSED. **The frozen tool's `unexplained` is then a statement about its refusal vocabulary** (it does not read `buy_refused_bars_gap`) **and about the holes in the live feed, not about the models.** The backtest's `spans_gap` column cannot flag it, because the recorder's store is gap-free.
+
+**The post-hoc feed-gap check (prompt item 3):** about 90% that no disagreement of the primary, E1 or E2 has an entry bar in the `2026-10-29` BTCUSDT feed gap (the only disagreements of that day are the `08:11:59.999Z` and `09:09:59.999Z` signal bars). **Step 9 (`s4_explore.py`):** about 85% that it exits 0 and prints its report with no error.
