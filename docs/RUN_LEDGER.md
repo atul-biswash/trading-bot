@@ -7614,3 +7614,96 @@ An observation log, so this section only adds; **section 75 is not edited**. R-E
 | 30 | 20100 | 2026-10-25T17:50:25Z | 2026-10-25T17:53:01Z | 156 | 32 | pass |
 
 **Reading the column "section 75 window(s)".** It names the row or rows of section 75's table the window comes from, so a reader can set the two tables side by side. The windows after the capture of `2026-10-26T03:49:46Z` are not here; they are measured later, by the same rules and with R-ED-1's start from the outset.
+
+## 77. M5m S4: the stop, the final capture, boots 9 to 11, the latch and fault records and the restart exclusion, before any backtest (P151 C2, R-DQ)
+
+An observation log, so this section only adds. P151 runs the S4 stop. Under R-DQ this section is committed BEFORE any backtest is run and before any recorded bar is read for the comparison; everything in it is read from the final capture and from file listings, with no venue call, nothing written under `deploy\45547f107715` and no survey or parallel test run (R-EC). Scripts, read-only, in `scratch\p151`: `records.py` (parts a to d), `tb2.py` (traceback heads), `live_stats.py` (the live side's own figures, section 78). **Everything here decides nothing about S4.**
+
+### 1. The final capture, and the halts checked first
+
+The prompt left its capture fields as placeholders (`<PATH>`, `<BYTES>`, `<SHA256>`). Two captures exist from after the stop, and **the owner chose the later**: `F:\trading bot\scratch\s4\2026-11-01\181221Z-capture.log`.
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `b8977bd` | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `b8977bd` |
+| the capture differs from the stated one | `sha256sum`, size, the freeze's own `SHA256SUMS` | **5,415,031 bytes, SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`**, equal to the freeze report's `capture sha256` and to `181221Z-trading_bot.log`; 24,600 lines. The other candidate, `181209Z-capture.log` (5,414,779 bytes, 12 s earlier), is a byte-exact prefix of it |
+| the capture shows a live bot process | the freeze report, the process list now, the live log | **The report (written `2026-11-01T18:12:21Z`) reads "that pid alive as a '-m trading_bot run' process : yes"**, 3 s after the log's last line `18:12:18Z`. Resolved by later observations, not by the report: no `python` process exists now (`Win32_Process`, empty), and the live `trading_bot.log` in the S4 clone is 5,415,031 bytes, equal to the capture, ending in `Received SIGINT; shutting down gracefully` and `Trading engine stopped event=engine_stopped clean_shutdown=True` of pid 15952, both at `18:12:18Z`. So the `yes` was the process still exiting when the freeze ran |
+| pid 15952 has no `engine_stopped` line | `Select-String`-equivalent over the capture | present, capture line 24600 |
+| the recorder's newest 1m bars open before `2026-10-31T23:59:00Z` | the freeze report's recorder section | BTCUSDT and ETHUSDT 1m newest bar opens **`2026-11-01T18:04:00Z`**, 5m `18:00:00Z`; last scheduled run `2026-11-01T18:05:01Z`, result 0, missed runs 0 |
+| a frozen file differs from its digest | `sha256sum` | `docs/S4_PREREGISTRATION.md` `49e4fdbb...50c6566f`, `scripts/s4_compare.py` `b8afa603...e5c3af08`, `scripts/trade_census.py` `926bdd46...be35d9bb`, `config.s4.yaml` `0f170bae...b0712594`, `scripts/s4_latch_compare.py` `59bb70c3...3e125aa7`, `scripts/s4_wick_annotate.py` `d9381b4c...cf5d7d09`, `scripts/store_check.py` `fbba98e5...21a18241`: all equal to the runbook's and the pre-registration's |
+| a command would write under `deploy\`, call the venue, start a survey | every command in this section | none |
+| a step would read the reserved window `[2024-01-01, 2026-10-01)` | this section reads no store | none |
+
+**The state of the stop's earlier steps, MEASURED by `Test-Path` and listings (read-only).** The runbook's steps 2 to 5 write under `F:\trading bot\scratch\s4stop\2026-11-01\` and `F:\trading bot\store\testnet-s4-2026-11-01`. Neither exists: `scratch\s4stop` holds only `rehearsal-2026-10-09`, and `store` holds only `mainnet-historical` and `testnet-s4-rehearsal-2026-10-09`. So there is no `check_testnet_after_stop.txt` (step 2), no `s4_daily_after_recorder.txt` (step 4) and no frozen store (step 5). The freeze report that exists (`181221Z-report.txt`) is step 3's. Step 4's own CHECK reads *"every `1m` series reads `newest bar opens <M minus 1 day>T23:59:00Z`"*, and the recorder's newest 1m bar opens **`2026-11-01T18:04:00Z`**, 18 h 5 min after `M`: the scheduled recorder ran after `M` and before the stop, and no recorder run was made by hand two minutes after `M`. That is a CHECK that does not hold as written, in the direction of more bars rather than fewer, and it is reported where it bites, in section 79.
+
+### 2. The stop
+
+Pid 15952 booted `2026-10-31T09:05:12Z` and received `SIGINT` at `2026-11-01T18:12:18Z`, which the owner states as Ctrl+C at 18:12Z, 18 h 12 min after `M` = `2026-11-01T00:00:00Z` (the earliest `M`: `T0` + 21 days is `2026-10-31T06:05:20Z`, and the first UTC midnight at or after it is `2026-11-01`). Bookings since `T0`, by `scripts/trade_census.py` over the capture: **313** (300 `close_booked`, 13 `exit_booked`, no `boot_exit_booked`), **294 before `M` and 19 at or after it**, census anomalies 0, against R-AY's 150 and the cap's floor of 100. The 19 are outside the window `[W, M)` and the backtest ends at `M`. By the log the last booking of each pair is a `close_booked` (BTCUSDT `17:31:04Z`, ETHUSDT `17:20:03Z`) after the last `order_placed` of that pair, so no position was open at the stop; `check_testnet` was not run, so that is read from the log and not from the venue (REASONED).
+
+### 3. (a) Boots 9 to 11
+
+The freeze report numbers 11 run boots at or after `T0` (`2026-10-10T06:05:20Z`, pid 16076). The capture holds 13 pids: the two `strategies` verification boots of `2026-10-10T05:58Z` (pids 27460 and 27176, before `T0`) and the 11. Every boot is `verdict=accepted`, `install_kind=vcs`, `code_commit=45547f10771543b41db42e1cbcb8b5a0a9cf1776`, `config_sha256=f9e0d73743667c195c93775c7997116b1c37f56db361fdd84582ba57d8fa82a0`.
+
+| Boot | pid | `boot_provenance` line | first `reconciliation_pass` | last line | stop marker in the log | stop cause, as the owner states it |
+|---|---|---|---|---|---|---|
+| 8 | 24884 | `2026-10-26T03:48:44Z`, line 20682 | `2026-10-26T04:13:01Z`, line 20694 | `2026-10-26T05:13:53Z` | **yes**: `Received SIGINT` and `engine_stopped clean_shutdown=True` | not stated (section 75 recorded this boot as running to the capture's end; the capture of that day ended at `03:48:48Z`) |
+| **9** | **23740** | `2026-10-26T05:56:51Z`, line 20741 | `2026-10-26T05:58:01Z`, line 20751 | `2026-10-26T16:17:01Z`, line 21195 (an ordinary pass) | **none**: the last line is a pass, no `SIGINT`, no `engine_stopped` | "I stopped the bot to clean dust in my CPU case" |
+| **10** | **3152** | `2026-10-28T21:49:25Z`, line 21203 | `2026-10-28T21:50:02Z`, line 21213 | `2026-10-31T04:40:01Z`, line 23075 (an ordinary pass) | **none** | "load shedding" (a power cut; no `engine_stopped` was possible) |
+| **11** | **15952** | `2026-10-31T09:05:12Z`, line 23083 | `2026-10-31T09:06:00Z`, line 23093 | `2026-11-01T18:12:18Z`, line 24600 | **yes**: `SIGINT` line 24599, `engine_stopped clean_shutdown=True` line 24600 | the S4 stop, by Ctrl+C at 18:12Z |
+
+Boot 8's own clean stop is new since section 75. For boots 9 and 10 the log can neither confirm nor contradict the owner's causes: both end mid-run with no shutdown line, which is also what a closed window, a power cut and a hard kill leave.
+
+**The downtime between processes, under the frozen rule** (`scripts/s4_compare.py` `down_intervals` over the capture, imported and not edited: the span from one process's last line to the next process's first `reconciliation_pass`):
+
+| From | To | Interval | Length |
+|---|---|---|---|
+| 20100 | 24884 | `2026-10-26T03:44:50Z` to `04:13:01Z` | 0:28:11 |
+| 24884 | **23740** | `2026-10-26T05:13:53Z` to `05:58:01Z` | **0:44:08** |
+| 23740 | **3152** | `2026-10-26T16:17:01Z` to `2026-10-28T21:50:02Z` | **2 d 5:33:01 = 53 h 33 m 1 s** |
+| 3152 | **15952** | `2026-10-31T04:40:01Z` to `09:06:00Z` | **4:25:59** |
+
+**The owner's 53 h 33 m 1 s is confirmed to the second** (192,781 s). All 12 frozen intervals of the capture (the two before `T0` included) are in `records_out.txt`; the ten since `T0` that fall inside `[W, M)` total 438,187 s, 5 d 1 h 43 m 7 s (the earlier ones are in sections 43 to 75).
+
+### 4. (b) Latch episodes and `exit_unbookable` clusters after `2026-10-26T03:48:44Z`
+
+**No R-DM/R-DP latch episode begins after `2026-10-26T03:48:44Z`.** The frozen `latch_episodes` (imported from `scripts/s4_latch_compare.py`, `closed_at` = `M`) returns the same four episodes as before and nothing after: BTCUSDT pid 16076 `2026-10-11T16:00:01Z` to `16:54:00Z`; ETHUSDT pid 22304 `2026-10-13T02:59:02Z` to `06:54:01Z`; BTCUSDT pid 14600 `2026-10-21T13:11:00Z` to `2026-10-23T08:05:33Z`; BTCUSDT pid 20100 `2026-10-26T00:51:01Z` to `03:44:50Z` (episode 4, section 75). After the cutoff the capture holds **0** `reconciliation_untrusted` lines (2,135 in the capture, all before it), **0** `committed_risk_unknown` refusals (41 in all), **0** `exit_unbookable` lines and **0** `exit_book_refused` lines. `exit_unbookable` is 111 lines in 6 clusters, the last a single line at `2026-10-24T18:34:02Z` (pid 20100, BTCUSDT list 228203), before the cutoff; `exit_book_refused` is 1,985 lines in 3 clusters, the last episode 4's list 243279.
+
+**One halted `CLOSE` is not an episode**, and it is the only `close_halted` after the cutoff: pid 3152 at `2026-10-29T08:53:01Z`, a `Close planned ... decision=halt` line and a `dispatch_refused reason=close_halted` line (2 lines). No untrusted pass precedes or follows it (the next passes read `states="active=1"`). Its cause is two `collaborator_failed` ERROR lines, `phase=close-confirm`, `error_type=ExchangeAPIError`, *"Internal error; unable to process your request. Please try again."*, one per protective leg: *"leg(s) SL, TP could not be read, so the venue state is unknown. An unread leg is not a leg that executed nothing"*. **These are the first `collaborator_failed` lines in this capture** (3 in all); `CLAUDE.md` records zero in the earlier ones, and Q-A waits on that sample.
+
+**The entry that failed to read its fill, and a trade nobody booked.** In the same venue-error hour, pid 3152 at `2026-10-29T08:12:01Z` placed the BTCUSDT entry of order list **282240** (`tb1-BTCUSDT-1793261519999-0-L`, entry bar `2026-10-29T08:11:59.999Z`, 0.02326000 at 80189.69) and its `entry-fill-query` failed with the same *"Internal error"*, so the bot logged `debit_from_requested_limit`, *"Debited at the REQUESTED limit; the fill price is unknown"*. At `09:45:01Z` a death cross closed it: both legs read `NEW` with nothing executed, the sell was dispatched, and at `09:45:02Z` a CRITICAL `close_sold_unbooked` followed, *"the close sell FILLED and was DROPPED UNBOOKED -- this bot has no cost basis for the position ... That trade is NOT in the ledger"* (`outcome=filled_and_released`). It is the capture's only `close_sold_unbooked` and `debit_from_requested_limit`. So a live entry that FILLED has **no booking**, and the comparison will see a placement with nothing booked, which is the shape the frozen tool labels `fok-unfilled` for the `13:09` entry (section 66).
+
+### 5. (c) The R-ED-1 fault windows after `2026-10-26T03:49:46Z`
+
+Measured as in section 75 with R-ED-1's start (the fault line minus 60 s), the end the earlier of the next successful pass of the same pid and `feed_resumed`, and overlapping windows merged. Fault lines: **3 failed passes and 4 websocket drops, no MemoryError.** The failed passes at `2026-10-26T09:13:04Z` (pid 23740) and `2026-10-31T22:56:04Z` (pid 15952) end in `CancelledError`, `TimeoutError` and `ExchangeConnectionError`; the one at `2026-10-31T22:02:01Z` is a DNS failure (`socket.gaierror`, `ClientConnectorDNSError`, `ExchangeConnectionError`, *"Cannot connect to host testnet.binance.vision"*).
+
+| # | pid | window start (R-ED-1) | window end | s | end from | fault lines | the bot's own gap record |
+|---|---|---|---|---|---|---|---|
+| 31 | 23740 | 2026-10-26T09:12:04Z | 2026-10-26T09:14:01Z | 117 | pass | failed pass BTCUSDT/1m `09:13:04Z` | none |
+| 32 | 3152 | 2026-10-29T06:37:52Z | 2026-10-29T06:39:01Z | 69 | pass | websocket `06:38:52Z` (`ConnectionClosedOK`, going away) | none |
+| 33 | 3152 | 2026-10-29T06:45:31Z | 2026-10-29T06:47:01Z | 90 | pass | websocket `06:46:31Z` (`ConnectionClosedOK`) | none |
+| 34 | 3152 | 2026-10-29T23:22:15Z | 2026-10-29T23:24:00Z | 105 | feed_resumed | websocket `23:23:15Z` (`ConnectionClosedError`; two failed reconnects) | BTCUSDT/1m 1 missing, first lost bar closed `23:23:00Z` (15 s before the fault line) |
+| 35 | 15952 | 2026-10-31T22:01:01Z | 2026-10-31T22:03:01Z | 120 | pass | failed pass BTCUSDT/1m `22:02:01Z` (DNS), websocket `22:02:27Z` (`ConnectionClosedError`, keepalive ping timeout) | none |
+| 36 | 15952 | 2026-10-31T22:55:04Z | 2026-10-31T22:57:01Z | 117 | pass | failed pass BTCUSDT/1m `22:56:04Z` | none |
+
+**6 windows, 618 s.** Numbered 31 to 36 so they continue section 76's 30 re-started windows (5,264 s): **36 windows and 5,882 s in all up to the capture's end**, the set the R-ED listing is made against (P150b). None of the six overlaps a section 76 window. The 60 s lead again contains every first lost bar the bot recorded (15 s).
+
+**A feed gap with no fault line.** At `2026-10-29T10:51:31Z` the watchdog logged `feed_silent` for BTCUSDT/1m, at `10:52:00Z` `bars_gap_detected` (1 bar missing between the bars of `10:49:00Z` and `10:51:00Z`, so the lost bar opened `10:50:00Z` and closed `10:51:00Z`) and at `10:52:01Z` `feed_resumed`, then `bars_contiguous_again` at `11:42:01Z`. **No websocket line, no failed pass and no MemoryError accompanies it**, so it is none of R-ED's three fault kinds and R-ED-1's start has no fault line to anchor on. It is recorded here and **not counted among the 36 windows**; the stop report shows any disagreement whose entry bar closed in `10:50:31Z` to `10:52:01Z` (the `feed_silent` line minus 60 s to `feed_resumed`) beside the R-ED listing and apart from it, for the owner to rule on. The only other gap record after the cutoff is window 34's.
+
+### 6. (d) The restart first-entry exclusion under the frozen rule, for every boot since `T0`
+
+`exclude_downtime` over the 276 live entries of `[W, M)` (entries whose entry bar opens in it; unplaced 0) with the frozen `down_intervals`: **5 are excluded and 271 kept.** The ten restarts since `T0`:
+
+| Restart | Interval | Entries excluded | The first entry after it |
+|---|---|---|---|
+| 16076 to 22304 | `2026-10-12T04:17:43Z` to `10-12T19:20:01Z` | 1 | BTCUSDT, signal bar closed `10-12T19:18:59Z`, inside the interval |
+| 22304 to 3444 | `10-13T06:54:01Z` to `07:00:35Z` | 0 | none before the next restart |
+| 3444 to 25352 | `10-13T07:00:48Z` to `10-14T07:12:00Z` | 1 | BTCUSDT `10-14T07:10:59Z`, inside |
+| 25352 to 5224 | `10-15T08:23:00Z` to `11:18:00Z` | 0 | BTCUSDT `10-15T11:24:59Z`, kept |
+| 5224 to 14600 | `10-20T01:34:44Z` to `10-20T09:38:01Z` | 1 | BTCUSDT `10-20T09:36:59Z`, inside |
+| 14600 to 20100 | `10-23T08:05:33Z` to `10-23T20:19:00Z` | 1 | **BTCUSDT `10-23T20:17:59Z`, inside** |
+| 20100 to 24884 | `10-26T03:44:50Z` to `10-26T04:13:01Z` | 1 | BTCUSDT `10-26T04:11:59Z`, inside |
+| 24884 to 23740 | `10-26T05:13:53Z` to `05:58:01Z` | 0 | BTCUSDT `10-26T07:02:59Z`, kept |
+| 23740 to 3152 | `10-26T16:17:01Z` to `10-28T21:50:02Z` | 0 | BTCUSDT `10-28T21:58:59Z`, kept |
+| 3152 to 15952 | `10-31T04:40:01Z` to `09:06:00Z` | 0 | BTCUSDT `10-31T10:14:59Z`, kept |
+
+**In all five exclusions the entry is the first after the restart and its signal bar closed before the new process's first pass, inside the interval and not in the two-bar tail**, because a pass is logged only while a position is open and so the interval ends at the first pass, after the first position opened. **That measures `M5m-631`**, the carried item that the first entry after the 2026-10-23 restart (pid 20100) is excluded under the frozen rule, REASONED at P128 and unscored in section 68 (row j): it is excluded, BTCUSDT `2026-10-23T20:17:59Z` against an interval ending `20:19:00Z`. The same holds for the primary and E2 alike, since E2 unions the frozen intervals.
