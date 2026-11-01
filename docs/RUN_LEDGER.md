@@ -7707,3 +7707,35 @@ Measured as in section 75 with R-ED-1's start (the fault line minus 60 s), the e
 | 3152 to 15952 | `10-31T04:40:01Z` to `09:06:00Z` | 0 | BTCUSDT `10-31T10:14:59Z`, kept |
 
 **In all five exclusions the entry is the first after the restart and its signal bar closed before the new process's first pass, inside the interval and not in the two-bar tail**, because a pass is logged only while a position is open and so the interval ends at the first pass, after the first position opened. **That measures `M5m-631`**, the carried item that the first entry after the 2026-10-23 restart (pid 20100) is excluded under the frozen rule, REASONED at P128 and unscored in section 68 (row j): it is excluded, BTCUSDT `2026-10-23T20:17:59Z` against an interval ending `20:19:00Z`. The same holds for the primary and E2 alike, since E2 unions the frozen intervals.
+
+## 78. M5m S4: the predictions for the stop's comparison, committed before the backtest runs (P151 C3, R-T, R-DQ)
+
+An observation log, so this section only adds. Under R-T and R-DQ these predictions are committed before the backtest of `[W, M)` is run, before any recorded bar is read for the comparison and before any `s4_compare` figure exists. They are not revised afterwards: section 79 scores them as written. **Everything here decides nothing about S4.**
+
+### 1. What was read before writing them
+
+Only the live side, from the final capture of section 77 (SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`), by the frozen `scripts/trade_census.py` and `scripts/s4_compare.py` functions over the live entries and no backtest: `scratch\p151\live_stats.py`. Of the 276 live entries of `[W, M)` the frozen downtime rule keeps **271** (224 BTCUSDT and 47 ETHUSDT; exits 259 `CLOSE`, 11 `SL`, 1 `TP`). Their per-trade return, in the units of the census' `return_pct` (percent): **mean -0.26597, standard deviation 1.61537, standard error 0.09813, 95% interval [-0.45830, -0.07364]**. By exit: `CLOSE` n 259 mean +0.00947, `SL` n 11 mean **-6.78383**, `TP` n 1 mean +0.09175. So the live mean sits almost wholly in its 11 stop-outs (11 x -6.78 / 271 = -0.275), and the interval of test A is 0.19 wide on a mean of -0.27.
+
+### 2. The architect's predictions, verbatim
+
+> A (backtest per-trade gross mean inside the live 95 percent interval): PASS, because the interval is wide. B (trade count within 10 percent): FAIL (latch-caused, R-DK). C (at least 80 percent of live entries reproduced on symbol and entry bar): PASS, in the range 80 to 95 percent. The R-DR wide=yes annotation is the cause for most fill-model exit disagreements. R-ED's listing holds 0 to 3 disagreements.
+
+### 3. The executing session's predictions, labelled as mine
+
+| | Prediction |
+|---|---|
+| a | **`N_live` is 271 in the primary** (the tool's live count after the frozen exclusions), and the primary lists the 5 excluded entries of section 77 section 6 by name. Any other number is a difference in what the tool counts and not in the capture. |
+| b | **A: PASS, about 70%.** The backtest's mean is its `CLOSE` exits (about +0.01) plus its stop-outs at the configured stop (2%) and stop slippage (1.20%), roughly -3.2 to -3.3 each. It lands inside [-0.458, -0.074] when it has between about 7 and 44 stop-outs among about 300 trades, and I expect 8 to 25. The architect's reason, a wide interval, I read as half right: the interval is 0.19 wide, but the live mean is carried by 11 stop-outs at -6.8, so the test is really whether the backtest has about as many stops as the live bot, at about half the loss each. **Falsified if** the printed backtest mean is outside the printed interval. |
+| c | **B: FAIL, about 85%, latch-caused.** The primary excludes downtime and not latch intervals, so the backtest keeps the entries the live bot refused during its four latch episodes (50.6 h in all, 2.11 d) while the live count carries none. At the live uptime rate outside the latches (271 over about 13.8 days, 19.6 a day) the surplus is about **+41**, a point prediction of `N_bt` = **312**, with a range of 295 to 330, which is +9% to +22% of 271 against the 10% (27.1) limit. **Falsified if** `abs(N_bt - 271) <= 27`. |
+| d | **C: reproduction between 80% and 92%, point 86%, PASS with about 75%.** Path dependence is the risk: a different exit changes the next entry, and the 11 live stop-outs, the 3 partly executed stop legs and the unbooked entry of list 282240 each shift later entries. **Falsified if** it prints below 80%. |
+| e | **The disagreement lists are long.** About 40 live-only and 80 backtest-only entries plus 15 to 30 matched pairs whose exits differ, so the primary's `DISAGREEMENTS (n)` between 100 and 170. The backtest-only entries are dominated by `risk refusal differs` (the latch refusals: at least 25). `fill-model` is at least 10. **`unexplained` is 10% to 40% of `n`** and is the largest single cause with about 40%, which would make a B failure partly undiagnosed (S4 section 7 D). |
+| f | **R-DR: `wide=yes` for most `fill-model` exit disagreements**, as the architect says, with about 60% that it exceeds 50% of them, and `unknown` zero (the store holds every bar of the window). |
+| g | **R-ED: 0 to 3 disagreements in all, at most 1 per list.** The 36 windows total 5,882 s, 0.32% of the 21 days; at about 100 to 170 disagreements per list the expected count is 0.3 to 0.6 a list. About 35% that the primary lists one or more, about 95% that the three lists together hold 0 to 3. |
+| h | **Three placements the frozen tool will call unfilled although they filled**: the `13:09` BTCUSDT entry of 2026-10-21 (list 183218), the `00:23:59` entry of 2026-10-26 (list 243279, the partly executed stop of episode 4) and the `08:11:59` entry of 2026-10-29 (list 282240, section 77 section 4). They appear among the "live placements with no booking", and where the backtest took the same entry the frozen label is `fok-unfilled`. About 85% that all three are there. The report annotates each and alters no label. |
+| i | **E1 (window to `2026-10-21T13:09:00Z`):** A PASS, B PASS (the surplus is only episodes 1 and 2, 0.2 d, about 4 entries of about 150), C at least 80%; about 70% for each. **E2 (latch intervals excluded too):** B PASS about 80%, C at least the primary's, A PASS about 70%. Figures only, as R-DK says. |
+| j | **The mechanics hold.** The census, `s4_compare`, E1, E2 and the three annotation runs exit 0; the three `DISAGREEMENTS (n)` equal the three `ANNOTATED DISAGREEMENTS (n)`; the backtest record carries `evidence_eligible: true`. About 80% that no CHECK needs attention beyond those named in section 77 (the missing steps 2 to 5 and step 4's newest-bar CHECK). |
+| k | **The frozen store verifies clean**: `store_check` and `--verify-only` read 0 problems, with the recorder's newest bars on 2026-11-01. About 90%. |
+
+### 4. The prediction rule in force
+
+A prediction is scored against what the tool prints, as written here. A figure outside a stated range is a MISS; a figure inside a range that its point value misses is not. The note on each of the architect's is the same, and section 79 scores the architect's and mine separately.
