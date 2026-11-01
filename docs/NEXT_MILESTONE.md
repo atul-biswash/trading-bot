@@ -3701,6 +3701,16 @@ quoted with its capture rather than bare.
 > run `023c72a1...` 6 and 0. They are separate runs and not an extension of the capture above, so
 > the 16 is not added to its 163.
 
+> **OBSERVED AT M5m, AND STRUCK AT THE M5m ROTATION (P153): `decision=halt` OCCURRED, 37 TIMES.** *"`HALT` has never
+> occurred"*, *"the sole remaining unobserved venue fact"* and the zero above are false of the S4 capture, SHA-256
+> `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`. MEASURED (`grep -c` over the capture): `event=close_planned`
+> **339**, of which `decision=sell` **302**, `decision=halt` **37** and `decision=already_closed` 0; the first halt is at
+> **`2026-10-21T13:38:02Z`** (pid 14600, BTCUSDT, list 183218), and the 37 are 33 on pid 14600, 3 on pid 20100 and 1 on pid
+> 3152 (`2026-10-29T08:53:01Z`, the unreadable-leg halt of `docs/QB_ESCALATION.md` Class E). 36 are partly executed stop legs
+> (`docs/QC_PROTECTIVE_ORDERS.md` section 4b), which is why the first one came with a fill and not a ruling. **What survives:**
+> the figures above for M5j's and M5k's captures, as records of what those captures held, and the next section's remark that
+> the unobserved surface is far larger than any item here. This item is closed; X1, X2a, X2b and X3 are all observed.
+
 ### X3. `resolve_placement` has never run — STRUCK at `0992fa3`
 
 **Closed by M5j.** Falsified by the event pair `placement_ambiguous` at
@@ -3712,6 +3722,10 @@ an **artefact** of the falsification rather than its instrument.
 
 X2b is the one remaining unobserved **venue fact**. It is **not** the remaining
 unobserved branch.
+
+> **ANNOTATED AT THE M5m ROTATION (P153): X2b IS OBSERVED** (the annotation under X2b), so no unobserved venue fact of
+> X1 to X3 remains. The sentence above is a statement about M5k's capture and stands as that. **What survives:** the table
+> below and the point of this section, that the unobserved surface is the code's branches and not these four facts.
 
 | Figure | Value | Instrument |
 |---|---|---|
