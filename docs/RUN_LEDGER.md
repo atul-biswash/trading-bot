@@ -7951,3 +7951,64 @@ The only disagreements of 2026-10-29 are the two of section 79 (the `08:11:59.99
 **Given by the owner in P152 (its instant is not stated, and it was run after the stop) and not read by this session; the venue was not called.** It is the runbook's step 2 account check, done late. It reports 515 assets with a non-zero balance, all with `free > 0`; `BTC` and `ETH` free, locked and total `0E-8`; **`USDT` free `93307.09101730`**, locked `0E-8`; `BTCUSDT` last 77893.02 and `ETHUSDT` last 2264.07; for both pairs `unmanaged holding ... DUST (does not block)` and `open orders: 0`; a 15-symbol candidate survey in which `BTCUSDT` and `ETHUSDT` are dust, 12 others `BLOCKS` and `MATICUSDT` is unsupported on Testnet; **317 order lists on the account, all `ALL_DONE`, none outside a terminal status**; and `All checks passed.`
 
 Three cross-checks against the capture, MEASURED: **317 order lists equals the 317 `order_placed` lines and the census' 317 placements**; **no BTC, no ETH and no open order at the stop**, which turns section 77's flat-account reading from the log (REASONED) into the venue's own answer as the owner reports it; and **515 non-zero assets is the 514 the boots' `EXCLUDED FROM EQUITY` warning counts plus `USDT`**. USDT free was `93281.61775370` at boot 8 (`2026-10-26T03:48:48Z`, section 75) and is `93307.09101730` now. The step 2 CHECK (no `-m trading_bot run`) held at the halt checks of section 77.
+
+## 82. M5m's closing rotation: the halts, the structural lists read against the tree, the arming registers re-run and X2b measured (P153 R4)
+
+An observation log, so this section only adds. It records what the rotation measured, which `docs/NEXT_MILESTONE.md`, `CLAUDE.md`, `README.md` and `docs/PHASE_HISTORY.md` then rest on. Read-only throughout: no venue call, nothing under `deploy\45547f107715`, no survey. Scripts in `scratch\p153`: `structs.py`, `fired.py`. **Nothing here decides anything about S4.**
+
+### 1. Halts, checked first
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `ddf3593` | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `ddf3593` |
+| a frozen file differs from its digest | `Get-FileHash` (section 80's list, the capture and the archived run included) | equal |
+| CLAUDE.md's rotation procedure conflicts with a step of the prompt | read side by side | **none that stops the work.** Two things the procedure leaves to this rotation and the prompt does not name: the structural lists are read against the tree (rule 3) and the arming registers are re-run (step 3); both are done here. The prompt's tag message is "M5m closed" plus the entry's first sentence, where M5l's tag message named the commits and the findings; the prompt governs |
+| a command would write under `deploy\` or call the venue | every command in the plan | none |
+
+### 2. The structural lists, read against the tree (rule 3 of the three rescued at M5g)
+
+`CLAUDE.md`'s and `README.md`'s architecture trees were compared with `src/trading_bot/*/*.py` and `scripts/*.py` by `scratch\p153\structs.py`. **Every module and every script is named in both, with one exception: `data/watchdog.py`** (M5l's `FeedWatchdog`) is named in neither tree's `data/` line. Nothing listed is absent from the tree. The omission pre-dates M5m, was found by this rotation, and is corrected in the closing commit. The `scripts/` list is complete, including the S4, S5, S6 and S7 tools and `store_check.py`.
+
+### 3. The arming registers, re-run
+
+`scripts/check_arming_conditions.py` over the four documents that carry conditions:
+
+| Document | Candidates | Parsed | Unparsed |
+|---|---|---|---|
+| `docs/NEXT_MILESTONE.md` | 55 | 54 | 1 (the Q-C section 3 leg-set condition, *"whoever amends Q-C section 3's leg set"*, accepted as unparsed by the owner's earlier ruling) |
+| `CLAUDE.md` | 2 | 2 | 0 |
+| `docs/QC_PROTECTIVE_ORDERS.md` | 0 | 0 | 0 |
+| `docs/QB_ESCALATION.md` | 1 | 0 | 1 (the halt flag's first writer, accepted by the same ruling) |
+
+**The candidate set, traced.** Of the 54 parsed conditions of `docs/NEXT_MILESTONE.md`, `scratch\p153\fired.py` finds **23 that name a file M5m changed** (136 files changed since `milestone/M5l`); a file name appearing in a condition is a candidate and not a firing, so each was traced to the symbol it names.
+
+| Condition (its opening words) | The M5m change | Verdict |
+|---|---|---|
+| renames `_EVENT_CLOSE_BOOKED` or `_EVENT_PLACED` ... | `engine/modes.py`: the `Dispatcher` typing and a docstring note | not fired; REAFFIRMED |
+| edits `main` in `scripts/download_data.py`, or adds a start time to `ExchangeClient.get_klines` | the downloader was written for S1; `interfaces.py` changed for `Dispatcher` and `get_klines` did not | fired by S1's own commits, which are the work it guarded; consumed |
+| edits `_cmd_backtest` in `main.py` or `BacktestConfig` in `config/models.py` | S2 | fired by S2's commits; consumed |
+| edits `backtesting/metrics.py` | S3 | fired by S3's commits; consumed |
+| edits the fill model in `backtesting/engine.py` | S2 | fired by S2's commits; consumed |
+| edits `backtesting/fill_model.py`, or the simulated executor's sequencing ... | S2 | fired by S2's commits; consumed |
+| makes an out-of-sample read of the reserved window, or edits `docs/research/PROTOCOL.md` | `PROTOCOL.md` last edited `2026-10-15` (`a03d5c9`), before the condition was written; no read | not fired; REAFFIRMED |
+| reaches step 1 of `docs/S4_STOP_RUNBOOK.md` with the cap `2026-11-14T06:05:20Z` nearer | S4 stopped at `M` = `2026-11-01`, before the cap | discharged |
+| first writes the E2 wrapper that applies R-DM ... (P129) | the wrapper was written at P130 | discharged, as the P130 annotation records |
+| edits `scripts/s4_latch_compare.py` or `docs/S4_CORRECTION_P130.md`, or first reads E2's output against the primary at the S4 stop | E2 was read against the primary at P151 from the backtest clone's interpreter, and no E2 figure stood in for the primary | **fired at P151 and discharged by it** |
+| edits `refuse_live_trading` in `config/settings.py` (two conditions) | `settings.py` gained `Settings.with_config` only | not fired; REAFFIRMED |
+| changes what `PersistedState` persists, or `_snapshot_unmanaged_holdings`; edits `_snapshot_live_order_lists`; edits `PendingCloseRecord` or `_persist_pending`; changes what `_persist_pending` or `_persist_ledger` writes (four conditions) | `engine/modes.py`: `Dispatcher` typing and a docstring note | none fired; REAFFIRMED |
+| edits `_leg` in `scripts/trade_census.py` | the file was written at S0 (`cf64d90`) and `_leg` is unedited since | not fired; REAFFIRMED |
+| edits `bollinger_bands` in `indicators/indicators.py`, or registers a strategy that reads it | the file changed for `sma`; `bollinger_bands` appears only in a docstring | not fired; REAFFIRMED |
+| edits `_CLOSE_SEQUENCE_CALLS` or the coherence block in `config/models.py` (two conditions) | `models.py` changed in `BacktestConfig` only; no diff line names either | not fired; REAFFIRMED |
+| edits `_dec` or `_opt_dec` in `exchange/models.py` | `exchange/models.py` is not among the changed files; the candidate came from a file name | not fired; REAFFIRMED |
+| edits `_record_gap_if_any` in `data/market_data.py` to fetch bars, or adds a start time to `get_klines` | `interfaces.py` changed for `Dispatcher`; no `get_klines` diff line | not fired; REAFFIRMED (U12) |
+| writes `paper/simulator.py` or `backtesting/engine.py` (U6) | `backtesting/engine.py` was written at S2 | fired, and resolved and struck at P105 C2 under R-U |
+
+**The live-trading block's own condition** (`CLAUDE.md`: the mode resolution in `Settings.__init__` or `_cmd_run`, or a run in `LIVE`) was audited from the diff: the `_cmd_run` hunk in `main.py` carries only context shift (the lines changed are the added backtest functions after it), and `Settings.__init__` is untouched. **Not fired; REAFFIRMED.** The consumed conditions are marked REASONED: this log does not show each guarded edit was audited at its own commit, only that the guarded work is complete.
+
+### 4. X2b, measured
+
+`decision=halt` in the S4 capture (SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`): `event=close_planned` 339 = `decision=sell` 302 + `decision=halt` 37 + `decision=already_closed` 0; first halt `2026-10-21T13:38:02Z`, pid 14600; 33 on pid 14600, 3 on pid 20100, 1 on pid 3152. Recorded against X2b in `docs/NEXT_MILESTONE.md` (`92763bc`).
+
+### 5. The findings extraction, before the build-log entry is written
+
+`git log milestone/M5l..HEAD` prints 181 commits and `scripts/check_findings.py milestone/M5l..HEAD M5m` reads, at `92763bc` (before this section's commit): **775 declared, 775 distinct, max 775, no duplicate, no gap, nothing cited and not declared, and one blockless commit, `934eb45`** (the owner's merge of pull request 2, `Merge pull request #2 from atul-biswash/claude/keen-sagan-ehal28`, which carries no findings block and is not the executing session's). Exit 1, for that commit alone. The result at the close is in the closing commit's message and the build-log entry.
