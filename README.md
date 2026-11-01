@@ -164,6 +164,16 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > gate. The live-blocking items are deferred to the milestone after a PASS. **What
 > survives:** everything else in this paragraph, the live block included. See
 > `docs/NEXT_MILESTONE.md`.
+>
+> **ANNOTATED AT M5m's CLOSE (P153): M5m IS COMPLETE, AND THE "HALT" SENTENCE ABOVE IS NO LONGER TRUE.** *"`HALT` — has never
+> occurred, zero across 163 close plans"* was true of M5k's capture. In the S4 capture (SHA-256
+> `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`) `decision=halt` occurred 37 times in 339 close plans, the
+> first at `2026-10-21T13:38:02Z`. **The outcome:** the shipped 1m SMA-crossover strategy loses gross and net; all six S6
+> candidates lose in sample; S7 is FAIL by ruling, the reserved window unread; the pre-registered S4 comparison of the backtester
+> with a live Testnet run is A PASS, B FAIL (latch-caused), C PASS (270 of 271 live entries reproduced, 99.63%). **What survives:**
+> every commission any capture records is `0.00000000`, the fee capture is unmet, base-quantity netting is unbuilt, and live
+> trading stays refused at every entry point by exactly those two gates. The next milestone is M5n; see `docs/NEXT_MILESTONE.md`
+> and `docs/PHASE_HISTORY.md`.
 
 Eight files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
@@ -344,6 +354,10 @@ so keys in `.env` are enough — they need not be exported.
 | `docs/QC_PROTECTIVE_ORDERS.md` | The protective-order contract M5 implements: where protection rests, the placement shapes, the identity scheme | Working on execution |
 | `docs/QB_ESCALATION.md` | What `CRITICAL` does, its binding sites, and which can clear on their own | Handling failure paths |
 | `docs/M5_NUMBERS.md` | The safety numbers, each with its cost-if-wrong and its measurement status | Choosing or changing a threshold |
+| `docs/RUN_LEDGER.md` | Append-only observation log: every run, capture and census, each figure with its command and the digest of what it was read from | Asking "what did the bot actually do?" |
+| `docs/S4_PREREGISTRATION.md`, `docs/S4_CORRECTION_*.md`, `docs/S4_STOP_RUNBOOK.md` | The live-versus-backtest comparison on Testnet: what was fixed before it ran, the rulings after it started, and how it was stopped | Reading or repeating S4 |
+| `docs/research/` | The research protocol, its log, the S6 selection and the S7 null check | Before any backtest of a candidate |
+| `docs/M5N_CHARTER_DRAFT.md` | The charter of the next milestone, M5n: volatility-scaled trend and breakout research on 4h and 1d bars | Starting M5n |
 | `PROJECT_KNOWLEDGE.md` | Orientation for a reviewer with no repository access | Reviewing from outside |
 
 Precedence, when they disagree: **the code wins over `CLAUDE.md`, and `CLAUDE.md`
@@ -388,7 +402,7 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical · kline_recorder · repository†
+  data/          market_data · historical · kline_recorder · watchdog · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)

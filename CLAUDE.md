@@ -240,7 +240,7 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical · kline_recorder · repository†
+  data/          market_data · historical · kline_recorder · watchdog · repository†
   indicators/    hand-written TA functions
   strategies/    base · registry · helpers · examples/
   engine/        live_engine · modes (composition root)
@@ -4881,6 +4881,16 @@ fact.** Against that rotation's capture — SHA-256
 **zero across 75 close plans**, and the denominator was quoted with its capture
 because it moved three times inside one milestone.
 
+> **ANNOTATED AT M5m's CLOSE (P153): `decision=halt` OCCURRED, AND FOUR SENTENCES ABOVE ARE NO LONGER TRUE.** They are, by
+> content: the M5h paragraph's *"`ALREADY_CLOSED` and `HALT` had never occurred"*, the M5i annotation's *"`HALT` had never
+> occurred — still true"*, the M5i-close annotation's *"`HALT` has never occurred — still true, `decision=halt` is zero"*, and
+> this paragraph's *"At M5j's close `decision=halt` was the sole remaining unobserved venue fact"* read as a present claim. Each
+> was true of the evidence it named. MEASURED over the S4 capture, SHA-256
+> `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`: `event=close_planned` 339 = `decision=sell` 302 +
+> `decision=halt` 37, the first at `2026-10-21T13:38:02Z` (`M5m-775`, `docs/RUN_LEDGER.md` section 82). **What survives:** the
+> figures as records of the captures they name, and the point that the unobserved surface is the code's branches and not a
+> list of venue facts. X1, X2a, X2b and X3 are all observed.
+
 *The accounting item.* **`M5j-012` began as "three call sites omit `fee`" and
 ended as an architectural accounting item.** At M5j's close the wiring inside
 `core/portfolio.py` was complete on both limbs; what was missing was any figure
@@ -5041,3 +5051,28 @@ netting is unbuilt. **Live trading stays blocked by exactly those two**, and
 > PASS or FAIL decision gate, with N6, U9 and U10 deferred to the milestone after a PASS.
 > **What survives:** the rest of this paragraph, the live block included. The scope and
 > its items, S0 to S7, are in `docs/NEXT_MILESTONE.md`, which is their single home.
+
+**M5m is complete, in 178 numbered commits and 6 rotation commits, with 787 findings declared across `M5m-001`-`M5m-787`, every
+commit but the owner's merge `934eb45` carrying a block.** *M5m outcome. The shipped 1m SMA-crossover strategy loses gross and
+net (S5). All six S6 candidates lose in sample. S7 is FAIL by ruling R-CV, with the reserved window unread. S4, the pre-registered
+live-versus-backtest comparison on Testnet: A PASS, B FAIL (latch-caused), C PASS with 270 of 271 live entries reproduced (99.63
+percent). Its four unexplained disagreements are live-feed holes of one or two bars after websocket drops (M5m-761 to M5m-772).
+The backtester is confirmed as an instrument for entry reproduction and the per-trade mean. Its stop-fill model diverges from
+Testnet on thin-book wicks: all 7 different exits are R-DR wide=yes. The largest live-versus-backtest divergences are the live
+engine's own fail-closed protective-leg latches (U10) and feed holes (U12). Live trading stays blocked.*
+
+*What exists.* `scripts/trade_census.py` (the census of record); `data/historical.py` and the monthly archive; a backtester that
+replays stored bars through the unchanged live provider and engine with a pure fill model, an evidence door
+(`evidence_eligible`) and a research-protocol guard; metrics and regime labels; the S4 tools (`s4_compare`, frozen, with E1 and E2
+beside it, `s4_wick_annotate`, `s4_daily`, `s4_explore`, `store_check`, the stop runbook and the correction files P128 to P151);
+and the S5 to S7 chain (`s5_report`, the sweep, the selection, the gate and the null check). **The live engine, executor,
+reconciler and risk manager are unchanged since M5l**; the live path moved only in `sma` (window-only, so a tie no longer depends
+on the buffer's length), a `Dispatcher` Protocol and `Settings.with_config`.
+
+*What ran.* The S4 run, from a deployment clone of `45547f1`: T0 `2026-10-10T06:05:20Z` to a clean stop at `2026-11-01T18:12:18Z`,
+11 boots, 317 order lists and 313 bookings, four latch episodes, 339 close plans (`decision=halt` 37 times), the first
+`collaborator_failed` lines, one `close_sold_unbooked` and a Class E halt. The venue was flat at the stop. **What it did not
+show is the thing to keep in view:** every commission in every capture is still zero, so the fee capture is unmet, and
+base-quantity netting is unbuilt. **Live trading stays blocked by exactly those two**, refused at every entry point, and
+`refuse_live_trading` is unchanged. The next milestone is M5n (`docs/M5N_CHARTER_DRAFT.md`); the open items are the register in
+`docs/NEXT_MILESTONE.md`, and the owner's pending steps are the retirement of two backtest clones.

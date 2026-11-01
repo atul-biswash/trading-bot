@@ -93,7 +93,7 @@ after K5; **K9 has no other home than its row here**); the status here is the on
 | `_go_naked` family | carried: the fourth candidate |
 | W1 to W4, W6 | standing declared test weaknesses (W6: format strings in `executor.py`) |
 | X1, X2a, X2b, X3 | **all observed and struck** (X2b at M5m) |
-| the trailing-stop milestone | BLOCKED on `main`: nothing places or amends an order for a trailing level. M5n's D1 (a venue `trailingDelta` sized k x ATR / price at entry) is the owner's chosen route, built only on branch `m5n` |
+| the trailing-stop milestone | BLOCKED on `main`: nothing places or amends an order for a trailing level. M5n's D1 (a venue `trailingDelta` sized k x ATR / price at entry) is the owner's chosen route, chartered and not built on `main` |
 | `M5m-510` | carried to M5n as the charter's N1: discharged before any out-of-sample read of the reserved window |
 
 **The unobserved surface is the code's branches, not these facts**, as the X section says; the S4 run exercised the close path 339

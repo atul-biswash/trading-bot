@@ -3979,3 +3979,279 @@ milestone.
 **M5l's scope, the P-3 order, the P-2 re-ruled text, P-3k's design questions and its gate, the call-cap
 sketch, the deferrals, the standing authorities and the P98 rulings were the project owner's;
 everything else was ruled by the architect or by the reviewer under delegation.**
+
+## Phase 5 M5m — a strategy that loses, a backtester trusted for what it was tested on, and a live run that measured the engine's own latches
+
+M5m outcome. The shipped 1m SMA-crossover strategy loses gross and net (S5). All six S6 candidates lose in sample. S7 is FAIL by ruling R-CV, with the reserved window unread. S4, the pre-registered live-versus-backtest comparison on Testnet: A PASS, B FAIL (latch-caused), C PASS with 270 of 271 live entries reproduced (99.63 percent). Its four unexplained disagreements are live-feed holes of one or two bars after websocket drops (M5m-761 to M5m-772). The backtester is confirmed as an instrument for entry reproduction and the per-trade mean. Its stop-fill model diverges from Testnet on thin-book wicks: all 7 different exits are R-DR wide=yes. The largest live-versus-backtest divergences are the live engine's own fail-closed protective-leg latches (U10) and feed holes (U12). Live trading stays blocked.
+
+**M5m is complete, in 178 numbered commits and 6 rotation commits (this one included), with 787 findings declared across `M5m-001`–`M5m-787`, every commit but the owner's merge `934eb45` carrying a block.** The owner scoped it: stop engine work, build the minimal backtester, prove it against Testnet trades, and test slower strategies on it, ending in a PASS or FAIL decision and not in code (`docs/NEXT_MILESTONE.md`, the M5m section, kept whole). It ended in FAIL. The milestone's weight is that **the question the project had been avoiding was answered by an instrument built to answer it, with the answer fixed before the instrument ran**: pre-registrations, frozen digests, predictions committed before measurements, and one reserved window never opened.
+
+### The commits
+
+Numbered commits are `milestone/M5l..ddf3593` in order, and include the owner's merge `934eb45` (row 2) and two M5n charter commits (`543d379` and `ee8d485`, P138 and P139) that landed on `main` before M5m closed. Rotation commits follow the table.
+
+| # | Commit | Subject |
+|---|---|---|
+| 1 | `70690c1` | docs(next): M5m decided -- validate a strategy before anything else |
+| 2 | `934eb45` | Merge pull request #2 from atul-biswash/claude/keen-sagan-ehal28 |
+| 3 | `c0d0948` | docs(claude): the venue-outage clause |
+| 4 | `7a211d8` | docs(next): the owner's M5m P99 rulings on S0 to S7, as annotations |
+| 5 | `cf64d90` | feat(scripts): trade_census, a tracked census of every booked trade (M5m S0) |
+| 6 | `27b8724` | test(scripts): the trade census's tests, and the mutation survey that proves they bite (M5m S0) |
+| 7 | `228a3a4` | docs: the trade census of record, and what separates it from the untracked census (M5m S0) |
+| 8 | `dae147f` | docs(next): the owner's P100 and P101 rulings on S0 to S7, M5m-022 to M5m-041 declared, 2244 measured |
+| 9 | `5884629` | feat(data): historical.py, the archive's ingest, verify and gap side (M5m S1) |
+| 10 | `d559da7` | test(data): the archive ingest's tests, and the R-F mutation survey of the unit and gap code (M5m S1) |
+| 11 | `e0613f9` | feat(data): HistoricalStore, the archive's read side, and its tests (M5m S1) |
+| 12 | `3ee39eb` | feat(scripts): download_data.py, the monthly archive downloader, and its tests (M5m S1) |
+| 13 | `8aa1514` | fix(scripts): the downloader's host check refused its own listing URL (M5m S1) |
+| 14 | `b7059ed` | docs(ledger): the monthly archive download, 980 of 1,100 months stored, 120 refused (M5m S1) |
+| 15 | `6e106b2` | feat(data): classify every archive row at ingest, and refuse a month only for an unknown shape (M5m S1) |
+| 16 | `e7ae2d5` | feat(data): the registry sidecar, the deep re-check and the gap kinds (M5m S1) |
+| 17 | `e236162` | feat(scripts): the downloader keeps every zip and ingests from disk (M5m S1) |
+| 18 | `92b493a` | docs(ledger): the 120 refused months ingested from disk, the store complete (M5m S1) |
+| 19 | `e96babc` | docs: record the P104 and P105 rulings, the P104 evidence and K7 (M5m S2) |
+| 20 | `5a48034` | feat(config): BacktestConfig money fields as Decimal, a half-open UTC window (M5m S2) |
+| 21 | `b1ffaa7` | refactor(core): a Dispatcher Protocol replaces the unused OrderExecutor ABC (M5m S2, U6) |
+| 22 | `7ae7d0f` | feat(backtesting): the exchangeInfo snapshot, fetched once and loaded through the live mapper (M5m S2) |
+| 23 | `42243f2` | feat(backtesting): replay stored bars through the unchanged live provider and engine (M5m S2) |
+| 24 | `dbbffad` | feat(backtesting): the fill model, as pure functions (M5m S2) |
+| 25 | `41a621a` | test(download): pin the zip fixture's member timestamp; the M18 extra kill was the wall clock (P106 C0) |
+| 26 | `f58a79e` | docs: record R-AA to R-AE verbatim, ratify K7, correct one docstring (M5m S2, P106 C1) |
+| 27 | `14cb8aa` | feat(backtesting): the simulated executor, sequencing the fill model against the live ledger (M5m S2, P106 C2) |
+| 28 | `c1d1d87` | feat(backtesting): the backtest root, the live decision path over stored history (M5m S2, P106 C4) |
+| 29 | `d5bff58` | feat(main): the backtest command, with window and symbol flags recorded resolved (M5m S2, P106 C5) |
+| 30 | `778e9b3` | docs: the R-AE smoke backtest, March 2024, run twice, and S2 closed (M5m S2, P106 C6) |
+| 31 | `7f08f56` | docs: record R-AF to R-AL verbatim and Step 0's results, among them the Testnet klines (M5m S2/S3, P107 C0) |
+| 32 | `86576e8` | feat(main): a backtest logs only to a file in its own run directory, never to the bot's log (M5m S2, P107 C1, R-AG) |
+| 33 | `1a6de2c` | feat(backtesting): every run record carries the boot_provenance verdict and its fields (M5m S2, P107 C2, R-AH) |
+| 34 | `13297bb` | feat(backtesting): quarterly regime labels, the module and the script that writes them once (M5m S3, P107 C4a, R-AI) |
+| 35 | `f9d0c57` | docs: the quarterly regime labels, committed with their digest and fixed before S6 (M5m S3, P107 C4b, R-AI) |
+| 36 | `1cc92ab` | feat(backtesting): the S3 metrics, pure: trades, fees, drawdown, Sharpe, Sortino, exposure, holding, breakdowns (M5m S3, P107 C5) |
+| 37 | `6748b94` | feat(backtesting): the root samples equity in its loop and records the S3 metrics (M5m S3, P107 C6, R-AJ) |
+| 38 | `c5e11f1` | test(backtesting): the Q2 survey of metrics.py, three tests it would have mis-scored fixed first (M5m S3, P107 C6b) |
+| 39 | `df3dd21` | docs(ledger): the smoke backtest on the C6 code, its metrics recomputed exactly and hand-checked (M5m S3, P107 C7) |
+| 40 | `c258295` | docs: record R-AM to R-BB, annotate the stale band text (R-AU), and log P108 Phase 1's measurements (M5m S4, P109 C1) |
+| 41 | `966be69` | feat(data): the Testnet kline recorder, as a library with an injected fetcher (M5m S4, P109 C2a, R-AN) |
+| 42 | `4019d68` | feat(scripts): the Testnet kline recorder script and its scheduler definition, first run recorded (M5m S4, P109 C2b, R-AN, R-AW) |
+| 43 | `13bd70e` | fix(indicators): sma is window-only, so a tie no longer depends on the buffer's length (M5m S4, P109 C3, R-AQ, R-AX) |
+| 44 | `524d53a` | feat(backtesting): evidence_eligible and the one door that refuses a record that is not evidence; a quiet backtest console (M5m S4, P109 C4, R-AR, R-AS) |
+| 45 | `265f902` | fix(scripts): the survey's summary ids are node ids, and every saved M5m survey log re-parsed (M5m S4, P110 C1, R-BC) |
+| 46 | `133515b` | docs: R-BC to R-BH recorded; the printed backtest line removed, main.py under the evidence census, the rich docstring corrected, bollinger_bands carried (M5m S4, P110 C2, R-BD, R-BE, R-BF, R-BG) |
+| 47 | `9210d38` | feat(config): S4's backtest plumbing -- exchange_info_environment, config.s4.yaml and the test that pins its difference (M5m S4, P110 C3) |
+| 48 | `a18f1b4` | feat(scripts): s4_compare.py, the core -- both records through the evidence door, the match key, R-C's three figures, figures and no verdict (M5m S4, P110 C4a) |
+| 49 | `6778445` | feat(scripts): s4_compare.py, the diagnosis -- bot downtime excluded on both sides, signal and refusal disagreements with one cause each, ties and gaps from the recorded closes, surveyed (M5m S4, P110 C4b, R-BA) |
+| 50 | `ceaaa9b` | docs: the Testnet clearing of R-AV carried out, the account before and after, config.s4.yaml's measured balance and the snapshot copy (M5m S4, P110 C5) |
+| 51 | `e248a73` | docs: S4's pre-registration -- the start, the stop, the window, the parameters, the tests and every frozen digest, committed before the run (M5m S4, P110 C6, R-AO, R-AY, R-AZ, R-BA, R-BB) |
+| 52 | `45547f1` | docs: the owner's rulings R-BI to R-BK recorded, the log rotation measured against the 35-day run, the pre-registration unchanged (M5m S4, P111 C1) |
+| 53 | `af51911` | docs: S4 launched at 2026-10-10T06:05:20Z, the recorder and the retirement recorded, R-BJ corrected by R-BL and the capture's reassembly ruled by R-BM (M5m S4, P112 C1) |
+| 54 | `0a5cb54` | docs: the S5/S6 foundation ruled -- R-BN to R-BT recorded, the research protocol with every candidate family and its full grid committed before any S5 run exists, M5m-302 added to U10 (M5m S5/S6, P113 C1) |
+| 55 | `d9045c1` | feat(backtesting): the run record carries its effective settings and their digests, and the evidence door refuses a record without them (M5m S5/S6, P113 C2a, R-BR) |
+| 56 | `31e9363` | feat(backtesting): --stop-slippage, --strategy, --timeframe and --param on the backtest command, validated before a run directory exists (M5m S5/S6, P113 C2b, R-BR) |
+| 57 | `c211359` | docs: S4's interruptions to 2026-10-14 recorded -- an ungraceful close, a refused restart, a held ETH position and a machine that restarts itself (M5m S4, P113, R-BN) |
+| 58 | `e5af2df` | feat(backtesting): the research protocol's guard core -- its declaration parsed, its windows classified, its grid and its entries checked (M5m S5/S6, P113 C3a, R-BT) |
+| 59 | `caa75cb` | test(backtesting): the research protocol's guard is tested -- every refusal, the order of the checks and the three arms of a candidate (M5m S5/S6, P113 C3b, R-BT) |
+| 60 | `478a746` | feat(backtesting): the research-protocol guard runs before any backtest directory exists, and the run record carries what it decided -- schema 6 (M5m S5/S6, P113 C4, R-BT) |
+| 61 | `79ae42f` | feat(strategies): an optional trend filter on both shipped strategies -- an entry only while the close is above its SMA (M5m S5/S6, P113 C5, R-BS) |
+| 62 | `9aa320b` | feat(scripts): S5's report -- in-sample and out-of-sample figures separately, through the evidence door, and no verdict (M5m S5/S6, P113 C6, R-BT) |
+| 63 | `2d37258` | docs: the canonical frozen mainnet store recorded -- copied, verified month by month, write-protected -- and the Q2 survey's evidence (M5m S5/S6, P113 C7, R-BQ) |
+| 64 | `67b7563` | docs: the S4 interruption resolved -- the owner's sale and release, the restart as pid 25352, and U10's three Testnet cases (M5m S4, P114 C1, R-BU, R-BV) |
+| 65 | `dfb5916` | docs: S5 complete -- the baseline loses in sample gross and net, R-BW and R-BX recorded, the sizing floor and the frozen function's rule measured (M5m S5, P115 C1, R-BW, R-BX) |
+| 66 | `09d697d` | test(protocol): the s5-baseline entry is marked read with its three records' digests, and a fresh clone's guard refuses a second read (M5m S5, P116 C1, R-BY, R-BZ) |
+| 67 | `66f64ce` | docs(protocol): amendment 2 -- selection on per-trade returns, the ruin and 250-trade rules, the walk-forward report, the freeze and S7's two profit factors (M5m S6, P117 C1, R-CA to R-CJ) |
+| 68 | `8bee34c` | test(protocol): the committed-baseline tests select S5's entry by id, so candidate entries can join the directory (M5m S6, P117 C2, R-CI) |
+| 69 | `35d6b38` | feat(backtesting): S6's selection -- the return profit factor, the eligibility rules, the tie-break, the ledger and the walk-forward report (M5m S6, P117 C3a, R-CB to R-CG) |
+| 70 | `d96045b` | test(backtesting): the selection over 216, the walk-forward, reading a run and the output are tested, and the targeted survey of the statistic, eligibility and tie-break (M5m S6, P117 C3b, R-CB to R-CG) |
+| 71 | `119b25c` | feat(scripts): s6_select -- read the in-sample sweep, choose a candidate per cell, print the walk-forward report, write the selection file unedited (M5m S6, P117 C4, R-CB to R-CG) |
+| 72 | `6b26c97` | feat(scripts): s6_sweep -- the in-sample sweep, resumable after a power cut, parallel only after R-CH's check, every variant in a manifest (M5m S6, P117 C5, R-CG, R-CH) |
+| 73 | `9fd2e2e` | test(protocol): an in-sample run over a grid point names its variant in the record the engine writes, and the selection reads that record back (M5m S6, P117 C6) |
+| 74 | `4dc445a` | feat(backtesting): S7's gate -- the five thresholds at the gate arm, both profit factors, and nine refusals, each tested one broken field at a time (M5m S7, P117 C7a, R-CJ, R-BW) |
+| 75 | `8e17898` | feat(scripts): s7_gate -- judge every candidate read out of sample, withhold every verdict on any refusal, and the targeted survey of the gate (M5m S7, P117 C7b, R-CJ) |
+| 76 | `a417700` | fix(scripts): the sweep's timing probe times both strategies, and the selection refuses a run made under another protocol digest (M5m S6, P117 C7c) |
+| 77 | `9d6d519` | docs: the S6 and S7 tooling is recorded -- P116's measurements, the build record, the owner's steps O1 to O6 and the research log (M5m S6/S7, P117 C8) |
+| 78 | `7f86953` | feat(scripts): s6_rehearsal -- the narrowed protocol and the pure helpers of the S6/S7 chain rehearsal, split from its orchestration (M5m S6/S7, P118 C1a, R-CL) |
+| 79 | `2f44ae2` | feat(scripts): s6_rehearsal -- the rehearsal's orchestration: a throwaway worktree, the real commands hop by hop, each recorded against its prediction (M5m S6/S7, P118 C1b, R-CL) |
+| 80 | `62c21ae` | fix(scripts): s6_rehearsal -- an invocation keeps its evidence under its own label, and a cleanup numbers its hops after the run's (M5m S6/S7, P118 C2a) |
+| 81 | `93e98e7` | fix(backtest): a run that reads a working-directory stamp a peer already holds takes a later one, instead of dying on FileExistsError (M5m S6, P118 C2b) |
+| 82 | `d198631` | feat(scripts): s6_rehearsal -- a --window flag, a default window wholly inside the real in-sample period, and a refusal of any window that reaches the real out-of-sample one (M5m S6/S7, P118 C2c) |
+| 83 | `da094f8` | feat(scripts): s6_rehearsal -- the default out-of-sample window is the whole of 2020, because a quarter can give a candidate no losing trade (M5m S6/S7, P118 C2d) |
+| 84 | `7fec073` | docs: the rehearsal of the S6/S7 chain is recorded -- the final run with its digests, R-CK and R-CL, the corrected install step O1 and the missing O7 (M5m S6/S7, P118 C3) |
+| 85 | `a03d5c9` | docs(research): amendment 3 -- two variants ruled ineligible for selection, R-CM to R-CQ recorded, and the figures that were seen (M5m S6, P119 C1, R-CM) |
+| 86 | `4a8ec1a` | feat(scripts): s6_mark_read -- owner step O7, an entry becomes read from its three verified records, all entries or none (M5m S6/S7, P119 C2, R-CP) |
+| 87 | `13c780e` | fix(scripts): s6_sweep -- a worker that was lost and whose variant was recovered is reported as lost and recovered, and the sweep reports COMPLETE (M5m S6, P119 C3, R-CQ) |
+| 88 | `365d767` | feat(scripts): s6_rehearsal -- owner step O7 is driven through s6_mark_read.py, and the rehearsal holds no marking code of its own (M5m S6/S7, P119 C4a, R-CP) |
+| 89 | `708a65f` | docs(ledger): section 53 -- the rehearsal re-run with step O7 driven through s6_mark_read.py, 112 of 112 hops matched, and what it did not cover (M5m S6/S7, P119 C4b, R-CP) |
+| 90 | `cf47421` | docs(next-milestone): the owner's steps O1 to O7 and the gate in one place, each with its CHECK, O3's CHECK as R-CQ makes it, and which PowerShell has been run (M5m S6/S7, P119 C5, R-CM to R-CQ) |
+| 91 | `0f42027` | docs: the sweep, the S4 restart of 2026-10-15, and O7 and the gate moved to the development tree (M5m S6/S7, P120 C1, R-CR, R-CS, R-CT) |
+| 92 | `8621c64` | feat(scripts): s7_null -- the chance that a strategy with no edge passes S7, computed by Monte Carlo from each candidate's own in-sample trades (M5m S6/S7, P120 C4, R-CS) |
+| 93 | `b5f7547` | docs(research): the S7 null check's output on the six candidates, and the reading it asks for before O6 (M5m S6/S7, P120 C4, R-CS) |
+| 94 | `2e00dcc` | feat(selection): the selection file is JSON Lines, one record a line, and no pick or digest changes (M5m S6, P121 C1, R-CU) |
+| 95 | `bdd95e4` | research: the S6 selection, regenerated in the line-per-record format, committed unedited (M5m S6, P121 C2, R-CU, R-CV) |
+| 96 | `f9c06a4` | docs: S7 recorded as FAIL without an out-of-sample read, the reserved window unread, O5 to O7 and the gate not taken, and the S4 restart corrected (M5m S6/S7, P121 C3, R-CU, R-CV, R-CW) |
+| 97 | `15de39c` | docs: R-CX to R-CZ recorded, P121's T0 corrected to the run boot, the selection file's old name annotated, and M5m-510 carried with its arming condition (M5m S4/S6, P122 C1, R-CX, R-CY, R-CZ) |
+| 98 | `4401670` | fix(scripts): the rehearsal names the selection file selection.jsonl, with a test that fails on the old name (M5m S6, P122 C2, R-CY) |
+| 99 | `8bd39b4` | feat(scripts): s4_daily -- the owner's read-only daily check of the S4 run, freezing every log file outside every clone, and reporting without a verdict (M5m S4, P122 C3a, R-CZ) |
+| 100 | `fd79692` | test(scripts): s4_daily -- the process status, the recorder's store, the two PowerShell seams and the whole report, each pinned by a mutation (M5m S4, P122 C3b, R-CZ) |
+| 101 | `ac07c44` | docs: the first run of scripts/s4_daily.py against the live S4 run, 84 bookings and 6.003 days from T0, every figure inside its prediction (M5m S4, P122 C4, R-CZ) |
+| 102 | `78e6304` | docs: the S4 stop runbook, nine steps each with its CHECK and the commands no run has executed, and R-DB and R-DC recorded (M5m S4, P123 C1, R-DB, R-DC) |
+| 103 | `d05e8cb` | feat(scripts): s4_explore -- S4's excluded intervals under the frozen rule and a corrected one, and the entries each excludes, exploratory and never a replacement for s4_compare (M5m S4, P123 C2, R-DC) |
+| 104 | `66bfc9b` | docs: the first run of scripts/s4_explore.py on a fresh copy of the S4 log, 42:15:04 excluded under the frozen rule and 41:36:16 under the corrected, and the comparable-count arithmetic (M5m S4, P123 C3, R-DC) |
+| 105 | `97efce3` | feat(scripts): store_check -- the store checker the S4 stop uses, tracked and tested, equal to the scratch one on the mainnet store and on a copy of the recorder's; R-DD, R-DE and R-DF recorded (M5m S4, P124 C1, R-DD, R-DE) |
+| 106 | `cef23c7` | docs: Appendix A of the S4 stop runbook executed over 2026-10-11 -- an eligible backtest of config.s4.yaml and s4_compare.py on real inputs, both exit 0, the clone removed; the runbook's N rows made E (M5m S4, P124 C2, R-DF) |
+| 107 | `df82ebe` | docs: the S4 runbook archives its evidence before any removal and writes every file a script reads in ASCII, and names its install procedure and the run that measured it (M5m S4, P125 C1, R-DG, R-DH) |
+| 108 | `7ec055f` | test(integration): the live market-data test asserts what holds on both paths -- the buffer's last bar is the stream's closed bar, appended or replaced, identical or not (M5m S4, P126 C1, R-DI) |
+| 109 | `d6c1c5a` | docs: every program the S4 runbook pipes into Out-File -Encoding ascii is shown to print only ASCII, and the boot is run from the backtest clone (M5m S4, P126 C2, R-DJ) |
+| 110 | `7f63985` | docs: P128's halts and the predictions for the S4 latch measurements, written before the 2026-10-23 capture is parsed (M5m S4, P128 C1, R-T) |
+| 111 | `b3d4f8b` | docs: the S4 correction file for the latch -- R-DK to R-DN verbatim, the three episodes R-DM finds, and what the measurements say about B (M5m S4, P128 C2, R-DK, R-DL, R-DM, R-DN) |
+| 112 | `4e1bef9` | docs: RUN_LEDGER section 66 -- the clean stop of pid 14600 at 2026-10-23T08:05:33Z, the latch on order 5431129, and the P128 episodes (M5m S4, P128 C3) |
+| 113 | `0586f48` | docs: NEXT_MILESTONE -- order 5431129 is U10's fourth Testnet case, and P128's rulings with the items they carry (M5m S4, P128 C4) |
+| 114 | `ed750f6` | docs: P129's halts, a correction to section 66's capture size, and the predictions for the R-DO measurements, written before the 190521Z capture is parsed (M5m S4, P129 C1, R-T) |
+| 115 | `1bd0db7` | docs: the S4 correction file for R-DO -- the end of a latch run, P128's episodes re-measured, and B recomputed with all three (M5m S4, P129 C2, R-DO) |
+| 116 | `22e9b3f` | docs: RUN_LEDGER section 67 completed -- the owner's restart of 2026-10-23, boot #7 (pid 20100), the downtime rule, and the predictions scored (M5m S4, P129 C3) |
+| 117 | `33d6765` | docs: NEXT_MILESTONE -- R-DO verbatim, what it and the restart resolve of P128's carried items, and the U10 sentence the sale makes false (M5m S4, P129 C4) |
+| 118 | `3fd0ef5` | docs: the S4 correction file for R-DP -- the break test is the trust set the bot refuses entries by (M5m S4, P130 C1, R-DP) |
+| 119 | `e4e12a4` | docs: P130's halts, the step-0 halt, and the predictions for the E2 wrapper, with a disclosure that a draft already existed (M5m S4, P130 C2, R-T) |
+| 120 | `c254740` | feat(scripts): s4_latch_compare -- the E2 wrapper, S4's comparison with the owner's latch intervals excluded as well as downtime, figures only (M5m S4, P130 C3, R-DL, R-DM, R-DO, R-DP) |
+| 121 | `8a570fd` | test(scripts): the E2 wrapper on synthetic fixtures -- the episodes, the coverage rule, R-DP, the union, both-sided exclusion and the 13:09 label (M5m S4, P130 C4, R-DL, R-DP) |
+| 122 | `4714d11` | test(scripts): the E2 wrapper's tests assert a length before reading an episode, and pin three behaviours the survey plan found unpinned (M5m S4, P130 C5) |
+| 123 | `a923f63` | test(scripts): the E2 wrapper's argument test compares its help with the frozen tool's, not only an exit status (M5m S4, P130 C6) |
+| 124 | `4062ccb` | test(scripts): two attach tests that could not tell a wrong process from the right one, or failed by a crash, now can (M5m S4, P130 C7) |
+| 125 | `5a7891c` | fix(scripts): the E2 wrapper calls the evidence door itself, as the repository's own scan requires (M5m S4, P130 C8) |
+| 126 | `21358d2` | docs(counts): the gate figures after the E2 wrapper and its tests -- 230 files formatted, mypy over 113, 4463 credentialed (M5m S4, P130 C9) |
+| 127 | `cc82563` | docs(runbook): step 7b, the two exploratory comparisons of R-DL, run after the primary and reported beside it (M5m S4, P130 C10) |
+| 128 | `7451d01` | docs(next-milestone): the E2 wrapper's arming condition discharged, R-DP recorded, and the 13:09 entry's fill established (M5m S4, P130 C11) |
+| 129 | `7e09636` | docs(ledger): section 68 completed -- the arming audit by test and by mutation, the predictions scored, and P130's process disclosures (M5m S4, P130 C12) |
+| 130 | `908fe9f` | docs(ledger): section 69, P131's halts and the predictions for the stop rehearsal of runbook steps 6 to 7b, before any step is run (M5m S4, P131 C1, R-T, R-DQ) |
+| 131 | `aead848` | docs(runbook): the step 6 boot CHECK reads the joined record, the 6a time estimate is measured, and steps 6b, 7 and 7b are marked executed for mechanics only (M5m S4, P131 C2) |
+| 132 | `0f84d50` | docs(ledger): section 69 completed -- the rehearsal's eighteen commands with exit, wall time and digest, the predictions scored, and what it found (M5m S4, P131 C3, R-DQ) |
+| 133 | `7ef7d5b` | docs(next-milestone): R-DQ recorded verbatim, with what it corrects in P131's description of it (M5m S4, P132 C1, R-DQ) |
+| 134 | `1176776` | docs(claude): the every-commit gate rule annotated with a pointer to R-DQ (M5m S4, P132 C2, R-DQ) |
+| 135 | `7a2981e` | docs(runbook): the step 8 report carries the 13:09 note and R-DK's wording, and the rehearsal clone is retained with a safe junction removal (M5m S4, P132 C3) |
+| 136 | `337de24` | docs(ledger): section 70, P133's halts and the predictions for the 2026-10-23 ETHUSDT zero-executed expiry, before any measurement (M5m S4, P133 C1, R-T, R-DQ) |
+| 137 | `379b2d8` | docs(ledger): section 70 completed -- list 218102's zero-executed expiry of 2026-10-23, every fact by timestamp, the predictions scored, and the wick it coincides with (M5m S4, P133 C2) |
+| 138 | `9ee6b67` | docs(next-milestone): list 218102 added to U10 as a fifth Testnet case, the first with nothing executed and the first cleared without an operator (M5m S4, P133 C3) |
+| 139 | `551da8b` | docs(ledger): section 71, P134's halts and the predictions for the stop-leg types of three order lists and the wide-bar threshold sensitivity, before any measurement (M5m S4, P134 C1, R-T, R-DQ) |
+| 140 | `eaff03a` | docs(ledger): section 71 completed -- the capture records no stop-leg type for lists 218102, 183218 and 71012, and the wide-bar counts by threshold (M5m S4, P134 C2) |
+| 141 | `9d15480` | docs: the S4 correction file for R-DR -- a wick annotation on the stop report's disagreements, with its threshold sensitivity (M5m S4, P134 C3, R-DR) |
+| 142 | `7d95de4` | docs(runbook): the step 8 report carries list 218102's expected fill-model disagreement and the required R-DR annotation (M5m S4, P134 C4) |
+| 143 | `d2fab1e` | docs: the S4 correction file for R-DS -- the interval of the R-DR wick annotation is the union of the holding periods (M5m S4, P135 C1, R-DS) |
+| 144 | `4f757ea` | docs(ledger): section 72, P135's halts and the predictions for scripts/s4_wick_annotate.py, before any code (M5m S4, P135 C2, R-T, R-DQ) |
+| 145 | `526002f` | feat(scripts): s4_wick_annotate -- the R-DR/R-DS wick annotation of a disagreement list, for the primary, E1 and E2, figures-free and verdict-free (M5m S4, P135 C3, R-DR, R-DS) |
+| 146 | `af9ccc4` | test(scripts): the R-DR/R-DS wick annotation on synthetic fixtures -- the interval of each kind, the half-open edges, the strict 3% bound, the counts by cause and the three analyses against their sources (M5m S4, P135 C4) |
+| 147 | `766b1e4` | docs(ledger): section 72, the arming audit's predicted kills for s4_wick_annotate.py, before the survey is run (M5m S4, P135 C5, R-T, R-DQ) |
+| 148 | `da3a8b5` | docs(next-milestone): U10 records that the stop legs are market-type and gives the thin-book expiry its reasoned mechanism, with the venue read deferred to after M5m (M5m S4, P135 C6) |
+| 149 | `51cd7b4` | docs(runbook): step 8's R-DR annotation is made by scripts/s4_wick_annotate.py -- the by-hand instruction and its "no live position" text replaced by the tool's three commands, each with its CHECK (M5m S4, P135 C7) |
+| 150 | `dcb66b7` | docs(counts): the gate figures after the wick-annotation tool and its tests -- 232 files formatted, mypy over 114, 4515 credentialed; the scripts list names the two S4 tools it missed (M5m S4, P135 C8) |
+| 151 | `811fd09` | docs(ledger): section 72 completed -- the arming audit's 52 mutations all matched, the four tests no mutation kills, a mechanics check on the real store (M5m S4, P135 C9) |
+| 152 | `8043049` | docs(ledger): section 73, P136's halts, the trace of a store read error, and the predictions for closing P135's six test gaps, before any code (M5m S4, P136 C1, R-T, R-DQ) |
+| 153 | `e0c3e1a` | fix(scripts): a store that is there and cannot be read refuses the wick annotation run instead of reading as unknown (M5m S4, P136 C2) |
+| 154 | `e9aa993` | test(scripts): twelve tests close the wick annotation's six gaps and pin the store-error refusal -- an ETHUSDT 5m end-to-end, the 5m exit-bar close, E2's frozen downtime, a live entry open at M, a naive instant, an extra cause, a store error (M5m S4, P136 C3) |
+| 155 | `146f920` | docs(ledger): section 73, the predicted kills for the closed gaps and the re-anchored m43, before the survey is run (M5m S4, P136 C4, R-T, R-DQ) |
+| 156 | `bcfc8b4` | docs(counts): the pytest figures after the twelve new wick-annotation tests -- 4527 credentialed (M5m S4, P136 C5) |
+| 157 | `33ad5dd` | docs(ledger): section 73 completed -- the six gaps closed, m43 settled, 54 mutations with no FEWER, and the mechanics re-check unchanged (M5m S4, P136 C6) |
+| 158 | `e8c820b` | docs: P135's correction file records that its operational exit-bar rule is ratified, with the ruling's words not supplied (M5m S4, P136 C7) |
+| 159 | `a2e95fe` | docs: P135's correction file carries the ratification text verbatim under its section 5 (M5m S4, P137 C1) |
+| 160 | `8c3bc5c` | docs: the stop runbook freezes the E2 and annotation tools, adds the R-DR counts and the pre-stop latch check (M5m S4, P137 C2) |
+| 161 | `543d379` | docs: M5n charter draft, marked DRAFT until M5m closes (M5n, P138 C1) |
+| 162 | `ee8d485` | docs: the M5n charter records D1 to D4, R-DT and the owner's two answers; check_findings needs no change (M5n, P139 C1) |
+| 163 | `24eab08` | docs(ledger): section 74, P150a's halts and the predictions for the pid 20100 resource fault, before the capture is measured (M5m S4, P150a C1, R-T, R-DQ) |
+| 164 | `cda8bfb` | docs(ledger): section 75, latch episode 4, the owner's sale, the release, boot #8 and the pid 20100 resource fault, measured (M5m S4, P150a C2) |
+| 165 | `b2bf5e5` | docs: S4 correction P150a records R-EC, the resource fence, and R-ED, the resource-fault windows, verbatim (M5m S4, P150a C3) |
+| 166 | `f16107c` | docs: the stop runbook's step 8 requires R-ED's listing as its sixth item (M5m S4, P150a C4) |
+| 167 | `7ab3d6c` | docs: order 7022204 is U10's sixth Testnet case (M5m S4, P150a C5) |
+| 168 | `9197be3` | docs: S4 correction P150b records R-ED-1, the window start, the listing and the architect-owned premise, verbatim (M5m S4, P150b C1) |
+| 169 | `ffdfcf5` | docs(ledger): section 76, section 75's windows re-started under R-ED-1 (M5m S4, P150b C2) |
+| 170 | `b8977bd` | docs: the stop runbook's step 8 item 6 cites R-ED-1 for the window start and the twice-made listing (M5m S4, P150b C3) |
+| 171 | `5cdf75e` | docs: S4 correction P151 records the ratification of R-ED's points 3 and 4, verbatim (M5m S4, P151 C1) |
+| 172 | `297d5fe` | docs(ledger): section 77, the S4 stop's records: the final capture, boots 9 to 11, the latch and fault windows and the restart exclusion, before any backtest (M5m S4, P151 C2, R-DQ) |
+| 173 | `f16a3ee` | docs(ledger): section 78, the predictions for the stop's comparison, before the backtest runs (M5m S4, P151 C3, R-T, R-DQ) |
+| 174 | `c001f8b` | docs(ledger): section 79, the S4 stop's comparison: steps 5 to 8a, the step 8 report and the predictions scored (M5m S4, P151 C4) |
+| 175 | `341da3d` | docs(ledger): section 80, P152's halts and the predictions for diagnosing the four unexplained entries, before any measurement (M5m S4, P152 C1, R-T, R-DQ) |
+| 176 | `f1eb625` | docs(ledger): section 81, the four unexplained entries diagnosed, the 2026-10-29 feed gap post hoc, step 9 and the owner's check_testnet (M5m S4, P152 C2) |
+| 177 | `a9b780b` | docs: the stop runbook's step 4 CHECK reads "at or after" M minus 1 day, citing P151's finding (M5m S4, P152 C3) |
+| 178 | `ddf3593` | docs: the S4 result, the fok-unfilled mislabel record and U13 in NEXT_MILESTONE (M5m S4, P152 C4) |
+
+**Rotation commits (6, this one included).** `e2e5ee2` (QC section 4b: a partly executed stop leg is measured), `6b841fb` (QB Class E fired once), `92763bc` (X2b struck: `decision=halt` occurred 37 times), `0e39631` (ledger section 82: the structural lists, the arming registers, X2b), `8abf2eb` (`NEXT_MILESTONE.md` rotated to M5n: the outcome, the resolved index, the register), and this commit (the build log, `CLAUDE.md`'s Current state, `README.md`, the milestone tag).
+
+### What was built, in order
+
+- **S0, the census.** `scripts/trade_census.py`, tracked and surveyed, replacing an untracked reviewer script: 165 bookings in the census of record, the M5k capture `3f7f551c...`.
+- **S1, the archive.** `data/historical.py` (ingest, `HistoricalStore`, gap kinds) and `scripts/download_data.py`: the monthly zips for 1,100 series-months, 980 fetched and 120 ingested from disk, every row classified at ingest and a month refused only for an unknown shape; quarantined spans are never backfilled.
+- **S2, the backtester.** `backtesting/`: the live provider and the unchanged engine replayed over stored bars (`replay`, `engine`'s `backtest_system`), a pure `fill_model`, a `simulated_executor` sequencing it against the live ledger, `exchange_info` snapshots, and a `backtest` command that logs only to its own run directory. U6 resolved along the way: a `Dispatcher` Protocol replaced the unused `OrderExecutor` ABC.
+- **S3, metrics and regimes.** Pure `metrics.py` (drawdown, Sharpe, Sortino, exposure, breakdowns), equity sampled in the root's loop, and quarterly regime labels fixed once and committed with their digest.
+- **S4, the comparison.** A Testnet kline recorder, `evidence_eligible` and the one door that refuses a record that is not evidence, `config.s4.yaml`, `scripts/s4_compare.py` (frozen) and a pre-registration committed before the run. The run: T0 `2026-10-10T06:05:20Z` to the stop `2026-11-01T18:12:18Z`, 11 boots, 313 bookings, four latch episodes. Around it: `s4_daily`, `s4_explore`, `store_check`, the stop runbook (executed in a rehearsal first), the E1 and E2 exploratory comparisons (`s4_latch_compare`), the R-DR wick annotation (`s4_wick_annotate`), and the correction files P128 to P151.
+- **S5 and S6, the research protocol.** A guard that classifies windows, grids and entries before any run directory exists (`protocol`, `overrides`, `candidate`, `readmark`), an optional trend filter on both shipped strategies, `s5_report`, the sweep over 216 variants, the selection (`selection`, `s6_sweep`, `s6_select`) and a rehearsal of the whole chain.
+- **S7, the gate.** `gate` and `s7_gate`, and `s7_null`, the chance that a strategy with no edge passes. Used once, to record that nothing could.
+- **In `src/`, live path.** `sma` became the window-only computation, so a tie no longer depends on the buffer's length (R-AQ, R-AX); `Settings.with_config`; the logger's false rich docstring corrected.
+
+### The decisions, and the alternatives rejected
+
+- **Validate a strategy before any engine work (the owner's instruction).** Rejected: P98's order, the live-blocking items first (N6, U9, U10). They are deferred and not dropped. The reason was MEASURED: the engine booked what the venue did to the strategy's orders, and the venue's answer was a loss once fees exist.
+- **The census of record is the tracked tool on the M5k capture.** Rejected: the untracked figures (157 bookings), which the tool reproduces to the digit over their own window. The 8 bookings after it are the whole difference, and "the difference is itself a finding".
+- **One code path.** The backtester replays stored bars through the live provider and engine rather than reimplementing the decision path; an incremental frame was not built (R-V), and the backtest applies no cooldown, at parity with a live `cooldown_minutes` that nothing calls (R-X, K7).
+- **The gate arm is a 1.20% stop slippage (R-B2).** Rejected: 0.66%, because R-B's "conservative" holds against the median only, and a median of eight values moved by 0.0227 points when a ninth was added.
+- **S4 is measured against Testnet, by the owner's option (c), pre-registered with every digest frozen, and the primary is never changed.** Rejected: editing `s4_compare.py` or excluding the latch in the primary (R-BN, R-DK). Latch handling is exploratory, E1 and E2, figures only, and a latch-caused failure is `FAIL (latch-caused)` and never `NOT MEASURED`.
+- **Downtime is excluded on both sides and the exclusion is the frozen rule's.** The corrected rule (R-DC, `s4_explore`) is exploratory.
+- **Predictions are committed before the measurement and scored as written (R-T, R-DQ).** Rejected: predicting and measuring in one commit. R-DQ adds that no code or test is drafted before the predictions commit about it exists.
+- **The research protocol fixes everything before S5 runs.** Every family and its full grid (R-BT); selection on per-trade returns and not USDT (R-CB), with a ruin rule (R-CC), a 250-trade floor (R-CD), the 1.20% arm only (R-CE), walk-forward reported and not gated (R-CF), all 216 variants counted (R-CG), and S7 passing only with both profit factors at least 1.3 (R-CJ). Rejected: selecting on P&L, and gating on walk-forward.
+- **S7 is recorded as FAIL without reading the reserved window (R-CV).** Rejected: reading it for the six. Every selected candidate loses in sample on the gate arm (per-trade-return profit factor 0.359 to 0.516, no fold above 1) and each has a null pass probability of 0.0000, so a read could only spend a window that "stays unread for later research".
+- **R-ED and R-ED-1, the resource-fault windows.** A window starts 60 s before its fault line, because a dead socket is logged only when its keepalive times out (the first lost bar closed up to 31 s earlier), and the listing is a by-hand join made twice. Rejected: a script before the stop (P150b's Listing ruling, citing R-EC).
+- **The four unexplained entries are diagnosed, not relabelled.** The frozen label stays `unexplained`; the diagnosis is a ledger section.
+
+### What measurement overturned
+
+- **The untracked census** (S0): 157 bookings against 165, -157.72 against -192.03 realised.
+- **"Conservative"** (R-B2): true against the median only.
+- **`decision=halt` has never occurred** (M5j, M5k, and `CLAUDE.md`'s four narrative blocks): 37 of 339 close plans in the S4 capture, the first at `2026-10-21T13:38:02Z` (`M5m-775`).
+- **QC section 4b's "a leg executed partially is UNMEASURED":** four occasions and a fifth shape with nothing executed (`M5m-773`).
+- **The architect's prediction that the 31 failed passes cluster in the memory squeeze:** they were request timeouts and one DNS failure, a day and more earlier (`M5m-715`, `M5m-730`).
+- **Test C's range:** both the architect's (80 to 95) and the executing session's (80 to 92) were exceeded by 99.63%; path dependence was a third of what both predicted (`M5m-759`).
+- **`unexplained` meant a model error:** it meant a feed hole the frozen tool's refusal vocabulary cannot read (`M5m-762`, `M5m-764`).
+- **The projection that test B is likely to fail (`M5m-617`) held,** and for the cause it named: four latch episodes in 22 days, the third lasting 42.9 hours.
+
+### What did NOT happen
+
+- **No candidate passed anything.** S5's baseline loses gross and net in every arm; the six S6 candidates lose in sample; S7 was recorded as FAIL by ruling, not measured.
+- **The reserved window `[2024-01-01, 2026-10-01)` was not read** for any candidate, except the two variants R-CM names and S5's baseline configuration.
+- **Live trading is not unblocked.** Every commission in every capture is still `0.00000000`, entry-fee deduction and base-quantity netting are unbuilt, and `refuse_live_trading` is unchanged. A venue `trailingDelta` is chartered for M5n (D1) and not built on `main`.
+- **The tag is not pushed, nor the branch, by the rotation;** and the rehearsal clone and the S4 backtest clone are not retired (the owner's).
+- **`check_testnet` after the stop was not run by an executing session:** it is the owner's and is recorded as given.
+
+### What the rotation's steps found
+
+- **Step 4, the contracts.** `docs/QC_PROTECTIVE_ORDERS.md` section 4b said a partly executed leg was UNMEASURED; `docs/QB_ESCALATION.md` Class E had never been observed. Both annotated; `docs/M5_NUMBERS.md` held no sentence M5m falsified.
+- **Rule 3, the structural lists.** `data/watchdog.py` (M5l's) was named in neither architecture tree. Corrected.
+- **The arming registers.** 55 candidates in `docs/NEXT_MILESTONE.md`; of the 54 parsed, 23 name a file M5m changed, and the trace found five consumed by S1 to S3's own work, the E2 condition fired and discharged at P151, two discharged by S4's stop, U6 fired at S2 and struck, and fourteen not fired (`M5m-776`, corrected by `M5m-778`).
+- **The sentences made false.** X2b and the four "HALT has never occurred" blocks in `CLAUDE.md` and `README.md`.
+- **A count in a finding was wrong,** the executing session's: `M5m-776` said six and thirteen where five and fourteen were meant, and is annotated by `M5m-778` and not amended.
+
+### The method rules, keyed
+
+- **A prediction made before the measurement is a falsifiable statement, and one taken from a prompt is not a fact** (`M5m-715`). Scored as written, by hit and miss, including the ranges the figure beat.
+- **A reconstruction is checked by reproducing the numbers the system logged,** to the digit (`M5m-763`): the live buffer rebuilt from the store with the reported holes removed reproduced three logged averages exactly.
+- **A fault line is not where the damage starts** (`M5m-719`): the first lost bar closed up to 31 s before the log line.
+- **A frozen tool's vocabulary is part of its meaning** (`M5m-764`, K9): `unexplained` read for what the tool cannot see.
+- **Two passes by one reader are independent in method and not in reader** (`M5m-756`), and the report says so.
+- **A CHECK written as equality about a moving quantity cannot hold** (`M5m-736`, `M5m-769`).
+- **Annotate a wrong finding in a later block, never amend it** (`M5m-778`), used on the rotation's own count.
+- **A resource fence is the architect's to build and is still missing** (`M5m-783`): R-EC governed one session and lapsed with it.
+
+### The architect's own errors, by class
+
+- **A premise carried untested:** the 31 failed passes (`M5m-715`, `M5m-730`).
+- **A label that named two things:** U11 (`M5m-782`); order ids called lists.
+- **A draft taken for a ruling:** the M5n charter's first D1 to D4 (`M5m-706`, ARCHITECT-OWNED, recorded in the charter).
+- **A count off by one in a finding** (`M5m-776`), the executing session's own, corrected by annotation.
+
+### What carries into M5n
+
+M5n is chartered in `docs/M5N_CHARTER_DRAFT.md` (a draft on `main`; amended through P142 on branch `m5n`, where R-DU branch 1, R-DX, R-DY, R-DZ, R-DT and R-DT-3b are recorded). Carried, each with its status at the close, in the register of `docs/NEXT_MILESTONE.md`: K1 to K9 (K9 new: the frozen tool's blindness to `buy_refused_bars_gap`); P-3i, P-3m, P-3n; N1 to N6; U0 to U5 and U7 to U13 (U6 resolved; U10 at six Testnet cases; U12 a REASONED prerequisite for any 4h or 1d live path; U13 new); A1 to A3, A5, A6; the `M5i` items; W1 to W4 and W6; X1 to X3 all observed; the blocked trailing-stop milestone; and `M5m-510`. **The owner's pending steps:** retire the rehearsal clone (junction first, `cmd /c rmdir`) and, after confirming the archive, the S4 backtest clone. **Live trading stays blocked by exactly the two gates it was, and refused at every entry point.**
+
+### The historical figures in this entry
+
+**Pinned to their commits, not a live count.**
+- **At `ddf3593`**, the last numbered commit: `ruff format` 232 files, `mypy` 114 source files, 4527 passed and 1 skipped with Testnet credentials (4524 and 4 derived); 772 findings and 178 commits.
+- **At this rotation's gate**: the same 232 / 114 / 4527 passed, 1 skipped, credentialed, since the rotation changed no `.py` file; 787 findings and 184 commits including this one.
+- The captures: S4's final, SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`; the census of record's, `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`; the S4 run `20261101T183301538998Z-e7ed287be238` (`run.json` `7a3e1b2f6e3f9c51a43cd7d66cc1285dd8e4cb641dc2b7fcf0681dcdabf5279c`).
+
+**M5m's scope, its order, S4's stop rule and every ruling from R-A to R-ED-1, and the ratification of P151, were the project owner's; everything else was ruled by the architect or by the reviewer under delegation.**
