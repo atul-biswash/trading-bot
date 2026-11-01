@@ -7739,3 +7739,135 @@ Only the live side, from the final capture of section 77 (SHA-256 `94201d9168462
 ### 4. The prediction rule in force
 
 A prediction is scored against what the tool prints, as written here. A figure outside a stated range is a MISS; a figure inside a range that its point value misses is not. The note on each of the architect's is the same, and section 79 scores the architect's and mine separately.
+
+## 79. M5m S4: the stop's comparison, steps 5 to 8a, the step 8 report and the predictions scored (P151 C4)
+
+An observation log, so this section only adds. It records the commands run from `docs/S4_STOP_RUNBOOK.md` after sections 77 and 78 were committed (`297d5fe` and `f16a3ee`), their exit codes and output digests, the step 8 report and the scoring of section 78's predictions as written. Nothing was run against the venue, nothing was written under `deploy\45547f107715`, no survey or parallel test run was made (R-EC), and the reserved window `[2024-01-01, 2026-10-01)` was not touched: the recorded Testnet store begins `2026-10-07T10:32Z`, and the mainnet store that holds that window was not opened. The development tree was at `f16a3eecc24c1ad0ca79087b11bae3a8cf3ecf0d` for every command, clean under `scripts`. **Everything is on the owner's side of the line: this section applies no S4 verdict beyond R-DK's labels, and R-DU and `m5n` are untouched.**
+
+### 1. The steps as run, and what departed from the runbook
+
+| Step | Run? | Why |
+|---|---|---|
+| 2 (stop, `UtcNow`, process list, `check_testnet`) | **not run by this session** | the owner stopped the bot; `check_testnet` reads the venue, which the halt rule forbids. The stop instant is the log's, `2026-11-01T18:12:18Z`; the process list read during the halt checks held no `python` process |
+| 3 (final freeze) | done by the owner | `181221Z`, section 77 |
+| 4 (final recorder run by hand, `s4_daily_after_recorder`) | **not run** | a recorder run is a venue call. The scheduled run of `2026-11-01T18:05:01Z` (result 0) covers `M`; the newest 1m bar opens `18:04:00Z`, so step 4's CHECK of a `2026-10-31T23:59:00Z` newest bar does not hold as written (section 77); the frozen store carries 18 h of bars past `M` and the backtest ends at `M` |
+| 5 (freeze the store) | **run, on the owner's choice** (asked mid-task) | local only |
+| 0, 6a, 6b, 7, 8 (with its items 1 to 6), 7b, 8a | run | below |
+| 9 (`s4_explore`, the `$LATEST` arithmetic) | the arithmetic below; **`s4_explore.py` not run** | outside the prompt's steps 6 to 8a |
+
+### 2. The commands, their exit codes and their output digests
+
+All outputs are in `F:\trading bot\scratch\s4stop\2026-11-01\` (`$OUT`), written with `Out-File -Encoding ascii`.
+
+| Step | Command (abbreviated) | Exit | Output and SHA-256 |
+|---|---|---|---|
+| 0 | the variable block, `New-Item $OUT`; recorder task `Ready` | - | `$M 2026-11-01`, `$W 2026-10-11`, `$S 45547f107715` |
+| 5 | `store_check.py` digest | - | `FBBA98E583362058B732DF05E2D77343F29A945F30006B47D0CA920E21A18241`, equal to the runbook's |
+| 5 | `robocopy $RSTORE $FROZEN /E /COPY:DAT` | **1** (clean: files copied) | `robocopy.txt` `07b291ff...87a45`; 21 files, 9 dirs, 8.34 MB, none failed |
+| 5 | `store_check.py` on source, then on the copy | 0, 0 | `store_check_recorder.txt` `33a9c217...e7f8`, `store_check_frozen.txt` `7c2ec2a7...d1d67`; **equal `inventory sha256` `b24752fb4949aa7b48d81b0353fa287c018c944975f805d6142ebd3e936f8ad3`**, `verify problems 0`, `mismatched 0`, `missing / extra 0 / 0`, `snapshots checked 2, mismatched 0`; the two inventory files byte-equal (`55c161c5...baef4`) |
+| 5 | `record_testnet_klines.py --root $FROZEN --verify-only` | 0 | `verify_only_frozen.txt` `d2cfc144...e0f9a`: BTCUSDT 1m 36,453 bars and 5m 7,291, ETHUSDT the same, `2026-10-07T10:32Z` to `2026-11-01T18:04Z` (5m to `18:00Z`), **0 gaps, 0 problems** in all four |
+| 6a | `git clone`, `checkout --detach`, `venv`, `pip freeze`, `pip install -c ... @45547f1` | 0, 0, 0, 0, 0 | `6a_clone.txt`, `6a_checkout.txt`, `6a_pip.txt` `e4911416...d865f`; 38 constraint lines; `Successfully built binance-trading-bot` |
+| 6a CHECKs | `rev-parse HEAD`, `status --porcelain`, `--version`, `.env`, `config.s4.yaml` | - | `45547f10771543b41db42e1cbcb8b5a0a9cf1776`; 0 lines; `Python 3.12.10`; `.env` False; `0F170BAEFB7B41C87D9F3BC5220A484CE9FA20B0A62758E15CB485E9B0712594` |
+| 6a | `python -m trading_bot strategies` from `$BT` | 0 | `boot_strategies.txt` `86d6ca2e...90861`; the seven field tests all `True`; `code_files_checked=77`; the clone clean after |
+| 6b | `cmd /c mklink /J "$BT\data\historical_testnet" $FROZEN` | 0 | `Junction`; `Test-Path` True; `status --porcelain` empty; 0 run directories before |
+| 7 | `python -m trading_bot --config config.s4.yaml backtest --start 2026-10-11 --end 2026-11-01` | **0** | `18:32:55Z` to `18:34:58Z` (2 min 3 s); console file empty (`e3b0c442...`); one run directory `20261101T183301538998Z-e7ed287be238` |
+| 7 CHECKs | listing, `"evidence_eligible": true`, `status` | - | `run.json` 13,868 bytes `7a3e1b2f6e3f9c51a43cd7d66cc1285dd8e4cb641dc2b7fcf0681dcdabf5279c`, **`evidence_eligible: true`**; `trades.csv` 150,001 bytes `d90b68223e070d740ea6c86e1005a4d6bf10aba3c5edf608db614676360a9f81` (430 trades); `backtest.log` 518,901 bytes `22e4f0c0404386821f48869bffd4b828dedd530dde8eda601e398243af46ac8b`; `git status` empty; count 1 |
+| 8 | `trade_census.py $CAPTURE` | 0 | `trade_census.txt` `b49d3be8...b339cc5` (51,341 bytes): 317 placements, 313 bookings, 0 anomalies, 313 of 313 matched to a placement, 4 placements never booked |
+| 8 | `s4_compare.py --run $RUN --capture $CAPTURE --window-start 2026-10-11T00:00:00Z --window-end 2026-11-01T00:00:00Z --store $FROZEN` | **0** | `s4_compare.txt` `00dcb9ece3cf1b5fe7256cb1f5cf1bf8be4614f14213f20b7e9154320a5e5bd4` (28,520 bytes); its `capture sha256` is `94201d91...bae9`, its `run.json sha256` and `trades.csv sha256` equal the above, `recorded series` names `$FROZEN` |
+| 7b gate | `merge-base --is-ancestor e8c820b HEAD`, `diff --stat`, `status`, two `Get-FileHash -eq` | 0 | `ancestor exit 0`; diff empty; status empty; both `True` |
+| 7b | E1: `s4_compare.py ... --window-end 2026-10-21T13:09:00Z` | 0 | `s4_compare_e1.txt` `6a7c5715fe06c55432f0d6cab9815fd71ccefe34d178dceca7285de5880a49bd` |
+| 7b | digests of `s4_compare.py` and `s4_latch_compare.py` | - | `B8AFA603F3B52687AEB8F62F4D6340D77FD31B893261A12022794965E5C3AF08` and `59BB70C3C40B0377F8EBF88520C67FA231F5F255E947D297AD2BB32C3E125AA7`, both as frozen |
+| 7b | E2: `s4_latch_compare.py ...` with `$PY` from the development tree's script path | 0 | `s4_latch_compare.txt` `410f20a2aa0962fe07431ec32ba25a34a13a9922a3d39a7fe947f6da85c01c07`; the `EXPLORATORY E2 (R-DL)` header printed; `capture sha256` and `run.json sha256` equal the primary's |
+| 8 item 4 | `s4_wick_annotate.py --analysis primary`, `e1`, `e2` | 0, 0, 0 | `s4_wick_primary.txt` `65f91190...4ae4d`, `s4_wick_e1.txt` `c81f07b6...71f5e`, `s4_wick_e2.txt` `052c945e...3fcdc`; the header three times; the capture digest equal in all three; **`ANNOTATED DISAGREEMENTS` 59, 14, 18 equal `DISAGREEMENTS (n)` 59, 14, 18** of the three files above them |
+| 8a | `robocopy $RUN "$ARCH\run\..."`, `robocopy scratch\s4 "$ARCH\captures"` | 1, 1 (both clean) | the archive path did not exist before (`Test-Path` False); `run files: 3 / 3`, `capture files: 192 / 192`, **both `Compare-Object` printed nothing** |
+| 8a | the two sums files | - | `SHA256SUMS-run.txt` `FBDA19FC9C1C8921C2B737DD8CAFD2DFD4739E528E6FD8128DACA3ADB1DCD0E3`, `SHA256SUMS-captures.txt` `B082FFDD89D5F7E027D6762C798A5707145399F07537969F3FE90951141E1B1B`, in `F:\trading bot\evidence\s4\` |
+
+**Every CHECK of steps 5 to 8a held as written.** The ones that needed attention are not in those steps: the freeze report's "alive: yes", the absent artefacts of steps 2 to 5, and step 4's newest-bar CHECK, all in section 77 and section 1 above. A `robocopy` exit of 1 is its clean code (Microsoft's table, as the runbook says); the shell tool prints it as an error.
+
+### 3. The step 8 report: the primary's three figures (R-DK)
+
+The window is `[2026-10-11T00:00:00Z, 2026-11-01T00:00:00Z)`; the printed figures, unchanged:
+
+| Test | Printed | Verdict |
+|---|---|---|
+| **A**, per-trade mean inside the live 95% interval | live mean **-0.2660%**, interval **[-0.4583%, -0.0736%]** (n 271); backtest mean **-0.3064%** (n 321), "inside" | **PASS** |
+| **B**, count within 10% | **321 against 271, difference 50 = 18.45% of live** (limit 27.1) | **FAIL (latch-caused)** |
+| **C**, at least 80% reproduced on symbol and entry bar | **270 of 271 = 99.63%** | **PASS** |
+
+**The latch is the diagnosed cause of B**, and R-DK's label is used, never `NOT MEASURED`. Of the 51 backtest-only entries, **41 are `risk refusal differs` with the live refusal at `committed_risk_unknown`**, 2 are live `limit_refused`, 4 are placements the live bot made and never booked (`fok-unfilled`) and 4 are `unexplained`; the one live-only entry is a `fill-model` case. Remove the 41 and the difference is 9, 3.3%. E2, which excludes the latch intervals, prints exactly that (section 4). **Arithmetic against the pre-registration's section 7, for the owner to read and not applied here:** A and C hold, B fails on eligible inputs (the inputs are eligible, 313 bookings against the floor of 100, 271 live entries after exclusions, and `recorded-gap` is 0), so S4 FAILS under *"It FAILS when any of them fails on eligible inputs"*, latch-caused. **Section 7 D also says** *"a FAIL with unexplained disagreements is undiagnosed, and S5 does not start until it is diagnosed"*, and there are **4 `unexplained`**, all BTCUSDT backtest-only entries (signal bars `2026-10-11T04:31:59.999Z`, `10-11T13:36:59.999Z`, `10-19T14:31:59.999Z`, `10-19T14:48:59.999Z`), each annotated `wide=no`.
+
+**The comparable-count arithmetic (step 9).** The census' bookings with an entry in `[W, M)`: 276; minus the 5 the frozen rule excludes (section 77) = **271** live entries, against R-AZ's floor of 100. The primary excludes 114 entries on both sides (5 live and 109 backtest) for the 12 frozen downtime intervals, and lists them apart.
+
+### 4. E1 and E2, figures only
+
+| | E1 (window ends `2026-10-21T13:09:00Z`) | E2 (latch intervals excluded too) |
+|---|---|---|
+| live entries / backtest entries | 161 / 170 | 270 / 279 |
+| count difference | 9 = **5.59%** of live | 9 = **3.33%** of live |
+| reproduced on symbol and bar | 161 of 161 = **100.00%** | 269 of 270 = **99.63%** |
+| live mean (interval) | -0.4187% [-0.7318%, -0.1055%] | -0.2665% [-0.4596%, -0.0735%] |
+| backtest mean | -0.3368%, inside | -0.2924%, inside |
+| `DISAGREEMENTS` | 14 (0 live-only, 9 backtest-only) | 18 (1 live-only, 10 backtest-only) |
+| exclusions on both sides | 45 | 157 |
+
+E2 printed the four latch episodes (BTCUSDT pid 16076 `2026-10-11T16:00:01Z` to `16:54:00Z`, 0.900 h; ETHUSDT pid 22304 `2026-10-13T02:59:02Z` to `06:54:01Z`, 3.916 h; BTCUSDT pid 14600 `2026-10-21T13:11:00Z` to `2026-10-23T08:05:33Z`, 42.909 h; BTCUSDT pid 20100 `2026-10-26T00:51:01Z` to `03:44:50Z`, 2.897 h) and 13 excluded intervals. Neither replaces the primary.
+
+### 5. The R-DR counts (item 5), beside the notes and not inside the primary's figures
+
+| File | `n` | `wide=yes` | `wide=no` | `unknown` | By cause (wide yes / no) |
+|---|---|---|---|---|---|
+| primary | 59 | 12 | 47 | 0 | risk refusal differs 43 (2 / 41); fok-unfilled 4 (3 / 1); fill-model 8 (7 / 1); unexplained 4 (0 / 4); recorded-gap, bar differs, exact-decimal tie, window-edge 0 |
+| E1 | 14 | 6 | 8 | 0 | risk refusal differs 4 (0 / 4); fok-unfilled 1 (1 / 0); fill-model 5 (5 / 0); unexplained 4 (0 / 4) |
+| E2 | 18 | 10 | 8 | 0 | risk refusal differs 2 (0 / 2); fok-unfilled 4 (3 / 1); fill-model 8 (7 / 1); unexplained 4 (0 / 4) |
+
+Each `n` is the one the CHECK matched to `DISAGREEMENTS (n)` of the file above it. **The fill-model exit disagreements are 7 matched pairs whose exits differ, and all 7 are `wide=yes`** (the widest bars 15.99% to 24.23%); the eighth `fill-model` entry is the live-only ETHUSDT entry of `2026-10-31T22:25:00Z`, `wide=no`.
+
+### 6. The notes the report requires
+
+- **The `13:09` BTCUSDT entry (item 1).** The primary lists it as `[fok-unfilled] backtest only BTCUSDT signal bar 2026-10-21T13:08:59.999Z: the live bot placed and nothing was booked`, annotated `wide=yes max_range=18.135617%`, and "live placements with no booking" names `BTCUSDT entry bar 2026-10-21T13:09:00Z: backtest FILLED`. **The label is reported unaltered and it FILLED IN FULL**: order list 183218's stop leg executed `0.01041000` of `0.02233000` and the owner sold the remaining `0.01192000` BTC (order `6268354`, owner-reported; no venue read), `0.01041000 + 0.01192000 = 0.02233000` (`M5m-647`, sections 66 and 67). E1 excludes it by its half-open window; E2 lists it.
+- **List 218102 (item 3).** ETHUSDT order list 218102, placed `2026-10-23T22:00:01Z`, is listed as predicted: `[fill-model] different exit ETHUSDT signal bar 2026-10-23T21:59:59.999Z: live CLOSE at 2385.08, backtest stop_loss at 2325.94960000000`, `wide=yes max_range=24.225751%`, in the primary and in E2 (E1 ends before it). The live bot's own strategy `CLOSE` booked it at `22:40:03Z` for -11.36658000 (order `5380675`) with both legs `EXPIRED` and nothing executed, and the backtest stopped it out on the `22:30` bar: **the REASONED expectation of `M5m-675` is confirmed.** Reported unaltered.
+- **Three more filled placements the frozen tool calls unfilled.** "Live placements with no booking" holds 4 (`census`: 4 never booked), all `backtest FILLED`, all `fok-unfilled` in the primary: ETHUSDT `2026-10-13T02:30:00Z` (list 1867449, the partly executed stop of 9.9%, `wide=yes max_range=18.90%`), BTCUSDT `2026-10-21T13:09:00Z` (above), BTCUSDT `2026-10-26T00:24:00Z` (list 243279, order 7022204 executed 16.6%, `wide=yes`, 16.54%) and BTCUSDT `2026-10-29T08:12:00Z` (list 282240, filled and dropped unbooked, section 77, `wide=no`, 0.08%). Each is annotated and no label is altered.
+
+### 7. The R-ED listing (item 6), made twice
+
+The windows are sections 76 and 77: 30 re-started windows and 6 more, **36 in all**, each starting 60 s before its fault line (R-ED-1) and ending at the earlier of the next successful pass and `feed_resumed`. A disagreement is listed when its `signal_close`, the signal bar the frozen tool prints, lies in the closed interval from a window's start to its end (R-ED P150a points 3 and 4, ratified at P151).
+
+**Pass 1, by disagreement**: each signal bar of the primary's 59, E1's 14 and E2's 18 against the windows of its day. **Pass 2, by window**: each of the 36 windows against the disagreements of its day, from the same three printed lists. The two passes disagree on nothing.
+
+| List | Listed | The disagreement | Window |
+|---|---|---|---|
+| primary | **1 of 59** | backtest-only BTCUSDT, signal bar `2026-10-21T16:08:59.999Z` (entry bar `16:09:00Z`), `risk refusal differs` (the live refusal at `committed_risk_unknown`), `wide=no` | section 76 window 11: pid 14600, `2026-10-21T16:08:03Z` to `16:10:03Z` (120 s) (fault line: the failed pass at `16:09:03Z`) |
+| E1 | **0 of 14** | none | - |
+| E2 | **0 of 18** | none | - |
+
+**Without R-ED-1's 60 s the primary would list none:** the signal bar closed 3 s before the fault line `16:09:03Z` and the window would start there. The separate feed gap of `2026-10-29T10:50:31Z` to `10:52:01Z` (section 77) holds no signal bar of any list. **A caveat the owner should weigh:** "twice, independently" here is two traversals in opposite directions by one executing session from the same printed lists; it is independent in method and not in reader.
+
+### 8. The predictions of section 78, scored as written
+
+**The architect's.**
+
+| | Predicted | Observed | |
+|---|---|---|---|
+| A | PASS | PASS (inside) | **hit** |
+| B | FAIL (latch-caused) | FAIL (latch-caused), 18.45%; E2 3.33% | **hit** |
+| C | PASS, in 80 to 95 percent | PASS, **99.63%** | verdict **hit**, range **missed** (above) |
+| R-DR | `wide=yes` the cause for most fill-model exit disagreements | 7 of 7 | **hit** |
+| R-ED | 0 to 3 | 1 (primary), 0, 0 | **hit** |
+
+**The executing session's.**
+
+| | Predicted | Observed | |
+|---|---|---|---|
+| a | `N_live` 271; the 5 excluded named | 271; the same 5 | **hit** |
+| b | A PASS, about 70% | PASS | **hit** |
+| c | B FAIL, about 85%; `N_bt` near 312, range 295 to 330; +9% to +22% | FAIL; **321**, +50 = 18.45% | **hit** (inside the range; the point 9 high) |
+| d | C 80% to 92%, point 86; PASS about 75% | **99.63%**, PASS | verdict **hit**, range and point **missed** |
+| e | `n` 100 to 170; about 40 live-only, 80 backtest-only, 15 to 30 different exits; risk refusal differs at least 25; fill-model at least 10; unexplained 10% to 40% and the largest cause | **59**; **1**, **51**, **7**; 43; **8**; **4 = 6.8%**, and not the largest | **missed** on `n`, live-only, backtest-only, different exits, fill-model and unexplained; **hit** on risk refusal differs |
+| f | `wide=yes` for most fill-model exits; `unknown` zero | 7 of 7; 0 | **hit** |
+| g | 0 to 3 in all, at most 1 a list | 1, 0, 0 | **hit** |
+| h | lists 183218, 243279 and 282240 among the placements with no booking, `fok-unfilled` | all three, and a fourth (1867449) | **hit** |
+| i | E1: A, B, C pass; E2: B pass, C at least the primary's, A pass | E1 inside, 5.59%, 100%; E2 inside, 3.33%, 99.63% (equal) | **hit** |
+| j | every command exits 0, the counts equal, `evidence_eligible: true`; no CHECK of steps 5 to 8a needing attention | as predicted | **hit** |
+| k | the frozen store verifies clean | 0 problems, 0 gaps | **hit** |
+
+**What the misses say.** Both sets over-predicted path dependence: reproduction on symbol and bar is 99.63%, and the disagreement lists are a third of the predicted length, because the live bot and the backtest kept the same positions through almost every exit (the 11 live stop-outs mostly matched a backtest stop-out, and only 7 matched pairs differ). The lists are short because the surplus is almost all one cause, the latch: 41 of the 59.
