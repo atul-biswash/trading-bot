@@ -212,8 +212,11 @@ Set-Location $DEV
 Get-Content "$OUT\s4_daily_after_recorder.txt" | Select-String -Pattern 'newest bar|capture sha256'
 ```
 
-CHECK: every `1m` series reads `newest bar opens <M minus 1 day>T23:59:00Z` and every `5m` series
-`<M minus 1 day>T23:55:00Z` (for `M` = `2026-11-01`: `2026-10-31T23:59:00Z` and `2026-10-31T23:55:00Z`); the
+CHECK: every `1m` series reads `newest bar opens` **at or after** `<M minus 1 day>T23:59:00Z` and every `5m` series at or after
+`<M minus 1 day>T23:55:00Z` (for `M` = `2026-11-01`: `2026-10-31T23:59:00Z` and `2026-10-31T23:55:00Z`). **Corrected at P152 from an exact
+match:** the scheduled recorder keeps extending the store after `M` until the bot is stopped, and at the S4 stop (`2026-11-01T18:12:18Z`)
+the newest 1m bar opened `2026-11-01T18:04:00Z`, so an exact-equality CHECK could not hold (P151, `M5m-736`, RUN_LEDGER sections 77 and
+79). What the step needs is that the store covers `M`, and the backtest ends at `M` whatever the store holds beyond it. The
 `capture sha256` is **identical** to step 3's, because the bot is stopped and its log cannot have grown. A different
 digest means the log changed after the stop: investigate before going on.
 
