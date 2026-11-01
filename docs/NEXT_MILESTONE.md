@@ -1,4 +1,103 @@
-# Next milestone — M5m
+# Next milestone — M5n (M5m is closed)
+
+*Rotated at M5m's close (P153). This is the single home for live open items. Rules do not live here: they are in `CLAUDE.md`.
+The body of this file below the M5m section is M5l's, carried; the M5m section itself is KEPT WHOLE, as a closed record, because it
+holds the owner's rulings R-A to R-DQ verbatim and several of them are recorded nowhere else in the tree. Splitting it out to its
+own file is a decision for the owner and was not taken by the rotation.*
+
+## M5n — what is next
+
+The next milestone is **M5n**, chartered in `docs/M5N_CHARTER_DRAFT.md` (`STATUS: DRAFT, until M5m closes`): volatility-scaled trend
+and breakout research on 4h and 1d bars, with the live-trading block kept armed. M5m closes at the tag `milestone/M5m`. The charter is
+the owner's to confirm, and `R-DU` (S4 test C selects M5n's path; **branch 1 applies**, per the owner at P151), the decisions D1 to D4,
+`R-DT`, and `R-DX`, `R-DY`, `R-DZ` and `R-DT-3b` are recorded in it **on branch `m5n`** (P140 to P149), not on `main`: `main` holds
+the draft as amended at P139. Nothing in M5n starts the live engine, edits an S4 file or lifts the live block.
+
+## M5m's CLOSE -- the outcome, what resolved, and the register of everything still open
+
+**M5m outcome, recorded verbatim in `docs/PHASE_HISTORY.md` as the M5m entry:** *"M5m outcome. The shipped 1m SMA-crossover strategy
+loses gross and net (S5). All six S6 candidates lose in sample. S7 is FAIL by ruling R-CV, with the reserved window unread. S4, the
+pre-registered live-versus-backtest comparison on Testnet: A PASS, B FAIL (latch-caused), C PASS with 270 of 271 live entries
+reproduced (99.63 percent). Its four unexplained disagreements are live-feed holes of one or two bars after websocket drops (M5m-761 to
+M5m-772). The backtester is confirmed as an instrument for entry reproduction and the per-trade mean. Its stop-fill model diverges from
+Testnet on thin-book wicks: all 7 different exits are R-DR wide=yes. The largest live-versus-backtest divergences are the live engine's
+own fail-closed protective-leg latches (U10) and feed holes (U12). Live trading stays blocked."* The S4 figures are in the annotation at
+the end of the M5m section, in `docs/RUN_LEDGER.md` sections 77 to 81, and the build log.
+
+**Owner steps pending, none taken by the rotation.** (1) **The rehearsal clone** `F:\trading bot\backtest\rehearsal-45547f107715` was
+retained as a fallback until M5m closed (P132) and **may now be retired, by the owner**: the junction first and alone, with
+`cmd /c rmdir "F:\trading bot\backtest\rehearsal-45547f107715\data\historical_testnet"` and the check that
+`Test-Path "F:\trading bot\store\testnet-s4-rehearsal-2026-10-09\BTCUSDT\1m"` still prints `True`, and only then the clone (the
+procedure is `docs/S4_STOP_RUNBOOK.md`'s note after Appendix A's second rehearsal; a recursive delete that follows the junction would
+delete the store copy). (2) **The S4 backtest clone** `F:\trading bot\backtest\45547f107715` was kept until M5m closes (R-DG); that
+condition is now met and its retirement is likewise the owner's, **after** the archive (`F:\trading bot\evidence\s4\`, shown equal by
+SHA-256 at step 8a) is confirmed, junction first. (3) **R-EC lapsed at the S4 stop** (`2026-11-01T18:12:18Z`, pid 15952's
+`engine_stopped`): *"Until the S4 stop, no mutation survey or parallel test run is made on the machine running the S4 bot"* no longer
+binds, and the machine is not running the S4 bot. The resource fence R-EC named as architect-owned and missing when R-DT authorised
+concurrent work is **still missing** (`docs/S4_CORRECTION_P150A.md` section 1), and nothing replaces it.
+
+**ARCHITECT-OWNED slips recorded at the close (R-BZ: a finding's owner is whoever made the claim).** P152's prompt named the new
+close-sold-unbooked item **U11**, which was taken at M5l P91 (the reconciliation timer), and called two order ids **lists**
+(`1867449` is the stop-leg order of list `71012`; `243279` is a list id). Both were the architect's; the item is **U13** and the
+mislabel table gives both ids. P150a's prediction (a) came from the architect's framing (`docs/S4_CORRECTION_P150B.md` section 4).
+
+### Resolved at M5m -- one index line each
+
+Each item's full text is in the M5m section of this file, kept whole, and in `docs/PHASE_HISTORY.md`'s M5m entry.
+
+- **S0, the trade census** -- `cf64d90`, `27b8724`, `228a3a4`: `scripts/trade_census.py`, tracked and surveyed; the census of record.
+- **S1, the historical archive** -- `5884629`, `d559da7`, `e0613f9`, `3ee39eb`, `8aa1514`, `6e106b2`, `e7ae2d5`, `e236162`, with the ledger commits `b7059ed` and `92b493a`: the monthly archive stored and ingested, 1,100 months.
+- **S2, the backtester** -- `5a48034`, `7ae7d0f`, `42243f2`, `dbbffad`, `14cb8aa`, `c1d1d87`, `d5bff58`, `778e9b3`, and U6 (`b1ffaa7`, R-U): the live provider and engine replayed over stored bars through a simulated executor and a pure fill model.
+- **S3, metrics and regimes** -- `13297bb`, `f9d0c57`, `1cc92ab`, `6748b94`, `c5e11f1`, `df3dd21`.
+- **S4, the pre-registered comparison** -- pre-registration `e248a73`, launch `af51911` (`T0` 2026-10-10T06:05:20Z), `scripts/s4_compare.py` `a18f1b4` and `6778445`, the recorder `966be69` and `4019d68`, the stop runbook `78e6304`, E2 `c254740`, the wick annotation `526002f`, and the stop's records `c001f8b` (ledger sections 77 to 81). Result: A PASS, B FAIL (latch-caused), C PASS.
+- **S5, the baseline** -- `9aa320b`, `dfb5916`, `09d697d`: the shipped strategy loses in sample gross and net in every stop-slippage arm.
+- **S6, the candidate sweep and selection** -- `35d6b38`, `d96045b`, `119b25c`, `6b26c97`, `bdd95e4`: 216 variants, six candidates selected, every one a loser in sample.
+- **S7, the out-of-sample gate** -- `4dc445a`, `8e17898`, `8621c64`, `f9c06a4`: FAIL by R-CV with the reserved window unread.
+- **X2b** -- struck by observation (`92763bc`): `decision=halt` occurred 37 times in the S4 capture; X1, X2a, X2b and X3 are all observed.
+- **U10's sixth case, K6 to K8's allocation, the E2 wrapper's and the S4 cap's arming conditions** -- recorded or discharged as `docs/RUN_LEDGER.md` section 82 lists.
+
+### The register -- every item still open, by id, with its status at M5m's close
+
+An item's full text, its annotations and its arming condition are at its own heading below (K6 to K8 are headed in the M5m-era block
+after K5; **K9 has no other home than its row here**); the status here is the one-line reading at the close. **Open owner rulings** are marked OWNER.
+
+| Id | Status at M5m's close |
+|---|---|
+| K1 | carried, unfired: `scripts/release_position.py` and `scripts/normalize_ledger_exponents.py` reuse the store's save and the instance lock |
+| K2 | carried: what P-3k's closed gate leaves standing |
+| K3 | carried: four pre-existing false sentences in `src/` and `tests/`, reported and not edited |
+| K4 | carried, UNMEASURED: the cause of the 229 s stall (`M5l-198`) |
+| K5 | left open by the owner's P98 ruling: the natural-gap rate of a pair other than BTCUSDT or ETHUSDT |
+| K6 | carried by R-I: `scripts/trade_census.py` infers the protective leg from the price (`_leg` unedited since S0) |
+| K7 | carried by R-X and R-AC: `cooldown_minutes` is dead (`Portfolio.start_cooldown` has no caller) |
+| K8 | carried by R-BG: `bollinger_bands` is still a rolling computation, to be converted before any strategy that uses it runs; its condition is unfired |
+| **K9** | **NEW, carried:** the frozen `scripts/s4_compare.py` reads a live `BUY` only from `intent_dispatched` and `risk_refused` lines, so it is blind to `buy_refused_bars_gap` (the engine's gap guard logs it and returns before the risk layer): a gap-refused `BUY` reads as `unexplained` (`M5m-764`, `docs/RUN_LEDGER.md` section 81). The tool is frozen for S4. *Arming condition:* **whoever next writes a comparison that reads live signals, or edits `_SIGNAL_EVENT` in `scripts/s4_compare.py`.** |
+| P-3i, P-3m | carried, unfired: settlement outside the driver's call count; a call-cap deferral that logs nothing (`M5l-075`) |
+| P-3n | carried, OWNER: whether the confirm-step question (five calls against four) is ruled |
+| N1 | carried: a held-then-released trade leaves no record across a restart |
+| N2, N3 | UNMEASURED: whether Testnet takes fees in BNB; how soon `myTrades` returns a fill. Every commission in every capture is still zero |
+| N4, N5 | carried: `_dec` launders a float past `Money` (`M5k-025`); Q-B's halt-flag condition may be stranded (`M5k-140`) |
+| N6 | the live-trading block's lift; blocked, with its two preconditions unmet (entry-fee deduction and base-quantity netting) |
+| U0 to U5, U7 | carried, unfired (U7 fired at M5k's `e511e6d` and is carried with its annotation) |
+| **U6** | **RESOLVED at M5m P105 (C2, `b1ffaa7`, R-U) and struck** |
+| U8 | carried: the mutation harness reports a dirty target and proceeds |
+| U9 | OWNER: how the fee-capture gate is met |
+| U10 | OWNER, not a gate: QC review of the protective order type. **Six Testnet cases**: M5m-302 (a stop filled 12.87% beyond its trigger); the 2026-10-11 BTCUSDT `CLOSE` sell that executed partly; order `1867449` (9.9% of list 71012); order `5431129` (46.6% of list 183218); list `218102` (nothing executed); order `7022204` (16.6% of list 243279). The stop legs are market-type `STOP_LOSS`; whether a limit-type stop bounds the fill is the question |
+| U11 | DEFERRED by the owner (M5l P91): reconciliation on a timer, independent of candles |
+| U12 | DEFERRED by the owner (M5l P91): REST backfill after a gap. **REASONED as a prerequisite for any 4h or 1d live path**: the gap guard refuses a `BUY` while a 51-bar window spans a hole and the buffer never backfills, so on a 4h or 1d series a one-bar hole refuses entries for as many bars as the strategy's window (the SMA crossover's is 51: 8.5 days of 4h bars, 51 days of 1d bars; a candidate's own window multiplies the same way) unless the buffer is repaired; and R-DZ (an indicator whose window holds a missing decision bar yields no value, recorded on branch `m5n`) makes the same demand of the backtest. The S4 feed holes (`M5m-762`) are 1 to 2 bars after a websocket drop |
+| **U13** | **NEW, open, post-M5m:** `close_sold_unbooked` after a venue "Internal error" on the entry fill read (list 282240, 2026-10-29); a sold position the ledger omits |
+| A1 | carried: the ENTRY half of the fee (the EXIT half is resolved) |
+| A2, A5, A6 | carried: a manual action and a venue-triggered fill are indistinguishable; position-level `DIVERGED` never observed; two adjacent lines read as a booking overriding a refusal (not a defect) |
+| A3 | reserved to the owner: two build-log headlines carry a claim their own annotation corrects; no edit proposed |
+| `M5i-065`, `M5i-095`, `M5i-104`, `M5i-126` | carried: the orphan guard raises silently; two tests assert only portfolio state; the unpack sweep at 17 sites; a substring assertion pins wherever its anchor occurs |
+| `_go_naked` family | carried: the fourth candidate |
+| W1 to W4, W6 | standing declared test weaknesses (W6: format strings in `executor.py`) |
+| X1, X2a, X2b, X3 | **all observed and struck** (X2b at M5m) |
+| the trailing-stop milestone | BLOCKED on `main`: nothing places or amends an order for a trailing level. M5n's D1 (a venue `trailingDelta` sized k x ATR / price at entry) is the owner's chosen route, built only on branch `m5n` |
+| `M5m-510` | carried to M5n as the charter's N1: discharged before any out-of-sample read of the reserved window |
+
+**The unobserved surface is the code's branches, not these facts**, as the X section says; the S4 run exercised the close path 339
+times, the latch four times, `close_sold_unbooked` once and Class E once (`docs/RUN_LEDGER.md` sections 77 to 82).
 
 *Rotated at M5l's close (P98). This is the single home for live open items. Rules do
 not live here: they are in `CLAUDE.md`, including its **Standing authorities for
@@ -12,6 +111,11 @@ its annotations, or indexed as resolved with the commits that resolved it.*
 > sentence says, and none of them is edited by the commit that wrote that section.
 
 ## M5m — VALIDATE A STRATEGY BEFORE ANYTHING ELSE
+
+> **CLOSED AT THE M5m ROTATION (P153), AND KEPT WHOLE AS A RECORD.** Every sentence in this section is in the tense of the day it was
+> written and describes M5m's plan, its rulings and its progress; the outcome, the resolved index and the register of what is
+> still open are in the section above, *M5m's CLOSE*. Nothing below is edited by the rotation except by annotation, and the
+> items S0 to S7 are all done.
 
 **DECIDED BY THE PROJECT OWNER, in a review session after M5l's close.** The owner's
 instruction, verbatim: *"rewrite the next milestone based on your suggestion"*. The
