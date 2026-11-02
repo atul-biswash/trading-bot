@@ -4744,3 +4744,52 @@ Short ids are `Class::test[param]`. "T" numbers are section 107's. A kill here i
 ### 5. The findings this section carries
 
 See the commit message.
+
+## 109. M5n P156: the scored result of the survey of the VERDICT mutations and the guard's re-parametrisation, and the direct digest check (P156 C8, R-T)
+
+An observation log, so this section only adds; a citation names its file (R-EG). The survey section 108 predicted ran in two detached worktrees outside the repository, one per spec, at `40f1c6c` (the commit that carries section 108), with the repository's `scripts/worktree_survey.py`. Each run printed where `trading_bot` and `tests` were imported from before any result counted (inside its worktree), took an unmutated baseline (**130 passed, no failure**, both times), applied each mutation byte-exact with exactly one match, restored it with the SHA shown equal, showed every copied file intact, and left `git worktree list` with the main worktree only. The environment carried `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false`. Both exited 0 and standard error was empty for both (0 bytes). No recorded bar was read and nothing ran on recorded data. **Nothing here decides anything about S4.**
+
+### 1. The runs
+
+| Run | Spec | Mutations | Exit | Memory before |
+|---|---|---|---|---|
+| `a` | `survey_a_p156.json` (SHA-256 `628e6156cee4c362d0f3b1b895034c0f73295657a762c93a6b26acfdd4469c56`) | `b10`, `b10b`, `b11`, `b47a`, `b47b`, `b47` | 0 | 40.2 percent free committed (13,964 of 34,710 MB); one git daemon |
+| `b` | `survey_b_p156.json` (SHA-256 `d0bdae785fb3ed2a8e337726aec5d8ee5e3d33c82ee548871a3199be9f0f01ed`) | `b14`, `b14b`, `b30`, `b34`, `b36`, `b48`, `b49` | 0 | 40.3 percent free (13,980 MB) after stopping the leftover daemons; none running |
+
+Neither run needed a second attempt. Both specs are the ones section 108 recorded, unedited.
+
+### 2. The result
+
+**13 mutations scored: 13 MATCH, 0 MORE, 0 FEWER. 46 failures were predicted and 46 observed, 46 kills and 0 crashes.** Every declared abstention held (the tests named as passing passed).
+
+| Mutation | The break | Predicted | Observed | Verdict | Kills | Crashes |
+|---|---|---|---|---|---|---|
+| `b10` | a digest line need only begin as the form does (`match`) | 6 | 6 | MATCH | 6 | 0 |
+| `b10b` | the form is found anywhere in a line (`search`) | 9 | 9 | MATCH | 9 | 0 |
+| `b11` | the tag is looked up by its bare name | 1 | 1 | MATCH | 1 | 0 |
+| `b14` | `main` always returns 0 | 1 | 1 | MATCH | 1 | 0 |
+| `b14b` | `main` returns 1 unless SELECTED | 2 | 2 | MATCH | 2 | 0 |
+| `b30` | the books check is removed | 1 | 1 | MATCH | 1 | 0 |
+| `b34` | the incomplete-run check is removed | 1 | 1 | MATCH | 1 | 0 |
+| `b36` | the equity probe samples every bar | 2 | 2 | MATCH | 2 | 0 |
+| `b48` | a candidate starts on the earlier pair's first defined day | 2 | 2 | MATCH | 2 | 0 |
+| `b49` | the span starts on the earliest candidate's first defined day | 2 | 2 | MATCH | 2 | 0 |
+| `b47a` | the pre-registration leaves `FROZEN_PATHS` | 6 | 6 | MATCH | 6 | 0 |
+| `b47b` | `sharpe_stats.py` leaves `FROZEN_PATHS` | 6 | 6 | MATCH | 6 | 0 |
+| `b47` | `n7_evaluate.py` leaves `FROZEN_PATHS` | 7 | 7 | MATCH | 7 | 0 |
+
+**What this shows.** Each of the eight VERDICT holes of section 105 is closed: a mutation that was predicted to fail nothing in section 105 now fails the test planned for it, and only that. The 4h midnight marking (`b36`) is killed by a stub test and by the whole chain on a real 4h world; the INDETERMINATE exit code (`b14`) by a test through `main`; the guard's digest-line pattern (`b10`, `b10b`) in the two ways P156's `superseded:` convention depends on. **P149 C8's re-parametrisation, which section 106 left unsurveyed, is now surveyed:** with any one of the three paths removed from `FROZEN_PATHS` the four per-file guard tests for that path are generated and fail, six or seven failures where section 105 had seen two for the third path. The two counts that differed from section 107 (`b48` 2, the removals 6, 6 and 7) were the ones section 108 re-derived and bound, and they held. No prediction was wrong in either direction, which is the case section 96 warns is not evidence the tests are good: the predictions were made after the tests were written (M5e-051), so the agreement is a check of the tracing and of the mutations' reach, not of the tests' independence.
+
+### 3. The three REPORT holes, still open
+
+`b35`, `b37` and `b38` (section 107, section 5) are untouched and carried: no test separates the buy and hold's open from its close, pins the result file's key order, or distinguishes a six-place rounding from a ten-place one. They change context and the shape of a file written after the judgement, not a gate, the selection, a label or an exit code.
+
+### 4. The direct digest check, and why there is no re-freeze
+
+**No frozen file changed.** `scripts/n7_evaluate.py`, `src/trading_bot/backtesting/sharpe_stats.py` and `docs/M5N_PREREGISTRATION.md` hash at `HEAD` to the three values of the charter's section 23, so the re-freeze of charter section 27's rule was not due, no digest line was superseded, and the charter's section 23 holds the only guard-shaped digest lines, exactly three.
+
+**The check was run directly.** `scratch\p156\direct_digest_check.py` (the session scratchpad) did two things with no recorded bar and no venue call. It read `HEAD`'s charter with `git show` and matched it with the runner's own `_DIGEST_LINE` pattern: each of the three paths has **one** line, equal to the SHA-256 of that file at `HEAD`; the charter holds **3** guard-shaped lines and **0** N0-shaped lines. It then cloned the repository to a path outside it, committed a synthetic N0 line in the clone only, and called the runner's real `check_n0_guard` on the clone, which reached its digest loop: **accepted** (the tag resolved to `a31c81b`, one N0 line, three digest lines, three file hashes). A second commit repeating one digest line made it **refuse `digest_line_duplicated`**, so the check is live. The clone held no junction and was removed.
+
+### 5. The findings this section carries
+
+See the commit message.
