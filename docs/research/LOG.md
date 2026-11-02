@@ -124,6 +124,22 @@ The walk-forward folds, forward trades and return profit factor: `sma_crossover`
 
 **S4, beside it (R-CW).** S4's run is still going at this entry and M5m closes after it ends. By R-AY it stops at the first UTC midnight that is at least T0 plus 21 days with at least 150 bookings, capped at T0 plus 35 days; if T0 is the first boot's `boot_provenance` instant (`2026-10-10T05:58:02Z`, pid 27460, DERIVED and not confirmed here) the earliest stop is `2026-11-01T00:00:00Z` and the cap is `2026-11-14T05:58:02Z`. If S4 fails, the FAIL stands and the backtester's calibration is recorded as unconfirmed.
 
+## Entry 7 -- M5n: six candidates registered, and the S6 `register_strategy` condition met by this record (P155)
+
+The arming condition carried at S6 in `docs/NEXT_MILESTONE.md` reads *"whoever next registers a strategy with `register_strategy` in `strategies/registry.py`"*. It sits on S6's three bullets, and what it asks of a registration is the second and third: a new strategy is *"a registry entry under `strategies/` with its own tests"*, and *"every variant tried is recorded, with its parameters and its in-sample result, in a research log under `docs/`"*, because that list is the denominator a multiple-testing judgement needs. M5n's six candidates fired it, in the commits that arrived with the merge `12d9a33`. This entry is the record.
+
+| | |
+|---|---|
+| what is registered | six strategies in `src/trading_bot/strategies/m5n/`, by `@register_strategy`: `donchian_1d_20`, `donchian_1d_55` and `donchian_4h_20` (`donchian.py`), `keltner_4h_20_2` (`keltner.py`), `sma_cross_1d_50_200` (`sma_cross.py`) and `tsmom_1d_90` (`tsmom.py`); they are R-DY's C1 to C6 (`docs/M5N_CHARTER_DRAFT.md` section 15) |
+| where they register | into the same registry, **only when `trading_bot.strategies.m5n` is imported**, which `scripts/n3_entry_counts.py`, `scripts/n4_trade_counts.py` and `scripts/n7_evaluate.py` do and the live bot does not. MEASURED at `4c7afe2`: after importing `trading_bot.strategies` the registry holds `rsi` and `sma_crossover`; after importing `trading_bot.strategies.m5n` it holds those two and the six |
+| their own tests | `tests/unit/test_m5n_strategies.py`, `test_m5n_gaps.py`, `test_m5n_trail.py` and `test_indicators_breakout.py` |
+| parameters | the standard published values of R-DY, fixed before any count or result: Donchian 20 and 55 bars on 1d and 20 on 4h, Keltner EMA(20) + 2 x ATR(20) on 4h, SMA(50) over SMA(200) on 1d, 90-bar momentum on 1d; the exit is the D1 trail at k = 3 x ATR(20), Wilder, at entry. **No parameter is fitted and none was searched** |
+| variants tried | **exactly these six.** No other variant of these families has been run, so the denominator for any multiple-testing judgement of M5n is N = 6 (`docs/M5N_PREREGISTRATION.md` section 6, c). They are not among S6's 216 variants, which stay 216 (Entry 6) |
+| in-sample results so far | **counts only**, by R-DT clause 3: entry-event counts (`docs/RUN_LEDGER_M5N.md` section 83) and trade counts (the same file's sections 90, 94 and 98), all over `[2017-08-17, 2024-01-01)`. No return, P&L, equity or Sharpe ratio has been computed for any of the six, because R-DT withholds them until N0 records the S4 result; N7 has not run |
+| out of sample | none read by any of the six (`docs/RUN_LEDGER.md` section 83, the audit). Their one read is bound by PROTOCOL amendment 4 and made by M5n's N8 runner, not through `check_run`, which would refuse them as `NOT_A_GRID_POINT` because their strategies are not among the declared families |
+
+**What this meets and what it does not.** The first half of the condition's requirement is met: each registration is a registry entry with its own tests. The second is met as far as it can be today: every variant tried is recorded here with its parameters, and its in-sample result is the counts above, because no return exists to record. **A residual remains and is carried, not met: when N7 computes the six in-sample results, they are added to this log (an Entry 8), so that each candidate's record holds its parameters and its in-sample result together.** That is a docs record and needs no code.
+
 ## Candidate entries
 
 None yet. No variant has been run.
