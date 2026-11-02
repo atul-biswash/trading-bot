@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P156 on `main` (HEAD `8c5d9ec`).** Section 27 records, verbatim, R-EG (where M5n ledger sections are written from now), the re-freeze rule, the survey-resources rule and the owner's ruling on the N1 HALT reading. Section 26's reading of that HALT clause is annotated in place as overruled. **No `N0 complete` line is written, and this amendment changes no digest line.**
+
 **Amended at P155 on `main` (HEAD `5dfc1ab`).** Section 26 records PROTOCOL amendment 4 (`bfbe166`) with the digests of `docs/research/PROTOCOL.md` before and after, marks N1 done, records R-EF verbatim (what "unread" means in M5n's documents), and says that section 8's freeze entry now resolves to the N8 runner's per-candidate ledger. The N1 row and section 8 are annotated in place. **No `N0 complete` line is written: the re-freezes are still due.**
 
 **Amended at P154 on `main` (HEAD `12d9a33`, the merge of `m5n`).** The DRAFT marker is lifted, citing the tag `milestone/M5m`. Section 25 records R-DU as applied (S4 test C passed, so branch (1) holds), R-EE (the M5n ledger sections 74 to 106 live in `docs/RUN_LEDGER_M5N.md`) and U12 as a REASONED prerequisite for N9's live path. The section 5 note displaced by R-DU and the sentence in section 23 about `tag_missing` are annotated in place. **No `N0 complete` line is written: the re-freezes are still due (P155).**
@@ -432,6 +434,8 @@ after   2b6fec867215c3a5ff05f39741499667c005d70c46b8f7695720681e900e7dc6
 
 *Reading, REASONED and the owner's to overrule.* The N1 row's HALT clause reads *"any N2 to N8 run exists before the amendment"*, and runs of N2, N3, N4 and N5 do precede `bfbe166`: `docs/RUN_LEDGER_M5N.md` sections 75, 79, 83, 90, 94 and 98. They were counts-only, in-sample runs made under R-DT clause 3 and R-DT-3a to R-DT-3f, which the owner ruled, and the audit in `docs/RUN_LEDGER.md` section 83 finds none of them touched the reserved window. PROTOCOL section 10 binds an amendment to precede *every run it could affect*, and amendment 4 can affect only a read of the window, of which there is no M5n instance; so section 10's rule is met. The literal HALT clause of the row is not, and is recorded here rather than passed over.
 
+> **ANNOTATED AT P156: THE LITERAL READING IN THE PARAGRAPH ABOVE IS OVERRULED BY THE OWNER (section 27, *N1 ruling*).** The HALT clause is not read as tripped by the N2 to N5 runs. **What survives:** the facts the paragraph records (which runs preceded `bfbe166`, and that none touched the reserved window).
+
 **3. R-EF**, in the owner's words:
 
 > R-EF  In M5n's documents (this charter, and pre-registration sections 2, 8 and 9), 'unread' means that no M5n candidate family has been read on [2024-01-01, 2026-10-01). The window's prior reads are S5's baseline over all of it, by design, and the M5m rehearsal and quarter scan over parts of 2024 and early 2025 (M5m-447). N8's report states these, together with these validity limits: S5's results on the window were seen before M5n's candidates were chosen; the window's price path is public history and within the architect's knowledge; the candidates use published standard parameters with no search. N8 is therefore a historical out-of-sample check, weaker than a forward one. ARCHITECT-OWNED: the architect wrote 'unread' for 'no candidate read' in P155's first clause (c), in this charter's section 8 item 4 and in pre-registration section 8, and withdraws the 'single-use across every path' rule, which contradicts PROTOCOL's per-candidate design.
@@ -441,3 +445,19 @@ after   2b6fec867215c3a5ff05f39741499667c005d70c46b8f7695720681e900e7dc6
 **4. Section 8's freeze entry.** Item 1's *"the freeze entry (PROTOCOL section 6 step 6, as amendment 4 rules it)"* resolves to the N8 runner's per-candidate ledger. Amendment 4 does not bind M5n's read through `check_run` or an entry file under `docs/research/entries/`: it says the read is made only by the N8 runner, exactly one candidate once, with the runner's own read ledger refusing a second M5n read. That refusal is code that does not exist yet and is built in the N8 runner's own prompt, before N8 runs; until then no M5n read of the window is made.
 
 **5. What this commit does not do.** It writes no `N0 complete` line, because the re-freezes are still due. It edits no frozen file: the pre-registration, the estimator module and the runner keep their section 23 digests, and the charter still carries exactly three `N7 frozen digest` lines and no line of the shape the N0 line has.
+
+## 27. R-EG, the re-freeze rule, survey resources and the N1 ruling, recorded verbatim at P156
+
+The four rulings below are the owner's P156 text, quoted as the prompt gives it; none is restated as something else. The readings after them are the executing session's, marked, and the owner's to overrule.
+
+> R-EG  From P156, M5n work writes its ledger sections to docs/RUN_LEDGER_M5N.md, continuing from section 107, and docs/RUN_LEDGER.md takes only non-M5n records, continuing from section 84. Every citation of a ledger section names its file.
+
+> Re-freeze rule  Before N0 is recorded, a frozen M5n digest may be re-frozen by a charter amendment that lists every change and its reason. After N7 has run once, no frozen M5n file changes.
+
+> Survey resources  Every survey sets core.fsmonitor=false in each worktree and test repository, and checks free committed memory before each spec, stopping below 20 percent headroom.
+
+> N1 ruling  The literal N1 HALT reading in section 26 is overruled: amendment 4 could affect only a read of the window, and none occurred; the N2 to N5 runs were in-sample count runs under R-DT.
+
+*Readings (REASONED).* (1) R-EG's "section 84" is the next free section of `docs/RUN_LEDGER.md`: its last is section 83 (P155's audit of M5n's reads, itself an M5n record and the last one that file takes). `docs/RUN_LEDGER_M5N.md` ends at section 106, so its next is 107. (2) The re-freeze rule is what makes P156's change to `sharpe_stats.py` and `scripts/n7_evaluate.py` lawful: no `N0 complete` line exists and N7 has not run. It asks of the amendment two things, that it list every change and its reason, and the amendment is therefore a section of this charter and not a note in a commit message. (3) "Headroom" in the survey-resources rule is read as free committed memory as a share of the commit limit, and the rule's 20 percent is the floor below which a spec does not start. (4) The ruling in the last block settles the N1 row's HALT clause; it does not change the facts section 26 records.
+
+*What this section does not do.* It changes no digest line, adds no line of the shape the N0 line has, and edits no frozen file.
