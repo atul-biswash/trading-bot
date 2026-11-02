@@ -74,6 +74,37 @@ class NonSellFillError(FeeUnresolvableError):
     """
 
 
+class EntryFillsIncompleteError(TradingBotError):
+    """An entry order's fills do not yet account for what the order executed. M5o H1.
+
+    **WAITING CAN CURE IT**, which is what makes it the retried kind: no fills
+    for the order, or fills summing to less than its executed quantity. A fill
+    list the venue has not finished indexing looks exactly like this (the delay
+    is UNMEASURED, ``docs/NEXT_MILESTONE.md`` N3). The entry twin of
+    :class:`FeeFillsIncompleteError`, and deliberately not a subclass of
+    :class:`FeeUnresolvableError`: that family is about a fee this ledger cannot
+    subtract, and an entry's fee is recorded, not subtracted (R-OE).
+    """
+
+
+class EntryFillsInconsistentError(TradingBotError):
+    """An entry order's fills contradict themselves or the order. TERMINAL. M5o H1.
+
+    Fills summing to MORE than the order executed, or one trade id appearing
+    twice. Neither is a state the venue produces and neither is cured by
+    waiting, so the settlement does not retry it: it is reported and left
+    pending for an operator, rather than booked on a figure that cannot be right.
+    """
+
+
+class NonBuyFillError(TradingBotError):
+    """A fill under an entry order is not a buy. TERMINAL. M5o H1.
+
+    The entry twin of :class:`NonSellFillError`. An entry settles buys only; a
+    sell under the working leg's order id means the id is not the entry's.
+    """
+
+
 class PositionNotHeldError(TradingBotError):
     """The ledger was asked to book the close of a symbol it does not hold. P-3e.
 
