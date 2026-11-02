@@ -24,12 +24,15 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from tests.unit.d1_world import ScriptedD1, build_minutes, flat, make_settings
+from tests.unit.d1_world import BrokenD1, ScriptedD1, build_minutes, flat, make_settings
 from trading_bot.backtesting.sharpe_stats import Mark, daily_series, sharpe
+from trading_bot.backtesting.simulated_executor import SimulatedExit, SimulatedTrade
+from trading_bot.core.models import Candle
 from trading_bot.strategies import registry
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
@@ -739,6 +742,75 @@ class TestTheStartDay:
     def test_an_empty_series_is_never_defined(self) -> None:
         assert n7.first_defined_open([], "1d", 1) is None
 
+    @pytest.mark.parametrize("late", ["BTCUSDT", "ETHUSDT"])
+    def test_a_candidate_starts_on_the_later_pairs_first_defined_day(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, late: str
+    ) -> None:
+        # One pair's 1d series begins on 2024-03-01 and the other's on 2024-03-03; the candidate is defined
+        # for BOTH pairs only from the later day, whichever pair it is (M5n-206).
+        monkeypatch.setitem(registry._REGISTRY, "n7_a", N7A)
+        root = tmp_path / "hist"
+        store = None
+        for symbol in ("BTCUSDT", "ETHUSDT"):
+            late_here = frozenset({0, 1}) if symbol == late else frozenset()
+            store = build_minutes(root, symbol, count=4320, decision="1d", omit_decisions=late_here)
+        assert store is not None
+        found = n7.candidate_starts(
+            store, [("C1", "n7_a", "1d")], begin=DAY0, end=DAY0 + timedelta(days=3)
+        )
+        assert found == {"C1": date(2024, 3, 3)}
+
+    def _evaluate_with_starts(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> tuple[n7.Evaluation, list[date]]:
+        """``evaluate`` over the six real candidates with every seam stubbed: two candidates are defined on an
+        early day and the rest on a late one, and each run returns a canned book. Returns the evaluation and
+        the ``start_date`` every ``run_candidate`` call was handed."""
+        early, late = date(2018, 1, 1), date(2018, 3, 3)
+        handed: list[date] = []
+        patterns = ["S1", "S2", "N1", "N2", "S1", "S2"]
+
+        async def run_candidate(
+            base: object, spec: tuple[str, str, str], window_args: Any, costs: n7.Costs
+        ) -> n7.CandidateRun:
+            handed.append(window_args["start_date"])
+            index = [row[0] for row in n7.CANDIDATES].index(spec[0])
+            return run_of(spec[0], spec[2], 40, patterns[index])
+
+        monkeypatch.setattr(n7, "HistoricalStore", lambda path: object())
+        monkeypatch.setattr(
+            n7,
+            "candidate_starts",
+            lambda store: {
+                row[0]: early if row[0] in ("C1", "C4") else late for row in n7.CANDIDATES
+            },
+        )
+        monkeypatch.setattr(n7, "run_candidate", run_candidate)
+        monkeypatch.setattr(
+            n7, "buy_and_hold_context", lambda store, start, end, initial: n7.ContextSharpe(0.0, 0)
+        )
+        monkeypatch.setattr(n7, "RESAMPLES", RESAMPLES)
+        base = SimpleNamespace(
+            config=SimpleNamespace(backtesting=SimpleNamespace(initial_balance=D(10000)))
+        )
+        return asyncio.run(n7.evaluate(base, str(tmp_path))), handed
+
+    def test_the_span_starts_on_the_latest_candidates_first_defined_day(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        evaluation, _ = self._evaluate_with_starts(monkeypatch, tmp_path)
+        assert evaluation.window == (date(2018, 3, 3), date(2024, 1, 1))
+        assert evaluation.first_defined["C1"] == date(2018, 1, 1)
+        assert evaluation.first_defined["C2"] == date(2018, 3, 3)
+
+    def test_every_run_is_handed_that_start(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        _, handed = self._evaluate_with_starts(monkeypatch, tmp_path)
+        # six candidates at the base costs and at each of the three sensitivities
+        assert len(handed) == 6 * (1 + len(n7.SENSITIVITIES))
+        assert set(handed) == {date(2018, 3, 3)}
+
 
 class TestAssembleMarks:
     def test_the_start_is_the_initial_balance_and_each_midnight_is_its_sample(self) -> None:
@@ -875,6 +947,16 @@ def refusal(root: Path) -> str:
     with pytest.raises(n7.GuardError) as caught:
         n7.check_n0_guard(root)
     return caught.value.code
+
+
+def outcome(root: Path) -> str | None:
+    """The guard's refusal code, or ``None`` when it accepts. A test of acceptance asserts on this, so a wrong
+    refusal fails by assertion and not by an exception that escapes."""
+    try:
+        n7.check_n0_guard(root)
+    except n7.GuardError as exc:
+        return exc.code
+    return None
 
 
 class TestTheGuardAccepts:
@@ -1020,6 +1102,55 @@ class TestTheGuardRefusesConditionC:
 
         repo, _, _ = make_repo(tmp_path, charter=charter)
         assert refusal(repo.path) == "digest_line_missing"
+
+
+class TestTheDigestLineIsTheWholeLine:
+    """A digest line is exactly ``N7 frozen digest <path> <sha256>`` and nothing else. P156 supersedes a digest by
+    putting ``superseded: `` before the old line, and that is only safe if the guard neither accepts a line with
+    anything after the hash nor finds the form in the middle of a line and counts it twice (M5n-264)."""
+
+    OLDER = hashlib.sha256(b"an earlier version of the file").hexdigest()
+
+    @pytest.mark.parametrize("path", list(FILES))
+    def test_a_digest_line_with_text_after_its_hash_is_not_a_digest_line(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        def charter(c1: str, side: str | None) -> list[str]:
+            lines = good_charter(c1, side, drop=(path,))
+            return [*lines, f"N7 frozen digest {path} {digests()[path]} (superseded)"]
+
+        repo, _, _ = make_repo(tmp_path, charter=charter)
+        assert refusal(repo.path) == "digest_line_missing"
+
+    @pytest.mark.parametrize("path", list(FILES))
+    def test_a_superseded_line_with_text_after_its_hash_is_not_a_second_digest(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        def charter(c1: str, side: str | None) -> list[str]:
+            old = f"N7 frozen digest {path} {self.OLDER} (superseded)"
+            return good_charter(c1, side, extra=(old,))
+
+        repo, _, _ = make_repo(tmp_path, charter=charter)
+        assert outcome(repo.path) is None
+
+    @pytest.mark.parametrize("path", list(FILES))
+    def test_a_superseded_line_with_a_prefix_is_not_a_digest_line(
+        self, tmp_path: Path, path: str
+    ) -> None:
+        def charter(c1: str, side: str | None) -> list[str]:
+            old = f"superseded: N7 frozen digest {path} {self.OLDER}"
+            return good_charter(c1, side, extra=(old,))
+
+        repo, _, _ = make_repo(tmp_path, charter=charter)
+        assert outcome(repo.path) is None
+
+
+class TestTheTagIsATag:
+    def test_a_branch_of_the_tags_name_is_not_the_tag(self, tmp_path: Path) -> None:
+        # `git rev-parse milestone/M5m` would find this branch; only refs/tags/milestone/M5m is the tag.
+        repo, c1, _ = make_repo(tmp_path, tag=None)
+        repo.git("branch", n7.MILESTONE_TAG, c1)
+        assert refusal(repo.path) == "tag_missing"
 
 
 class TestTheGuardFailsClosed:
@@ -1284,3 +1415,328 @@ class TestMainOnTheFixtureWorldWithTheGuardSatisfied:
         before = result.read_bytes()
         assert n7.main(args, out=io.StringIO()) == 2
         assert result.read_bytes() == before
+
+
+# ---- P156: the VERDICT holes of ledger section 105, closed (docs/RUN_LEDGER_M5N.md section 107) -----------
+def trade_of(**changes: Any) -> SimulatedTrade:
+    """A closed round trip whose books add up: 220 out, 200 in, fees 0.2 and 0.22, so 19.58 realised."""
+    fields: dict[str, Any] = {
+        "symbol": "BTCUSDT",
+        "timeframe": "1d",
+        "signal_bar_open": DAY0,
+        "entry_bar_open": DAY0 + timedelta(days=1),
+        "quantity": D("2"),
+        "entry_limit": D("100"),
+        "entry_price": D("100"),
+        "entry_notional": D("200"),
+        "entry_fee": D("0.2"),
+        "entry_quote_total": D("200.2"),
+        "stop_loss": None,
+        "take_profit": None,
+        "exit_reason": SimulatedExit.CLOSE,
+        "exit_bar_open": DAY0 + timedelta(days=2),
+        "exit_time": DAY0 + timedelta(days=2),
+        "exit_price": D("110"),
+        "exit_trigger": None,
+        "exit_open_through_trigger": False,
+        "exit_gross": D("220"),
+        "exit_fee": D("0.22"),
+        "realised": D("19.58"),
+        "spans_gap": False,
+        "spans_short_bar": False,
+    }
+    return SimulatedTrade(**{**fields, **changes})
+
+
+class TestTradeBooks:
+    def test_a_trade_whose_books_do_not_add_up_is_refused(self) -> None:
+        # One cent off the ledger's own realised figure: the two sources disagree, so there is no verdict.
+        with pytest.raises(n7.RunnerError, match="does not add up"):
+            n7.trade_books([trade_of(realised=D("19.57"))])
+
+    def test_trades_that_add_up_are_summed(self) -> None:
+        second = trade_of(
+            entry_notional=D("100"),
+            entry_fee=D("0.1"),
+            exit_gross=D("90"),
+            exit_fee=D("0.09"),
+            realised=D("-10.19"),
+        )
+        gross, fees, notional = n7.trade_books([trade_of(), second])
+        assert (gross, fees, notional) == (D("10"), D("0.61"), D("300"))
+
+
+class TestAnIncompleteRun:
+    def test_an_incomplete_run_is_refused_not_judged(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A strategy whose signals forget the trail makes the executor log an ERROR, which makes the run
+        # incomplete; its marks are not the run's, so the gates must not read them (M5n-264).
+        world = E1(tmp_path, monkeypatch)
+        spec = ("C1", "n7_a", "1d")
+        args = {
+            "data_dir": str(world.root),
+            "start_date": date(2024, 3, 1),
+            "end_date": date(2024, 3, 4),
+        }
+
+        def run() -> n7.CandidateRun:
+            return asyncio.run(n7.run_candidate(world.settings, spec, args, n7.BASE_COSTS))
+
+        assert (
+            run().label == "C1"
+        )  # the control: the same call over the complete world returns a run
+        monkeypatch.setitem(registry._REGISTRY, "n7_a", BrokenD1)
+        with pytest.raises(n7.RunnerError, match="C1 n7_a at base was incomplete"):
+            run()
+
+
+class _StubPortfolio:
+    """Equity is the mark of the one open symbol, so a sample says which bar's close it was taken at."""
+
+    def marked_symbols(self) -> list[str]:
+        return ["ETHUSDT"]
+
+    def equity(self, marks: dict[str, Decimal]) -> Decimal:
+        return marks["ETHUSDT"]
+
+
+class _StubProvider:
+    def __init__(self) -> None:
+        self.last: dict[str, Candle] = {}
+
+    def last_candle(self, symbol: str, timeframe: str) -> Candle | None:
+        return self.last.get(symbol)
+
+
+def bar_of(timeframe: str, opened: datetime, close: Decimal) -> Candle:
+    span = timedelta(hours=4) if timeframe == "4h" else timedelta(days=1)
+    return Candle(
+        symbol="ETHUSDT",
+        timeframe=timeframe,
+        open_time=opened,
+        close_time=opened + span - timedelta(milliseconds=1),
+        open=close,
+        high=close,
+        low=close,
+        close=close,
+        volume=D(1),
+    )
+
+
+class TestTheMidnightProbe:
+    async def test_only_a_bar_that_ends_at_midnight_is_sampled(self) -> None:
+        # Six 4h bars open from 2024-03-01 00:00 to 20:00; only the last ends at UTC 00:00 (on 2024-03-02), and
+        # its close is 105. A probe that sampled every bar would also hold 104, the close of the bar ending at 20:00.
+        provider = _StubProvider()
+        probe = n7._MidnightProbe(
+            SimpleNamespace(portfolio=_StubPortfolio(), provider=provider), "4h"
+        )
+        for i in range(6):
+            candle = bar_of("4h", DAY0 + timedelta(hours=4 * i), D(100 + i))
+            provider.last["ETHUSDT"] = candle
+            await probe(candle)
+        assert probe.samples == {DAY0 + timedelta(days=1): D(105)}
+
+    async def test_a_1d_bar_ends_at_midnight_and_is_always_sampled(self) -> None:
+        provider = _StubProvider()
+        probe = n7._MidnightProbe(
+            SimpleNamespace(portfolio=_StubPortfolio(), provider=provider), "1d"
+        )
+        for i in range(2):
+            candle = bar_of("1d", DAY0 + timedelta(days=i), D(100 + i))
+            provider.last["ETHUSDT"] = candle
+            await probe(candle)
+        assert probe.samples == {DAY0 + timedelta(days=1): D(100), DAY0 + timedelta(days=2): D(101)}
+
+    def test_a_4h_candidate_is_marked_at_the_bar_that_closes_at_midnight(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # World E2: two 4h candidates through the real D1 path, each holding one position that only rises. Equity
+        # is cash plus quantity times the price, so the marks are a straight line in the prices AT the 4h closes
+        # that end at midnight. Each price below differs from the price at the 20:00 close of the same date, so
+        # marks taken at the date's last bar do not lie on the line.
+        world = E2(tmp_path, monkeypatch)
+        evaluation = world.evaluate()
+        stamps = [DAY0 + timedelta(days=i) for i in range(4)]
+        for run, prices in zip(
+            evaluation.runs, (world.ETH_AT_MIDNIGHT, world.BTC_AT_MIDNIGHT), strict=True
+        ):
+            assert [at for at, _ in run.marks] == stamps
+            assert run.carried_marks == 0
+            equity = [value for _, value in run.marks]
+            assert equity[1] != equity[2] != equity[3]
+            p1, p2, p3 = prices
+            assert (equity[2] - equity[1]) * (p3 - p2) == (equity[3] - equity[2]) * (p2 - p1)
+
+
+class N7FourHourEth(ScriptedD1):
+    """Buys ETHUSDT on the first 4h bar of 2024-03-01 and holds it while the price steps up."""
+
+    name = "n7_4h_eth"
+
+    def __init__(self) -> None:
+        super().__init__(buy={"ETHUSDT": ["2024-03-01T00:00"]})
+
+
+class N7FourHourBtc(ScriptedD1):
+    """Buys BTCUSDT on the first 4h bar of 2024-03-01 and holds it while the price steps up."""
+
+    name = "n7_4h_btc"
+
+    def __init__(self) -> None:
+        super().__init__(buy={"BTCUSDT": ["2024-03-01T00:00"]})
+
+
+def stepped(*steps: tuple[int, int, str]) -> dict[int, Any]:
+    """Flat minutes at the named prices: each step is (first minute, minute after the last, price)."""
+    return {minute: flat(price) for first, stop, price in steps for minute in range(first, stop)}
+
+
+class E2:
+    """Two 4h candidates over a 3-day world. Minute 0 is 2024-03-01 00:00 and a 4h bar is 240 minutes, so the
+    bar ending at 00:00 on the 2nd, 3rd and 4th closes at minutes 1439, 2879 and 4319, and the bar ending at 20:00
+    on the 2nd and 3rd closes at minutes 2639 and 4079. ETHUSDT is 100 until minute 2640, 130 until 3600, 140
+    until 4080 and 150 after: 100, 130, 150 at the three midnights and 100, 140 at the two 20:00 closes.
+    BTCUSDT is 200, 204 from minute 2400, 220 from 2640, 230 from 3600 and 260 from 4080: 200, 220, 260 at
+    the midnights and 204, 230 at the 20:00 closes."""
+
+    ETH_AT_MIDNIGHT = (D(100), D(130), D(150))
+    BTC_AT_MIDNIGHT = (D(200), D(220), D(260))
+
+    def __init__(self, tmp: Path, mp: pytest.MonkeyPatch) -> None:
+        mp.setitem(registry._REGISTRY, "n7_4h_eth", N7FourHourEth)
+        mp.setitem(registry._REGISTRY, "n7_4h_btc", N7FourHourBtc)
+        mp.setattr(n7, "CANDIDATES", (("C1", "n7_4h_eth", "4h"), ("C2", "n7_4h_btc", "4h")))
+        mp.setattr(n7, "IN_SAMPLE_BEGIN", datetime(2024, 3, 1, tzinfo=UTC))
+        mp.setattr(n7, "IN_SAMPLE_END", datetime(2024, 3, 4, tzinfo=UTC))
+        mp.setattr(n7, "RESAMPLES", 400)
+        mp.setitem(n7.FLOORS, "4h", n7.Floors(1, 1))
+        self.root = tmp / "hist"
+        paths = {
+            "ETHUSDT": (
+                "100",
+                stepped((2640, 3600, "130"), (3600, 4080, "140"), (4080, 4320, "150")),
+            ),
+            "BTCUSDT": (
+                "200",
+                stepped(
+                    (2400, 2640, "204"),
+                    (2640, 3600, "220"),
+                    (3600, 4080, "230"),
+                    (4080, 4320, "260"),
+                ),
+            ),
+        }
+        for symbol, (base, minutes) in paths.items():
+            build_minutes(
+                self.root,
+                symbol,
+                count=4320,
+                base=base,
+                minutes=minutes,
+                decision="4h",
+                also_decisions=("1d",),
+            )
+        self.settings = make_settings(
+            tmp,
+            self.root,
+            pairs=[("BTCUSDT", "4h"), ("ETHUSDT", "4h")],
+            strategy="n7_4h_eth",
+            params={},
+            start="2024-03-01",
+            end="2024-03-04",
+            n5=True,
+        )
+
+    def evaluate(self) -> n7.Evaluation:
+        return asyncio.run(n7.evaluate(self.settings, str(self.root)))
+
+
+def evaluation_of(world: str) -> n7.Evaluation:
+    """An evaluation whose judgement is judge world ``world``, with no sensitivity, for a test of ``main``."""
+    runs = tuple(run_of(*row) for row in WORLDS[world])
+    judgement = n7.judge(runs, floors=TEST_FLOORS, resamples=RESAMPLES)
+    returns = daily_series(marks_of("N2"))
+    return n7.Evaluation(
+        window=(date(2024, 3, 1), date(2024, 4, 10)),
+        first_defined={},
+        runs=runs,
+        judgement=judgement,
+        sensitivities=(),
+        context=n7.ContextSharpe(sharpe(returns), len(returns)),
+        resamples=RESAMPLES,
+    )
+
+
+class TestTheExitCodes:
+    """``main`` with the guard satisfied and ``evaluate`` standing in: 0 a verdict, 1 incomplete or INDETERMINATE,
+    2 refused (the runner's docstring)."""
+
+    def _main(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, evaluate: Any
+    ) -> tuple[int, str, Path]:
+        repo, _, _ = make_repo(tmp_path / "guard")
+        monkeypatch.setattr(n7, "REPO_ROOT", repo.path)
+        monkeypatch.setattr(n7, "get_settings", lambda path: None)
+        monkeypatch.setattr(n7, "evaluate", evaluate)
+        result = tmp_path / "n7_result.json"
+        out = io.StringIO()
+        code = n7.main(["--out", str(result)], out=out)
+        return code, out.getvalue(), result
+
+    @staticmethod
+    def _returning(world: str) -> Any:
+        async def evaluate(base: object, data_dir: str) -> n7.Evaluation:
+            return evaluation_of(world)
+
+        return evaluate
+
+    def test_indeterminate_exits_1_and_selects_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, text, result = self._main(tmp_path, monkeypatch, self._returning("W3b"))
+        assert code == 1
+        assert (
+            "verdict INDETERMINATE C1 C2 (a tie that section 7 does not break)" in text.splitlines()
+        )
+        judgement = json.loads(result.read_bytes())["judgement"]
+        assert (judgement["outcome"], judgement["selected"], judgement["tied"]) == (
+            "INDETERMINATE",
+            None,
+            ["C1", "C2"],
+        )
+
+    def test_a_selected_verdict_exits_0(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        code, text, _ = self._main(tmp_path, monkeypatch, self._returning("W5"))
+        assert code == 0
+        assert "verdict SELECTED C1" in text.splitlines()
+
+    def test_a_fail_at_n7_exits_0(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        code, text, _ = self._main(tmp_path, monkeypatch, self._returning("W1"))
+        assert code == 0
+        assert any(line.startswith("verdict FAIL at N7") for line in text.splitlines())
+
+    def test_a_run_with_no_verdict_exits_1_and_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        async def evaluate(base: object, data_dir: str) -> n7.Evaluation:
+            raise n7.RunnerError("C1 n7_a at base was incomplete: 1 problem(s)")
+
+        code, text, result = self._main(tmp_path, monkeypatch, evaluate)
+        assert code == 1 and text == ""
+        assert "no verdict: C1 n7_a at base was incomplete" in capsys.readouterr().err
+        assert not result.exists()
+
+    def test_an_unexpected_error_exits_2_and_writes_nothing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        async def evaluate(base: object, data_dir: str) -> n7.Evaluation:
+            raise ValueError("not a RunnerError")
+
+        code, _, result = self._main(tmp_path, monkeypatch, evaluate)
+        assert code == 2
+        assert capsys.readouterr().err.startswith("error: ValueError at ")
+        assert not result.exists()
