@@ -1,4 +1,122 @@
-# Next milestone — M5n (M5m is closed)
+# Next milestone -- M5o, the platform and execution reliability hardening milestone (M5n is closed)
+
+*Rotated at M5n's close (P158). This is the single home for live open items. Rules do not live here: they are in `CLAUDE.md`. The
+sections below this note are carried whole as closed records, in this order: M5n's own section (`M5n -- what is next`, with the
+P157 annotations), M5m's close and its register, and the M5m section itself, which holds the owner's rulings R-A to R-DQ verbatim and
+the body M5l left. The file's title at M5m's close was `Next milestone -- M5n (M5m is closed)`. M5o's charter is not written: it
+comes from P159, and nothing in this rotation decides any part of it beyond what the owner's decision, quoted next, already says.*
+
+## M5o -- what is next
+
+The next milestone is **M5o**, named by the project owner at P158. Its charter comes from P159. The owner's decision, verbatim:
+
+> Owner decision on M5n's N7 FAIL: I choose pure Option 1: Close M5n as FAIL at N7 (no OOS read), pause strategy research, and open the platform/execution reliability hardening milestone (clearing the S4 backlog: U12 REST backfill for feed holes, U10 partially executed protective legs, U13 unbooked trades after venue errors, and the two live-trading blockers: fee capture and base-asset netting). We will not run Option 3 (no exploratory Testnet paper-trading of C1).
+
+What that fixes, and nothing more (REASONED readings, the owner's to overrule): strategy research is paused, so no candidate is read on
+the reserved window and no new variant is run; no Testnet paper run of C1; the live-trading block stays armed (closing record (3));
+and the scope is the five items the owner names, whose current status is in the register below. **Which of them are built, in what
+order, with what exit evidence and under which halts is P159's.** The M5o charter is also the place that decides whether the
+blocked trailing-stop milestone (a venue `trailingDelta`, M5n's D1) stays blocked, since the owner's pause removes its only consumer.
+
+## M5n's CLOSE -- the outcome, what resolved, and the register of everything still open
+
+**M5n outcome, recorded verbatim in `docs/PHASE_HISTORY.md` as the M5n entry's opening:** *"M5n outcome: FAIL at N7, with no
+out-of-sample read. Six pre-registered volatility-scaled trend and breakout candidates on 4h and 1d bars (R-DY), with ATR-scaled
+venue trailing stops (D1), were evaluated once in sample over [2018-03-05, 2024-01-01). None passed all three gates. The nearest, C1
+donchian_1d_20, had an annualised net daily Sharpe of 0.7456 and a bootstrap 5th percentile of 0.0945, but a deflated Sharpe ratio
+of 0.5692 against 0.95, beside a buy-and-hold Sharpe of 0.6436. Both 4h candidates were consumed by costs. The cheap-slippage
+sensitivity would have selected C5 and decided nothing (R-DY)."* The figures are in `docs/RUN_LEDGER_M5N.md` sections 110 and 111 and
+`docs/research/LOG.md` Entry 8; the result file is `data/n7/n7_result_P157.json` (local, gitignored), SHA-256
+`c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`. The owner's three closing records are in `docs/M5N_CHARTER_DRAFT.md`
+section 29 and in the PHASE_HISTORY entry: the reserved window stays unread by any M5n family (subject to R-EF's limits), the
+cumulative trial ledger is carried forward and any future research deflation must count it, and the live-trading block remains armed.
+
+**Owner steps pending, none taken by the rotation.** Each clone below is retired by the owner, **the junction first and alone, with
+`cmd /c rmdir` on the junction path and then the check that the junction's target still exists, and only then the clone**; a recursive
+delete that follows a junction would delete the store behind it (R-CO, `docs/RUN_LEDGER.md` section 53). Measured read-only at P158 (the clone root
+and its `data` directory only, each entry's attributes, nothing followed):
+
+| Clone | Path | Junction found | Its target, which must survive | CHECK before the clone goes |
+|---|---|---|---|---|
+| the S4 deploy clone | `F:\trading bot\deploy\45547f107715` | none at the root or in `data` (deeper levels UNMEASURED) | -- | no junction; confirm none with `cmd /c dir /AL` on the clone before any delete; this is the clone S4 ran from, and the charter's halts forbade any write under it |
+| the S4 backtest clone | `F:\trading bot\backtest\45547f107715` | `data\historical_testnet` | `F:\trading bot\store\testnet-s4-2026-11-01` | after `cmd /c rmdir "F:\trading bot\backtest\45547f107715\data\historical_testnet"`, `Test-Path` on the target prints `True`; and only after the archive `F:\trading bot\evidence\s4\` is confirmed (R-DG) |
+| the rehearsal clone | `F:\trading bot\backtest\rehearsal-45547f107715` | `data\historical_testnet` | `F:\trading bot\store\testnet-s4-rehearsal-2026-10-09` | after `cmd /c rmdir "F:\trading bot\backtest\rehearsal-45547f107715\data\historical_testnet"`, `Test-Path` on the target prints `True` |
+
+Two more clones with a `.venv\Scripts\python.exe` sit beside them and are in nobody's list: `F:\trading bot\backtest\67b7563de683` and
+`F:\trading bot\backtest\cf474214a539`. REASONED, from the names: the first is S5's clone (LOG Entry 2 names the deployment clone
+`67b7563de683...`) and the second is S6's sweep clone. They are recorded so the owner can decide; the rotation neither lists their
+junctions nor retires them. **R-EC lapsed at the S4 stop** and the resource fence it named as architect-owned is still missing
+(`docs/S4_CORRECTION_P150A.md` section 1); M5n added a survey-resources rule (R-EG: `core.fsmonitor=false` in each worktree and test
+repository, and a 20 percent free-committed-memory floor) that is a rule and not a fence, and `M5n-274` below is the part of it the
+tests do not meet.
+
+### Resolved at M5n -- one index line each
+
+Each item's full text is in the charter (`docs/M5N_CHARTER_DRAFT.md`), `docs/RUN_LEDGER_M5N.md` and `docs/PHASE_HISTORY.md`'s M5n entry.
+
+- **N0, M5m's close-out and S4's result intake** -- `29ef8f1`: the N0 line names `ddf3593`, the re-freeze window closed, the guard accepts.
+- **N1, PROTOCOL amendment 4 and the pre-registration** -- `bfbe166`, `ede21a3`; `M5m-510` discharged by the owner's ruling "step 6 is AMENDED".
+- **N2, the 4h and 1d bars, verified** -- `8bf38f7`, `015ee29`, `1b8fccf`, `9061a1c`, `4ff9a73`, `8016ffb`, `d01d88e`, `f43acc0`.
+- **N3, the indicators, the six candidates and their entry counts** -- `c0b3928`, `ea86adc`, `0998ce2`, `cd85621`, `0c7d36b`, `daf8320`.
+- **N4, the D1 trail and its executor** -- `8356084`, `eeff30b`, `cc02c06`, `fec51e4`, `65bae2f`, `29e5353`, `fbef8be`.
+- **N5, sizing from the clamped trail** -- `8473a24`, `a9a18ad`, `1eb0858`, `819852d`, `d0b47f1`.
+- **N6, the estimators (stationary bootstrap, deflated Sharpe)** -- `58ad896`, `05678b6`.
+- **N7, the runner and its one run** -- `57588ee`, `b5deb42`, `50a114d`; run at P157, **FAIL** (`docs/RUN_LEDGER_M5N.md` sections 110 and 111).
+- **`M5n-252`** -- the S6 `register_strategy` condition's carried part, closed by LOG Entry 8 (`6f83ad2`).
+- **N8 and N9** -- **not reached and not carried**: N8 needs a candidate and there is none; its runner was never built; N9's design note was not written. A future milestone that wants either writes it from its own charter.
+
+### The register -- every item still open, by id, with its status at M5n's close
+
+An item's full text, annotations and arming condition are at its own heading below (the M5m register, kept below, carries the
+one-line readings this table updates). **Open owner rulings** are marked OWNER. **The five rows in bold are M5o's scope by the owner's
+decision of P158.**
+
+| Id | Status at M5n's close |
+|---|---|
+| **U12** | **M5o SCOPE (owner, P158): REST backfill for feed holes.** Was DEFERRED by the owner at M5l P91. REASONED prerequisite for any 4h or 1d live path (a one-bar hole refuses entries for the strategy's window length, because the buffer never backfills); the S4 feed holes are 1 to 2 bars after a websocket drop (`M5m-762`). R-DZ's gap rule makes the same demand of the backtest. Nothing built |
+| **U10** | **M5o SCOPE (owner, P158): partially executed protective legs.** OWNER, QC review of the protective order type, not a gate. **Six Testnet cases**, unchanged since M5m's close (M5n ran no live engine): M5m-302 (a stop filled 12.87% beyond its trigger); the 2026-10-11 BTCUSDT `CLOSE` sell that executed partly; order `1867449` (9.9% of list 71012); order `5431129` (46.6% of list 183218); list `218102` (nothing executed); order `7022204` (16.6% of list 243279). The stop legs are market-type `STOP_LOSS`; whether a limit-type stop bounds the fill is the question |
+| **U13** | **M5o SCOPE (owner, P158): unbooked trades after venue errors.** Open: `close_sold_unbooked` after a venue "Internal error" on the entry fill read (list 282240, 2026-10-29); a sold position the ledger omits |
+| **Fee capture** | **M5o SCOPE (owner, P158).** One of the two live-trading blockers. Held by U9 (OWNER: how the fee-capture gate is met), N2 and N3 (UNMEASURED: whether Testnet takes fees in BNB; how soon `myTrades` returns a fill) and A1 (the ENTRY half of the fee; the exit half is booked). **Every commission in every capture is still zero** (the 306 BTCUSDT fills of the `myTrades` capture, the S4 run's bookings), so booking net of fees has never subtracted a non-zero fee outside a test |
+| **Base-asset netting** | **M5o SCOPE (owner, P158).** The other live-trading blocker, with N6 (the live-trading block's lift): entry-fee deduction and base-quantity netting are unbuilt, and every protective leg and every exit is sized from the ORDERED quantity (`CLAUDE.md`, the live-trading block). Measured: every BUY fill's commission in the capture is in the BASE asset (128 of 128). REASONED: the account then holds less base than the legs ask to sell. UNMEASURED: what the venue does with a sell or protective leg larger than the base held, and whether BNB commission avoids the deduction |
+| `M5n-274` | **carried, tests-only (MEASURED at P156, REASONED as to cause):** `tests/unit/test_s6_rehearsal.py` and `tests/unit/test_worktree_survey.py` start git repositories without `core.fsmonitor=false`, and stray `git fsmonitor--daemon` processes accumulate (18 at P156, two more at P157, **ten more after P158's bare gate**, `docs/RUN_LEDGER_M5N.md` section 112; the system `gitconfig` enables fsmonitor). Its arming condition is stated below the table. |
+| **the cumulative trial ledger** | **carried by the owner's closing record (2).** 223 distinct configurations evaluated in sample with a performance figure (S5's baseline 1, S6's sweep 216, M5n's six 6), by source in `docs/RUN_LEDGER_M5N.md` section 112 and as a table in the M5n entry of `docs/PHASE_HISTORY.md`. They are declared configurations, not independent trials: no effective N is estimated. **Any future research deflation must count it** (N7's deflation used N = 6). Its arming condition is stated below the table. |
+| `M5n-294` | **carried:** the lists that name the reserved window's prior reads (`docs/M5N_CHARTER_DRAFT.md` section 26 point 3, section 2 of `docs/RUN_LEDGER.md` section 83, `docs/research/LOG.md` Entry 6) omit the three M5m smoke backtests of 2024-03 (`docs/RUN_LEDGER.md` sections 32 and 35). They add no configuration and do not change that no M5n family read the window. Its arming condition is stated below the table. |
+| the owner's clone retirements | **carried, OWNER:** the S4 deploy clone, the S4 backtest clone and the rehearsal clone, each junction first by `cmd /c rmdir`; table above |
+| `register_strategy` | **REAFFIRMED:** the S6 condition on `strategies/registry.py` stays for the next registration outside the six; its carried part closed with `M5n-252` |
+| K1 to K5 | carried, unchanged from M5m's close (store reusers; P-3k's residue; four false sentences in `src/` and `tests/`; the 229 s stall UNMEASURED; the natural-gap rate of other pairs) |
+| K6, K7, K8 | carried, unchanged: `trade_census.py` infers the protective leg from the price; `cooldown_minutes` is dead; `bollinger_bands` is still rolling |
+| K9 | carried, unfired: the frozen `s4_compare.py` is blind to `buy_refused_bars_gap` |
+| P-3i, P-3m, P-3n | carried, unchanged (P-3n OWNER) |
+| N1 | carried: a held-then-released trade leaves no record across a restart |
+| N4, N5 | carried: `_dec` launders a float past `Money`; Q-B's halt-flag condition may be stranded |
+| U0 to U5, U7, U8 | carried, unchanged (U8: the mutation harness reports a dirty target and proceeds) |
+| U6 | RESOLVED at M5m P105 and struck |
+| U9 | OWNER: see the fee-capture row |
+| U11 | DEFERRED by the owner (M5l P91): reconciliation on a timer, independent of candles |
+| A2, A3, A5, A6 | carried, unchanged (A3 reserved to the owner; A5 position-level `DIVERGED` never observed) |
+| `M5i-065`, `M5i-095`, `M5i-104`, `M5i-126`, the `_go_naked` family | carried, unchanged |
+| W1 to W4, W6 | standing declared test weaknesses |
+| X1, X2a, X2b, X3 | all observed and struck |
+| the trailing-stop milestone | BLOCKED on `main`: nothing places or amends an order for a trailing level. M5n built D1 in the backtester only (`d1_trail.py`, `d1_executor.py`, `d1_risk.py`); no venue path exists and N9's design note was not written. REASONED: the owner's pause on strategy research removes its only named consumer. Whether it stays blocked is for the M5o charter |
+| `M5m-510` | **RESOLVED at P155** (amendment 4, `bfbe166`) and struck |
+
+**The three arming conditions M5n adds, each its own block because `scripts/check_arming_conditions.py` reads a block as running to the
+next blank line, so conditions in consecutive table rows would be audited as one.**
+
+`M5n-274` (tests-only): *Arming condition:* **whoever next edits `tests/unit/test_s6_rehearsal.py` or `tests/unit/test_worktree_survey.py`, or next finds a stray daemon before a survey or a run.**
+
+The cumulative trial ledger (`M5n-293`): *Arming condition:* **whoever next computes a deflated Sharpe ratio with `backtesting/sharpe_stats.py` or `scripts/n7_evaluate.py`, or selects among strategy variants with `backtesting/selection.py`.**
+
+`M5n-294`: *Arming condition:* **whoever next states the reserved window's prior reads in `docs/M5N_CHARTER_DRAFT.md` or `docs/research/LOG.md`, or plans a read of the window.**
+
+**The unobserved surface is the code's branches, not these facts**, as the X section says. The research chain is paused, not removed:
+`backtesting/`, the M5n candidates under `strategies/m5n/` (not in the live registry), `scripts/n7_evaluate.py` and the frozen
+pre-registration stay in the tree, unchanged and out of every live path.
+
+> **ANNOTATED AT M5n's CLOSE (P158): the section below, `M5n -- what is next`, is M5n's own and is CLOSED.** *"The next
+> milestone is **M5n**"* and *"Nothing in M5n starts the live engine, edits an S4 file or lifts the live block"* describe a milestone
+> that has ended; the P157 annotation inside it records N0, N7 and `M5n-274`. **What survives:** every sentence as the record of what
+> M5n was chartered to do, and the live block.
 
 *Rotated at M5m's close (P153). This is the single home for live open items. Rules do not live here: they are in `CLAUDE.md`.
 The body of this file below the M5m section is M5l's, carried; the M5m section itself is KEPT WHOLE, as a closed record, because it
