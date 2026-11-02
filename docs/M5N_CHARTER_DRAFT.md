@@ -4,6 +4,8 @@
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
 
+**Amended at P157 on `main` (HEAD `e0d1f8d`).** Section 28 writes the N0 line, naming `ddf3593`, and records that R-DT clause 3 ends, that the re-freeze window is closed and what counts as a run of N7. Four sentences that said the line was missing are annotated in place under section 23.
+
 **Amended at P156 on `main` (HEAD `8c5d9ec`).** Section 27 records, verbatim, R-EG (where M5n ledger sections are written from now), the re-freeze rule, the survey-resources rule and the owner's ruling on the N1 HALT reading. Section 26's reading of that HALT clause is annotated in place as overruled. **No `N0 complete` line is written, and this amendment changes no digest line.**
 
 **Amended at P155 on `main` (HEAD `5dfc1ab`).** Section 26 records PROTOCOL amendment 4 (`bfbe166`) with the digests of `docs/research/PROTOCOL.md` before and after, marks N1 done, records R-EF verbatim (what "unread" means in M5n's documents), and says that section 8's freeze entry now resolves to the N8 runner's per-candidate ledger. The N1 row and section 8 are annotated in place. **No `N0 complete` line is written: the re-freezes are still due.**
@@ -389,6 +391,8 @@ The estimator module is `05678b6`'s (after `58ad896`), the runner is `57588ee`'s
 
 > **ANNOTATED AT P154: *"the guard still refuses at `tag_missing` on this tree"* IS NO LONGER TRUE.** The tag `milestone/M5m` exists and resolves to `a31c81b`. The guard's order in `check_n0_guard` is charter readable, then the tag, then the `N0 complete` line, so on this tree it now refuses at `n0_line_missing` (REASONED from that order; the guard was not run). **What survives:** the three digests above and the rule that the guard compares nothing else; and *"the correct state until N0 records the S4 result"*, which the missing line still is.
 
+> **ANNOTATED AT P157: THE MISSING LINE IS NOW WRITTEN, AND FOUR PRESENT-TENSE SENTENCES ARE NO LONGER TRUE.** By content: this section's *"**No `N0 complete` line exists in this file**, so the guard still refuses"* (two paragraphs up); the annotation above, *"so on this tree it now refuses at `n0_line_missing`"* and *"which the missing line still is"*; section 25 item 5's and section 26 item 5's *"It writes no `N0 complete` line, because the re-freezes are still due"* and the clause *"the N7 guard therefore still refuses, now at `n0_line_missing`"*; and the P154 to P156 notes' *"No `N0 complete` line is written"*. Each was true of the commit it described. Section 28 writes the line and ends the re-freeze window. **What survives:** the three digests above, the rule that the guard compares nothing else, and the N7 guard's three conditions.
+
 ## 24. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
@@ -461,3 +465,15 @@ The four rulings below are the owner's P156 text, quoted as the prompt gives it;
 *Readings (REASONED).* (1) R-EG's "section 84" is the next free section of `docs/RUN_LEDGER.md`: its last is section 83 (P155's audit of M5n's reads, itself an M5n record and the last one that file takes). `docs/RUN_LEDGER_M5N.md` ends at section 106, so its next is 107. (2) The re-freeze rule is what makes P156's change to `sharpe_stats.py` and `scripts/n7_evaluate.py` lawful: no `N0 complete` line exists and N7 has not run. It asks of the amendment two things, that it list every change and its reason, and the amendment is therefore a section of this charter and not a note in a commit message. (3) "Headroom" in the survey-resources rule is read as free committed memory as a share of the commit limit, and the rule's 20 percent is the floor below which a spec does not start. (4) The ruling in the last block settles the N1 row's HALT clause; it does not change the facts section 26 records.
 
 *What this section does not do.* It changes no digest line, adds no line of the shape the N0 line has, and edits no frozen file.
+
+## 28. N0 recorded at P157
+
+S4's result is recorded at `ddf3593` (`docs/NEXT_MILESTONE.md` at that commit: A PASS, B FAIL (latch-caused), C PASS with 270 of 271 live entries reproduced, "R-DU branch 1 applies to M5n"; applied in section 25). The next line is the one `check_n0_guard` reads, in exactly the form it accepts, naming the commit by its full 40 characters; the paragraph after it is the owner's, verbatim.
+
+N0 complete: S4 result recorded at ddf3593199a463cd00c200b731c94b254ada1001
+
+> N0 recorded: R-DT clause 3 ends; M5n returns may now be computed and read. The re-freeze window is closed: no frozen M5n file changes from here. A run of N7 counts when its result file is written; a crash before that is not a run and may be repeated, and is recorded.
+
+*Readings (REASONED).* (1) "A run of N7 counts when its result file is written" is read against the runner's own order: it writes its result file (opened with exclusive creation) only after `evaluate` has returned, so a crash or a refusal before then leaves no file and is not a run, and a second run refused with `result_exists` is the runner holding the owner's one-result rule. (2) A crash that is repeated is recorded in the ledger with its exit code and its standard error, and the repeat runs the same frozen bytes. (3) "No frozen M5n file changes from here" is the three files of section 23, whose digests are unchanged by this section.
+
+*What this section does not do.* It changes no digest line and edits no frozen file. The charter still carries exactly three lines of the guard's digest shape and, from this section, exactly one line of the N0 shape.
