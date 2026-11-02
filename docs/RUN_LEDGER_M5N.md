@@ -4596,3 +4596,96 @@ All four are tests that use a world the prediction did not trace. `a13` (only a 
 ### The findings this section carries
 
 See the commit message.
+
+## 107. M5n P156: the classification of the eleven open runner holes, and the plan that closes the VERDICT ones with its predictions, before any code (P156 C2, R-T, R-DQ, R-EG)
+
+An observation log, so this section only adds. This is section 107 of `docs/RUN_LEDGER_M5N.md`, the first written under R-EG (charter section 27), and a citation of it names this file. Under R-DQ clause (1) it is committed BEFORE any test or code is drafted. Read-only: the sources read were this ledger's sections 105 and 106, `scripts/n7_evaluate.py` at `8c5d9ec` (unchanged since its own commit `57588ee`, and so since section 105's survey at `5cb0d55`) and the test files that cover it. No recorded bar was read and nothing was run on recorded data. **Nothing here decides anything about S4.**
+
+### 1. Halts, checked first
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `8c5d9ec` | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `8c5d9ec` (then `28e8a77` after C1, the charter commit) |
+| the pre-registration's digest differs | `sha256sum` | equal `e6187480...d45e`; `sharpe_stats.py` `2b55991c...dda82` and `n7_evaluate.py` `1f307de6...dcfff` equal their charter section 23 lines |
+| a command reads recorded bars or runs on recorded data | every command in the plan | none: the survey below mutates source files in a throwaway worktree and runs unit tests on generated fixtures |
+| free committed memory is below 20 percent before a survey spec starts | `Win32_OperatingSystem.FreeVirtualMemory` over `TotalVirtualMemorySize` (the commit limit) | **46.9 percent free** at the time of writing (16,288 of 34,710 MB), free physical 2,160 MB; measured again before each spec |
+| stray `git fsmonitor--daemon` processes | `Get-CimInstance Win32_Process` on `git.exe` | two, 8 MB each, one per working repository (`core.fsmonitor` is `true` in the system config): not the leak of section 106. The survey sets `core.fsmonitor=false` for every git subprocess through `GIT_CONFIG_COUNT`, as the charter's survey-resources rule requires |
+
+### 2. The classification
+
+VERDICT means the hole could change a gate result, the selection, a verdict label or the exit code; REPORT means it could change context or telemetry only. The eleven are the mutations section 106 scored as failing nothing, less the two equivalent mutants (`a01`, `a02`). Sites are `scripts/n7_evaluate.py` lines at `8c5d9ec`.
+
+| Hole | The break (section 105) | Site | Class | Reason |
+|---|---|---|---|---|
+| `b10` | a digest line need only begin as the form does | `_DIGEST_LINE.fullmatch`, line 233 | **VERDICT** | a charter line the guard must refuse (text after the hash) would be accepted, or counted as a second digest, so a run proceeds where the guard exits 2; P156's re-freeze depends on a superseded line not being counted |
+| `b11` | the tag is looked up by its bare name | `refs/tags/` lookup, line 212 | **VERDICT** | a branch named `milestone/M5m` would satisfy condition (a), so a run proceeds where the guard exits 2 |
+| `b14` | an INDETERMINATE verdict exits 0 | `main`, line 970 | **VERDICT** | the exit code of a tie section 7 does not break; the docstring fixes it at 1 |
+| `b30` | the check that a trade's books add up is removed | `trade_books`, line 789 | **VERDICT** | borderline, classed VERDICT: the books feed only the telemetry, but the check compares them with the ledger's own realised figure, which equity (and so every mark) is built from; without it a run whose two sources disagree issues a verdict instead of exiting 1 |
+| `b34` | an incomplete run is judged anyway | `run_candidate`, line 828 | **VERDICT** | an ERROR record or an unserved bar means the marks are not the run's; the gates read the marks |
+| `b36` | the equity probe samples every bar | `_MidnightProbe`, line 751 | **VERDICT** | the **4h midnight marking**: for a 4h candidate (C4, C5) the mark of each date would be the equity after the date's last bar, about 20 hours after midnight, so every daily return, and so every gate, moves; no test has a 4h candidate |
+| `b48` | a candidate starts on the earlier pair's first defined day | `max(days)`, line 731 | **VERDICT** | the span start, hence which days enter every return series |
+| `b49` | the span starts on the earliest candidate's first defined day | `max(first.values())`, line 884 | **VERDICT** | the span start for all six: C3's SMA(200) is the latest to be defined (201 bars against 22 for C1, C4 and C5, section 82), so the earliest-day reading starts the span months early and adds days of zero return for C3 and every other candidate to every return series |
+| `b35` | the buy and hold buys at the first day's close | `bars[0].open`, line 868 | REPORT | section 10's context, "never a criterion": it is printed beside the verdict and read by no gate |
+| `b37` | the result file's keys are not sorted | `canonical_json`, line 675 | REPORT | the order of keys in a file written after the judgement; the content and every gate are unchanged |
+| `b38` | floats in the result file are rounded to six places | `_rounded`, line 568 | REPORT | the gates are decided on unrounded values before the document is built, and the file records each gate's boolean |
+
+**Eight VERDICT, three REPORT.** The 4h midnight marking (`b36`) and the INDETERMINATE exit code (`b14`) are both VERDICT.
+
+### 3. What each VERDICT hole needs, and the sites already do it
+
+At every one of the eight sites the code already does what the runner's docstring and the pre-registration say: `fullmatch`, `refs/tags/`, `return 1` for INDETERMINATE, the books check, the `complete` check, the midnight filter, `max` twice. **So each hole is closed by a test, and no change to `scripts/n7_evaluate.py` or `sharpe_stats.py` is expected** (REASONED from reading the sites; a test that finds otherwise changes the code under the re-freeze rule, and this plan then changes). INDETERMINATE and "no verdict" both exit 1 by the docstring ("1 a run was incomplete or the verdict is INDETERMINATE"); that is a documented overlap, not a hole, and the tests below pin both.
+
+### 4. The closing plan and its predictions (provisional until the tests exist, M5e-051)
+
+All tests go in `tests/unit/test_n7_evaluate.py`; the 4h world needs `tests/unit/d1_world.py` to build a 1d series beside a 4h one (the context reads the 1d archive), a backward-compatible extension. "T" numbers name the tests.
+
+| T | Test (class, name) | Closes | How it fails under the mutation |
+|---|---|---|---|
+| T1 | `TestTheDigestLineIsTheWholeLine::test_a_digest_line_with_text_after_its_hash_is_not_a_digest_line[path]` (3) | b10 | the line with text after its hash is accepted as the path's digest, so the guard does not refuse `digest_line_missing` |
+| T2 | `::test_a_superseded_line_with_text_after_its_hash_is_not_a_second_digest[path]` (3) | b10 | a clean line plus the same line with " (superseded)" counts twice, so the guard refuses `digest_line_duplicated` where it must accept |
+| T3 | `::test_a_superseded_line_with_a_prefix_is_not_a_digest_line[path]` (3) | b10b | the convention P156 uses (`superseded: ` before the form): a `search` finds it and counts twice |
+| T4 | `TestTheTagIsATag::test_a_branch_of_the_tags_name_is_not_the_tag` | b11 | a branch `milestone/M5m` and no tag: the bare name resolves, so the guard does not refuse `tag_missing` |
+| T6 | `TestTheExitCodes::test_indeterminate_exits_1_and_selects_nothing` | b14 | `main` over an INDETERMINATE judgement (world W3b) returns 0 |
+| T7 | `::test_a_selected_verdict_exits_0` | none (pins the other side) | passes under every mutation |
+| T8 | `::test_a_fail_at_n7_exits_0` | b14b | a FAIL (world W1) returns 1 |
+| T9 | `::test_a_run_with_no_verdict_exits_1_and_writes_nothing` | none (pins the overlap) | a `RunnerError` from `evaluate` returns 1, prints "no verdict" and writes no file |
+| T10 | `TestTradeBooks::test_a_trade_whose_books_do_not_add_up_is_refused` | b30 | a trade whose `realised` is one unit off its gross less fees is summed instead of refused |
+| T11 | `::test_trades_that_add_up_are_summed` | none | passes under every mutation |
+| T12 | `TestAnIncompleteRun::test_an_incomplete_run_is_refused_not_judged` | b34 | the world with a strategy whose signals forget the trail (`BrokenD1`) returns marks instead of raising `RunnerError` |
+| T13 | `TestTheMidnightProbe::test_only_a_bar_that_ends_at_midnight_is_sampled` | b36 | a stub system and a day of six 4h bars: the five bars that do not end at midnight are sampled |
+| T14 | `::test_a_4h_candidate_is_marked_at_the_bar_that_closes_at_midnight` | b36 | a real 4h world (world E2): the marks must be collinear with the prices at the 4h closes ending at midnight; they are not when each date takes its last bar's equity |
+| T15 | `TestTheStartDay::test_a_candidate_starts_on_the_later_pairs_first_defined_day` | b48 | BTCUSDT's 1d series begins on day 0 and ETHUSDT's on day 2; the earlier day is returned |
+| T16a | `::test_the_span_starts_on_the_latest_candidates_first_defined_day` | b49 | `evaluate` over two candidates whose first defined days differ (stubbed seams) reports the earlier day as the window start |
+| T16b | `::test_every_run_is_handed_that_start` | b49 | the `start_date` handed to every `run_candidate` is the earlier day |
+
+**The survey after the code** (section 108 re-derives these at the green baseline and is committed before it runs): the eight VERDICT mutations plus `b10b` and `b14b`, and P149 C8's re-parametrisation of the guard tests, which section 106 left unsurveyed: removing each of the three `FROZEN_PATHS` entries in turn (`b47a`, `b47b`, and `b47` as section 105 had it).
+
+| Mutation | The break | Predicted failures (provisional) |
+|---|---|---|
+| `b10` | `_DIGEST_LINE.fullmatch` becomes `.match` | **6**: T1 and T2, three paths each |
+| `b10b` | `.fullmatch` becomes `.search` | **9**: T1, T2 and T3, three paths each |
+| `b11` | the tag lookup drops `refs/tags/` | **1**: T4 |
+| `b14` | `main` returns 0 whatever the outcome | **1**: T6. T7 and T8 expect 0 and still get 0; T9's exit 1 is returned from the error branch, above the line mutated |
+| `b14b` | `main` returns 1 unless SELECTED | **2**: T8 and `test_it_writes_one_result_file_prints_its_digest_and_refuses_a_second_run` (E1 ends in FAIL and asserts 0) |
+| `b30` | the books check is removed | **1**: T10 |
+| `b34` | the `complete` check is removed | **1**: T12 |
+| `b36` | the midnight filter is removed | **2**: T13, T14 |
+| `b48` | `max(days)` becomes `min(days)` | **1**: T15 |
+| `b49` | `max(first.values())` becomes `min(first.values())` | **2**: T16a, T16b |
+| `b47a` | the pre-registration is removed from `FROZEN_PATHS` | **5**: the four per-file guard tests for it, and the constants test |
+| `b47b` | `sharpe_stats.py` is removed | **5**: the same four for it, and the constants test |
+| `b47` | `n7_evaluate.py` is removed | **6**: the four per-file tests, the wrong-length test, and the constants test (section 105 predicted these six and saw two, because the tests were generated from the mutated tuple) |
+
+**Declared abstentions.** Under `b10` T3 passes (a prefix stops a `match`) and the older wrong-length test passes (`abc123` is not 64 hex digits, whichever pattern reads it). Under `b14` T7, T8 and T9 pass. Every 1d test passes under `b36`, because every 1d bar ends at midnight. World E1 passes under `b48` and `b49`, because both of its pairs and both of its candidates are defined on the same day. T11 and T7 pass under every mutation, by design. No test is expected to crash.
+
+### 5. What stays open (REPORT), listed
+
+`b35` (the buy and hold buys at the first day's close or the open: no world separates them), `b37` (the result file's key order: nothing pins that it is sorted) and `b38` (the precision of the floats in the result file: the test compares a value with its own ten-place rounding, which a six-place rounding also satisfies). All three are left open as the owner's P156 instruction says, and carried.
+
+### 6. The re-freeze and the direct digest check
+
+No change to a frozen file is planned, so the re-freeze of charter section 27's rule is **not due unless a test changes a frozen file**. The guard's digest check is not a function of its own: it is the last loop of `check_n0_guard`, after the tag and the N0 line. Calling it directly therefore takes either a refactor of the frozen runner (not warranted by any hole) or a throwaway clone whose charter carries a synthetic N0 line, which reaches the real digest loop in the real code. The verification uses the clone, and also reads the charter's digest lines at `HEAD` with the guard's own `_DIGEST_LINE` pattern.
+
+### 7. The findings this section carries
+
+See the commit message.
