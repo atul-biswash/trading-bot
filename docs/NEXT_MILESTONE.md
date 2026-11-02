@@ -1966,6 +1966,8 @@ takes and the bot did not is a finding about one of them.
 >
 > **What survives:** every ruling R-BN to R-CW, S7 recorded as FAIL, the selection, and S4 as the thing M5m waits for.
 
+> **ANNOTATED AT M5n P155: `M5m-510` IS DISCHARGED.** The condition fired when `docs/research/PROTOCOL.md` was edited, and the owner answered first: *"Owner ruling on M5m-510: step 6 is AMENDED."* Amendment 4 (`bfbe166`) replaced section 6 step 6 by what the code does (the selection is always committed, and an entry exists only to bind a read, as R-CV says) and bound M5n's one read by a rule of its own, the N8 runner's per-candidate ledger and not `check_run`. The file's SHA-256 moved from `fc11efae...34547` to `2b6fec86...e7dc6`. **What survives:** the block above as the record of the question and its arming condition. **What it leaves open:** the N8 runner's refusal of a second M5n read does not exist yet, and is carried to the prompt that builds that runner (`M5n-257`).
+
 > **ANNOTATED AT M5m P123 (C1). Two rulings of the project owner, verbatim.** **R-DB:** *"The S4 stop is done from docs/S4_STOP_RUNBOOK.md: stopping the bot, the final freeze and recorder run, the store frozen from the recorder clone by hash, the backtest clone built outside deploy\ with no .env, the backtest of [W, M) through config.s4.yaml, and the frozen comparison, each step with its CHECK, using T0 2026-10-10T06:05:20Z and only procedures already measured on this machine."*
 > **R-DC:** *"scripts/s4_explore.py computes, for a frozen capture, the excluded intervals under the frozen down_intervals and under a corrected rule (from each process's last record to the next process's first closed candle), and the entries each would exclude. Its output is exploratory under the ratified CHOSEN line 5 and never replaces s4_compare.py's result."*
 >
@@ -2127,6 +2129,8 @@ than twenty days.
 > only above a 200-period average"* is no longer an example; it is the filter. **What survives:** the
 > arming condition on `register_strategy`, which this commit does not fire (it registers nothing), and the
 > three-line shape of the split, the candidates and the research log.
+
+> **ANNOTATED AT M5n P155: THE ARMING CONDITION ABOVE FIRED, AND *"which this commit does not fire (it registers nothing)"* IS SCOPED TO P113.** M5n's six candidates register with `@register_strategy` in `strategies/m5n/`, in the commits that arrived with the merge `12d9a33`; they join the registry only when `trading_bot.strategies.m5n` is imported, which only the N3, N4 and N7 scripts do. The condition's requirement is S6's own two bullets: a new strategy is a registry entry with its own tests, and every variant tried is recorded, with its parameters and in-sample result, in a research log under `docs/`. `docs/research/LOG.md` Entry 7 (`5dfc1ab`) meets it as far as today allows: six variants, R-DY's parameters, and their in-sample results as counts, since no return exists yet. **Carried, not met:** when N7 computes the six in-sample results they are added to that log as an Entry 8, a docs record and not code (`M5n-252`). **What survives:** the condition for the next registration of a strategy outside these six.
 
 **S7. The decision gate.** A candidate PASSES only if, **out of sample and net of fees and
 S2's stop slippage**, all of these hold:
