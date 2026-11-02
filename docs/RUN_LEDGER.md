@@ -8434,3 +8434,47 @@ Every row is `symbol BTCUSDT`, base `BTC`, quote `USDT`, and **every order was f
 - It does not establish anything about a multi-fill entry, a non-zero commission, a commission in a third asset, or index lag after a fill: every sampled fill was at least a day old, so the delay between a fill and its appearance in `myTrades` (`N3`) is still UNMEASURED.
 - It does not establish the venue's limits or the order of a multi-fill page.
 - It makes no claim about the nine entries' protective legs or exits; only entries were read.
+
+## 89. M5o P161 H1: the arming audit's predicted kills, committed before the survey runs (P161 C10, R-T, R-DQ)
+
+An observation log, so this section only adds; a citation names its file (R-EG). Committed BEFORE the mutation survey runs and after the tests exist, so under `M5e-051` these counts are derived at the green baseline and are binding. HEAD `df0b762`, the committed tree the survey will mutate (in a detached worktree outside the repository, by `scripts/worktree_survey.py`, with the unmutated baseline and the proof of import location before any result counts). The spec is `h1_spec.json` in the session scratchpad, SHA-256 `c4da18e8de5ce96483eba7463c4a8646bfd3e85071b0dc882a9e284ef0495fc9`: 21 mutations, **45 predicted kills**, over seven test files (`test_settlement`, `test_executor`, `test_reconciliation_driver`, `test_portfolio`, `test_persistence_store`, `test_modes`, `test_binance_client`). Before this section was written every anchor was checked to match exactly once in the committed file (`git show HEAD:<file>`), nothing was mutated, and no test was run under a mutation.
+
+**How the predictions were made.** Each by reading the assertions of the tests downstream of the mutated point, not their names (`M5h`, *reason from what a thing reaches*), and by checking each fixture can express the mutation (`M5e-079`: say what the mutated code now DOES). **The rule for a miss** is the owner's from M5k: more kills than predicted is recorded; fewer HALTS the survey until each missing kill is explained.
+
+| # | File | What the mutated code now does | Predicted kills | Declared abstentions |
+|---|---|---|---|---|
+| q01 | `execution/settlement.py` | fills summing OVER the executed quantity settle | 2: `test_fills_over_the_executed_quantity_are_inconsistent`, `test_a_contradiction_is_not_retried[F9d-over]` | |
+| q02 | `execution/settlement.py` | a repeated trade id is not checked | 1: `test_a_repeated_trade_id_is_inconsistent_and_is_reported_as_one` | `[F9e-duplicate]`: the doubled fills still sum over the executed quantity, so the over-fill check raises the same type |
+| q03 | `execution/settlement.py` | a SELL under the entry order id settles | 2: `test_a_sell_under_the_entry_order_id_is_refused`, `test_a_contradiction_is_not_retried[F9f-sell]` | |
+| q04 | `execution/settlement.py` | the sums and the VWAP run under the caller's decimal context | 1: `test_the_vwap_is_taken_under_its_own_context_whatever_the_caller_runs` | every other settlement test: the default ambient precision is 28 |
+| q05 | `execution/settlement.py` | the quote total is `price x quantity` summed, not the venue's `quoteQty` summed | 9: the seven `test_the_settlement_equals_the_hand_derived_figures[F1,F2a,F2b,F3,F4,F5,F5b]`, `test_a_clean_entry_costs_one_order_read_and_one_fills_read`, `test_a_third_asset_commission_is_recorded_and_marked_not_converted` | the executor and driver tests, which compare the total NUMERICALLY, and the product equals it at another exponent |
+| q06 | `execution/settlement.py` | an order still open with nothing executed is an expiry | 1: `test_an_order_still_open_with_nothing_executed_is_retried_not_expired` | |
+| q07 | `execution/settlement.py` | the first page asks from trade id 1 | 2: `test_paging_starts_at_zero_and_continues_from_the_last_id_plus_one`, `test_a_full_last_page_is_ended_by_an_empty_one` | `test_paged_fills_settle_end_to_end`: the fake serves every id from 1 up, so the same fills return |
+| q08 | `execution/settlement.py` | the cursor advances to the last id, not past it (a repeated fill per page) | 4: the two above, `test_the_page_cap_returns_a_short_list_and_the_derivation_refuses_it` (refuses as inconsistent, not incomplete), `test_paged_fills_settle_end_to_end` | |
+| q09 | `execution/executor.py` | the settlement's bounds ignore the dispatch budget | 1: `test_a_spent_budget_begins_no_settlement_and_the_position_still_opens` | |
+| q10 | `execution/executor.py` | an unanswered entry reads as `SETTLED` | 4: `test_a_persistent_failure_opens_the_position_pending_and_counts_the_attempts`, `test_fills_short_of_the_executed_quantity_leave_the_entry_pending`, `test_a_spent_budget_begins_no_settlement_and_the_position_still_opens`, `test_a_live_resolution_that_cannot_read_the_fills_opens_pending` | |
+| q11 | `execution/executor.py` | the requested-limit debit is not remembered as an estimate | 1: `test_a_persistent_failure_opens_the_position_pending_and_counts_the_attempts` | |
+| q12 | `execution/executor.py` | the `fees` field of `entry_settled` is blank | 2: `test_a_clean_entry_is_settled_and_records_every_commission`, `test_a_third_asset_commission_is_recorded_and_marked_and_the_entry_still_opens` | |
+| q13 | `execution/reconciliation_driver.py` | the retry has 99 spare calls whatever the pass left | 1: `test_the_retry_spends_only_the_calls_the_pass_left_of_its_cap` | |
+| q14 | `execution/reconciliation_driver.py` | there is no attempt ceiling | 1: `test_the_attempt_ceiling_stops_the_retry_and_says_so_once` | |
+| q15 | `execution/reconciliation_driver.py` | the retry phase is deleted | 4: `test_a_pending_entry_is_settled_on_the_next_pass_and_the_debit_trued_up`, `test_a_failed_retry_counts_the_attempt_and_stays_pending`, `test_the_attempt_ceiling_stops_the_retry_and_says_so_once`, `test_a_cost_basis_cured_on_a_pass_books_an_exit_that_filled_on_the_same_pass` | `test_the_retry_spends_only_the_calls_the_pass_left_of_its_cap`: it asserts nothing was retried, which a deleted phase also satisfies |
+| q16 | `core/portfolio.py` | the late settlement debits the over-debit instead of crediting it | 3: `test_it_sets_the_cost_basis_and_credits_back_the_over_debit`, `test_a_failed_credit_leaves_the_position_pending`, `test_a_pending_entry_is_settled_on_the_next_pass_and_the_debit_trued_up` | |
+| q17 | `persistence/store.py` | a schema-2 record that already carries the schema-3 keys loads | 1: `test_a_version_two_file_carrying_the_new_keys_is_corrupt` | |
+| q18 | `persistence/store.py` | schema 4 is readable | 2: `test_the_readable_versions_are_exactly_one_two_and_three`, `test_a_version_this_build_cannot_read_is_refused` | |
+| q19 | `engine/modes.py` | a restored position stays pending although the boot read its total | 1: `test_a_restored_position_keeps_a_settlement_it_still_owes[the-boot-read-the-total]` | |
+| q20 | `engine/modes.py` | the record always says `"settled"` | 1: `test_a_pending_settlement_survives_into_the_record` | |
+| q21 | `exchange/binance_client.py` | `fromId` goes out as a string | 1: `test_get_my_trades_sends_from_id_as_an_integer_beside_an_order_id` | |
+
+**Totals:** 21 mutations, 45 predicted kills (2+1+2+1+9+1+2+4+1+4+1+2+1+1+4+3+1+2+1+1+1), each of the 21 predicted to fail at least one test. **No mutation is predicted to be a crash**: every kill is an assertion on a wrong value or an unmet `pytest.raises`, which the survey's hook classifies from the live exception class and not from pytest's text. A crash (`AttributeError`, `ValueError` from a test's own unpack) would be recorded as one and as a miss against the prediction of a kill.
+
+**The arming audit is the second half of step 6 and has no predictions to make:** `scripts/check_arming_conditions.py` is run against the four documents that carry conditions, and the conditions naming a symbol this item edited are listed with their resolution, `RESOLVED` or `REAFFIRMED`. It follows the survey in the next section.
+
+### What reviewing the predictions changed
+
+- **q09 was rewritten before it was committed here.** The first draft replaced `now=utc_now()` with `now=started_at` in the settlement's bounds. The spent-budget test uses a stub budget that counts consultations and ignores `now`, so that mutation would have left the stub answering `None` after its first call and the test would have PASSED: an abstention disguised as coverage (`M5c-U`'s trap, one level down: the fixture could not express the mutation). The mutation now removes the budget from the bounds altogether, which the stub can express (`M5o-060`).
+- **q02's abstention is declared in advance** because the over-fill check catches the doubled fills and raises the same type, so the retry test cannot tell the two checks apart; only the message-matching derivation test can. That is a real property of the pair of checks, not a gap in the tests.
+
+### What this section does not establish
+
+- It does not establish that the 45 are right; the survey does, and a miss is recorded either way.
+- It does not claim every behaviour of H1 is mutated: the executor's `collaborator_failed` line, the `entry_settlement_pending` event's fields, the log of `entry_settled_late`, `base_asset_of`'s refusal and the `RetryPolicy` arithmetic are covered by tests that no mutation here probes. They are listed so a later reader does not read 21 as complete.
