@@ -197,14 +197,24 @@ DEFAULT_STORE_PATH = Path("data/state.json")
 #: (``M5l-107``). So the rule above gains a second trigger: a shape a previous
 #: build would read and then silently lose. This build reads every version in
 #: :data:`_READABLE_SCHEMAS`, 1 as well as 2.
-SCHEMA_VERSION = 2
+#:
+#: **BUMPED TO 3 AT M5o P161 (H1), by the owner's R-OD, for two keys a version-2
+#: build would read and then lose.** A position record gains ``settlement`` and
+#: ``settlement_attempts``; a version-2 build loads a file carrying them (it
+#: reads named keys and ignores the rest) and erases them at its next whole-file
+#: save, which is the second trigger above. R-OD requires the bump, a loader that
+#: refuses an unknown version, and tests loading the old one: :func:`load`
+#: reads 1, 2 and 3, refuses everything else, and refuses a version-1 or -2 file
+#: whose position records already carry the new keys, since no build writes that
+#: shape.
+SCHEMA_VERSION = 3
 
 #: Every version :func:`load` accepts. **A TUPLE, NOT A SET**: membership is
 #: then tested by ``==``, so a payload whose ``schema`` is an unhashable JSON
 #: value is refused as corrupt rather than raising ``TypeError`` past the
 #: refusal. Tied to :data:`SCHEMA_VERSION`, so a later bump is read by the
 #: build that makes it.
-_READABLE_SCHEMAS = (1, SCHEMA_VERSION)
+_READABLE_SCHEMAS = (1, 2, SCHEMA_VERSION)
 
 _TEMP_SUFFIX = ".tmp"
 
@@ -323,6 +333,21 @@ class PositionRecord(_Frozen):
     entry_limit: Money
     stop_loss: Money | None
     take_profit: Money | None
+    #: **ANNOTATED AT M5o P161 (H1, R-OD): THE INCLUSION TEST ABOVE NOW ADMITS
+    #: PROCESS BOOKKEEPING, AND THESE TWO FIELDS ARE IT.** "Every one is something
+    #: WE REQUESTED, never something the venue reported" still excludes a fill
+    #: price, a quote total, a commission and an order id, and they stay out. What
+    #: it did not contemplate is a fact about OUR OWN knowledge: whether the
+    #: entry's fills have been read back (``"settled"``, or ``"pending_settlement"``
+    #: when the executor's bounded retries could not) and how many reads have
+    #: failed. Neither is venue-reported and neither can be re-derived by asking the
+    #: venue, because a restart must not forget that a settlement is still owed
+    #: (``M5o-042``). **Required keys**, like ``stop_loss``: a truncated record
+    #: raises rather than reading as settled. Version-1 and -2 files carry
+    #: neither, and :func:`_load_positions` supplies ``"settled"`` and ``0`` for
+    #: them.
+    settlement: Literal["settled", "pending_settlement"]
+    settlement_attempts: int = Field(ge=0)
 
 
 class LedgerRecord(_Frozen):
@@ -629,7 +654,13 @@ def _dump_position(record: PositionRecord) -> dict[str, Any]:
         "entry_limit": _dump_money(record.entry_limit),
         "stop_loss": _dump_optional_money(record.stop_loss),
         "take_profit": _dump_optional_money(record.take_profit),
+        "settlement": record.settlement,
+        "settlement_attempts": record.settlement_attempts,
     }
+
+
+#: The two keys schema 3 added to a position record.
+_SCHEMA_3_POSITION_KEYS = ("settlement", "settlement_attempts")
 
 
 def _load_positions(version: object, entries: list[Any]) -> tuple[PositionRecord, ...]:
@@ -638,12 +669,31 @@ def _load_positions(version: object, entries: list[Any]) -> tuple[PositionRecord
     **A VERSION-1 FILE CARRYING POSITIONS IS CORRUPT, NOT IGNORED.** No build
     writes one: version 1 predates the key. Reading past it would drop the
     records silently, which is the loss ``M5l-107`` names, so it is refused.
+
+    **A VERSION-1 OR -2 FILE WHOSE POSITION RECORDS CARRY THE SCHEMA-3 KEYS IS
+    CORRUPT FOR THE SAME REASON** (M5o H1, R-OD): no build writes that shape, and
+    reading it as the older version would be reading past a key. An older file's
+    records, which carry neither, load with ``settlement="settled"`` and
+    ``settlement_attempts=0`` -- the state of every position before the field
+    existed. At version 3 both keys are REQUIRED: a record that lost one is
+    refused by :class:`PositionRecord` and not read as settled.
     """
     if version == 1 and entries:
         raise ValueError(
             f"a schema-1 file carries {len(entries)} position record(s); schema 1 "
             "predates positions, so no build writes that shape"
         )
+    if version in (1, 2):
+        upgraded = []
+        for entry in entries:
+            carried = [key for key in _SCHEMA_3_POSITION_KEYS if key in entry]
+            if carried:
+                raise ValueError(
+                    f"a schema-{version} file carries a position record with {carried}; "
+                    "those keys arrived at schema 3, so no build writes that shape"
+                )
+            upgraded.append({**entry, "settlement": "settled", "settlement_attempts": 0})
+        entries = upgraded
     return tuple(PositionRecord(**entry) for entry in entries)
 
 

@@ -26,6 +26,7 @@ from pydantic import (
 )
 
 from trading_bot.core.enums import (
+    EntrySettlementState,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -667,6 +668,48 @@ class ExitSettlement(_Frozen):
     fill_count: int = Field(ge=1)
 
 
+class EntrySettlement(_Frozen):
+    """One entry order's fills, settled: quantity, quote total, unit price and commissions.
+
+    **THE ENTRY TWIN OF** :class:`ExitSettlement`, built by
+    ``execution.settlement.derive_entry_settlement`` from the order's fills by
+    SUMMING, and the type the P160 owner rulings R-OC and R-OE call for: every
+    commission is recorded exactly, **each amount paired with its asset**, and
+    never as a bare ``Decimal``. The money rule's denomination invariant is why
+    :attr:`fees` is a tuple of :class:`Fee` and not a number.
+
+    **``quote_quantity`` IS THE FIGURE A BOOKING USES and ``price`` is the
+    quotient**, as on :class:`Trade`: the VWAP is ``quote_quantity / quantity``
+    under a 28-digit context, rounded half-even, and says so. It is carried
+    because ``Position.entry_fill_price`` is a unit price, and it is lossy at the
+    28th digit for a non-terminating division; the exact quote total is what
+    ``Portfolio.close_position`` subtracts.
+
+    **``fees`` HOLDS ONE** :class:`Fee` **PER ASSET, SORTED BY ASSET**, summed over
+    the fills by addition. A commission of zero is recorded as a zero in its
+    asset (``0E-8 BTC``): the denomination is measured even when the amount is
+    not, which is all Testnet can show (``docs/RUN_LEDGER.md`` section 84).
+
+    **``unmeasured_fee_assets`` IS R-OC's MARK.** The assets among :attr:`fees`
+    that are neither the symbol's base asset nor its quote asset. A non-empty
+    tuple says this trade's net P&L is UNMEASURED: nothing here converts a
+    commission in a third asset, and nothing subtracts one. The mark is derived
+    from the fees and the two named assets, so it cannot disagree with them.
+
+    **A BASE-ASSET COMMISSION IS NOT DEDUCTED FROM QUOTE P&L HERE OR ANYWHERE**
+    (R-OE): it is reflected through the netted quantity, which is H4's.
+    """
+
+    order_id: str
+    quantity: Money
+    quote_quantity: Money
+    price: Money
+    fees: tuple[Fee, ...]
+    unmeasured_fee_assets: tuple[str, ...] = ()
+    filled_at: datetime
+    fill_count: int = Field(ge=1)
+
+
 class HeldExit(_Frozen):
     """An exit that FILLED and that this ledger cannot book, as ONE value. R2.
 
@@ -788,6 +831,30 @@ class Position(BaseModel):
     #: without one -- a fixture, or a restored record whose GET gave none --
     #: and booking then takes the quotient, exactly as before this field.
     entry_quote_total: Money | None = None
+    #: **M5o H1: whether this entry's fills have been read back.**
+    #: :attr:`~EntrySettlementState.PENDING_SETTLEMENT` means the entry filled and
+    #: the bounded retries could not read its fills, so :attr:`entry_fill_price`
+    #: and :attr:`entry_quote_total` are ``None`` for that reason and not another;
+    #: the reconciliation driver retries each pass and
+    #: ``Portfolio.complete_entry_settlement`` is the one writer of the transition
+    #: back. **The default is** :attr:`~EntrySettlementState.SETTLED`, the
+    #: expensive direction in principle, for the reason written on the enum.
+    #: **PERSISTED** (schema 3), unlike the two fields above it, because a
+    #: restart must not forget that a settlement is still owed.
+    entry_settlement: EntrySettlementState = EntrySettlementState.SETTLED
+    #: How many settlement attempts have FAILED to read this entry's fills, by the
+    #: executor's bounded retries and by every reconciliation pass since. Recorded
+    #: so an operator can see it; at ``SETTLEMENT_RETRY_LIMIT`` the driver stops
+    #: retrying and says so once at CRITICAL. **PERSISTED** (schema 3).
+    entry_settlement_attempts: int = Field(default=0, ge=0)
+    #: **THE AMOUNT THIS POSITION'S OPEN DEBIT WAS ESTIMATED AT, or ``None``.** Set
+    #: only when ``_open_position`` debited the requested limit because the fill
+    #: was unknown. ``Portfolio.complete_entry_settlement`` credits back the
+    #: difference from the real quote total and clears it. **MEMORY ONLY**: a
+    #: restored position was never debited -- the boot seeds ``free_quote`` from
+    #: the venue, which already reflects what left the account -- so it carries
+    #: ``None`` and a late settlement corrects nothing.
+    entry_debit_estimate: Money | None = None
     #: Close time of the bar this entry was decided on. Deterministic across a
     #: restart, unlike :attr:`opened_at`, which is why it -- not ``opened_at``
     #: -- seeds a derivable client order ID.

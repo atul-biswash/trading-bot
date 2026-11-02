@@ -31,7 +31,7 @@ import pytest
 from freezegun import freeze_time
 from pydantic import ValidationError
 
-from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
+from trading_bot.core.enums import EntrySettlementState, OrderSide, PositionSide, ProtectionState
 from trading_bot.core.exceptions import (
     ExchangeError,
     FeeAssetUnresolvableError,
@@ -41,7 +41,7 @@ from trading_bot.core.exceptions import (
     PositionNotHeldError,
     TradingBotError,
 )
-from trading_bot.core.models import Fee, Position, Trade
+from trading_bot.core.models import EntrySettlement, Fee, Position, Trade
 from trading_bot.core.portfolio import Ledger, Portfolio, held_exit, settle_exit
 
 D = Decimal
@@ -896,3 +896,138 @@ class TestAnAbsentSymbolIsNeverBooked:
         """Typed so a caller can tell it from a venue failure. MUTATION: derive it from ExchangeError."""
         assert issubclass(PositionNotHeldError, TradingBotError)
         assert not issubclass(PositionNotHeldError, ExchangeError)
+
+
+# --------------------------------------------------------------------------
+# M5o H1: a late entry settlement gives the cost basis and trues up the debit.
+# --------------------------------------------------------------------------
+_ESTIMATE = D("1602.0000000000")
+_PENDING_QTY = D("0.02000000")
+_PENDING_QUOTE = D("1600.00000000")
+
+
+def _pending_position(
+    *, estimate: Decimal | None = _ESTIMATE, quantity: Decimal = _PENDING_QTY
+) -> Position:
+    """An entry that filled and whose fills could not be read: no price, no total, pending."""
+    return Position(
+        symbol=SYMBOL,
+        side=PositionSide.LONG,
+        quantity=quantity,
+        entry_price=D("80100.00"),
+        entry_fill_price=None,
+        entry_quote_total=None,
+        entry_settlement=EntrySettlementState.PENDING_SETTLEMENT,
+        entry_settlement_attempts=3,
+        entry_debit_estimate=estimate,
+        entry_bar_time=NOW,
+        protection=ProtectionState.UNKNOWN,
+        opened_at=NOW,
+    )
+
+
+def _entry_settlement(
+    *, quote: Decimal = _PENDING_QUOTE, quantity: Decimal = _PENDING_QTY
+) -> EntrySettlement:
+    return EntrySettlement(
+        order_id="1001",
+        quantity=quantity,
+        quote_quantity=quote,
+        price=quote / quantity,
+        fees=(Fee(amount=D("0E-8"), asset="BTC"),),
+        filled_at=NOW,
+        fill_count=1,
+    )
+
+
+class TestCompleteEntrySettlement:
+    """`Portfolio.complete_entry_settlement`, the one writer of PENDING_SETTLEMENT -> SETTLED."""
+
+    def test_it_sets_the_cost_basis_and_credits_back_the_over_debit(self) -> None:
+        """The position was debited the REQUESTED limit (80100.00 x 0.02 = 1602); 1600 left.
+
+        EXACT: 8398.00 + 1602.0000000000 - 1600.00000000 = 8400. MUTATION: skip the
+        credit (free_quote stays 8398.00); credit the whole estimate; credit the
+        total instead of the difference.
+        """
+        position = _pending_position()
+        portfolio = Portfolio(free_quote=D("8398.00"), positions={SYMBOL: position})
+
+        portfolio.complete_entry_settlement(SYMBOL, _entry_settlement())
+
+        assert portfolio.free_quote == D("8400.00")
+        assert position.entry_quote_total == D("1600.00000000")
+        assert position.entry_fill_price == D("80000")
+        assert position.entry_settlement is EntrySettlementState.SETTLED
+        assert position.entry_debit_estimate is None
+
+    def test_a_restored_position_corrects_nothing(self) -> None:
+        """No estimate means the boot seeded free_quote from the venue: nothing left to true up.
+
+        MUTATION: credit `quantity x entry_price - total` whatever the estimate says.
+        """
+        position = _pending_position(estimate=None)
+        portfolio = Portfolio(free_quote=D("8400.00"), positions={SYMBOL: position})
+
+        portfolio.complete_entry_settlement(SYMBOL, _entry_settlement())
+
+        assert portfolio.free_quote == D("8400.00")
+        assert position.entry_settlement is EntrySettlementState.SETTLED
+
+    def test_a_symbol_not_held_is_refused_and_nothing_is_written(self) -> None:
+        portfolio = Portfolio(free_quote=D("100"), positions={"ETHUSDT": _pending_position()})
+
+        with pytest.raises(PositionNotHeldError, match="BTCUSDT"):
+            portfolio.complete_entry_settlement(SYMBOL, _entry_settlement())
+
+        assert portfolio.free_quote == D("100")
+
+    def test_a_position_that_is_not_pending_is_refused(self) -> None:
+        """A settled position must not have its cost basis overwritten by a later read.
+
+        MUTATION: drop the state check.
+        """
+        position = _position()
+        portfolio = Portfolio(free_quote=D("100"), positions={SYMBOL: position})
+
+        with pytest.raises(ValueError, match="is not pending settlement"):
+            portfolio.complete_entry_settlement(SYMBOL, _entry_settlement())
+
+        assert portfolio.free_quote == D("100")
+        assert position.entry_fill_price == AWKWARD_ENTRY_FILL
+
+    def test_a_settlement_of_another_quantity_is_refused_before_any_write(self) -> None:
+        """A fill of a different size than the position records is an anomaly, not a cost basis.
+
+        MUTATION: drop the quantity check. The pending position and the balance
+        are asserted unchanged, which is what separates refusing from half-writing.
+        """
+        position = _pending_position()
+        portfolio = Portfolio(free_quote=D("8398.00"), positions={SYMBOL: position})
+
+        with pytest.raises(ValueError, match="against a position of"):
+            portfolio.complete_entry_settlement(
+                SYMBOL, _entry_settlement(quantity=D("0.01500000"), quote=D("1200.00000000"))
+            )
+
+        assert portfolio.free_quote == D("8398.00")
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_fill_price is None
+
+    def test_a_failed_credit_leaves_the_position_pending(self) -> None:
+        """THE FALLIBLE STEP FIRST: a total above the estimate debits more, and free_quote is ge=0.
+
+        0.5 + 1602 - 1604 < 0 raises on the assignment; the position must still be
+        pending with no cost basis, so the next pass retries. MUTATION: write the
+        position's fields before the balance.
+        """
+        position = _pending_position()
+        portfolio = Portfolio(free_quote=D("0.5"), positions={SYMBOL: position})
+
+        with pytest.raises(ValidationError):
+            portfolio.complete_entry_settlement(SYMBOL, _entry_settlement(quote=D("1604.00000000")))
+
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_fill_price is None
+        assert position.entry_debit_estimate == D("1602.0000000000")
+        assert portfolio.free_quote == D("0.5")

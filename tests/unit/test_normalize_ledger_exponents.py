@@ -53,6 +53,8 @@ def _position(symbol: str = "BTCUSDT") -> store.PositionRecord:
         entry_limit=D("60123.45000000"),
         stop_loss=D("58000.00000000"),
         take_profit=D("63000.00000000"),
+        settlement="settled",
+        settlement_attempts=0,
     )
 
 

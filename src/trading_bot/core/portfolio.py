@@ -42,7 +42,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState
+from trading_bot.core.enums import EntrySettlementState, OrderSide, PositionSide, ProtectionState
 from trading_bot.core.exceptions import (
     FeeAssetUnresolvableError,
     FeeFillsIncompleteError,
@@ -50,7 +50,14 @@ from trading_bot.core.exceptions import (
     NonSellFillError,
     PositionNotHeldError,
 )
-from trading_bot.core.models import ExitSettlement, Fee, HeldExit, Money, Position
+from trading_bot.core.models import (
+    EntrySettlement,
+    ExitSettlement,
+    Fee,
+    HeldExit,
+    Money,
+    Position,
+)
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from collections.abc import Mapping, Sequence
@@ -569,6 +576,61 @@ class Portfolio(BaseModel):
             )
         position.protection = ProtectionState.UNKNOWN
         self.positions[position.symbol] = position
+
+    def complete_entry_settlement(self, symbol: str, settlement: EntrySettlement) -> None:
+        """Give a position whose entry fills were unread its cost basis, and true up the debit.
+
+        **The one writer of** ``PENDING_SETTLEMENT -> SETTLED`` (M5o H1). It sets
+        :attr:`Position.entry_fill_price` and :attr:`Position.entry_quote_total`
+        from ``settlement`` and, when the position was opened on an ESTIMATE
+        (:attr:`Position.entry_debit_estimate`, set when ``_open_position``
+        debited the requested limit because the fill was unknown), credits back
+        ``estimate - settlement.quote_quantity`` so ``free_quote`` matches what
+        left the account. A restored position carries no estimate -- the boot
+        seeded ``free_quote`` from the venue -- and so corrects nothing.
+
+        **Refused before anything is written**, for a symbol not held
+        (:class:`PositionNotHeldError`), a position not pending, and a
+        settlement whose quantity is not the position's: a fill of a different
+        size than the position records is the anomaly this ledger must not
+        paper over by overwriting a cost basis. The fallible step precedes the
+        irreversible one, as everywhere in this class: ``free_quote`` carries
+        ``ge=0`` under ``validate_assignment``, so the credit goes first, and the
+        state flag last, so an interrupted write leaves the position pending and
+        retried and never settled with a stale estimate.
+
+        **The estimate was an over-debit in every measured instance** (the
+        request exceeded the fill five times of five), so the correction is
+        normally a credit; a quote total above the estimate would debit more and
+        is handled by the same arithmetic.
+
+        :raises PositionNotHeldError: ``symbol`` is not held.
+        :raises ValueError: the position is not ``PENDING_SETTLEMENT``, or
+            ``settlement.quantity`` differs from the position's quantity.
+        """
+        position = self.positions.get(symbol)
+        if position is None:
+            raise PositionNotHeldError(
+                f"complete_entry_settlement was asked about {symbol}, which this portfolio "
+                "does not hold; nothing was written"
+            )
+        if position.entry_settlement is not EntrySettlementState.PENDING_SETTLEMENT:
+            raise ValueError(
+                f"{symbol} is not pending settlement ({position.entry_settlement.value}); "
+                "nothing was written"
+            )
+        if settlement.quantity != position.quantity:
+            raise ValueError(
+                f"{symbol}'s entry settled for {settlement.quantity} against a position of "
+                f"{position.quantity}; nothing was written"
+            )
+        estimate = position.entry_debit_estimate
+        if estimate is not None:
+            self.free_quote = self.free_quote + estimate - settlement.quote_quantity
+        position.entry_fill_price = settlement.price
+        position.entry_quote_total = settlement.quote_quantity
+        position.entry_debit_estimate = None
+        position.entry_settlement = EntrySettlementState.SETTLED
 
     def close_position(
         self,

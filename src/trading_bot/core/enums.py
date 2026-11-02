@@ -296,6 +296,32 @@ class ProtectionState(str, Enum):
     DIVERGED = "diverged"
 
 
+class EntrySettlementState(str, Enum):
+    """Whether an entry's fills have been read back from the venue (M5o H1).
+
+    Carried by :attr:`~trading_bot.core.models.Position.entry_settlement`. Both
+    members have a writer, as the discipline in :class:`ProtectionState` asks:
+    ``OrderExecutor`` writes :attr:`PENDING_SETTLEMENT` when its bounded retries
+    could not read the entry's fills, and the same executor and the
+    reconciliation driver write :attr:`SETTLED` when they did.
+
+    **The default on ``Position`` is** :attr:`SETTLED`, **and that is the
+    expensive direction in principle**: a position wrongly ``SETTLED`` is simply
+    today's ``NO_COST_BASIS`` state, which nothing retries. It is confined to
+    construction sites that never ran a settlement -- every fixture, a restored
+    position whose record did not say pending, and the backtester's simulated
+    executors -- whose behaviour is unchanged. A required field would have
+    changed about forty sites for no new safety (``M5o-041``).
+    """
+
+    #: Nothing is waiting: the entry's fills were read, or no read was attempted.
+    SETTLED = "settled"
+    #: The entry filled and its fills could not be read. The cost basis, the
+    #: quote total and the entry commission are unknown, and the reconciliation
+    #: driver retries each pass.
+    PENDING_SETTLEMENT = "pending_settlement"
+
+
 class PositionSizingMethod(str, Enum):
     FIXED_FRACTION = "fixed_fraction"
     FIXED_AMOUNT = "fixed_amount"

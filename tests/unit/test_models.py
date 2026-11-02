@@ -8,7 +8,13 @@ from decimal import Decimal
 import pytest
 from pydantic import ValidationError
 
-from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState, SignalAction
+from trading_bot.core.enums import (
+    EntrySettlementState,
+    OrderSide,
+    PositionSide,
+    ProtectionState,
+    SignalAction,
+)
 from trading_bot.core.models import (
     Balance,
     Fee,
@@ -399,6 +405,7 @@ _POSITION_MONEY_FIELDS = [
     "entry_price",
     "entry_fill_price",
     "entry_quote_total",
+    "entry_debit_estimate",
     "stop_loss",
     "take_profit",
     "trailing_stop",
@@ -417,6 +424,29 @@ def test_money_field_list_is_complete() -> None:
         name for name, field in Position.model_fields.items() if "Decimal" in str(field.annotation)
     }
     assert set(_POSITION_MONEY_FIELDS) == declared
+
+
+def test_a_position_is_settled_with_no_attempts_and_no_estimate_by_default() -> None:
+    """M5o H1: every construction site that never ran a settlement is unchanged.
+
+    The default direction is the expensive one in principle (a wrongly SETTLED
+    position is today's NO_COST_BASIS), accepted because it is confined to sites
+    that bypass settlement. MUTATION: default to PENDING_SETTLEMENT, which would
+    make the reconciler retry a settlement for every fixture.
+    """
+    position = _open_position()
+
+    assert position.entry_settlement is EntrySettlementState.SETTLED
+    assert position.entry_settlement_attempts == 0
+    assert position.entry_debit_estimate is None
+
+
+def test_the_attempt_count_cannot_go_negative() -> None:
+    """`ge=0` holds under assignment as well as construction (`validate_assignment`)."""
+    position = _open_position()
+
+    with pytest.raises(ValidationError):
+        position.entry_settlement_attempts = -1
 
 
 @pytest.mark.parametrize("field", _POSITION_MONEY_FIELDS)

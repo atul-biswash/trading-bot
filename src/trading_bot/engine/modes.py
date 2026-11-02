@@ -144,7 +144,13 @@ from datetime import timezone
 from typing import TYPE_CHECKING, assert_never
 
 from trading_bot.core.assessment import EntryIntent, ExitIntent
-from trading_bot.core.enums import OrderSide, PositionSide, ProtectionState, SignalAction
+from trading_bot.core.enums import (
+    EntrySettlementState,
+    OrderSide,
+    PositionSide,
+    ProtectionState,
+    SignalAction,
+)
 from trading_bot.core.exceptions import (
     ConfigError,
     FeeFillsIncompleteError,
@@ -670,6 +676,8 @@ def _to_position_record(position: Position) -> store.PositionRecord:
         entry_limit=position.entry_price,
         stop_loss=position.stop_loss,
         take_profit=position.take_profit,
+        settlement=position.entry_settlement.value,
+        settlement_attempts=position.entry_settlement_attempts,
     )
 
 
@@ -1531,6 +1539,14 @@ def _restored_position(
     is the cost basis ``Portfolio.book_restored_exit`` prices the exit
     against, and that method refuses a symbol the portfolio holds.
     """
+    # R-OD / H1: a record that said a settlement was still owed keeps saying so
+    # unless the boot's own read just gave the entry's quote total. A placement
+    # source, or a record that said settled, restores settled, as before.
+    pending = (
+        isinstance(source, store.PositionRecord)
+        and source.settlement == EntrySettlementState.PENDING_SETTLEMENT.value
+        and decision.entry_quote_total is None
+    )
     return Position(
         symbol=source.symbol,
         side=PositionSide.LONG,
@@ -1547,6 +1563,14 @@ def _restored_position(
         venue_order_list_id=_venue_list_id(decision.order_list),
         stop_loss=source.stop_loss,
         take_profit=source.take_profit,
+        entry_settlement=(
+            EntrySettlementState.PENDING_SETTLEMENT if pending else EntrySettlementState.SETTLED
+        ),
+        entry_settlement_attempts=(
+            source.settlement_attempts
+            if pending and isinstance(source, store.PositionRecord)
+            else 0
+        ),
     )
 
 
@@ -1569,6 +1593,9 @@ def _as_held_record(source: store.PositionRecord | PendingPlacement) -> store.Po
         entry_limit=source.entry_limit,
         stop_loss=source.stop_loss,
         take_profit=source.take_profit,
+        # A placement carries no settlement state: it was never a position.
+        settlement=EntrySettlementState.SETTLED.value,
+        settlement_attempts=0,
     )
 
 

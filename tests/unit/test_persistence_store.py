@@ -653,13 +653,18 @@ class TestThePendingClose:
         ``SCHEMA_VERSION`` to 3.** What survives: asserting the integer, on the
         written file and on the constant, so any further bump is a deliberate
         edit here rather than a side effect.
+
+        **ANNOTATED AT M5o P161 (H1, R-OD): THE SCHEMA IS NOW 3**, bumped for a
+        position record's ``settlement`` and ``settlement_attempts``; this is the
+        edit that line promised, and both integers above moved with it.
+        **MUTATION: bump ``SCHEMA_VERSION`` to 4.**
         """
         path = tmp_path / "state.json"
 
         s.save(s.PersistedState(pending=(_close_record(),)), path)
 
-        assert json.loads(path.read_text(encoding="utf-8"))["schema"] == 2
-        assert s.SCHEMA_VERSION == 2
+        assert json.loads(path.read_text(encoding="utf-8"))["schema"] == 3
+        assert s.SCHEMA_VERSION == 3
 
     def test_a_file_written_before_the_tag_still_loads_as_a_placement(self, tmp_path: Path) -> None:
         """**THE COMPATIBILITY CLAIM, on a payload shaped like the live file.**
@@ -1040,7 +1045,7 @@ class TestAgreementWithTheDomainsDaySummary:
 
 
 # --------------------------------------------------------------------------
-# The position record -- the owner's R1 and R2, at schema 2
+# The position record -- the owner's R1 and R2, at schema 2, and schema 3 from M5o H1
 # --------------------------------------------------------------------------
 def _position_record(**overrides: object) -> s.PositionRecord:
     """The position ``_record``'s placement opened, as we requested it."""
@@ -1053,6 +1058,8 @@ def _position_record(**overrides: object) -> s.PositionRecord:
         "entry_limit": D("2508.41000000"),
         "stop_loss": D("2458.25000000"),
         "take_profit": D("2608.74000000"),
+        "settlement": "settled",
+        "settlement_attempts": 0,
     }
     fields.update(overrides)
     return s.PositionRecord(**fields)  # type: ignore[arg-type]
@@ -1088,6 +1095,8 @@ class TestThePositionRecord:
                 "entry_limit": "2508.41000000",
                 "stop_loss": "2458.25000000",
                 "take_profit": "2608.74000000",
+                "settlement": "settled",
+                "settlement_attempts": 0,
             }
         ]
         assert s.load(path) == state
@@ -1123,13 +1132,14 @@ class TestThePositionRecord:
     def test_a_version_this_build_cannot_read_is_refused(self, tmp_path: Path) -> None:
         """A later build's file is refused rather than loaded and erased (``M5l-107``).
 
-        MUTATION: accept any version. MUTATION: bump ``SCHEMA_VERSION`` to 3,
-        which makes 3 readable.
+        MUTATION: accept any version. MUTATION: bump ``SCHEMA_VERSION`` to 4,
+        which makes 4 readable. (This test said 3 until M5o H1 made 3 the
+        current version; the boundary moved with it.)
         """
         path = tmp_path / "state.json"
-        path.write_text('{"schema": 3, "pending": [], "ledger": null}', encoding="utf-8")
+        path.write_text('{"schema": 4, "pending": [], "ledger": null}', encoding="utf-8")
 
-        with pytest.raises(s.StoreCorruptError, match="declares schema 3"):
+        with pytest.raises(s.StoreCorruptError, match="declares schema 4"):
             s.load(path)
 
     def test_two_position_records_for_one_symbol_are_refused(self) -> None:
@@ -1181,4 +1191,114 @@ class TestThePositionRecord:
             "entry_limit",
             "stop_loss",
             "take_profit",
+            # M5o H1, R-OD: process bookkeeping, not a venue-reported value. The
+            # inclusion test was amended in the record's docstring (M5o-042).
+            "settlement",
+            "settlement_attempts",
         }
+
+    # -- schema 3, M5o H1: R-OD asks for a bump, a refusing loader and old-version tests ----
+    def test_a_pending_settlement_record_round_trips(self, tmp_path: Path) -> None:
+        """The state a restart must not forget, written and read back exactly.
+
+        MUTATION: drop ``settlement_attempts`` from ``_dump_position``, or write
+        ``"settled"`` for every record. The payload is read before anything loads
+        it, so either fails as a wrong value and not as the load's refusal.
+        """
+        path = tmp_path / "state.json"
+        record = _position_record(settlement="pending_settlement", settlement_attempts=3)
+
+        s.save(s.PersistedState(positions=(record,)), path)
+        entry = json.loads(path.read_text(encoding="utf-8"))["positions"][0]
+
+        assert (entry["settlement"], entry["settlement_attempts"]) == ("pending_settlement", 3)
+        loaded = s.load(path)
+        assert loaded is not None and loaded.positions == (record,)
+
+    def _version_two_payload(self, tmp_path: Path) -> tuple[Path, dict[str, object]]:
+        """A schema-2 file as the build before H1 wrote it: no settlement keys at all."""
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(positions=(_position_record(),)), path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["schema"] = 2
+        for entry in payload["positions"]:
+            del entry["settlement"]
+            del entry["settlement_attempts"]
+        return path, payload
+
+    def test_a_version_two_file_loads_with_every_position_settled(self, tmp_path: Path) -> None:
+        """THE OLD VERSION LOADS (R-OD): the store on disk at schema 2 is not refused.
+
+        A position written before the field existed owed no settlement, so it
+        loads ``"settled"`` with zero attempts. MUTATION: remove the injected
+        defaults in ``_load_positions`` (the record then lacks required keys and
+        the file is refused as corrupt), or inject ``"pending_settlement"``.
+        """
+        path, payload = self._version_two_payload(tmp_path)
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        loaded = s.load(path)
+
+        assert loaded is not None
+        assert [(p.symbol, p.settlement, p.settlement_attempts) for p in loaded.positions] == [
+            ("ETHUSDT", "settled", 0)
+        ]
+        assert loaded.schema_version == s.SCHEMA_VERSION
+
+    def test_a_version_two_file_carrying_the_new_keys_is_corrupt(self, tmp_path: Path) -> None:
+        """No build writes a schema-2 record with schema-3 keys, so it is refused, not read past.
+
+        MUTATION: delete the carried-keys branch of ``_load_positions``; the file
+        then loads and the two keys are silently overwritten by the injected
+        defaults.
+        """
+        path, payload = self._version_two_payload(tmp_path)
+        payload["positions"][0]["settlement"] = "pending_settlement"  # type: ignore[index]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(s.StoreCorruptError, match="schema-2 file carries a position record"):
+            s.load(path)
+
+    def test_a_version_three_record_that_lost_a_key_is_refused(self, tmp_path: Path) -> None:
+        """At schema 3 both keys are required: a truncated record is not read as settled.
+
+        MUTATION: inject the defaults at every version, which would read the
+        truncated record as ``"settled"`` and pass.
+        """
+        path = tmp_path / "state.json"
+        s.save(s.PersistedState(positions=(_position_record(),)), path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        del payload["positions"][0]["settlement"]
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        with pytest.raises(s.StoreCorruptError, match="does not match the expected shape"):
+            s.load(path)
+
+    def test_an_unknown_settlement_value_is_refused(self) -> None:
+        """The state is a closed set; a value no writer produces is not stored."""
+        with pytest.raises(ValidationError):
+            _position_record(settlement="settling")
+
+    def test_the_readable_versions_are_exactly_one_two_and_three(self) -> None:
+        """THE LOADER REFUSES UNKNOWN VERSIONS (R-OD), pinned from both sides.
+
+        Together with the version-4 refusal above this is the whole boundary:
+        everything this build wrote or could read, and nothing else. MUTATION:
+        add 4 to ``_READABLE_SCHEMAS``.
+        """
+        assert s._READABLE_SCHEMAS == (1, 2, 3)
+
+    def test_the_stored_values_are_the_enum_values(self) -> None:
+        """The record stores strings and the domain holds an enum; they must agree.
+
+        ``engine/modes.py`` writes ``EntrySettlementState.<member>.value`` into the
+        record and compares the record's string with the same values, so a rename
+        on one side only would round-trip as a refusal at boot. MUTATION: rename
+        a member's value in ``core/enums.py``.
+        """
+        from typing import get_args
+
+        from trading_bot.core.enums import EntrySettlementState
+
+        stored = set(get_args(s.PositionRecord.model_fields["settlement"].annotation))
+        assert stored == {member.value for member in EntrySettlementState}

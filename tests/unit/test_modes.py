@@ -24,7 +24,7 @@ from contextlib import contextmanager
 from dataclasses import FrozenInstanceError
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import pytest
 from binance.exceptions import BinanceAPIException
@@ -49,6 +49,7 @@ from tests.unit.test_risk_manager import (
 from trading_bot.config.models import StopLossConfig, TakeProfitConfig
 from trading_bot.core.assessment import EntryIntent, ExitIntent
 from trading_bot.core.enums import (
+    EntrySettlementState,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -98,6 +99,7 @@ from trading_bot.engine.modes import (
     _build_signal_handler,
     _pair_timeframes,
     _restore_pending,
+    _restored_position,
     _seed_portfolio,
     _to_position_record,
     live_system,
@@ -114,6 +116,7 @@ from trading_bot.execution.reconciliation_driver import (
     ReconciliationBudget,
     ReconciliationDriver,
 )
+from trading_bot.execution.restoration import Restore
 from trading_bot.persistence import store
 from trading_bot.risk.manager import PairContext, RiskAssessment, RiskManager
 from trading_bot.utils.instance_lock import acquire as acquire_instance_lock
@@ -4503,6 +4506,8 @@ def _position_record(
         entry_limit=D("60123.45000000"),
         stop_loss=D("58000.00000000"),
         take_profit=D("63000.00000000"),
+        settlement="settled",
+        settlement_attempts=0,
     )
 
 
@@ -4684,6 +4689,78 @@ class TestPositionRecordsCrossTheRoot:
         record = _to_position_record(_open_position(generation=1))
 
         assert record == _position_record(generation=1)
+
+    def test_a_pending_settlement_survives_into_the_record(self) -> None:
+        """M5o H1, R-OD: a restart must not forget that a settlement is still owed.
+
+        Written out beside ``_position_record``, not mapped by a helper. Attempts
+        of 4 and not 0 or 1, so a hard-coded value cannot also produce it.
+        MUTATION: write ``"settled"`` and ``0`` for every record.
+        """
+        position = _open_position()
+        position.entry_settlement = EntrySettlementState.PENDING_SETTLEMENT
+        position.entry_settlement_attempts = 4
+
+        record = _to_position_record(position)
+
+        assert (record.settlement, record.settlement_attempts) == ("pending_settlement", 4)
+        assert record == store.PositionRecord(
+            **{
+                **_position_record().model_dump(),
+                "settlement": "pending_settlement",
+                "settlement_attempts": 4,
+            }
+        )
+
+    @pytest.mark.parametrize(
+        ("recorded", "attempts", "total", "state", "kept"),
+        [
+            pytest.param(
+                "pending_settlement", 4, None, EntrySettlementState.PENDING_SETTLEMENT, 4, id="owed"
+            ),
+            pytest.param(
+                "pending_settlement",
+                4,
+                D("1387.39000000"),
+                EntrySettlementState.SETTLED,
+                0,
+                id="the-boot-read-the-total",
+            ),
+            pytest.param("settled", 0, None, EntrySettlementState.SETTLED, 0, id="was-settled"),
+        ],
+    )
+    def test_a_restored_position_keeps_a_settlement_it_still_owes(
+        self,
+        recorded: Literal["settled", "pending_settlement"],
+        attempts: int,
+        total: Decimal | None,
+        state: EntrySettlementState,
+        kept: int,
+    ) -> None:
+        """The boot's own read of the entry's total cures it; nothing else does.
+
+        A record that says pending stays pending, with its attempt count, unless
+        the boot's GET returned the quote total. MUTATION: restore every position
+        settled; or keep pending even when the total arrived (the second row).
+        """
+        record = store.PositionRecord(
+            **{
+                **_position_record().model_dump(),
+                "settlement": recorded,
+                "settlement_attempts": attempts,
+            }
+        )
+        decision = Restore(
+            record=record,
+            order_list=_our_list(),
+            entry_fill_price=None if total is None else D("60056.40000000"),
+            entry_quote_total=total,
+        )
+
+        position = _restored_position(record, decision)
+
+        assert (position.entry_settlement, position.entry_settlement_attempts) == (state, kept)
+        assert position.entry_debit_estimate is None
 
     @pytest.mark.parametrize(
         ("list_id", "defect"),
@@ -4872,6 +4949,8 @@ def _record(symbol: str = SYMBOL) -> store.PositionRecord:
         entry_limit=D("60123.45000000"),
         stop_loss=D("58000.00000000"),
         take_profit=D("63000.00000000"),
+        settlement="settled",
+        settlement_attempts=0,
     )
 
 

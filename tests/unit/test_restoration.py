@@ -77,6 +77,8 @@ def record(symbol: str = SYMBOL, *, take_profit: bool = True) -> PositionRecord:
         entry_limit=D("60123.45000000"),
         stop_loss=D("58000.00000000"),
         take_profit=D("63000.00000000") if take_profit else None,
+        settlement="settled",
+        settlement_attempts=0,
     )
 
 
