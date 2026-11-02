@@ -359,9 +359,33 @@ def small_repo(tmp_path: Path) -> Path:
     (repo / "tests" / "__init__.py").write_bytes(b"")
     (repo / "tests" / "test_calc.py").write_bytes(_PKG_TESTS.encode("utf-8"))
     _git("init", "-q", cwd=repo)
+    # Git for Windows switches fsmonitor on in its system config, and every `add`, `commit` or
+    # `worktree add` in a throwaway repository then starts a daemon that outlives the repository
+    # and the test (M5n-223, M5n-274). A `-c` flag would cover only the command that carries it,
+    # and the survey script runs its own git calls in this repository, so the setting goes in
+    # the repository's own configuration, straight after `init`, which starts no daemon.
+    _git("config", "core.fsmonitor", "false", cwd=repo)
     _git("add", "-A", cwd=repo)
     _git("commit", "-q", "-m", "base", cwd=repo)
     return repo
+
+
+def test_the_fixture_repository_disables_fsmonitor(small_repo: Path) -> None:
+    """Seven tests share `small_repo`, and each leaked one daemon before this setting (M5n-274).
+
+    FAILS ON: removing the `core.fsmonitor` line from the fixture, which leaves every test that
+    takes it creating a repository whose first `add` starts a daemon nothing stops. Reads the
+    repository's own configuration with `--local`, which starts no daemon itself. It does not
+    count daemons: a count is not hermetic, and that measurement is recorded in the ledger.
+    """
+    # No `check=True`: `git config --get` exits 1 for an unset key, and a raised
+    # CalledProcessError would be a crash, not the assertion on the wrong value that a kill is.
+    done = subprocess.run(
+        ["git", "-C", str(small_repo), "config", "--local", "--get", "core.fsmonitor"],
+        capture_output=True,
+        text=True,
+    )
+    assert (done.returncode, done.stdout.strip()) == (0, "false")
 
 
 def _run(
