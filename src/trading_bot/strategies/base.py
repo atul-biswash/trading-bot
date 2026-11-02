@@ -10,7 +10,7 @@ identically in backtest, paper, and live modes.
 from __future__ import annotations
 
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from trading_bot.core.interfaces import Strategy
 from trading_bot.core.models import Candle, Signal
@@ -27,6 +27,11 @@ class BaseStrategy(Strategy):
     """
 
     name: str = "base"
+
+    #: ``True`` for a strategy whose only exit is the D1 trailing stop, so a backtest sequences its
+    #: orders with the D1 executor; every other strategy takes the simulated executor. A strategy
+    #: that declares it emits ``BUY`` only and carries ``trail_delta_bps`` on every signal.
+    declares_d1_exit: ClassVar[bool] = False
 
     def __init__(self, **params: Any) -> None:
         self.params = params

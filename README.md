@@ -293,10 +293,10 @@ new finding is a regression.
 
 ```
 ruff check src tests scripts           All checks passed!
-ruff format --check src tests scripts  232 files already formatted
-mypy                                   Success: no issues found in 114 source files
-pytest                                 4524 passed, 4 skipped
-                                       (4527 passed, 1 skipped with Testnet credentials)
+ruff format --check src tests scripts  272 files already formatted
+mypy                                   Success: no issues found in 135 source files
+pytest                                 5491 passed, 4 skipped
+                                       (5494 passed, 1 skipped with Testnet credentials)
 ```
 
 ### How to read that output — it has two honest forms
@@ -305,9 +305,9 @@ pytest                                 4524 passed, 4 skipped
 things, and both are expected:
 
 - **Credentials.** The three integration tests are skipped without Binance Testnet
-  keys. The *same commit* reports `4524 passed, 4 skipped` on a machine without
-  them and `4527 passed, 1 skipped` on a machine with them. **Both are green.** A
-  fresh clone seeing 4524 is not looking at a regression — quote the count with its
+  keys. The *same commit* reports `5491 passed, 4 skipped` on a machine without
+  them and `5494 passed, 1 skipped` on a machine with them. **Both are green.** A
+  fresh clone seeing 5491 is not looking at a regression — quote the count with its
   condition, never bare. The skipped column never reaches zero: one unit test skips
   on Windows because `time.tzset` is POSIX-only, which is the lone skip in the
   credentialed run and the fourth in the uncredentialed one.
@@ -402,9 +402,9 @@ src/trading_bot/
   config/        settings · pydantic config models
   exchange/      base · binance_client · models (mappers) · websocket_client
                  · ids
-  data/          market_data · historical · kline_recorder · watchdog · repository†
-  indicators/    hand-written TA functions
-  strategies/    base · registry · helpers · examples/
+  data/          market_data · historical · aggregation · kline_recorder · watchdog · repository†
+  indicators/    hand-written TA functions · breakout (Donchian, Keltner, momentum)
+  strategies/    base · registry · helpers · examples/ · m5n/ (research candidates, not in the live registry)
   engine/        live_engine · modes (composition root)
   risk/          manager · rules · position_sizing
   execution/     executor · placement · dispatch_budget · resolution
@@ -412,7 +412,7 @@ src/trading_bot/
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
                  · simulated_executor · regimes · evidence · candidate · overrides · protocol
-                 · selection · gate · readmark
+                 · selection · gate · readmark · d1_trail · d1_executor · d1_risk
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
@@ -421,12 +421,13 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · download_exchange_info.py
                  · check_findings.py · check_gate_counts.py
                  · check_arming_conditions.py · run_census.py
-                 · mutation_survey.py · abc_double_census.py
+                 · mutation_survey.py · worktree_survey.py · survey_hook.py · abc_double_census.py
                  · cancel_testnet_order_list.py · clear_testnet_holdings.py
                  · probe_x1.py · release_position.py
                  · normalize_ledger_exponents.py · trade_census.py
                  · regime_labels.py
                  · record_testnet_klines.py (+ recorder_task.xml)
+                 · n2_archive_check.py · n2_verify_bars.py · n3_entry_counts.py · n4_trade_counts.py
                  · s4_compare.py · s4_daily.py · s4_explore.py · s4_latch_compare.py · s4_wick_annotate.py · s5_report.py · s6_mark_read.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
                  · s7_gate.py · s7_null.py · store_check.py
 tests/           unit/ · integration/
