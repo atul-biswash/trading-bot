@@ -8012,3 +8012,79 @@ An observation log, so this section only adds. It records what the rotation meas
 ### 5. The findings extraction, before the build-log entry is written
 
 `git log milestone/M5l..HEAD` prints 181 commits and `scripts/check_findings.py milestone/M5l..HEAD M5m` reads, at `92763bc` (before this section's commit): **775 declared, 775 distinct, max 775, no duplicate, no gap, nothing cited and not declared, and one blockless commit, `934eb45`** (the owner's merge of pull request 2, `Merge pull request #2 from atul-biswash/claude/keen-sagan-ehal28`, which carries no findings block and is not the executing session's). Exit 1, for that commit alone. The result at the close is in the closing commit's message and the build-log entry.
+
+## 83. M5n N0: every read of the reserved window, as the halted P155 run measured it, and the audit of what M5n read (P155 C2, R-T, R-DQ)
+
+An observation log, so this section only adds. This is section 83 of `docs/RUN_LEDGER.md`. **`docs/RUN_LEDGER_M5N.md` (R-EE) also holds a section 83** (N3's entry-event counts), so a citation of "section 83" names its file. Read-only throughout: no venue call, nothing under `deploy\45547f107715`, no recorded bar read, no run directory opened. The reserved window is `[2024-01-01, 2026-10-01)`.
+
+### 1. Halts, checked first
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `4c7afe2` | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `4c7afe2` |
+| a frozen M5n or S4 file differs from its digest | `sha256sum` against the charter's section 23 and the pre-registration's section 9 | equal: `docs/M5N_PREREGISTRATION.md` `e6187480...d45e`, `sharpe_stats.py` `2b55991c...dda82`, `n7_evaluate.py` `1f307de6...dcfff`, and the nine S4 files |
+| the audit finds a read of an M5n candidate family on any part of the window | section 3 below | **none** |
+| a command would call the venue or read recorded bars | every command in the plan | none: the audit read the ledger, the committed scripts at their run commits, and the tests' fixture builders |
+
+### 2. The reads of the window, from the halted P155 run (it stands as measured)
+
+The first P155 run stopped at its own halt condition and reported this table. It is copied here as the record, not re-measured: its sources are `docs/research/LOG.md` Entries 1 to 6 and the protocol's declaration (parsed with `parse_protocol` at `4c7afe2`). No run directory was opened for either run.
+
+| Read | Window | Touches `[2024-01-01, 2026-10-01)`? | Source |
+|---|---|---|---|
+| **S5 baseline** (`docs/research/entries/s5-baseline.json`, `status` `read`), three arms 0.05, 0.66, 1.20 | `[2017-08-17, 2026-10-01)`, window class `straddling` | **Yes, all of it**, by design (R-BT) | Log Entries 1 to 3; the declared baseline's `window_start` and `window_end` |
+| Rehearsal run 1, in sample, narrowed protocol | `[2023-12-01, 2025-01-01)` | Yes, `2024-01-01` to `2025-01-01` | Log Entry 5 |
+| Rehearsal run 1, out of sample, narrowed protocol | `[2025-01-01, 2025-04-01)` | Yes | Log Entry 5 |
+| Rehearsal run 2 | `[2024-01-01, 2024-04-01)` | Yes | Log Entry 5 |
+| Quarter scan, 2024 Q2, Q3, Q4 | `2024-04-01` to `2025-01-01` | Yes | Log Entry 5 |
+| S6 sweep, 216 variants | `[2017-08-17, 2024-01-01)` | No | Log Entry 6 |
+| S7 | no candidate read, by R-CV | No | Log Entry 6 |
+| S4 backtest | `[W, M)`, `W` the first UTC midnight at or after `T0` `2026-10-10T06:05:20Z`, so `2026-10-11` or later (DERIVED from `docs/S4_PREREGISTRATION.md` section 4 and R-CX) | No | `docs/S4_PREREGISTRATION.md` |
+
+The S5 entry file does not name its own window; the protocol's declared baseline does (`protocol.py:761-766` requires exactly that window of a baseline read). The rehearsal and scan figures were seen by the implementer (an AI coding assistant) in throwaway worktrees, for two variants (`sma_crossover` 4h at 10/50, filter off and on; Log Entry 5, `M5m-447`); R-CM ruled those two variants ineligible. **No S6 candidate was read out of sample, and the count of S7 candidates read is 0.**
+
+### 3. The audit of `docs/RUN_LEDGER_M5N.md`, section by section
+
+For each section: what it records, the window it read, and whether that touched the reserved window. The windows of the six runs are the scripts' own constants, read from `git show <run commit>:<script>` and not only from the ledger's statement.
+
+| Sections | What is recorded | Window read | Touches the reserved window? |
+|---|---|---|---|
+| 74 | P140's halts and predictions; before any code, the source, the store's directory listing and the `MANIFEST.jsonl` files were read (row counts and times, no bar value) | none | No bar. Which months the listing and manifests showed is not recorded (see section 5 below) |
+| **75** | `scripts/n2_verify_bars.py`, run once at `9061a1c`, `2026-10-24T10:12:44Z` to before `10:14:54Z`, 34 keyless requests to `api.binance.com/api/v3/klines` and the 1m store aggregated | `[2017-08-17, 2024-01-01)`, `WINDOW_END` at `n2_verify_bars.py:53` at the run commit; no response held a bar at or after `2024-01-01` | **No** |
+| 76, 77 | Predictions and the mutation survey of the aggregation and verification tests, two detached worktrees at `62ebd00`, each running only its file's tests | none on recorded data; the tests build their stores in temporary roots from generated rows (`test_n2_verify_bars.py:70-76`) | No |
+| 78 | P141's halts and predictions; source and manifests as section 74 | none | No bar (same note as 74) |
+| **79** | `scripts/n2_archive_check.py`, run once at `f43acc0`, `2026-10-24T11:17:37Z` to `11:19:20Z`, no request: the archive series against the 34 saved responses | `[2017-08-17, 2024-01-01)`, imported from `n2_verify_bars` at the run commit (`WINDOW_END`, line 53 there); "no bar at or after `2024-01-01` was read" | **No** |
+| 80, 81 | Predictions and the surveys of the traded-minute and archive-check tests and the re-run of the aggregation survey | none on recorded data; generated stores | No |
+| 82 | P142's halts and predictions for the indicators, the six candidates and the counts; source and the manifest row counts of section 78 | none ("No archive bar was read") | No |
+| **83** | `scripts/n3_entry_counts.py`, run once at `67560d2`, `2026-10-24T18:36:34Z` to `18:39:41Z`: entry-event counts of the six candidates, counts only | `[2017-08-17, 2024-01-01)`, `IN_SAMPLE_END` at `n3_entry_counts.py:58`, a wider window refused at `:119-121` | **No.** An in-sample run of M5n candidate families |
+| 84, 85 | Predictions and the survey of the N3 tests. Mutation rows `n05` and `y12` make the code's window end `2024-01-02`, to see that the tests catch it; the surveys run the tests on generated fixtures | none on recorded data | No (the `2024-01-02` is the mutated value, not a read) |
+| 86, 87, 88 | N4a: the D1 trail as a pure function, hand-built fixtures (minute 0 is `2023-01-01T00:00Z`), predictions and the survey | none on recorded data | No |
+| 89 | P144's halts and predictions for the counts-only run | none ("any bar at or after `2024-01-01` is read: none yet") | No |
+| **90** | `scripts/n4_trade_counts.py`, run once at `fbef8be`, `2026-10-25T05:21:52Z` to `05:27:13Z`: the six candidates' trades counted through the D1 path, counts only | `[2017-08-17, 2024-01-01)`, `IN_SAMPLE_END` at `n4_trade_counts.py:65`, a wider window refused at `:148` | **No.** An in-sample run of M5n candidate families |
+| 91, 92 | Predictions and the arming-audit survey of the N4b code (`scripts/worktree_survey.py`, `survey_hook.py`) | none on recorded data | No |
+| 93 | How the unchanged `RiskManager` sizes; predictions for the N5 run | source only | No |
+| **94** | `scripts/n4_trade_counts.py`, run once at `1eb0858` (script `0a17f02`), `2026-10-25T09:48:06Z` to `09:53:58Z`, 1-percent risk sizing | `[2017-08-17, 2024-01-01)`, `n4_trade_counts.py:68`, refused wider at `:157` | **No.** An in-sample run of M5n candidate families |
+| 95, 96 | Predictions and the arming-audit survey of the N5 code | none on recorded data | No |
+| 97 | What a `RiskManager` keeps after construction; predictions for the cap-binding count | source only | No |
+| **98** | `scripts/n4_trade_counts.py`, run once at `d0b47f1`, `2026-10-25T10:49:43Z` to `10:54:48Z`, with the capped-entry count | `[2017-08-17, 2024-01-01)`, `n4_trade_counts.py:69`, refused wider at `:160` | **No.** An in-sample run of M5n candidate families |
+| 99, 100 | Predictions and the re-survey of the outcomes line and the capped-entry count | none on recorded data | No |
+| 101, 102, 103 | N6: what `metrics.py` does, the estimator module's design, hand-worked fixtures (`derive_fixtures.py`, exact `Decimal`), predictions and the survey. "No recorded bar was read and no backtest was run" | none | No |
+| 104, 105, 106 | N7: the estimator's changes and the runner, derivation scripts in `scratch\p149` that import neither module, world E1's scripted candidates over `2024-03-01` to `2024-03-04` and a fixture window `[2024-03-01, 2024-04-10)` on synthetic 1m bars, predictions and the survey. "No recorded bar was read and no backtest was run on recorded data" | none; `scripts/n7_evaluate.py` has not been run on recorded data (the N0 guard refuses it) | No (the dates inside the window are fixture dates) |
+
+**Totals.** Six runs on recorded data (sections 75, 79, 83, 90, 94, 98), all inside `[2017-08-17, 2024-01-01)`; four of them (83, 90, 94, 98) are runs of M5n candidate families, all in sample. Twenty-seven sections record predictions, source reading or mutation surveys on generated fixtures. **No M5n read touched `[2024-01-01, 2026-10-01)`, and no M5n candidate family has been read on any part of it.**
+
+**The date scan behind the table.** Across sections 74 to 106 there are 29 dates in `2026-10` and `2026-11`, all run or commit times, and 48 other dates at or after `2024`: 33 are `2024-01-01` as a window end or the guard's boundary; 4 are `2024-01-02` in mutation rows `n05` and `y12`; 8 are `2024-03-01`, `2024-03-04` or `2024-04-10` and 2 are `2024-03-02` in sections 104 and 105, all describing synthetic fixtures; 1 is `2026-07-25`, a test's fixed clock in section 95.
+
+### 4. What the audit rests on, instrument by instrument
+
+| Claim | Instrument | Status |
+|---|---|---|
+| each of the six runs' scripts had a window end of `2024-01-01` at its run commit | `git show <commit>:<script>`, the constant and, for the N3 and N4 scripts, the refusal of a wider window; all seven commits exist | MEASURED |
+| `n2_archive_check.py` shares `n2_verify_bars.py`'s `WINDOW_END` | its import at `:52` and the constant at `n2_verify_bars.py:53` at `f43acc0` | MEASURED |
+| the survey sections read no recorded bar | each section's own statement, and the fixture builders read for `d1_world.py:95-110` and `test_n2_verify_bars.py:70-76`, which write stores into temporary roots from generated rows | MEASURED for the two builders, REASONED for every other test module |
+| no recorded run was left out | the ledger records only what was written into it | UNMEASURED: a run nobody recorded cannot be audited from the ledger |
+| the manifest and directory-listing reads of sections 74 and 78 showed no month inside the window | none; the ledger says "row counts and times, no bar value" and does not say which months | UNMEASURED, and unmeasurable in retrospect: what a past console displayed was not preserved |
+
+### 5. What follows, and what does not
+
+PROTOCOL amendment 4 (`bfbe166`) rests on this: its appended paragraph says the window is "not untouched" (S5 and the M5m rehearsal read parts of it) and that "No M5n candidate family has been read on it", and the second half is the audit's result. It is a statement about M5n's candidate families and about recorded runs in this ledger, not about every command ever issued on this machine. **The window's prior reads (section 2) are not changed by this audit**, and they are the reason the charter's R-EF defines "unread" as "no M5n candidate family has been read" and not as "no read".
