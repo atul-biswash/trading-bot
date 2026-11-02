@@ -1086,6 +1086,11 @@ def test_real_git_temporary_repository_end_to_end(tmp_path: Path) -> None:
     repo = tmp_path / "checkout"
     (repo / "sub").mkdir(parents=True)
     _git(repo, "init", "-q")
+    # Git for Windows switches fsmonitor on in its system config, and the `add` and `commit`
+    # below would start a daemon that outlives this repository (M5n-274). `_git` runs under
+    # `child_environment`, which strips every GIT_* variable, so an environment override cannot
+    # reach it; the repository's own configuration can.
+    _git(repo, "config", "core.fsmonitor", "false")
     _git(repo, "config", "status.showUntrackedFiles", "no")
     config = repo / "config.yaml"
     config.write_bytes(b"mode: testnet\n")
