@@ -15,7 +15,7 @@ entry file's shape (section 8). Each is marked DRAFTED where it appears. **Amend
 replaced the draft of the selection rule, the walk-forward report and the in-sample trade minimum
 (section 6) by the owner's rulings R-CB to R-CF, and added S7's two profit factors (section 7); R-CG
 runs and counts all 216 variants of section 5. Amendment 3 (section 10, P119) rules two of the 216
-ineligible for selection (R-CM), and records R-CN to R-CQ.**
+ineligible for selection (R-CM), and records R-CN to R-CQ. Amendment 4 (section 10, P154) replaces section 6 step 6 by what the code does, and points to M5n's pre-registration.**
 
 ## 1. The history and the two windows (R-BP)
 
@@ -139,16 +139,44 @@ There are twelve **cells**: a family, a timeframe and a filter setting. For each
    limit carry across the splits, so a forward figure approximates a re-run, and the report says so. It
    removes no candidate, adds none and ranks nothing.
 6. **The freeze (the candidate's parameters are fixed before its first out-of-sample read).**
-   `scripts/s6_select.py` writes **one selection file**, the chosen point per cell with its evidence (the
-   run directory and the SHA-256 of its `run.json`, its statistic, its trades, the eligible count and the
-   reason for every ineligible point), and the owner commits it **unedited** with its SHA-256 recorded in the
-   research log. From it, **one entry per candidate** is committed with `status` `pending`, bound to the
-   candidate by its **candidate digest** (which holds the strategy, its parameters, the pairs and timeframe,
-   the costs and the config's digest), and **pushed before any out-of-sample read**. The out-of-sample
-   clone is built from that pushed commit, and the guard refuses a run whose digest has no entry
-   (`NO_ENTRY`): a parameter changed after the freeze is a different digest and has no entry. After the
-   three arms are read each entry becomes `read`, with `oos.records` holding the run directory and
-   the SHA-256 of the `run.json` of each arm.
+   Line numbers in this step are those at commit a31c81b; where they differ, the named functions govern. It is two
+   acts, and only the first is always done.
+
+   *The selection (always).* `scripts/s6_select.py --out FILE` writes **one selection file**, as JSON Lines, one
+   record a line (R-CU): a record per variant with its figures and its reasons, a record per cell with its chosen
+   point, the walk-forward report and the skipped directories (`backtesting/selection.py:100`, `:926-927`). It is
+   created exclusively and refuses to overwrite, computes nothing over an incomplete sweep, and reads no
+   out-of-sample record (`scripts/s6_select.py:5-20`, `:113-121`). The owner commits it **unedited**, with the
+   SHA-256 the script prints (`:125`) recorded in the research log.
+
+   *The entry (only to bind a read).* An entry is `docs/research/entries/<id>.json` (`protocol.py:93`). It exists to
+   bind one out-of-sample read of one candidate and is committed only when such a read is to be made: **a selection
+   with no read to follow has no entry** (R-CV: "No entry is committed, since entries exist only to bind a read."),
+   and S6's selection was committed with none. When a read is to be made the entry is committed with `status`
+   `pending` and no `oos` block, bound to the candidate by its **candidate digest** (the strategy, its parameters,
+   the pairs and timeframe, the costs and the config's digest; `backtesting/candidate.py:160`), listing the three
+   arms and carrying a `selection` block: the variant, the in-sample run and the SHA-256 of its `run.json`, the two
+   profit factors, the trade count and the selection file's SHA-256 (`backtesting/selection.py:952-980`).
+   `s6_select.py --entries-dir DIR`, with `--out`, writes one such entry per candidate (`scripts/s6_select.py:21-23`,
+   `:75-76`). The entry is pushed before any read, and a `status` is `pending` or `read` and nothing else, a `read`
+   entry having an `oos` block and a `pending` one having none (`protocol.py:482-483`, `:504-508`). One malformed
+   entry refuses the whole load, because the entry it hides might be the one that says a candidate was read
+   (`:539-557`).
+
+   *What a read must clear.* The out-of-sample window is read only by a run that clears `check_run`
+   (`protocol.py:697-789`), in this order: a provenance verdict of `accepted`, so a clone of a pushed commit
+   (`:725-731`); an entry carrying the run's candidate digest (`NO_ENTRY`, `:732-740`); for a candidate entry, a point
+   of a declared family's grid (`NOT_A_GRID_POINT`, `:744-751`); exactly the declared window (`WRONG_WINDOW`,
+   `:761-766`); exactly the declared arms (`ARMS_MISMATCH`, `ARM_NOT_DECLARED`, `:767-776`); an entry that is
+   `pending` with no `oos` block (`ALREADY_READ`, `:777-782`); and no completed record of that candidate at that arm
+   in this clone (`LOCAL_PRIOR_READ`, `:783-788`). A parameter changed after the freeze is a different digest and has
+   no entry. A window wholly in sample needs none (`:719-722`).
+
+   *After the read.* The three arms are read, then `scripts/s6_mark_read.py` (R-CP) verifies each record through the
+   evidence door and rewrites the entry as `read`, with `oos.records` holding each arm's run directory and the
+   SHA-256 of its `run.json` (`backtesting/readmark.py:1-14`); it refuses an entry already read (`:192-195`). The
+   gate re-checks every record against its entry, and the variant against the entry's `selection` block
+   (`backtesting/gate.py:302-318`).
 
 **What is pre-declared and what is chosen.** Pre-declared, in this file before the first S6 run: the
 families, timeframes and grids (section 5), the filter, the window and its boundary, the arm and the cost
@@ -210,6 +238,14 @@ non-candidate configuration**: the committed config, `sma_crossover` 20/50 on BT
 over `[2017-08-17, 2026-10-01)`, at the three arms. It has a baseline entry of kind `baseline`. It is not
 a candidate read, because its timeframes (1m and 5m) are not a candidate's (1h, 4h, 1d). **S5's report gives
 the in-sample and the out-of-sample figures separately, at the boundary of section 1.**
+
+**M5n (amendment 4).** M5n's pre-registration is `docs/M5N_PREREGISTRATION.md` (committed at `ede21a3`, SHA-256
+`e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e`). It pins M5n's unit, evaluation span, costs, risk
+settings, trade floors, in-sample gate, selection, no-pass rule and single out-of-sample read. This protocol carries the
+slot for it and none of its values (R-DW), so the floors and every other number are read from that file and are not
+restated here. The declared families of section 5 are `sma_crossover` and `rsi`, so the guard above treats a candidate
+of any other strategy as `NOT_A_GRID_POINT` (`protocol.py:744-751`).
+M5n's one read is bound by amendment 4's rule in section 10, not by this guard.
 
 ## 9. What is not claimed
 
@@ -279,6 +315,31 @@ costs, joint runs, the eligibility numbers 0.95 and 250, the read-once guard and
 govern code, tools and the owner's steps, not this file, and are recorded here, as R-CA, R-CH and R-CI were, so
 that the protocol holds every ruling that shaped S6's machinery. The figures R-CM refers to are recorded in
 `docs/research/LOG.md` (Entry 5). No S6 run exists that this amendment could affect.
+
+**Amendment 4 (P154; sections 6, 8 and 10 and the intro; before any M5n out-of-sample read, and after S7 was recorded
+FAIL).** The owner's rulings, verbatim:
+
+- R-CV (the sentence that bears on step 6): "No entry is committed, since entries exist only to bind a read."
+- R-DW: "The trade floors are pinned in the M5n pre-registration, written after N3's counts and before N7, and it
+  states that the counts were seen. PROTOCOL amendment 4 (N1) carries the rule's slot, not its values."
+
+*What it changes.* Section 6 step 6 read as though a `pending` entry per candidate were an unconditional part of the
+freeze; it is the freeze's second act, committed only to bind a read, and step 6 now says what
+`scripts/s6_select.py`, `backtesting/protocol.py`, `backtesting/readmark.py` and `backtesting/gate.py` do, with the
+lines they do it on. That discharges `M5m-510`. Section 8 gains the paragraph that points to
+`docs/M5N_PREREGISTRATION.md`. *What it does not change:* the declaration of section 11, so the families, the 216
+variants, the boundary, the arms, the costs, the eligibility numbers 0.95 and 250, S7's thresholds and the read-once
+guard are as they were; S5's baseline entry; the selection committed at `bdd95e4`. The protocol's digest changes with
+this commit (it is the SHA-256 of the file's text, `protocol.py:440`), and the records that carry the earlier digest
+(`docs/research/selection.jsonl`, `s7_null.json`, `s7_null.txt` and S5's records) are not re-read under it. No M5m run
+exists that this amendment could affect: S7 is recorded FAIL with no S7 candidate read out of sample (R-CV).
+
+*How M5n's read is bound.* M5n's single out-of-sample read is governed by docs/M5N_PREREGISTRATION.md and is made only
+by M5n's N8 runner, never through check_run, whose declared families do not include M5n's. It reads exactly one
+candidate, once, and the N8 runner keeps its own read ledger and refuses a second M5n read. The window is not
+untouched: S5's baseline read all of it by design (window class straddling), and the M5m rehearsal and quarter scan
+read parts of 2024 and early 2025 (M5m-447). No M5n candidate family has been read on it. After M5n's read, the window
+is retired from candidate confirmation for every later milestone, which confirms on a forward window instead.
 
 ## 11. The machine-readable declaration
 
