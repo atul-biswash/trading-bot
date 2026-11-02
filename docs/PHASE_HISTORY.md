@@ -4255,3 +4255,195 @@ M5n is chartered in `docs/M5N_CHARTER_DRAFT.md` (a draft on `main`; amended thro
 - The captures: S4's final, SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`; the census of record's, `3f7f551cf5c20d62e38cbe789a297f1db0d1871a99388d88e3f3f0f6db797528`; the S4 run `20261101T183301538998Z-e7ed287be238` (`run.json` `7a3e1b2f6e3f9c51a43cd7d66cc1285dd8e4cb641dc2b7fcf0681dcdabf5279c`).
 
 **M5m's scope, its order, S4's stop rule and every ruling from R-A to R-ED-1, and the ratification of P151, were the project owner's; everything else was ruled by the architect or by the reviewer under delegation.**
+
+## Phase 5 M5n -- a trend and breakout candidate set that does not clear its gates, an estimator pinned before it was read, and a research pause
+
+M5n outcome: FAIL at N7, with no out-of-sample read. Six pre-registered volatility-scaled trend and breakout candidates on 4h and 1d bars (R-DY), with ATR-scaled venue trailing stops (D1), were evaluated once in sample over [2018-03-05, 2024-01-01). None passed all three gates. The nearest, C1 donchian_1d_20, had an annualised net daily Sharpe of 0.7456 and a bootstrap 5th percentile of 0.0945, but a deflated Sharpe ratio of 0.5692 against 0.95, beside a buy-and-hold Sharpe of 0.6436. Both 4h candidates were consumed by costs. The cheap-slippage sensitivity would have selected C5 and decided nothing (R-DY).
+
+The owner's decision on the FAIL, verbatim:
+
+> Owner decision on M5n's N7 FAIL: I choose pure Option 1: Close M5n as FAIL at N7 (no OOS read), pause strategy research, and open the platform/execution reliability hardening milestone (clearing the S4 backlog: U12 REST backfill for feed holes, U10 partially executed protective legs, U13 unbooked trades after venue errors, and the two live-trading blockers: fee capture and base-asset netting). We will not run Option 3 (no exploratory Testnet paper-trading of C1).
+
+The three closing records, verbatim:
+
+> (1) The reserved window [2024-01-01T00:00:00Z, 2026-10-01T00:00:00Z) remains unread by any M5n family, subject to R-EF's limits: prior reads by S5's baseline (all of it, by design) and by the M5m rehearsal and quarter scan (M5m-447), and a public price path. (2) Cumulative multiple-testing trial accounting across milestones (the step 1 ledger: S6's sweep and selection plus M5n's six candidates, with every other source it lists) is carried forward, and any future research deflation must count it. (3) The live-trading block remains armed.
+
+**M5n is complete, in 114 numbered commits and 5 rotation commits (this one included), with 304 findings declared across `M5n-001`-`M5n-304`, every commit carrying a block.** The owner scoped it from the end of M5m: continue into volatility-scaled trend and breakout research on 4h and 1d bars with the live block armed, ATR-scaled trailing stops in place of the fixed brackets, trade floors scaled to the timeframe, fee-share telemetry first in every report, and `M5m-510` discharged before the unread window was touched (`docs/M5N_CHARTER_DRAFT.md`, section 1). It ended in FAIL at N7, and the weight of the milestone is the procedure rather than the verdict: every threshold, cost and estimator was fixed in a file digested before the one run that could have contradicted it, every candidate parameter was recorded first (R-DY, LOG Entry 7), and the run was made once.
+
+### The commits
+
+Numbered commits are `milestone/M5m..041c604` in order, and include the merge of branch `m5n` (`12d9a33`, row 95). The 22 commits between `ee8d485` (the charter's first commit) and the `milestone/M5m` tag belong to M5m's table and declare no M5n finding. Rotation commits follow the table.
+
+| # | Commit | Subject |
+|---|---|---|
+| 1 | `2e68278` | docs: the M5n charter records the N2 venue read, the cap, the fee, the order change and R-DU's missing text (M5n, P140 C1) |
+| 2 | `335041c` | docs(ledger): section 74, P140's halts and the predictions for the 4h and 1d bar aggregation and its venue verification, before any code (M5n N2a, P140 C2, R-T, R-DQ) |
+| 3 | `8bf38f7` | feat(data): aggregate the 1m store into 4h and 1d bars, tagged complete or incomplete (M5n N2a, P140 C3) |
+| 4 | `015ee29` | test(data): pin the 4h and 1d aggregation on synthetic fixtures and a real month-file store (M5n N2a, P140 C4) |
+| 5 | `1b8fccf` | feat(scripts): n2_verify_bars compares the aggregated 4h and 1d bars with the venue's klines over a fixed in-sample window (M5n N2a, P140 C5) |
+| 6 | `9061a1c` | test(scripts): pin n2_verify_bars on a fake venue and a real month-file store (M5n N2a, P140 C6) |
+| 7 | `b817882` | docs(ledger): section 75, the N2a run, the scoring of section 74 and what the mismatches are (M5n N2a, P140 C7, R-T) |
+| 8 | `62ebd00` | docs(ledger): section 76, the predicted kills for the mutation survey of the N2a tests, before it is run (M5n N2a, P140 C8, R-T, R-DQ) |
+| 9 | `a4690d5` | docs(ledger): section 77, the mutation survey of the N2a tests scored against section 76 (M5n N2a, P140 C9, R-T) |
+| 10 | `2882fae` | docs(counts): the gate figures and the file lists after the N2a module, script and tests (M5n N2a, P140 C10) |
+| 11 | `e14ce80` | docs: the M5n charter records R-DU, R-DV, R-DT-3a, R-DW and the confirmed fee verbatim (M5n, P141 C1) |
+| 12 | `cf46f8c` | docs(ledger): section 78, P141's halts and the predictions for the archive 4h and 1d series, the traded-minute mode and the volume gap, before any code (M5n N2b, P141 C2, R-T, R-DQ) |
+| 13 | `f8f180b` | refactor(data): share the 1m stream checks of the aggregator so a second aggregation can use them (M5n N2b, P141 C3) |
+| 14 | `4ff9a73` | feat(data): a traded-minute aggregation beside the plain one, for R-DV's consistency check (M5n N2b, P141 C4) |
+| 15 | `8016ffb` | test(data): pin the traded-minute aggregation on synthetic fixtures and a real month-file store (M5n N2b, P141 C5) |
+| 16 | `d01d88e` | feat(scripts): n2_archive_check compares the archive series with the saved API responses, checks the traded-minute aggregation and bands the volume gap (M5n N2b, P141 C6) |
+| 17 | `f43acc0` | test(scripts): pin n2_archive_check on saved responses and real month-file stores (M5n N2b, P141 C7) |
+| 18 | `5b72656` | docs(ledger): section 79, the archive check run, the scoring of section 78 and what the decision bars are (M5n N2b, P141 C8, R-T) |
+| 19 | `6666f4f` | docs(ledger): section 80, the predicted kills for the mutation survey of the traded-minute and archive-check tests and for the re-run of the aggregation survey, before they are run (M5n N2b, P141 C9, R-T, R-DQ) |
+| 20 | `c942071` | docs(ledger): section 81, the three mutation surveys scored against section 80 (M5n N2b, P141 C10, R-T) |
+| 21 | `f840e98` | docs(counts): the gate figures and the scripts list after the traded-minute code, the archive check and their tests (M5n N2b, P141 C11) |
+| 22 | `e942e4f` | docs: the M5n charter records R-DX, R-DZ, R-DY and R-DT-3b verbatim (M5n, P142 C1) |
+| 23 | `718aeec` | docs(ledger): section 82, P142's halts and the predictions for the indicators, the six candidates and their entry-event counts, before any code (M5n N3, P142 C2, R-T, R-DQ) |
+| 24 | `c0b3928` | feat(indicators): donchian_high, keltner_upper and momentum for the M5n candidates (M5n N3, P142 C3) |
+| 25 | `b109f33` | test(indicators): pin donchian_high, keltner_upper and momentum on hand-worked values (M5n N3, P142 C4) |
+| 26 | `ea86adc` | feat(strategies): the six M5n candidates and the R-DZ gap-free windows (M5n N3, P142 C5) |
+| 27 | `0998ce2` | test(strategies): pin the R-DZ gap-free windows (M5n N3, P142 C6) |
+| 28 | `cd85621` | test(strategies): pin the six M5n candidates on hand-worked frames (M5n N3, P142 C7) |
+| 29 | `0c7d36b` | feat(config): config.m5n.yaml, the research configuration that enables nothing live (M5n N3, P142 C8) |
+| 30 | `81b9c14` | test(config): pin config.m5n.yaml as research only (M5n N3, P142 C9) |
+| 31 | `daf8320` | feat(scripts): n3_entry_counts.py counts the six candidates' entry events and R-DZ suppressions (M5n N3, P142 C10) |
+| 32 | `67560d2` | test(scripts): pin n3_entry_counts.py on hand-worked stores (M5n N3, P142 C11) |
+| 33 | `e486efc` | docs(ledger): section 83, the N3 entry-event counts scored against section 82 (M5n N3, P142 C12) |
+| 34 | `6e416a2` | docs(ledger): section 84, the predictions for the mutation survey of the N3 tests (M5n N3, P142 C13) |
+| 35 | `f911ef0` | test(scripts): the trimming oracle builds its strategies itself (M5n N3, P142 C14) |
+| 36 | `184c219` | docs(ledger): section 85, the mutation survey of the N3 tests scored against section 84 (M5n N3, P142 C15) |
+| 37 | `70980c6` | docs: the gate figures and the architecture lists after N3 (M5n N3, P142 C16) |
+| 38 | `bf602b1` | docs: the M5n charter records C3, R-EA and R-DT-3c verbatim (M5n, P143 C1) |
+| 39 | `febf0b4` | docs: the charter cites the Binance documentation D1 required, before the trail is modelled (M5n, P143 C2) |
+| 40 | `8af15c1` | docs(ledger): section 86, P143's halts and the predictions for the D1 trail as a pure function, before any code (M5n N4a, P143 C3) |
+| 41 | `8356084` | feat(backtesting): d1_trail.py, the D1 trailing stop as a pure function (M5n N4a, P143 C4) |
+| 42 | `eeff30b` | test(backtesting): pin the D1 trail on hand-worked bars (M5n N4a, P143 C5) |
+| 43 | `5d4512a` | docs(ledger): section 87, the predictions for the mutation survey of the D1 trail tests (M5n N4a, P143 C6) |
+| 44 | `15185e1` | docs(ledger): section 88, the mutation survey of the D1 trail tests scored against section 87 (M5n N4a, P143 C7) |
+| 45 | `275ffaf` | docs: the gate figures and the architecture list after N4a (M5n N4a, P143 C8) |
+| 46 | `944a705` | docs(charter): R-EB, R-DT-3d and the N4b decisions, verbatim, with the six R-EA readings marked (M5n N4b, P144 C1) |
+| 47 | `b957011` | docs(ledger): section 89, P144's halts, the step 2 answers and the predictions for the counts-only run (M5n N4b, P144 C2) |
+| 48 | `cc02c06` | fix(backtesting): the entry minute's high counts toward the trail's peak, and the equality pin (M5n N4b, P144 C3) |
+| 49 | `92e63e3` | feat(scripts): the worktree mutation survey as a tested script, with the real exception class (M5n N4b, P144 C4) |
+| 50 | `fec51e4` | feat(strategies): a candidate fixes its D1 trail at the signal and declares its exit (M5n N4b, P144 C5) |
+| 51 | `65bae2f` | feat(backtesting): d1_executor.py, the executor for a strategy whose exit is the D1 trail (M5n N4b, P144 C6) |
+| 52 | `29e5353` | feat(backtesting): the engine chooses the D1 executor for a strategy that declares the exit, and every other strategy keeps the old one (M5n N4b, P144 C7) |
+| 53 | `fbef8be` | feat(scripts): n4_trade_counts.py, the counts-only run of the six candidates, with its forbidden-figure scan (M5n N4b, P144 C8) |
+| 54 | `5492d27` | test(scripts): pin the quantile rank and the root logger's handlers in the counts script (M5n N4b, P144 C9) |
+| 55 | `009b354` | docs(ledger): section 90, the counts-only run of the six candidates and section 89 scored (M5n N4b, P144 C10) |
+| 56 | `836c21d` | docs(ledger): section 91, the predictions for the arming audit of the N4b code (M5n N4b, P144 C11) |
+| 57 | `a7fcb0c` | docs(ledger): section 92, the arming-audit survey of the N4b code scored against section 91 (M5n N4b, P144 C12) |
+| 58 | `a19c723` | docs: the gate figures and the architecture list after N4b (M5n N4b, P144 C13) |
+| 59 | `b6759a1` | docs(charter): R-DT-3e, the tick reading, the N5 decisions and the clamp note, verbatim (M5n N5, P145 C1) |
+| 60 | `dd61369` | docs(ledger): section 93, how the RiskManager sizes and the predictions for the N5 count run (M5n N5, P145 C2) |
+| 61 | `8473a24` | feat(backtesting): size a D1 entry from the signal's own clamped trail through the unchanged RiskManager (M5n N5, P145 C3) |
+| 62 | `a9a18ad` | feat(backtesting): tally each refusal under the rule that fired (M5n N5, P145 C4, R-DT-3e) |
+| 63 | `0a17f02` | feat(scripts): print refusals by rule and the four entry outcomes beside them (M5n N5, P145 C5, R-DT-3e) |
+| 64 | `1eb0858` | feat(config): config.m5n.yaml sizes 1 percent risked at the initial stop (M5n N5, P145 C6) |
+| 65 | `9431958` | docs(ledger): section 94, the N5 counts-only run scored against section 93, and M5n-091 resolved (M5n N5, P145 C7) |
+| 66 | `1ffed99` | docs(ledger): section 95, the predictions for the arming audit of the N5 code (M5n N5, P145 C8) |
+| 67 | `0cc80e8` | docs(ledger): section 96, the arming-audit survey of the N5 code scored against section 95 (M5n N5, P145 C9) |
+| 68 | `4454ea4` | docs: the gate figures and the architecture list after N5 (M5n N5, P145 C10) |
+| 69 | `06fa1f8` | docs(charter): R-DT-3f, D1RiskManager, the halt note and the clamp correction, verbatim (M5n P146 C1) |
+| 70 | `e58c675` | docs(ledger): section 97, what a RiskManager keeps after construction and the predictions for the cap-binding count (M5n P146 C2) |
+| 71 | `819852d` | feat(backtesting): tally the entries whose size the position cap limited (M5n P146 C3, R-DT-3f) |
+| 72 | `d0b47f1` | feat(scripts): print the capped-entry count and close the outcomes-line hole (M5n P146 C4, R-DT-3f) |
+| 73 | `d031654` | docs(ledger): section 98, the counts-only run with the capped-entry count, scored against section 97 (M5n P146 C5) |
+| 74 | `24bf718` | docs(ledger): section 99, the predictions for the re-survey of the outcomes line and the capped-entry count (M5n P146 C6) |
+| 75 | `520de35` | docs(ledger): section 100, the re-survey of the outcomes line and the capped-entry count, scored against section 99 (M5n P146 C7) |
+| 76 | `cd37d4b` | docs: the gate figures after P146 (M5n P146 C8) |
+| 77 | `ede21a3` | docs: the M5n pre-registration, frozen by digest before any metric is read (M5n P147 C1) |
+| 78 | `48c4199` | docs(charter): the pre-registration pointer, its SHA-256, and N7 marked superseded (M5n P147 C2) |
+| 79 | `73a7abe` | docs(charter): the readings of the pre-registration, the rulings on M5n-178 and the M5n-173 note, verbatim (M5n P148 C1) |
+| 80 | `a65dc95` | docs(ledger): section 101, what metrics.py does, the N6 module's design and its fixtures' hand-worked values (M5n P148 C2) |
+| 81 | `58ad896` | feat(backtesting): the N6 estimators, pure, on synthetic fixtures only (M5n P148 C3) |
+| 82 | `abb8827` | docs(ledger): section 102, the predictions for the survey of the N6 estimator module, before it is run (M5n P148 C4) |
+| 83 | `e2de51f` | docs(ledger): section 103, the scored result of the N6 estimator module's survey (M5n P148 C5) |
+| 84 | `b7d6407` | docs: the gate figures after P148, and sharpe_stats in the architecture tree (M5n P148 C6) |
+| 85 | `918ca98` | docs(charter): the survey practice, the fee telemetry and the N0 guard, verbatim, with four readings (M5n P149 C1) |
+| 86 | `2388ae2` | docs(ledger): section 104, the predictions for the estimator changes, the N0 guard and the N7 runner, before any code (M5n P149 C2) |
+| 87 | `05678b6` | fix(backtesting): one accepted form of mark, the bootstrap's stream pinned, its dead line gone and its no-variance guard exact (M5n P149 C3) |
+| 88 | `57588ee` | feat(scripts): the N7 runner, with the N0 guard first (M5n P149 C4) |
+| 89 | `b5deb42` | test(scripts): the N7 runner's guard, judge worlds and end-to-end fixture world (M5n P149 C5) |
+| 90 | `d8ed75b` | docs(charter): the three frozen digests of the N7 guard's condition (c) (M5n P149 C6) |
+| 91 | `5cb0d55` | docs(ledger): section 105, the predictions for the survey of the estimator module and the N7 runner, before it is run (M5n P149 C7) |
+| 92 | `7711771` | test(scripts): the guard tests start no git daemon, and test the frozen paths they list themselves (M5n P149 C8) |
+| 93 | `ea3eac9` | docs(ledger): section 106, the scored result of the survey of the estimator module and the N7 runner (M5n P149 C9) |
+| 94 | `2c32af0` | docs: the gate figures after P149, and n7_evaluate in the scripts tree (M5n P149 C10) |
+| 95 | `12d9a33` | Merge branch 'm5n' into main: the M5n branch (ee8d485..2c32af0) with its ledger sections split out (R-EE, P154) |
+| 96 | `4c7afe2` | docs(charter): the M5n charter's DRAFT marker is lifted, R-DU is applied, R-EE and U12 are recorded (P154) |
+| 97 | `bfbe166` | docs(research): PROTOCOL amendment 4 -- section 6 step 6 says what the code does, and M5n's one read is bound per candidate (P155, M5m-510) |
+| 98 | `e33ff54` | docs(ledger): section 83, the reserved window's reads from the halted P155 run and the audit of what M5n read (P155 C2) |
+| 99 | `5dfc1ab` | docs(research): log Entry 7 -- M5n's six candidates are registered, and the S6 register_strategy condition is met by this record (P155) |
+| 100 | `4c41c58` | docs(charter): amendment 4 and N1 done, R-EF recorded, and section 8's freeze entry resolved to the N8 runner's ledger (P155) |
+| 101 | `f3548d0` | docs(next): M5m-510 is discharged by amendment 4, and the S6 register_strategy condition is recorded as fired and met in part (P155) |
+| 102 | `8c5d9ec` | docs(readme): the architecture tree names sharpe_stats and n7_evaluate, and the docs map records the M5n ledger file and step 2's outcome (P155) |
+| 103 | `28e8a77` | docs(charter): R-EG, the re-freeze rule, the survey-resources rule and the N1 ruling, recorded verbatim (P156) |
+| 104 | `2df308c` | docs(ledger): M5n section 107 -- the eleven runner holes classified, and the plan that closes the VERDICT ones, before any code (P156) |
+| 105 | `c49c6b7` | test(scripts): d1_world can store a 1d series beside a 4h one, for the 4h world the midnight-marking test needs (P156) |
+| 106 | `50a114d` | test(scripts): close the eight VERDICT holes of the N7 runner's tests -- digest line, tag, exit codes, books, incomplete run, 4h marking, start day (P156) |
+| 107 | `5854581` | docs: the documented pytest figure moves to 5519 credentialed and 5516 uncredentialed, after 25 tests were added (P156) |
+| 108 | `40f1c6c` | docs(ledger): M5n section 108 -- the binding predictions for the survey of the VERDICT mutations, before it is run (P156) |
+| 109 | `e0d1f8d` | docs(ledger): M5n section 109 -- the scored result of the survey of the VERDICT mutations, and the direct digest check (P156) |
+| 110 | `29ef8f1` | docs(charter): N0 recorded -- the N0 line names ddf3593, the re-freeze window closes, a run of N7 is defined (P157) |
+| 111 | `dbc7c14` | docs(ledger): M5n section 110 -- the predictions for N7's one run, before it is run, and the guard's acceptance on HEAD (P157) |
+| 112 | `2b98945` | docs(ledger): M5n section 111 -- the result of N7's one run, rendered from its result file, and the predictions scored (P157) |
+| 113 | `6f83ad2` | docs(research): LOG Entry 8 -- the six candidates' in-sample results from N7, and the verdict FAIL (P157) |
+| 114 | `041c604` | docs: record the N7 outcome in NEXT_MILESTONE, close M5n-252, carry M5n-274 as a tests-only item (P157) |
+
+**The five rotation commits (P158), the last being this commit:** `cb570dc` (the charter closed), `f40d1e8` (RUN_LEDGER_M5N section 112), `1e3a2d6` (NEXT_MILESTONE rotated to M5o), `390da44` (CLAUDE.md and README) and this commit (the build log), which carries the tag `milestone/M5n`.
+
+### The cumulative trial ledger (closing record 2), by source
+
+This is the owner's "step 1 ledger", read from the committed records and recorded with its commands in `docs/RUN_LEDGER_M5N.md` section 112. Every source ran BTCUSDT and ETHUSDT jointly. "In sample" is `[2017-08-17, 2024-01-01)`, except M5n's, which starts at `2018-03-05`. The counts are DECLARED configurations, not independent trials, and no effective number of trials is estimated.
+
+| # | Source | What was evaluated | Configurations added | Reads of the reserved window | Recorded in |
+|---|---|---|---|---|---|
+| 1 | S5's baseline | `sma_crossover` 20/50 on BTCUSDT 1m and ETHUSDT 5m at stop slippage 0.05, 0.66 and 1.20 percent (three runs) | **1** | all of it, by design | LOG Entries 1 to 3; RUN_LEDGER section 50 |
+| 2 | S6's sweep | all 216 declared variants (54 `sma_crossover`, 162 `rsi`; 1h, 4h, 1d; trend filter off and on) at the 1.20 percent arm | **216** | none | PROTOCOL section 5; LOG Entry 6; RUN_LEDGER sections 54 and 56 |
+| 3 | S6's six selected candidates and walk-forward | 6 of 12 cells had an eligible point, all among the 216; four anchored folds 2020 to 2023 inside the same records | 0 | none | LOG Entry 6 |
+| 4 | The M5m rehearsal | 2 variants (`sma_crossover` 4h 10/50, filter off and on), both among the 216, in narrowed protocols: 10 invocations, one of them a 28-quarter scan | 0 | yes, for those two: 2024-01-01 to 2025-04-01 (`M5m-447`) | LOG Entry 5; RUN_LEDGER sections 52 and 53 |
+| 5 | The M5m smoke backtests | S5's configuration again over 2024-03-01 to 2024-04-01, three runs | 0 | **yes: 2024-03** | RUN_LEDGER sections 32 and 35 |
+| 6 | M5n's six at N7 | C1 `donchian_1d_20`, C2 `donchian_1d_55`, C3 `sma_cross_1d_50_200`, C4 `donchian_4h_20`, C5 `keltner_4h_20_2`, C6 `tsmom_1d_90` once at the base costs, plus the three sensitivities as figures | **6** | none | RUN_LEDGER_M5N sections 110 and 111; LOG Entries 7 and 8 |
+| 7 | M5n's counts-only runs | the same six, counts only, no price, return or equity | 0 | none | RUN_LEDGER_M5N sections 83, 90, 94 and 98 |
+| | **Distinct configurations with an in-sample performance figure** | rows 1, 2 and 6 | **223 = 1 + 216 + 6** | | |
+
+Left out, with reasons: S4's live run and its backtest comparison (after the reserved window, a calibration of the backtester and not a configuration search); the S7 null check (derived from the six S6 candidates' own trades); the one-day smoke of `config.s4.yaml` on 2026-10-08 (S5's configuration, after the window). **N7's deflated Sharpe ratio used N = 6 as the pre-registration fixes, and a future one counts 223** (`M5n-293`). No deflated Sharpe ratio at N = 223 was computed; the direction is REASONED, with its caveat, in RUN_LEDGER_M5N section 112. **Row 5 is a gap in three older lists** (R-EF's prior reads, RUN_LEDGER section 83's table, LOG Entry 6's exceptions), found at this rotation and declared, not edited (`M5n-294`).
+
+### What M5n decided, and why
+
+- **To write code during S4, under a condition (D4, R-DT).** The architect recommended against writing M5n code while S4 ran; the owner overrode it. The condition that makes the override safe is R-DT: code is exercised on synthetic fixtures only, and nothing on recorded data prints or stores a return, P&L, equity or metric until N0 records the S4 result. R-DT-3a to R-DT-3f then allowed counts-only runs (trade counts, clamp counts, refusal counts, capped-entry counts), with a forbidden-figure scan in `scripts/n4_trade_counts.py`. The cost was that the floors had to be set from counts, so the pre-registration says the counts were seen first (R-DW).
+- **The decision bars are the venue's archive 4h and 1d series, verified against the venue's own klines (R-DV).** The alternative, aggregating 1m bars into 4h and 1d, was kept as a consistency check rather than as the source: `data/aggregation.py` builds both, tags a bucket complete or incomplete, and the archive check compares them. The mismatches are recorded in RUN_LEDGER_M5N section 75; the 128 `bars_gap_detected` warnings in N7's standard error come from the 4h series, 64 for each pair (section 111).
+- **Six candidates, published parameters, no search (R-DY), no volume (R-DX), and a gap rule (R-DZ).** An indicator whose window holds a missing decision bar yields no value, so a hole suppresses entries and is counted instead of being bridged. The denominator of M5n's judgement is therefore 6, and was fixed before any return was computed.
+- **The exit is D1: a trailing stop sized k x ATR / price at entry in integer basis points, clamped to [10, 2000], resolved on the 1m path with the peak updated by each minute's high before that minute's low is tested (R-EA).** The venue's `TRAILING_DELTA` bounds were read by the owner on both venues; the documentation was cited before the trail was modelled. A triggered `STOP_LOSS` executes as a MARKET order, so the stop slippage (1.20 percent at the base, 0.66 and 0.10 as figures) is an assumption and not a documented fact. D1 was built **in the backtester only**; no order for a trailing level is placed anywhere, and QC section 3's three-leg set is untouched.
+- **The estimators are a daily-return Sharpe, a stationary block bootstrap (Politis-Romano) and a deflated Sharpe ratio (D2, N6).** Walk-forward and the S6-style null check were rejected because no parameter is fitted; the pre-registration supersedes the charter's N7 wording. The module (`backtesting/sharpe_stats.py`), the pre-registration and the runner were frozen by digest, and the survey found eleven open holes in the runner that P156 classified, closing the eight that could change a VERDICT by test before N0.
+- **One run, defined.** N0 was recorded as a charter line the runner's guard reads from `HEAD`; after it no frozen file may change (R-EG); a run counts when its result file is written, and a crash before that is not a run. N7 ran once, 1,350 s, and wrote `data/n7/n7_result_P157.json`.
+- **PROTOCOL amendment 4 binds M5n's read to one candidate once, by a runner, never through `check_run` or an entry file (N1).** The owner ruled that step 6 is amended and that "unread" means no M5n family was read (R-EF). The architect's first wording, a single-use rule across every path, contradicted the protocol's per-candidate design and was withdrawn, and it is recorded as ARCHITECT-OWNED. The refusal of a second read is code in a runner that was never built.
+- **The N7 predictions were committed first and scored afterwards** (RUN_LEDGER_M5N sections 110 and 111). Of the architect's four scored, three held and (4) failed on C5's sign (+0.0817, not negative); of the executing session's ten, five held whole, three held in their headline and failed in a stated detail, one failed on the sensitivities, and one is not scored.
+
+### What the rotation's steps found
+
+- **Step 4, the contracts.** `docs/QC_PROTECTIVE_ORDERS.md`, `docs/QB_ESCALATION.md` and `docs/M5_NUMBERS.md` were searched for `M5n`, `trailingDelta`, `N7`, `strategy research` and `sharpe`; the only hits were the substring "sharp". QC's prose on the trailing milestone (no owner, the three-leg set, `trailing_stop` retained) is unchanged by M5n because D1 never reached a venue. Annotated: nothing (`M5n-304`).
+- **Rule 3, the structural lists.** Read against the tree: every directory under `src/trading_bot` and every file under `scripts/` is named in both architecture trees (the `examples/` and `m5n/` directories by name, as before), every dagger stub is still docstring-and-imports only, and `check_gate_counts` agreed at 15 structural sites twice (`M5n-302`).
+- **The arming registers.** 60 blocks in `docs/NEXT_MILESTONE.md` after the rotation, 59 parsed and the one unparsed accepted by ruling. M5n's 53 changed files fire three conditions, traced in RUN_LEDGER_M5N section 112: the `M5n-274` condition (not fired), the `backtesting/engine.py` fill-model condition (not fired) and the `PROTOCOL.md` condition (fired at P155 and answered by the owner). The extractor reads a block to the next blank line, which merged two of this rotation's three new conditions until each was given its own block (`M5n-300`).
+- **The sentences made false.** The M5m paragraph's "The next milestone is M5n" and "two backtest clones" in `CLAUDE.md` and `README.md`, annotated; three docs-map rows in the README, corrected in place; the charter's ordering note and status line, annotated.
+- **The gate,** bare, uncredentialed by environment so that no venue call was possible: 272 files formatted, mypy 135, 5516 passed and 4 skipped, exit 0 (`M5n-296`). Ten stray `git fsmonitor--daemon` processes followed it, because the system `gitconfig` enables `core.fsmonitor`; `M5n-274` is carried with that count.
+
+### The method rules, keyed
+
+- **A list that names a thing's prior uses is a claim about every use, and is audited against the records, not against itself** (`M5n-294`): three lists of the reserved window's prior reads each omitted the same three smoke runs.
+- **An instrument that reads a block to a delimiter audits one condition where two share the block** (`M5n-300`), found because the count did not move when two conditions were added.
+- **An item named in the owner's text that the charter does not define is recorded as named** (`M5n-292`): N10 has no row, and the tree's other `N10` is a mutation label.
+
+### What carries into M5o
+
+M5o is the platform and execution reliability hardening milestone, chartered from P159. **The owner's five items:** U12 (REST backfill for feed holes), U10 (partially executed protective legs, six Testnet cases), U13 (unbooked trades after venue errors), the fee-capture blocker (every commission in every capture is zero) and the base-asset-netting blocker (every leg and exit is sized from the ordered quantity). **Carried with them,** each in the register of `docs/NEXT_MILESTONE.md` with its current status: `M5n-274` (tests-only), the cumulative trial ledger, `M5n-294`, K1 to K9, P-3i, P-3m, P-3n, N1 to N6, U0 to U5, U7 to U9, U11, A1 to A3, A5, A6, the `M5i` items, W1 to W4 and W6, and the blocked trailing-stop milestone, whose only named consumer the owner's pause removes. **The owner's pending steps:** retire three clones, the S4 deploy clone, the S4 backtest clone and the rehearsal clone, each junction first by `cmd /c rmdir`. **Live trading stays blocked by exactly the two gates it was, and refused at every entry point.**
+
+### The historical figures in this entry
+
+**Pinned to their commits, not a live count.**
+- **At `041c604`**, the last numbered commit: 114 numbered commits and 290 findings. `ruff format` 272 files, `mypy` 135 source files, 5516 passed and 4 skipped uncredentialed **measured at P158** (bare gate, exit 0, 347.6 s, output SHA-256 `6a39c5922f22ee73bf6d6cd9f4592c7b35f348993021323a583aea173735bc35`); the credentialed 5519 passed and 1 skipped is the P156 figure, not re-measured because it would call the venue.
+- **At this rotation's end**: the same 272 / 135 / 5516 and 4 skipped, since the rotation changed no `.py` file; 304 findings and 119 commits including this one.
+- The captures: N7's result file, SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`, its standard output `8db10f10c3a4da4d4ef4166ef24147d1d1b87bcacabd97ba1235cd9d65154d53` and its standard error `f9d587a3dd05fe5b187fd73392be9b8a066721eda25a05ce1d2e816c0a08f89e`; the frozen digests `docs/M5N_PREREGISTRATION.md` `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e`, `sharpe_stats.py` `2b55991c0207fc2938e6f03b33e0b9cfec3754d486af7002d5adee4ee88dda82` and `n7_evaluate.py` `1f307de67f5aebd7af39a3d8fb5cd22a78d9fa671cfdf5353b894beacbadcfff`, unchanged across the run.
+
+**M5n's scope, its order, D1 to D4, R-DT to R-EG, amendment 4's ruling, N0, the single run's definition and the decision on its FAIL were the project owner's; everything else was ruled by the architect or by the reviewer under delegation.**
