@@ -140,6 +140,29 @@ The arming condition carried at S6 in `docs/NEXT_MILESTONE.md` reads *"whoever n
 
 **What this meets and what it does not.** The first half of the condition's requirement is met: each registration is a registry entry with its own tests. The second is met as far as it can be today: every variant tried is recorded here with its parameters, and its in-sample result is the counts above, because no return exists to record. **A residual remains and is carried, not met: when N7 computes the six in-sample results, they are added to this log (an Entry 8), so that each candidate's record holds its parameters and its in-sample result together.** That is a docs record and needs no code.
 
+## Entry 8 -- M5n N7: the six candidates' in-sample results, and the verdict FAIL at N7 (P157)
+
+This entry discharges the residual Entry 7 carried: *"when N7 computes the six in-sample results, they are added to this log (an Entry 8)"*. N7 was run once, at P157, on the frozen bytes the charter's section 23 digests, after N0 was recorded (`docs/M5N_CHARTER_DRAFT.md` section 28). The record of the run, its result file's digest and the predictions scored is `docs/RUN_LEDGER_M5N.md` sections 110 and 111; this entry is the research log's copy, so that each candidate's parameters and its in-sample result sit together. **Entry 7 is not edited**; its residual is met here.
+
+**What was run.** `scripts/n7_evaluate.py`, one run, over the in-sample span `[2018-03-05, 2024-01-01)`: the common start is 2018-03-05, the day C3's 201-bar window is first defined for both pairs, and every candidate is measured over the same 2,128 daily returns. Costs are the pre-registered base: fee 0.10 percent a side, stop slippage 1.20 percent. Parameters are Entry 7's, unchanged, and no parameter was fitted or searched. Result file `data/n7/n7_result_P157.json` (local, gitignored), SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`. Figures below are rendered from it by a script and rounded to four places; money is in the account's quote currency from a 10,000 start (the result file holds the full strings).
+
+| Candidate | Strategy | TF | Trades (floor) | Ann. net daily Sharpe | Bootstrap 5th pct | DSR | Gross | Fees | Net | Fee share | Skew | Kurtosis | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C1 | `donchian_1d_20` | 1d | 69 (30) | 0.7456 | 0.0945 | 0.5692 | 2981.0587 | 123.7627 | 2857.2960 | 0.0415 | -0.0338 | 17.9862 | FAILED (dsr) |
+| C2 | `donchian_1d_55` | 1d | 48 (30) | 0.5086 | -0.1311 | 0.3467 | 1499.9230 | 79.6728 | 1420.2502 | 0.0531 | -0.3592 | 25.6889 | FAILED (bootstrap, dsr) |
+| C3 | `sma_cross_1d_50_200` | 1d | 12 (30) | 0.5057 | -0.1975 | 0.3425 | 839.7295 | 20.0420 | 819.6875 | 0.0239 | 0.7137 | 63.1352 | EXCLUDED (below floor) |
+| C4 | `donchian_4h_20` | 4h | 399 (120) | -0.7171 | -1.3711 | 0.0005 | -3063.6297 | 972.6777 | -4036.3074 | 0.3175 | 0.7757 | 8.7532 | FAILED (bootstrap, dsr) |
+| C5 | `keltner_4h_20_2` | 4h | 274 (120) | 0.0817 | -0.5176 | 0.0762 | 1162.8193 | 969.9059 | 192.9134 | 0.8341 | 1.1298 | 13.6562 | FAILED (bootstrap, dsr) |
+| C6 | `tsmom_1d_90` | 1d | 40 (30) | 0.1796 | -0.5805 | 0.1159 | 462.9786 | 63.3802 | 399.5984 | 0.1369 | 0.8781 | 41.2048 | FAILED (bootstrap, dsr) |
+
+**Reading the gates.** The floors are 30 trades on 1d and 120 on 4h. The bootstrap gate is the 5th percentile of the annualised net daily Sharpe above 0 (stationary bootstrap, p = 1/20, 10,000 resamples, seed 20261025). The deflated Sharpe gate is above 0.95 at N = 6 trials. **No candidate passes all three: the verdict is FAIL at N7, no candidate is selected, and the out-of-sample window stays unread.** C1 is the nearest: it clears the floor and the bootstrap and fails the DSR at 0.5692. C3 is excluded below its floor at 12 trades. C4 has a negative gross as well as net (flagged `gross<=0`), and C5's fee share is 0.8341, so almost all of its gross goes to fees. Equal-weight buy and hold over the same span has an annualised Sharpe of 0.6436 (context only; no gate reads it).
+
+**Sensitivities, figures only (R-DY).** At fee 0.075 percent and at stop slippage 0.66 percent no gate flips and nothing would be selected. At stop slippage 0.10 percent three gates flip (C2 bootstrap, C5 bootstrap and C5 DSR) and C5 alone would pass; that is a figure and decides nothing, because the pre-registered base is 1.20 percent and the verdict is the base run's.
+
+**Variants tried, and the denominator.** Exactly these six; the denominator for any multiple-testing judgement of M5n stays N = 6, and S6's 216 variants stay 216 (Entry 6). The count of M5n candidates read out of sample is **0**: the reserved window `[2024-01-01, 2026-10-01)` is unread by all six, and their one read is bound by PROTOCOL amendment 4 to M5n's N8 runner, which has not run and which a FAIL at N7 means will not be run on these six.
+
+**What this entry does not say.** It does not say a candidate has no edge out of sample: none was read. It says that in sample, at the pre-registered costs, none of the six clears the pre-registered gates, and that the 4h candidates are far more sensitive to the stop-slippage assumption than the 1d ones. The runner's standard error held 128 `bars_gap_detected` warnings, all in the 4h series (64 per pair); the effect of those missing bars on the 4h results is not measured here.
+
 ## Candidate entries
 
 None yet. No variant has been run.
