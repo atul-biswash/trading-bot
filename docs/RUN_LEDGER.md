@@ -8386,3 +8386,51 @@ For F2b the product `vwap x quantity` equals `quote_quantity` exactly (delta `0E
 
 - It does not establish `fromId = 0`, an oldest-first answer, the time `myTrades` takes to show a fill, or any figure for the venue's per-minute limit: each is UNMEASURED until step 5 or stays so.
 - It rules nothing: the readings in part 2 are the executing session's, and OR-4's retry bound is the owner's to overrule.
+
+## 88. M5o P161 H1: nine S4 entries settled against the real Testnet responses, and the weights measured (P161 C9)
+
+An observation log, so this section only adds; a citation names its file (R-EG). **Authorised for this item only, by the P161 prompt (step 5):** keyed Testnet `GET /api/v3/myTrades` and `GET /api/v3/order`, for order ids taken from the S4 capture's entry placements, **no writes**. The run was made at `2026-11-02T21:57:15Z` to `21:57:26Z` (the host's local clock read `2026-11-03` in the morning; UTC is given here), exit status 0, standard error empty (0 bytes). Marks: MEASURED (read from the venue in this run), DOCUMENTED, REASONED, UNMEASURED.
+
+### 1. What ran, and what it could not have called
+
+- **The instrument:** a session-scratchpad script, `measure_settlement.py`, SHA-256 `8a32b01b8d8e373a67c5f403790ba4f958d29bec255af817dfecf11624db7e97`, not committed (the M5n precedent for scratch instruments); its output, SHA-256 `429d342342a003d788f5e02e94b00cfc32d52af5359ff637d0760e1f92e11111`.
+- **It builds the library client directly and does not call `AsyncClient.create`**, because `create` issues `GET /api/v3/ping` and `GET /api/v3/time` in its own body (read from the installed library's source), neither of which this step authorised. Its only venue calls are the adapter's `get_order` (one `v3_get_order`, `GET /api/v3/order`) and `get_my_trades` (one `GET /api/v3/myTrades`), each at one attempt. Verified by reading the adapter: `get_order` is one `_call(self._client.v3_get_order, ...)`, `get_my_trades` one `_call(self._client.get_my_trades, ...)`, and `close()` is local. Because the library makes no clock-sync call, signed requests carry the local clock; none failed with a timestamp error.
+- **The input:** the capture `F:\trading bot\deploy\45547f107715\logs\trading_bot.log`, read and never written; **5,415,031 bytes, SHA-256 `94201d916846288855d31c37931812c6149c09ed59b140a53af56e3e50b5bae9`**, equal to section 77's digest (the script refuses to run otherwise). It holds **317** `Order list placed` lines. The sample is nine: the first three, the two in the middle, the last three, and list `282240` (U13's case).
+- **The calls:** nine `get_order`, nine first pages of `myTrades` (each one page, since each order has one fill), and five `myTrades` calls of the paging experiment: **23 GETs**, no other request. The used-weight header (below) moved by exactly 4 then 5 across every one of the nine pairs, which agrees with that count.
+
+### 2. The nine entries
+
+Every row is `symbol BTCUSDT`, base `BTC`, quote `USDT`, and **every order was found, `FILLED`, with exactly one fill and a commission of `0E-8 BTC`**. "Total" is the settlement's `quote_quantity`; it equals the order's own `cummulativeQuoteQty` **in value and in string, so the exponent agrees too**, on all nine. The settlement's VWAP equals the order's `average_price` in value and in string on all nine. The settlement's quantity equals the order's `executedQty` in string on all nine.
+
+| List | Entry bar (UTC) | Order id | Executed | Total (= `cummulativeQuoteQty`) | VWAP (= `avg`) | Used weight, order read | Used weight, fills read |
+|---|---|---|---|---|---|---|---|
+| `34993` | 2026-10-10 06:46:59 | `1092784` | `0.02295000` | `1900.90191150` | `82827.97` | unread -> 4 | 4 -> 9 |
+| `35415` | 2026-10-10 07:45:59 | `1105692` | `0.02297000` | `1901.18118970` | `82768.01` | 9 -> 13 | 13 -> 18 |
+| `35970` | 2026-10-10 08:48:59 | `1120746` | `0.02289000` | `1895.15397330` | `82793.97` | 18 -> 22 | 22 -> 27 |
+| `167287` | 2026-10-20 11:10:59 | `5019752` | `0.02295000` | `1873.35801000` | `81627.8` | 27 -> 31 | 31 -> 36 |
+| `167417` | 2026-10-20 11:26:59 | `5024152` | `0.02297000` | `1873.01996970` | `81542.01` | 36 -> 40 | 40 -> 45 |
+| `321419` | 2026-11-01 15:07:59 | `9503083` | `0.02387000` | `1863.72257610` | `78078.03` | 45 -> 49 | 49 -> 54 |
+| `321690` | 2026-11-01 15:36:59 | `9508841` | `0.02386000` | `1864.29775960` | `78134.86` | 54 -> 58 | 58 -> 63 |
+| `322186` | 2026-11-01 16:27:59 | `9519511` | `0.02386000` | `1863.60963720` | `78106.02` | 63 -> 67 | 67 -> 72 |
+| `282240` | 2026-10-29 08:11:59 | `8423546` | `0.02326000` | `1863.34883080` | `80109.58` | 72 -> 76 | 76 -> 81 |
+
+### 3. What it shows
+
+- **No Testnet reset removed these orders** (`M5o-013` asked this of the three U10 orders; for entries the answer is MEASURED): the oldest sampled is `2026-10-10`, 23 days before the read. MEASURED for these nine; it says nothing about the U10 orders.
+- **The weights are as documented, measured by the venue's own counter** (`x-mbx-used-weight-1m`, read from the library's last response): `get_order` **+4** and `myTrades` with an `orderId` **+5**, on all nine pairs. A filled entry's settlement therefore costs **+9**, against the +4 of the single read it replaces: **+5**, the figure section 87 predicted. MEASURED, and it confirms `M5o-037`'s DOCUMENTED weights.
+- **The prediction F1 (one fill) is confirmed on the real venue for nine entries.** A multi-fill ENTRY was not in the sample (all nine have one fill), so the exactness of the VWAP and the page cursor on a real multi-fill order is **UNMEASURED**; the fixtures F2a, F2b, F8 and F8b stay the only evidence for those shapes (`M5o-053`).
+- **List `282240` is the U13 case, and its settlement is obtainable today.** The bot's entry-fill read failed with *"Internal error"* at `2026-10-29T08:12:01Z`, it debited the requested limit (`0.02326 x 80189.69 = 1865.2121894`), and the close later dropped the trade unbooked. The venue still holds order `8423546` `FILLED` for `0.02326000` at a total of `1863.34883080`, one fill, commission `0E-8 BTC`: a settlement would have found it. The estimate over-debited by `1.8633586`, and the fill was `80.11` per unit below the requested limit, the same direction as the five earlier instances. This is evidence that H2's recovery is feasible with exactly the read H1 added; per R-OB, list `282240` is **not** back-filled.
+- **Paging.** `fromId = 0` with `orderId` is **accepted** (HTTP success, the one fill returned). `fromId` is **inclusive** (`from_id` equal to the last id returns it again) and `from_id` of the last id plus one returns an empty page, so the loop's cursor and its stop are right. **Whether the answer is oldest first with several fills, and whether the default with no `fromId` is the most recent, cannot be told from a one-fill order: both stay UNMEASURED** (`M5o-039` and `M5o-043` are narrowed, not closed).
+- **Latency, this host, one session** (the adapter call as wall clock): `get_order` n = 9, minimum 141 ms, median 404 ms, maximum 416 ms; the whole fills read of one order n = 9, minimum 141 ms, median 147 ms, maximum 413 ms. The two-call settlement of a filled entry therefore took about 0.3 s to 0.8 s here. At three attempts with the waits of 0.25 s and 0.5 s the worst case is six calls of about 0.42 s plus 0.75 s, about 3.3 s, inside the shipped `dispatch_deadline_s = 9.0`; the placement's own latency is not measured by this run, so how much of the deadline remains after it is UNMEASURED.
+
+### 4. The dispatch call budget, as R-OD asks (*"measured at H1 and raised only with measured headroom against the venue's limits"*)
+
+- **Measured:** calls per entry (2 after the placement, up from 1), used weight per entry (9, up from 4), latency (above), and that the retry's time is gated by `dispatch_deadline_s` and its reconciliation calls are charged to the pass's unspent `max_calls`.
+- **Not measured, and so not claimed:** the venue's per-minute weight limit. The pages read at P161 state none, and `exchangeInfo`'s `rateLimits` is a keyless read this item was not authorised to make. **Headroom against the limit is therefore UNMEASURED** (`M5o-052`).
+- **Raised: nothing.** `dispatch_deadline_s`, the coherence constants and `config.yaml` are unchanged by this item; the shipped config loads under the unchanged validator (the config tests passed untouched in every gate).
+
+### 5. What this section does not establish
+
+- It does not establish anything about a multi-fill entry, a non-zero commission, a commission in a third asset, or index lag after a fill: every sampled fill was at least a day old, so the delay between a fill and its appearance in `myTrades` (`N3`) is still UNMEASURED.
+- It does not establish the venue's limits or the order of a multi-fill page.
+- It makes no claim about the nine entries' protective legs or exits; only entries were read.
