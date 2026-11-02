@@ -8264,3 +8264,45 @@ An observation log, so this section only adds; a citation names its file (R-EG).
 - It does not establish which owner words named U10 at P87 or P98: the tree holds renderings of both (`M5o-025`).
 - It does not rule on any of the three texts.
 - It makes no measurement of any daemon. The counts are part of the next section, which will be written after the fix and the full gate.
+
+## 86. M5o P160: M5n-274 measured, the predictions of section 85 scored, and the fix (P160 C5)
+
+An observation log, so this section only adds; a citation names its file (R-EG). It records what happened after section 85 (`c71988c`) fixed the predictions, in the order it happened. Every count is a count of processes read by `Get-CimInstance Win32_Process` filtered on a name matching `git` and a command line matching `fsmonitor--daemon`, taken by `count_daemons.py` in the session scratchpad (not committed) immediately before a run, immediately after it exits, and 60 s after that. The credential slots were blanked in the child environment for every run, so no integration test could reach the venue; no venue call was made. **Host-local times below are the daemons' `CreationDate`; the host's date was `2026-11-02` when they were created.**
+
+### 1. Before the fix: the four files alone, on the unchanged tree
+
+| Target | before | after | +60 s | delta | delta +60 s | pytest | Predicted (section 85) | Scored |
+|---|---|---|---|---|---|---|---|---|
+| `tests/unit/test_s6_rehearsal.py` | 10 | 10 | 10 | 0 | 0 | 87 passed | P1: 0 | HELD |
+| `tests/unit/test_worktree_survey.py` | 10 | 17 | 17 | **7** | 7 | 43 passed | P2: 7 (range 5 to 9) | HELD, exactly |
+| `tests/unit/test_provenance.py` | 17 | 18 | 18 | **1** | 1 | 55 passed | P3: 1 | HELD |
+| `tests/unit/test_n7_evaluate.py` | 18 | 18 | 18 | 0 | 0 | 130 passed | P4: 0 | HELD |
+
+P5 (the four sum to 8, within 2 of the recorded full-gate figures) HELD: 7 + 1 = 8, and P159's bare gate raised the count by the same 8. **Independent check from the daemons' own start times, which the counts do not use:** the 18 daemons alive afterwards began at `22:51:23`, `23:21:34`, `23:40:22`, seven within `23:41:58` to `23:42:07` (P159's gate), seven within `23:56:56` to `23:57:05` (this run's `test_worktree_survey.py`, a 9-second burst) and one at `23:58:19` (`test_provenance.py`). The two earliest are the baseline (one of them is presumably this repository's own working-tree daemon); `23:40:22` and the seven after it are P159's gate. The start times cannot say which repository a daemon watches: its command line carries no path, so which of the strays belong to which run is read from the times and not from the processes.
+
+### 2. The fix, and the check that its pin test bites
+
+- `tests/unit/test_worktree_survey.py`: the `small_repo` fixture runs `git config core.fsmonitor false` straight after `git init` (`7872703`), and `test_the_fixture_repository_disables_fsmonitor` pins it by reading the repository's `--local` configuration. `tests/unit/test_provenance.py`: the same one line after `git init` in `test_real_git_temporary_repository_end_to_end` (`e1a48e3`). `tests/unit/test_s6_rehearsal.py` is not edited: it creates no repository (P1 held).
+- **Why a repository setting and not a flag, MEASURED by the result:** `scripts/worktree_survey.py` runs `git worktree add` and `remove` in `small_repo`, and the daemon count after the fix is 0 with the script's calls included, which a `-c` flag in the test's helper could not have achieved.
+- **The bite check**, run in a detached worktree outside the repository: both test files shown byte-equal after copying; `trading_bot` resolved to the worktree's `src` and the test module to the worktree's `tests`; an unmutated control arm, 1 passed; one mutation, deleting the fixture's `core.fsmonitor` line (exactly one match); and the worktree discarded, `git worktree list` showing the main worktree only. **The first draft of the pin test did not bite correctly**: it passed `check=True` to `git config --get`, which exits 1 for an unset key, so the mutation raised `CalledProcessError`, a crash, and the check's own assertion `"AssertionError" in output` refused it (`M5o-029`, declared in `7872703`). The assertion was rewritten to compare `(returncode, stdout)` with `(0, "false")`; the second run failed with `1 failed`, by `AssertionError`.
+
+### 3. After the fix
+
+| Target | before | after | +60 s | delta | delta +60 s | pytest | Predicted | Scored |
+|---|---|---|---|---|---|---|---|---|
+| `tests/unit/test_worktree_survey.py` | 18 | 18 | 18 | 0 | 0 | 44 passed | P6 (per file) | HELD |
+| `tests/unit/test_provenance.py` | 18 | 18 | 18 | 0 | 0 | 55 passed | P6 (per file) | HELD |
+| the bare gate, first fixed run | 18 | 18 | 18 | 0 | 0 | 5517 passed, 4 skipped, 284.35 s | P6: delta 0 | HELD |
+| the bare gate, on the committed bytes | 18 | 18 | 18 | **0** | 0 | 5517 passed, 4 skipped, 301.56 s | P6: delta 0 | HELD |
+
+Both gates read all four steps PASS (`ruff check`, `ruff format --check`, `mypy`, `pytest`). The second was run after the pin test's assertion was rewritten, so it is the run on the bytes that were committed. P7 (fixing `test_s6_rehearsal.py` has no measurable effect) HELD vacuously: it was not edited.
+
+**What `M5n-274` is, now that it is measured.** Its claim that `test_s6_rehearsal.py` and `test_worktree_survey.py` are the source was half right: `test_worktree_survey.py` leaked 7, `test_s6_rehearsal.py` leaked 0, and `test_provenance.py`, which it did not name, leaked 1 (`M5o-030`). Its REASONED cause (git for Windows enabling fsmonitor in the system config) is consistent with the result, and what was measured is the effect of the repository setting, not the system config. The ledger's carried count (18 at P156, 2 more at P157, 10 more after P158's gate) is now explained as 8 per bare gate by this fixture and this test (P159's gate: 8 by start time; P158's 10 is not decomposed here, as it was taken at a tree this task did not run).
+
+### 4. What the count is now, and what this section does not establish
+
+- **18 daemons are alive.** Eight are from this task's pre-fix runs and eight from P159's gate; the fix prevents new ones and **stops none** (`M5o-031`). Their working sets are 6 to 9 MB each. They are the operator's to stop, as at P157; this task did not stop any, because it was not asked to and the count is the evidence of the before state. A command that stops them is `Get-CimInstance Win32_Process | Where-Object { $_.Name -match 'git' -and $_.CommandLine -match 'fsmonitor--daemon' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`, which also stops the one belonging to this repository's own working tree; git restarts that one on the next command.
+- **It does not establish that no other test ever leaks.** The result is a delta of 0 over two full bare gates and four single-file runs on one host; a test that leaks only on a branch the gate does not take, or only without credentials blanked, is not excluded. The stated P6 contingency (find a further leaker by running the remaining git-using files one at a time) was not needed.
+- **It does not establish how long a daemon lives after its repository is deleted.** The strays above are hours old and none exited; a longer-lived measurement is not made here.
+- **A wrong number in a commit message, recorded and not amended:** `e1a48e3`'s message says the diff is "+6 lines"; `git diff --cached --numstat` read `5 0`. The correction is this sentence; nothing else in that message is affected (`M5o-032`).
+- **Documented gate figures** in `CLAUDE.md` and `README.md` read `5516 passed, 4 skipped` (`5519 passed, 1 skipped` credentialed). The tree now runs 5517; the figures are corrected at the M5o rotation from a fresh run by `scripts/check_gate_counts.py`, as each milestone's are (`M5o-033`). `ruff format` and `mypy` counts are unchanged: no file was added.
