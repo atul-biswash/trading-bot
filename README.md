@@ -174,6 +174,15 @@ runs. See `docs/NEXT_MILESTONE.md`.
 > every commission any capture records is `0.00000000`, the fee capture is unmet, base-quantity netting is unbuilt, and live
 > trading stays refused at every entry point by exactly those two gates. The next milestone is M5n; see `docs/NEXT_MILESTONE.md`
 > and `docs/PHASE_HISTORY.md`.
+>
+> **ANNOTATED AT M5n's CLOSE (P158): M5n IS COMPLETE, AND *"The next milestone is M5n"* IS NO LONGER TRUE.** The outcome: FAIL at N7,
+> with no out-of-sample read. Six pre-registered volatility-scaled trend and breakout candidates on 4h and 1d bars were evaluated once
+> in sample over `[2018-03-05, 2024-01-01)` and none passed the floor, the bootstrap bound and the deflated Sharpe ratio together; the
+> nearest, `donchian_1d_20`, has a net Sharpe of 0.7456 and a deflated Sharpe ratio of 0.5692 against 0.95. The owner paused strategy
+> research and opened **M5o, the platform and execution reliability hardening milestone** (U12, U10, U13, and the fee-capture and
+> base-asset-netting blockers); its charter comes from P159. **What survives:** every commission any capture records is
+> `0.00000000`, the fee capture is unmet, base-quantity netting is unbuilt, and live trading stays refused at every entry point by
+> exactly those two gates. See `docs/NEXT_MILESTONE.md` and `docs/PHASE_HISTORY.md`.
 
 Eight files are docstring-only placeholders: `execution/order_manager`,
 `paper/simulator`, `persistence/database`, `persistence/models`,
@@ -355,10 +364,10 @@ so keys in `.env` are enough — they need not be exported.
 | `docs/QB_ESCALATION.md` | What `CRITICAL` does, its binding sites, and which can clear on their own | Handling failure paths |
 | `docs/M5_NUMBERS.md` | The safety numbers, each with its cost-if-wrong and its measurement status | Choosing or changing a threshold |
 | `docs/RUN_LEDGER.md` | Append-only observation log: every run, capture and census, each figure with its command and the digest of what it was read from | Asking "what did the bot actually do?" |
-| `docs/RUN_LEDGER_M5N.md` | The M5n ledger sections 74 to 106 written on branch `m5n` (R-EE), kept in a file of their own because both branches numbered sections 74 to 82; a "RUN_LEDGER section N" in an M5n document means this file's | Reading M5n's runs |
+| `docs/RUN_LEDGER_M5N.md` | The M5n ledger sections 74 to 112 (R-EE: 74 to 106 were written on branch `m5n`, 107 onward on `main`), kept in a file of their own because both branches numbered sections 74 to 82; a "RUN_LEDGER section N" in an M5n document means this file's | Reading M5n's runs |
 | `docs/S4_PREREGISTRATION.md`, `docs/S4_CORRECTION_*.md`, `docs/S4_STOP_RUNBOOK.md` | The live-versus-backtest comparison on Testnet: what was fixed before it ran, the rulings after it started, and how it was stopped | Reading or repeating S4 |
-| `docs/research/` | The research protocol (amendment 4: M5n's one read is bound by the N8 runner, not the S6 guard), its log, the S6 selection and the S7 null check. Log Entry 7 records M5n's six registered candidates, which met the S6 `register_strategy` condition in part: their in-sample results are added as Entry 8 when N7 computes them | Before any backtest of a candidate |
-| `docs/M5N_CHARTER_DRAFT.md` | The charter of the next milestone, M5n: volatility-scaled trend and breakout research on 4h and 1d bars | Starting M5n |
+| `docs/research/` | The research protocol (amendment 4: M5n's one read is bound by the N8 runner, not the S6 guard), its log, the S6 selection and the S7 null check. Log Entry 7 records M5n's six registered candidates, which met the S6 `register_strategy` condition in part, and Entry 8 their in-sample results from N7's one run (FAIL) | Before any backtest of a candidate |
+| `docs/M5N_CHARTER_DRAFT.md` | The charter of M5n, volatility-scaled trend and breakout research on 4h and 1d bars; closed at P158 (FAIL at N7), with the owner's decision and closing records in its section 29 | Reading what M5n was and how it ended |
 | `PROJECT_KNOWLEDGE.md` | Orientation for a reviewer with no repository access | Reviewing from outside |
 
 Precedence, when they disagree: **the code wins over `CLAUDE.md`, and `CLAUDE.md`

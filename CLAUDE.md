@@ -5077,3 +5077,40 @@ show is the thing to keep in view:** every commission in every capture is still 
 base-quantity netting is unbuilt. **Live trading stays blocked by exactly those two**, refused at every entry point, and
 `refuse_live_trading` is unchanged. The next milestone is M5n (`docs/M5N_CHARTER_DRAFT.md`); the open items are the register in
 `docs/NEXT_MILESTONE.md`, and the owner's pending steps are the retirement of two backtest clones.
+
+> **ANNOTATED AT M5n's CLOSE (P158): *"The next milestone is M5n"* AND *"the owner's pending steps are the retirement of two
+> backtest clones"* ARE NO LONGER TRUE.** M5n has closed (next paragraph). The next milestone is M5o, the platform and execution
+> reliability hardening milestone, whose charter comes from P159; the owner's pending steps are the retirement of three clones, the S4
+> deploy clone, the S4 backtest clone and the rehearsal clone, each junction first by `cmd /c rmdir`, tabulated in
+> `docs/NEXT_MILESTONE.md`. **What survives:** the rest of the paragraph above, the live block included.
+
+**M5n is complete, in 114 numbered commits and 5 rotation commits, with 304 findings declared across `M5n-001`-`M5n-304`, every
+commit carrying a block.** *M5n outcome: FAIL at N7, with no out-of-sample read. Six pre-registered volatility-scaled trend and
+breakout candidates on 4h and 1d bars (R-DY), with ATR-scaled venue trailing stops (D1), were evaluated once in sample over
+[2018-03-05, 2024-01-01). None passed all three gates. The nearest, C1 donchian_1d_20, had an annualised net daily Sharpe of 0.7456
+and a bootstrap 5th percentile of 0.0945, but a deflated Sharpe ratio of 0.5692 against 0.95, beside a buy-and-hold Sharpe of
+0.6436. Both 4h candidates were consumed by costs. The cheap-slippage sensitivity would have selected C5 and decided nothing
+(R-DY).* The owner then closed M5n as FAIL at N7, paused strategy research, and opened the platform and execution reliability
+hardening milestone, M5o, over the S4 backlog (U12, U10, U13) and the two live-trading blockers (fee capture and base-asset
+netting); there is no Option 3, no Testnet paper run of C1.
+
+*What exists.* `data/aggregation.py` (4h and 1d bars from the 1m store, tagged complete or incomplete, checked against the venue's
+klines and against the archive series); `indicators/breakout.py`; the six candidates under `strategies/m5n/` (not in the live
+registry); the D1 trail, executor and risk manager in `backtesting/` (`d1_trail.py`, `d1_executor.py`, `d1_risk.py`), which exist
+**in the backtester only** and never reach a venue; the estimators in `backtesting/sharpe_stats.py` (stationary bootstrap and the
+deflated Sharpe ratio); the pre-registration `docs/M5N_PREREGISTRATION.md`; the runner `scripts/n7_evaluate.py` with its N0 guard;
+the N2 to N4 scripts; the worktree mutation survey; and PROTOCOL amendment 4, which binds any read of the reserved window to one
+candidate once, by a runner whose own ledger refuses a second read. That runner was never built. **The existing `src/` files M5n
+changed are `backtesting/engine.py` (the executor choice), `indicators/__init__.py` and `strategies/base.py` (a `declares_d1_exit`
+class variable, default false); the live engine, executor, reconciler and risk manager are unchanged since M5l.**
+
+*What ran.* Six runs on recorded data, all inside `[2017-08-17, 2024-01-01)` (the bar verification, the archive check, the entry
+counts and three trade-count runs), then N7's one run at P157: 1,350 s, exit 0, result file SHA-256
+`c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`. **No M5n candidate was read on the reserved window**, which stays
+unread by every M5n family subject to R-EF's limits (S5's baseline over all of it, the M5m rehearsal and quarter scan, and, found
+at this rotation, the three M5m smoke backtests of 2024-03), and no venue write was made. The cumulative trial ledger is **223
+distinct configurations** evaluated in sample (S5's baseline 1, S6's sweep 216, M5n's six 6), carried forward by the owner's ruling:
+any future research deflation must count it (`docs/RUN_LEDGER_M5N.md` section 112). **What it did not show is the thing to keep in
+view:** every commission in every capture is still zero, so the fee capture is unmet, and base-quantity netting is unbuilt.
+**Live trading stays blocked by exactly those two**, refused at every entry point, and `refuse_live_trading` is unchanged. The
+next milestone is M5o; the open items are the register in `docs/NEXT_MILESTONE.md`.
