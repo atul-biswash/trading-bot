@@ -1854,6 +1854,48 @@ async def test_get_my_trades_omits_limit_when_the_caller_states_none() -> None:
     client.get_my_trades.assert_awaited_once_with(symbol="BTCUSDT", recvWindow=5000)
 
 
+async def test_get_my_trades_sends_from_id_as_an_integer_beside_an_order_id() -> None:
+    """`from_id` is the paging cursor of M5o H1: an integer on the wire, with `orderId`.
+
+    The domain carries trade and order ids as `str`; the wire takes numbers, as
+    `orderId` already does. The venue lists `symbol` + `orderId` + `fromId` as a
+    supported combination, so both ride together.
+
+    FAILS ON: sending `fromId` as the string, which a strict venue reads as a
+    malformed parameter; dropping it, which makes every page the first; or
+    sending it as `fromId=None` when it is not stated (the next test).
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = [MY_TRADE]
+    bc = _make(client)
+
+    await bc.get_my_trades("BTCUSDT", order_id="3612839", from_id="0", limit=3)
+
+    client.get_my_trades.assert_awaited_once_with(
+        symbol="BTCUSDT", recvWindow=5000, orderId=3612839, limit=3, fromId=0
+    )
+
+
+async def test_get_my_trades_omits_from_id_when_the_caller_states_none() -> None:
+    """AN UNSTATED CURSOR SENDS NOTHING: the venue then returns the MOST RECENT trades.
+
+    That default is the one thing a cursor must never be allowed to hide: `None`
+    riding along as `fromId=None` would reach the venue as a parameter, and
+    `fromId=0` sent for `None` would silently change which trades come back.
+
+    FAILS ON: assigning `params["fromId"]` unconditionally, or defaulting it to 0.
+    """
+    client = AsyncMock()
+    client.get_my_trades.return_value = []
+    bc = _make(client)
+
+    await bc.get_my_trades("BTCUSDT", order_id="3612839")
+
+    client.get_my_trades.assert_awaited_once_with(
+        symbol="BTCUSDT", recvWindow=5000, orderId=3612839
+    )
+
+
 #: The BUY leg of order list 171948, copied VERBATIM out of the same capture as
 #: ``MY_TRADE`` above. It is the CROSS-DENOMINATION record: its fee is named in
 #: the BASE asset, which MEASURED is what the venue does on every buy.

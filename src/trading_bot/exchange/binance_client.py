@@ -653,6 +653,7 @@ class BinanceClient(BaseExchangeClient):
         *,
         order_id: str | None = None,
         limit: int | None = None,
+        from_id: str | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Trade]:
@@ -673,8 +674,12 @@ class BinanceClient(BaseExchangeClient):
         argument**, and the divergence is deliberate: this endpoint defaults to
         500 records on a symbol whose history already runs to hundreds of
         fills, so a caller resolving one order's fills needs a way to ask for
-        less. ``fromId``, ``startTime`` and ``endTime`` are still refused --
-        surface with no caller.
+        less. ``startTime`` and ``endTime`` are still refused -- surface with
+        no caller. **``fromId`` has one since M5o H1** (``from_id``, sent as an
+        integer and only when given): paging an order's fills for the entry
+        settlement. The venue lists ``symbol`` + ``orderId`` + ``fromId`` as a
+        supported combination and does not list ``fromId`` with ``startTime``
+        or ``endTime``, which is why those two stay refused.
 
         **ONE ORDER IS NOT ONE RECORD.** MEASURED against a capture of 306
         fills, 11 of 215 distinct order ids carry more than one fill and the
@@ -694,6 +699,8 @@ class BinanceClient(BaseExchangeClient):
             params["orderId"] = int(order_id)
         if limit is not None:
             params["limit"] = limit
+        if from_id is not None:
+            params["fromId"] = int(from_id)
         raw = await self._call(
             self._client.get_my_trades,
             attempts=attempts,

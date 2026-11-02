@@ -139,6 +139,7 @@ class ExchangeClient(ABC):
         *,
         order_id: str | None = None,
         limit: int | None = None,
+        from_id: str | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Trade]:
@@ -164,6 +165,16 @@ class ExchangeClient(ABC):
         ``timeout_s`` and ``attempts`` bound one call, as on
         :meth:`get_own_open_orders`. ``limit`` bounds how many records the
         venue returns and ``None`` means its own default. Idempotent.
+
+        **``from_id`` PAGES, and it is the only way to** (M5o H1). It is the
+        trade id to fetch from, INCLUSIVE, and the venue documents the
+        combination ``symbol`` + ``orderId`` + ``fromId`` as supported. **When
+        it is absent the venue returns the MOST RECENT trades, not the first**
+        (the account-endpoints page: *"Default gets most recent trades."*), so a
+        caller reading every fill of one order starts at ``from_id="0"`` and
+        continues from the last id it received plus one. That ``0`` is accepted,
+        and that the answer is then oldest first, are UNMEASURED until the H1
+        Testnet read (``docs/RUN_LEDGER.md`` section 88).
         """
         ...
 
