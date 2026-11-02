@@ -4793,3 +4793,53 @@ Neither run needed a second attempt. Both specs are the ones section 108 recorde
 ### 5. The findings this section carries
 
 See the commit message.
+
+## 110. M5n P157: N0 recorded, and the predictions for N7's one run, made before it exists (P157 C2, R-T)
+
+An observation log, so this section only adds; a citation names its file (R-EG). It is committed BEFORE `scripts/n7_evaluate.py` runs, and no M5n return has been computed or read: the predictions below are made from the pre-registration, the charter and the strategies' source, never from a bar of the in-sample span.
+
+### 1. State at the prediction
+
+| Fact | Value | How it was checked |
+|---|---|---|
+| Branch, HEAD, status | `main`, clean; HEAD `29ef8f1e40918d2a3bfd2f44ee9ef15e07f4c98c` (the commit that writes the N0 line; its parent is `e0d1f8d`) | `git branch --show-current`, `git status --short` empty before this section |
+| `docs/M5N_PREREGISTRATION.md` SHA-256 | `e6187480b6af7da1349ab280a6bb74f7219d4a7cded4217574e6247d5f54d45e` | equal to the prompt's and to the charter's digest line |
+| `src/trading_bot/backtesting/sharpe_stats.py` SHA-256 | `2b55991c0207fc2938e6f03b33e0b9cfec3754d486af7002d5adee4ee88dda82` | same |
+| `scripts/n7_evaluate.py` SHA-256 | `1f307de67f5aebd7af39a3d8fb5cd22a78d9fa671cfdf5353b894beacbadcfff` | same |
+| The N0 line | `N0 complete: S4 result recorded at ddf3593199a463cd00c200b731c94b254ada1001`, one line, in charter section 28 | `ddf3593` resolves to those 40 characters and is an ancestor of HEAD |
+| The guard, called end to end | `check_n0_guard(Path("."))` on `29ef8f1`: **ACCEPTED** | the runner's own function, no mock; it reads the charter from `HEAD`, resolves `refs/tags/milestone/M5m`, finds the one N0 line and the three digest lines and compares each with the file |
+
+The owner's N0 text, recorded in the charter and quoted here so this section is self-contained: *"N0 recorded: R-DT clause 3 ends; M5n returns may now be computed and read. The re-freeze window is closed: no frozen M5n file changes from here. A run of N7 counts when its result file is written; a crash before that is not a run and may be repeated, and is recorded."*
+
+### 2. The architect's predictions, verbatim
+
+> (1) C3 is excluded by its in-sample floor (12 trades against 30). (2) No candidate passes all three in-sample gates; probability about 0.65. (3) If one passes, it is a 1d Donchian, C1 or C2. (4) Both 4h candidates, C4 and C5, have negative in-sample annualised net daily Sharpe at 1.20 percent stop slippage. (5) At least one 1d candidate has positive in-sample annualised net daily Sharpe.
+
+Read against the runner so each can be scored without a judgement call: "all three in-sample gates" are the floor, the bootstrap bound (the 5th percentile of the annualised net daily Sharpe above 0) and the deflated Sharpe (above 0.95 at N = 6); the "12 trades" and the sign of a Sharpe are the in-sample figures of the result file; (3) is scored only if (2) fails; (4) needs a negative figure for both C4 and C5, so one non-negative figure falsifies it; (5) is scored on any of C1, C2, C3, C6 having a positive annualised net daily Sharpe, whatever its floor verdict.
+
+### 3. My own predictions (the assistant's, labelled as mine; not the architect's)
+
+All of them are REASONED from the source and the pre-registration, or from general knowledge of how such strategies behave on two large crypto pairs; none rests on a figure I have seen of this span.
+
+| ID | Prediction | Confidence | Scored by |
+|---|---|---|---|
+| A1 | **The common evaluation start is 2018-03-05 (UTC).** C3 binds: its `window_bars` is `SLOW + 1` = 201 (`strategies/m5n/sma_cross.py`), so the first defined 1d bar is the 201st of an unbroken run; the archive's 1d files begin at `2017-08` for both pairs (file names only, no bar read) and the first Binance spot 1d bar is 2017-08-17, so 201 bars end on 2018-03-05. Every other candidate starts earlier (C6 92 bars, C2 57, C1 22; the 4h candidates 22 and 20 bars of four hours). A missing day in either pair's early 1d series restarts the run (R-DZ), so the date can only move **later**, never earlier. | 0.55 for the exact date; 0.95 that it is not before 2018-03-05; 0.9 that it is C3's | `common_start` in the result file, and which candidate's `first_defined` equals it |
+| A2 | **C3 is below its floor of 30 trades.** Agrees with the architect's (1); I add that the count lies between 8 and 16. | 0.9 (below floor); 0.7 (8 to 16) | C3's in-sample trade count |
+| A3 | **No candidate is SELECTED; the verdict is "no pass" and the exit code is 0.** Slightly above the architect's 0.65, because the DSR at N = 6 and a 5th-percentile bound on roughly 5.8 years of daily returns are two further gates behind the floor, and a strategy with a 1.2 percent stop slippage is penalised on every stopped trade. | 0.72 | the selection field and the exit code |
+| A4 | **If one passes, it is C2 (`donchian_1d_55`) rather than C1,** the longer window having fewer, larger trades and so a smaller fee and slippage share. Weaker than the architect's (3), which allows either. | 0.5 given a pass | the selected label |
+| A5 | **C4 and C5 both have a negative annualised net daily Sharpe,** as the architect says, and I hold the stronger statement that at least one of them has a **fee share above 40 percent of gross** or a non-positive gross (the `gross<=0` flag). | 0.75 for both negative; 0.7 for the fee share | the two Sharpe figures; the fee telemetry |
+| A6 | **At least two of C1, C2, C6 have a positive annualised net daily Sharpe,** stronger than the architect's (5). Trend following on BTC and ETH from March 2018 to December 2023 includes the 2020 to 2021 run and the 2018 to 2019 drawdown. | 0.7 for two or more; 0.9 for at least one | the 1d Sharpe figures |
+| A7 | **No candidate has a bootstrap 5th-percentile bound above 0 together with a DSR above 0.95,** which is A3 stated by gate. I expect the bootstrap bound to be the weaker gate (negative for every candidate whose annualised net daily Sharpe is below about 0.8) and the DSR to be the binding one for any candidate that clears it. | 0.75 | the two gate verdicts per candidate |
+| A8 | **Buy and hold over the common span has a positive annualised daily Sharpe for the BTC and ETH context,** as a context figure only; no gate reads it. | 0.9 | the buy-and-hold block |
+| A9 | **The sensitivities (fee 0.075, stop slippage 0.66 and 0.10 percent) change no gate verdict that the base run settled,** each a figure and not a verdict (R-DY). If a sensitivity flips a candidate's gate it is recorded and changes nothing. | 0.7 | the sensitivity block |
+| A10 | **The run exits 0 and finishes in under 20 minutes of wall time** (six candidates, each a replay of about 5.8 years of stored 1d or 4h bars through the unchanged provider and engine, plus 10,000 bootstrap resamples each). An INDETERMINATE (exit 1) is possible only on a tie the selection rule does not break and I give it 0.03; a refusal (exit 2) after the guard accepted I give 0.03; a crash before the result file exists, 0.05. | 0.8 for exit 0 and under 20 minutes | the exit code and the wall time |
+
+**Three places a prediction is most likely wrong, named in advance.** A1's date, if the early archive has a missing 1d bar for either pair (it can only move later, and I did not look: reading the early bars to check would be a read of the in-sample span before the predictions are committed). A3 and A7, because they rest on how the DSR at N = 6 compares with the bootstrap bound, which depends on the skew and kurtosis of the daily returns I have not seen. A10's wall time, which depends on the replay's speed on this machine and which the stray `git fsmonitor` daemons and the free memory can move; the memory is measured before the run and recorded.
+
+### 4. What the run will be, fixed here before it starts
+
+One run: `scripts/n7_evaluate.py --out data/n7/n7_result_P157.json` with the project venv's interpreter (`.venv\Scripts\python.exe`), standard output to `data/n7/n7_stdout_P157.txt` and standard error to `data/n7/n7_stderr_P157.txt` by redirection to files, never a pipe, under `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false`, after the free committed memory is measured at 20 percent or more and the stray `git fsmonitor--daemon` processes are stopped. `data/*` is gitignored, so the three files are local; section 111 records each one's SHA-256 and states the result from the file by script, and no figure is typed by hand. If the process dies before the result file exists, that is not a run (N0's text): it is repeated on the same frozen bytes and the crash is recorded here in section 111 with its exit code and its standard error. A second run after a result file exists is refused by the runner (`result_exists`).
+
+### 5. The findings this section carries
+
+See the commit message.
