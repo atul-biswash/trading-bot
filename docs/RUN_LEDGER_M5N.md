@@ -4843,3 +4843,176 @@ One run: `scripts/n7_evaluate.py --out data/n7/n7_result_P157.json` with the pro
 ### 5. The findings this section carries
 
 See the commit message.
+
+## 111. M5n P157: the result of N7's one run, from its result file, and the predictions scored (P157 C3, R-T)
+
+An observation log, so this section only adds; a citation names its file (R-EG). **The run was made once, after section 110 was committed (`dbc7c14`), on the frozen bytes the charter's section 23 digests, and it wrote its result file: it counts as a run (charter section 28).** Every figure in sections 2 to 4 below is rendered from that file by `scratch\gen_s111.py` (the session scratchpad), which prints the file's own values and types nothing; the prose in section 1 and section 5 is the assistant's. **N7's verdict is FAIL: no candidate passes the in-sample gates and the out-of-sample window stays unread.**
+
+### 1. The run
+
+| Fact | Value |
+|---|---|
+| Command | `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false .venv/Scripts/python.exe scripts/n7_evaluate.py --out data/n7/n7_result_P157.json > data/n7/n7_stdout_P157.txt 2> data/n7/n7_stderr_P157.txt`, from the repository root at HEAD `dbc7c14`, clean tree; no pipe |
+| Exit code | **0** (a verdict; the runner's code for a verdict is 0, and 0 here is FAIL at N7, not a selection) |
+| Wall time | **1,350 s (22 min 30 s)**: start `2026-11-02T10:59:55Z`, end `2026-11-02T11:22:25Z`, by the wrapper's own `date -u` and `SECONDS` (`data/n7/run_timing_P157.txt`) |
+| Result file | `data/n7/n7_result_P157.json`, 1,004,998 bytes, SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`; equal to the `result_sha256=` line the runner printed |
+| Standard output | `data/n7/n7_stdout_P157.txt`, 2,448 bytes, SHA-256 `8db10f10c3a4da4d4ef4166ef24147d1d1b87bcacabd97ba1235cd9d65154d53` |
+| Standard error | `data/n7/n7_stderr_P157.txt`, 38,144 bytes, 128 lines, SHA-256 `f9d587a3dd05fe5b187fd73392be9b8a066721eda25a05ce1d2e816c0a08f89e`. **Not empty, and not an error:** every line is a `WARNING` `bars_gap_detected` from `trading_bot.data.market_data`, 64 for `BTCUSDT/4h` and 64 for `ETHUSDT/4h`, the first naming 7 bars missing between `2018-02-08T00:00:00` and `2018-02-09T08:00:00`. They are the archive's own gaps in the 4h series read through the unchanged provider; no 1d series produced one. The result file carries `carried_marks` 0 for every candidate |
+| Free committed memory before the run | 38.9 percent (above the 20 percent floor); the two stray `git fsmonitor--daemon` processes were stopped first and none ran during the run |
+| Frozen files | unchanged by the run: the working tree was clean at `dbc7c14` after it (`git status --short` empty) |
+
+The runner reads the in-sample span `[2018-03-05, 2024-01-01)` only (the result file's `window`, half-open, the end being the `IN_SAMPLE_END` constant); that no bar at or after 2024-01-01T00:00:00Z was read is REASONED from the runner's `store.candles(..., begin, end)` bounds, not separately instrumented.
+
+### 2. The result, rendered from the result file
+
+**Window** `2018-03-05` to `2024-01-01` (half-open). **Common evaluation start** (the latest of the candidates' first defined days): see the table below. Parameters: p = 0.05, resamples 10000, seed 20261025, DSR minimum 0.95, fee 0.1 percent, stop slippage 1.2 percent. Trials N = 6.
+
+#### First defined day per candidate
+
+| Label | First defined day (UTC) |
+|---|---|
+| C1 | 2017-09-07 |
+| C2 | 2017-10-12 |
+| C3 | 2018-03-05 |
+| C4 | 2017-08-20 |
+| C5 | 2017-08-20 |
+| C6 | 2017-11-16 |
+
+The latest of these, which starts the common span: `2018-03-05`.
+
+#### Per candidate, in sample
+
+| Label | Strategy | TF | Trades | Floor | Floor met | Days | Ann. net daily Sharpe | Boot 5th pct | DSR | Boot pass | DSR pass | Skew | Kurtosis | Status |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| C1 | donchian_1d_20 | 1d | 69 | 30 | true | 2128 | 0.7455796838 | 0.0945225322 | 0.5692204465 | true | false | -0.0337698485 | 17.986154616 | FAILED (dsr) |
+| C2 | donchian_1d_55 | 1d | 48 | 30 | true | 2128 | 0.508563344 | -0.1310878728 | 0.3466606603 | false | false | -0.3592292737 | 25.6888882571 | FAILED (bootstrap, dsr) |
+| C3 | sma_cross_1d_50_200 | 1d | 12 | 30 | false | 2128 | 0.505728708 | -0.1975191082 | 0.3425329518 | false | false | 0.7137032112 | 63.135229089 | EXCLUDED (below floor) |
+| C4 | donchian_4h_20 | 4h | 399 | 120 | true | 2128 | -0.7170710939 | -1.3711056478 | 0.0004772886 | false | false | 0.7756976532 | 8.7532165418 | FAILED (bootstrap, dsr) |
+| C5 | keltner_4h_20_2 | 4h | 274 | 120 | true | 2128 | 0.0816880696 | -0.5176148895 | 0.0762170761 | false | false | 1.1298081797 | 13.6561647648 | FAILED (bootstrap, dsr) |
+| C6 | tsmom_1d_90 | 1d | 40 | 30 | true | 2128 | 0.1795829405 | -0.580466364 | 0.1159144601 | false | false | 0.8781473237 | 41.2047594343 | FAILED (bootstrap, dsr) |
+
+Bootstrap errors: none. **Outcome:** `FAIL`, selected `n/a`, tied `[]`.
+
+#### Fee telemetry (charter section 22)
+
+| Label | Trades | Gross | Fees | Net | Entry notional | Fee share | Fees per trade (bps of entry notional) | Flag |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 69 | 2981.05869110534108 | 123.76268830299404108 | 2857.29600280234703892 | 60390.81480594435 | 0.04151635413025172924992130662 | 20.49362783076937577938037791 |  |
+| C2 | 48 | 1499.9229874367998 | 79.6728132931337998 | 1420.2501741436660002 | 39086.4451528485 | 0.05311793602769279778141768786 | 20.38374505063617687993462486 |  |
+| C3 | 12 | 839.72949780658 | 20.04201862019458 | 819.68747918638542 | 9601.144561194 | 0.02386723185566952655213691186 | 20.87461395092477505021503588 |  |
+| C4 | 399 | -3063.62974560104206124 | 972.67765174312965793876 | -4036.30739734417171917876 | 487870.64074436535 | 0.3174919074799306949019073064 | 19.93720405595781025940225667 | gross<=0 |
+| C5 | 274 | 1162.8193327107221302 | 969.9059150576316221302 | 192.9134176530905080698 | 484371.54786246045 | 0.8340985463293100174278057098 | 20.02400676377137061070331616 |  |
+| C6 | 40 | 462.97858186292176 | 63.38015808197882176 | 399.59842378094293824 | 31458.58975005795 | 0.1368965230031836682142586277 | 20.14717079994409759109253267 |  |
+
+#### Run figures
+
+| Label | Trades | Open at end | Carried marks | Gross | Fees | Entry notional | Final mark |
+|---|---|---|---|---|---|---|---|
+| C1 | 69 | 0 | 0 | 2981.05869110534108 | 123.76268830299404108 | 60390.81480594435 | 12857.29600280234703892 |
+| C2 | 48 | 0 | 0 | 1499.9229874367998 | 79.6728132931337998 | 39086.4451528485 | 11420.2501741436660002 |
+| C3 | 12 | 0 | 0 | 839.72949780658 | 20.04201862019458 | 9601.144561194 | 10819.68747918638542 |
+| C4 | 399 | 0 | 0 | -3063.62974560104206124 | 972.67765174312965793876 | 487870.64074436535 | 5963.69260265582828082124 |
+| C5 | 274 | 0 | 0 | 1162.8193327107221302 | 969.9059150576316221302 | 484371.54786246045 | 10192.9134176530905080698 |
+| C6 | 40 | 0 | 0 | 462.97858186292176 | 63.38015808197882176 | 31458.58975005795 | 10399.59842378094293824 |
+
+#### Section 3 sensitivities, figures only
+
+**fee_0.075** (fee 0.075 percent, stop slippage 1.2 percent): would select `none`, outcome `FAIL`, gate flips none.
+
+| Label | Trades | Floor met | Ann. net daily Sharpe | Boot 5th pct | DSR | Boot pass | DSR pass | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 69 | true | 0.75357358 | 0.1028938665 | 0.5963825036 | true | false | FAILED (dsr) |
+| C2 | 48 | true | 0.5157134509 | -0.1245318551 | 0.3718285982 | false | false | FAILED (bootstrap, dsr) |
+| C3 | 12 | false | 0.5089300504 | -0.1943336623 | 0.364251931 | false | false | EXCLUDED (below floor) |
+| C4 | 399 | true | -0.6706954691 | -1.3236309718 | 0.000827543 | false | false | FAILED (bootstrap, dsr) |
+| C5 | 274 | true | 0.1234197589 | -0.475801542 | 0.1001020647 | false | false | FAILED (bootstrap, dsr) |
+| C6 | 40 | true | 0.1860631179 | -0.574371604 | 0.1293579278 | false | false | FAILED (bootstrap, dsr) |
+
+| Label | Gross | Fees | Entry notional | Final mark |
+|---|---|---|---|---|
+| C1 | 2984.18622897692864 | 92.94759428020629648 | 60472.9697389824 | 12891.23863469672234352 |
+| C2 | 1501.35638763468956 | 59.80979427340491717 | 39122.5179884526 | 11441.54659336128464283 |
+| C3 | 839.7797183810188 | 15.0351024781632891 | 9603.51179291835 | 10824.7446159028555109 |
+| C4 | -3104.21600223804596456 | 740.33698461613046552658 | 495110.097745206 | 6155.44701314582356991342 |
+| C5 | 1164.6410315420914737 | 735.870289236114368605275 | 489997.8723083052 | 10428.770742305977105094725 |
+| C6 | 463.61812941820872 | 47.57163453760373154 | 31482.61396036005 | 10416.04649488060498846 |
+
+**slip_0.66** (fee 0.1 percent, stop slippage 0.66 percent): would select `none`, outcome `FAIL`, gate flips none.
+
+| Label | Trades | Floor met | Ann. net daily Sharpe | Boot 5th pct | DSR | Boot pass | DSR pass | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 69 | true | 0.8396705495 | 0.1850509145 | 0.8105382282 | true | false | FAILED (dsr) |
+| C2 | 48 | true | 0.5915443925 | -0.0504646206 | 0.6104625754 | false | false | FAILED (bootstrap, dsr) |
+| C3 | 12 | false | 0.5448765283 | -0.1598167782 | 0.567754843 | false | false | EXCLUDED (below floor) |
+| C4 | 399 | true | -0.2129147998 | -0.8702739732 | 0.04950935 | false | false | FAILED (bootstrap, dsr) |
+| C5 | 274 | true | 0.5515815233 | -0.0556275659 | 0.575180883 | false | false | FAILED (bootstrap, dsr) |
+| C6 | 40 | true | 0.2526998677 | -0.5080793161 | 0.2947361 | false | false | FAILED (bootstrap, dsr) |
+
+| Label | Gross | Fees | Entry notional | Final mark |
+|---|---|---|---|---|
+| C1 | 3367.41908431905784 | 125.99673860967285784 | 61314.6597626769 | 13241.42234570938498216 |
+| C2 | 1738.523993721465592 | 80.707086893296665592 | 39484.2814497876 | 11657.816906828168926408 |
+| C3 | 898.16090613511452 | 20.14445197029901452 | 9623.14553208195 | 10878.01645416481550548 |
+| C4 | -438.423739835932490374 | 1149.567635986591267509626 | 575003.0298632136 | 8412.008624177476242116374 |
+| C5 | 4190.732899473794757715 | 1105.638426492358994757715 | 550723.8467964426 | 13085.094472981435762957285 |
+| C6 | 645.955445623859536 | 64.079791339036859536 | 31716.9179467065 | 10581.875654284822676464 |
+
+**slip_0.10** (fee 0.1 percent, stop slippage 0.1 percent): would select `C5`, outcome `SELECTED`, gate flips [{'after': True, 'before': False, 'gate': 'bootstrap', 'label': 'C2'}, {'after': True, 'before': False, 'gate': 'bootstrap', 'label': 'C5'}, {'after': True, 'before': False, 'gate': 'dsr', 'label': 'C5'}].
+
+| Label | Trades | Floor met | Ann. net daily Sharpe | Boot 5th pct | DSR | Boot pass | DSR pass | Status |
+|---|---|---|---|---|---|---|---|---|
+| C1 | 69 | true | 0.9392507474 | 0.282230005 | 0.9070456123 | true | false | FAILED (dsr) |
+| C2 | 48 | true | 0.6796803911 | 0.0323300746 | 0.7553851181 | true | false | FAILED (dsr) |
+| C3 | 12 | false | 0.5860209166 | -0.1209543633 | 0.6818977613 | false | false | EXCLUDED (below floor) |
+| C4 | 399 | true | 0.3461728734 | -0.3161122238 | 0.4548998539 | false | false | FAILED (bootstrap, dsr) |
+| C5 | 274 | true | 1.0658763304 | 0.4578044924 | 0.9568355096 | true | true | PASS |
+| C6 | 40 | true | 0.3303799942 | -0.4305174885 | 0.4397652718 | false | false | FAILED (bootstrap, dsr) |
+
+| Label | Gross | Fees | Entry notional | Final mark |
+|---|---|---|---|---|
+| C1 | 3780.15276564854322 | 128.36444868269834322 | 62292.1479585249 | 13651.78831696584487678 |
+| C2 | 1991.26089441065166 | 81.79608808276865166 | 39902.413594179 | 11909.46480632788300834 |
+| C3 | 959.0794941619608 | 20.2522324271506608 | 9646.57646649435 | 10938.8272617348101392 |
+| C4 | 3390.15950834942518905 | 1380.46957109794022518905 | 688539.7057947954 | 12009.68993725148496386095 |
+| C5 | 8218.80915092896742835 | 1272.82315398485626742835 | 632302.17241696365 | 16945.98599694411116092165 |
+| C6 | 838.9690884188655 | 64.8127372084295655 | 31986.88406000535 | 10774.1563512104359345 |
+
+#### Buy-and-hold context (no gate reads it)
+
+Equal-weight buy and hold over the same span: annualised Sharpe `0.643586945` over `2128` days.
+
+### 3. The selection
+
+**No candidate is selected; the verdict is FAIL at N7.** C1 clears the floor and the bootstrap bound (5th percentile 0.0945 above 0) and fails the deflated Sharpe (0.5692 against 0.95). C2, C4, C5 and C6 fail the bootstrap and the DSR. C3 is excluded below its floor (12 trades against 30). Nothing reaches the tie rule. By R-DY the sensitivities are figures and decide nothing: the one that selects a candidate when slippage is lowered to 0.10 percent, `slip_0.10` (would select C5, three gate flips), does not change the verdict, which is the base run's.
+
+### 4. The predictions scored (section 110)
+
+| Prediction | Result | Score |
+|---|---|---|
+| Architect (1): C3 is excluded by its floor, 12 trades against 30 | C3 has exactly 12 trades, status EXCLUDED (below floor) | **TRUE** |
+| Architect (2): no candidate passes all three gates, about 0.65 | Verdict FAIL, no pass | **TRUE** |
+| Architect (3): if one passes it is C1 or C2 | no candidate passed in the base run | **NOT SCORED** (the antecedent is false) |
+| Architect (4): C4 and C5 both have a negative annualised net daily Sharpe at 1.20 percent | C4 -0.7171, **C5 +0.0817** | **FALSE** (C4 true, C5 slightly positive; one non-negative figure falsifies the pair) |
+| Architect (5): at least one 1d candidate has a positive Sharpe | C1 0.7456, C2 0.5086, C3 0.5057, C6 0.1796 | **TRUE** (all four) |
+| A1 (mine): common start 2018-03-05, C3 binding, never earlier | `first_defined`: C3 2018-03-05, every other candidate earlier (C4 and C5 2017-08-20) | **TRUE** (the exact date and the binding candidate) |
+| A2 (mine): C3 below its floor, 8 to 16 trades | 12 | **TRUE** |
+| A3 (mine): no selection, exit 0, 0.72 | FAIL, exit 0 | **TRUE** |
+| A4 (mine): a pass would be C2 | no pass | **NOT SCORED** |
+| A5 (mine): C4 and C5 both negative; and a fee share above 40 percent or a non-positive gross for at least one of them | C5 is positive; C4 flagged `gross<=0` and C5 fee share 0.8341 | **FALSE** for the first clause (as the architect's (4)), **TRUE** for the second |
+| A6 (mine): at least two of C1, C2, C6 positive | all three positive | **TRUE** |
+| A7 (mine): no candidate has both bootstrap and DSR passing; bootstrap the weaker gate, negative below a Sharpe of about 0.8 | none passes both; **but C1 passes the bootstrap at a Sharpe of 0.7456** (bound 0.0945) and fails on the DSR alone | headline **TRUE**; the detail **FALSE** (the bootstrap is not the weaker gate for C1, and the 0.8 threshold was wrong) |
+| A8 (mine): buy and hold has a positive annualised Sharpe | 0.6436 over 2,128 days | **TRUE** |
+| A9 (mine): the sensitivities flip no settled gate verdict | `fee_0.075` and `slip_0.66` flip none; **`slip_0.10` flips three** (C2 bootstrap, C5 bootstrap, C5 DSR) and would select C5 | **FALSE** (for one of the three sensitivities) |
+| A10 (mine): exit 0 and under 20 minutes | exit 0; **1,350 s = 22 min 30 s** | exit **TRUE**, the time bound **FALSE** |
+
+**Count.** Of the architect's five, four are scored: three held ((1), (2), (5)) and one, (4), failed on C5 by a margin of 0.08 in Sharpe; (3) is not scored. Of the assistant's ten, five held whole (A1, A2, A3, A6, A8), three held in their headline and failed in a stated detail (A5, A7, A10), one failed (A9) and one was not scored (A4).
+
+### 5. What the scoring does and does not say
+
+The two misses that matter point the same way. C5 is positive at 1.20 percent stop slippage, so the architect's (4) and my A5 were wrong about the sign of the Keltner 4h candidate, by a small margin, and its fee share (0.8341) says that what is left of its gross after fees is very little: the figures are telemetry (charter section 22), not a criterion. And the cost assumption moves the 4h candidates far more than the 1d ones: at 0.10 percent slippage C4's net turns from -4,036 to a gain and C5's gross rises from 1,163 to 8,219. The assistant's A9 and A10 did not anticipate that sensitivity or the replay's wall time. **The sensitivities are not evidence for a pass:** the pre-registration fixes 1.20 percent as the base and R-DY reports the others as figures only, so a candidate that passes at 0.10 percent and fails at 1.20 percent has failed N7. Nothing in this section selects, tunes or re-reads anything; the out-of-sample window stays unread.
+
+Three things are NOT tested by N7's in-sample figures and are named so they are not read in: whether any candidate has an edge out of sample (unread, by FAIL), whether the 1.20 percent stop slippage is the right assumption for the 4h candidates (a pre-registered constant, unchanged), and whether the 128 archive-gap warnings in the 4h series moved the 4h results (the runner reports 0 carried marks; the effect of a missing bar on a 4h signal is not measured here).
+
+### 6. The findings this section carries
+
+See the commit message.
