@@ -27,6 +27,7 @@ import pytest
 
 from trading_bot.core.assessment import EntryIntent, ExitIntent, RiskAssessment
 from trading_bot.core.enums import (
+    EntrySettlementState,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -395,18 +396,54 @@ class FakeClient:
             )
         return sell_trade(order_id=order_id)
 
+    def _entry_trades(self) -> list[Trade]:
+        """The ENTRY's fills, M5o H1: one BUY fill mirroring the entry `get_order` answer.
+
+        The whole executed quantity at the entry's price, at its quote total when the
+        fake was given one and else the exact product, commission `0.00000000` BTC --
+        the denomination and amount MEASURED on every BUY in the capture whose SHA-256
+        is 111d1c15a3c5fff56148f172bfbcbec85baf5aabe2128f34fb622cafe5463970. So the
+        order's venue total and its fills AGREE, as they did on all six entries of
+        `docs/RUN_LEDGER.md` section 26. An expired entry has no fills.
+        """
+        if self.fill_price is None:
+            return []
+        quantity = D(self.filled_quantity)
+        quote = (
+            D(self.entry_quote_total)
+            if self.entry_quote_total is not None
+            else D(self.fill_price) * quantity
+        )
+        return [
+            Trade(
+                trade_id="5",
+                order_id="1",
+                symbol=SYMBOL,
+                side=OrderSide.BUY,
+                quantity=quantity,
+                price=D(self.fill_price),
+                quote_quantity=quote,
+                fee=Fee(amount=D("0.00000000"), asset="BTC"),
+                filled_at=BAR,
+            )
+        ]
+
     async def get_my_trades(
         self,
         symbol: str,
         *,
         order_id: str | None = None,
         limit: int | None = None,
+        from_id: str | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Trade]:
         """The settlement read. Counted in `venue_calls` like every round trip."""
         self.venue_calls.append("get_my_trades")
         self.settlements.append((order_id, timeout_s, attempts))
+        if self._trades_answers is None and order_id == "1":
+            floor = int(from_id) if from_id is not None else 0
+            return [t for t in self._entry_trades() if int(t.trade_id) >= floor]
         if self._trades_answers is None:
             return [self._default_settlement(order_id or "777")]
         answer = (
@@ -484,12 +521,17 @@ class RecordingWriter:
         return [record.symbol for record in self.calls[index]]
 
 
+async def _no_sleep(seconds: float) -> None:
+    """The entry settlement's wait, injected away: no test sleeps (M5o H1)."""
+
+
 def build(
     *,
     client: Any = None,
     deadline_s: float = 9.0,
     portfolio: Portfolio | None = None,
     persist: Any = None,
+    sleep: Any = _no_sleep,
 ) -> tuple[OrderExecutor, FakeClient, Portfolio]:
     resolved_client = client if client is not None else FakeClient()
     resolved_portfolio = portfolio if portfolio is not None else Portfolio(free_quote=D("10000"))
@@ -499,6 +541,7 @@ def build(
         budget=DispatchBudget(deadline_s=deadline_s),
         settlement_bounds=SETTLEMENT_BOUNDS,
         persist_pending=persist,
+        sleep=sleep,
     )
     return executor, resolved_client, resolved_portfolio
 
@@ -1301,8 +1344,18 @@ class TestTheEntryFillPrice:
 
         await executor.dispatch(buy(), entry_assessment(), candle())
 
-        assert client.venue_calls == ["place", "get_order"]
-        assert len(client.venue_calls) == 2
+        assert client.venue_calls == ["place", "get_order", "get_my_trades"]
+        assert len(client.venue_calls) == 3
+
+    # ANNOTATED AT M5o P161 (H1), under the ruled-overturn authority: the test above
+    # read `["place", "get_order"]` and `len == 2`, and its name says "two". The
+    # owner's P161 instruction -- "Executor: use settlement in place of the single
+    # get_order read" -- overturns that count: a filled entry now costs one order
+    # read and one fills read after the placement, so three. Ledger section 87
+    # predicted exactly this (+1 call, +5 weight). The name is unchanged because the
+    # test's subject, the call-count guard, is; its mutation line still holds for
+    # any call BEYOND these three on the clean path. The retry paths are pinned
+    # below by `TestTheEntrySettlement`.
 
     async def test_a_filled_entry_records_what_it_actually_cost(self) -> None:
         """MUTATION: pass `entry_limit` as the fill price, or drop the argument.
@@ -5235,22 +5288,34 @@ class TestTheEntryQuoteTotal:
 
         position = portfolio.positions[SYMBOL]
         assert position.entry_quote_total == self.TOTAL
-        assert position.entry_fill_price == D("98.00000000")  # the price still lands
+        # Ruled-overturn, M5o P161 (H1). OLD: `== D("98.00000000")  # the price still
+        # lands`, the order's own `average_price`. NEW: the price is the fills' VWAP,
+        # `48.99999999 / 0.5`, which is what `to_order` derives the order's price from
+        # as well. The assertion's SUBJECT, that the total and not the price drives the
+        # debit, is unchanged and still pinned by the next two lines.
+        assert position.entry_fill_price == self.TOTAL / D("0.5")
+        assert position.entry_fill_price != D("98.00000000")
         assert portfolio.free_quote == D("10000") - self.TOTAL
         assert portfolio.free_quote != D("10000") - D("0.5") * D("98")
 
-    async def test_a_response_with_no_total_leaves_it_absent_and_debits_the_price(self) -> None:
-        """The fallback, unchanged: no total on the response, no total on the position.
+    async def test_a_response_with_no_total_takes_the_total_from_the_fills(self) -> None:
+        """Ruled-overturn, M5o P161 (H1). Was `..._leaves_it_absent_and_debits_the_price`.
 
-        MUTATION: invent a total (the price x the quantity) when the response
-        gives none.
+        OLD: no total on the order response, no total on the position, the debit
+        `quantity x price`. A response carrying a price and no total is a shape
+        production cannot produce (`to_order` derives the price FROM the total), and
+        the entry settlement now takes the total from the order's own fills whatever
+        the order response says. NEW: the position carries the exact fills total
+        (`0.5 x 98` at the fills' exponent) and the debit is that total.
+
+        MUTATION: drop the quote total from the settlement's result.
         """
         portfolio = Portfolio(free_quote=D("10000"))
         executor, _, _ = build(client=FakeClient(), portfolio=portfolio)
 
         await executor.dispatch(buy(), entry_assessment(), candle())
 
-        assert portfolio.positions[SYMBOL].entry_quote_total is None
+        assert portfolio.positions[SYMBOL].entry_quote_total == D("49")
         assert portfolio.free_quote == D("10000") - D("0.5") * D("98")
 
     async def test_a_live_resolution_carries_the_entry_total_and_debits_it(
@@ -5677,3 +5742,225 @@ class TestTheCloseGuard:
 
         assert [r.reason for r in _records(caplog, "dispatch_refused")] == ["close_pending"]
         assert len(client.sold) == 1
+
+
+# --------------------------------------------------------------------------
+# M5o H1: the entry is SETTLED from its own fills, with a bounded retry
+# --------------------------------------------------------------------------
+class _Sleeps:
+    """An injected sleep that records the waits."""
+
+    def __init__(self) -> None:
+        self.waits: list[float] = []
+
+    async def __call__(self, seconds: float) -> None:
+        self.waits.append(seconds)
+
+
+def _bnb_entry_trade() -> Trade:
+    """The entry's one fill with a commission in a THIRD asset (R-OC), 0.00150000 BNB."""
+    return Trade(
+        trade_id="5",
+        order_id="1",
+        symbol=SYMBOL,
+        side=OrderSide.BUY,
+        quantity=D("0.5"),
+        price=D("98.00000000"),
+        quote_quantity=D("49.00000000"),
+        fee=Fee(amount=D("0.00150000"), asset="BNB"),
+        filled_at=BAR,
+    )
+
+
+class TestTheEntrySettlement:
+    """What `execution/settlement.py` changed in the executor: the retry, the state, the record.
+
+    Predicted in `docs/RUN_LEDGER.md` section 87 and written after it: the call
+    sequences, the waits, and that a failure is `PENDING_SETTLEMENT` with its
+    attempts counted and never an expiry.
+    """
+
+    async def test_a_clean_entry_is_settled_and_records_every_commission(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R-OE: every entry fee is recorded, each amount beside its asset, one line.
+
+        MUTATION: drop the `fees` field from `entry_settled`; write the asset
+        without the amount; or omit the line.
+        """
+        executor, _, portfolio = build()
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.SETTLED
+        assert position.entry_settlement_attempts == 0
+        assert position.entry_debit_estimate is None
+        (line,) = _records(caplog, "entry_settled")
+        assert vars(line).get("fees") == "BTC=0E-8"  # as `fee=0E-8` renders on a booking line
+        assert vars(line).get("quote_total") == D("49.000000000")
+        assert "unmeasured_fee_assets" not in vars(line)  # absent, never null
+
+    async def test_a_third_asset_commission_is_recorded_and_marked_and_the_entry_still_opens(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """R-OC: BNB is recorded exactly, the trade is marked UNMEASURED, nothing is subtracted.
+
+        The debit is the quote total, untouched by a commission in another asset.
+        MUTATION: refuse the entry on a foreign fee, or net the BNB from the debit.
+        """
+        client = FakeClient(trades_answers=[[_bnb_entry_trade()]])
+        executor, _, portfolio = build(client=client)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        (line,) = _records(caplog, "entry_settled")
+        assert vars(line).get("fees") == "BNB=0.00150000"
+        assert vars(line).get("unmeasured_fee_assets") == "BNB"
+        assert portfolio.positions[SYMBOL].entry_settlement is EntrySettlementState.SETTLED
+        assert portfolio.free_quote == D("10000") - D("49.00000000")
+
+    async def test_an_order_read_that_fails_once_is_retried_after_one_wait(self) -> None:
+        """F6 at the executor: `["place", "get_order", "get_order", "get_my_trades"]`, one 0.25 s wait.
+
+        MUTATION: no retry (a position opens with no cost basis on a transient
+        error, which is U13); or wait before the first attempt.
+        """
+        sleeps = _Sleeps()
+        client = FakeClient()
+        errors: list[Exception | None] = [ExchangeConnectionError("reset"), None]
+        original = client.get_order
+
+        async def flaky(symbol: str, **kwargs: Any) -> Order:
+            error = errors.pop(0) if errors else None
+            if error is not None:
+                client.venue_calls.append("get_order")
+                raise error
+            return await original(symbol, **kwargs)
+
+        client.get_order = flaky  # type: ignore[method-assign]
+        executor, _, portfolio = build(client=client, sleep=sleeps)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert client.venue_calls == ["place", "get_order", "get_order", "get_my_trades"]
+        assert sleeps.waits == [0.25]
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.SETTLED
+        assert position.entry_quote_total == D("49.000000000")
+
+    async def test_a_persistent_failure_opens_the_position_pending_and_counts_the_attempts(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """F7 at the executor, and the central change of H1.
+
+        Three attempts, waits of 0.25 s then 0.5 s; the position is opened (the list is
+        at the venue and must be tracked) as `PENDING_SETTLEMENT` with three failed
+        attempts and no cost basis; the debit is the REQUESTED limit, remembered as an
+        estimate; one `collaborator_failed` of phase `entry-fill-query` (the operator
+        signal, once and not three times) and one `entry_settlement_pending`.
+
+        NEVER an expiry: the entry is not refused. MUTATION: refuse on an unanswered
+        read (orphans a filled, protected entry); forget to remember the estimate (the
+        late settlement then cannot true up the balance); log the failure per attempt.
+        """
+        sleeps = _Sleeps()
+        client = FakeClient(order_error=ExchangeConnectionError("reset"))
+        executor, _, portfolio = build(client=client, sleep=sleeps)
+
+        with caplog.at_level(logging.DEBUG, logger=_EXEC_LOGGER):
+            await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert client.venue_calls == ["place", "get_order", "get_order", "get_order"]
+        assert sleeps.waits == [0.25, 0.5]
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_settlement_attempts == 3
+        assert position.entry_fill_price is None and position.entry_quote_total is None
+        assert position.entry_debit_estimate == D("0.5") * D("100")
+        assert portfolio.free_quote == D("10000") - D("0.5") * D("100")
+        failed = [
+            r
+            for r in _records(caplog, "collaborator_failed")
+            if vars(r).get("phase") == "entry-fill-query"
+        ]
+        assert len(failed) == 1
+        (pending,) = _records(caplog, "entry_settlement_pending")
+        assert vars(pending).get("attempts") == 3
+        assert len(_records(caplog, "debit_from_requested_limit")) == 1
+
+    async def test_fills_short_of_the_executed_quantity_leave_the_entry_pending(self) -> None:
+        """F9 at the executor: the order says 0.5 executed, the fills sum to 0.3. It never settles."""
+        short = _bnb_entry_trade().model_copy(update={"quantity": D("0.3")})
+        client = FakeClient(trades_answers=[[short]])
+        executor, _, portfolio = build(client=client)
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_quote_total is None
+        assert client.venue_calls == ["place", "get_order", "get_my_trades"] * 1 + [
+            "get_order",
+            "get_my_trades",
+            "get_order",
+            "get_my_trades",
+        ]
+
+    async def test_a_spent_budget_begins_no_settlement_and_the_position_still_opens(self) -> None:
+        """A budget may refuse to BEGIN work: zero reads, zero attempts, `PENDING_SETTLEMENT`.
+
+        The budget allows exactly one consultation, which is dispatch's own sample
+        before the placement; the settlement then asks and finds nothing. (A stub
+        and not a tiny deadline: `datetime` has microsecond resolution, so an
+        instant fake client would not spend even a nanosecond.) The list is at the
+        venue, so the position is recorded all the same. MUTATION: ignore the
+        budget in the settlement bounds (the reads then run on a stale full bound).
+        """
+
+        class _SpentAfterTheFirstSample:
+            def __init__(self) -> None:
+                self.samples = 0
+
+            def bounds_for_next_call(self, *, started_at: Any, now: Any) -> CallBounds | None:
+                self.samples += 1
+                return CallBounds(timeout_s=9.0, attempts=1) if self.samples == 1 else None
+
+        client = FakeClient()
+        portfolio = Portfolio(free_quote=D("10000"))
+        executor = OrderExecutor(
+            client=client,  # type: ignore[arg-type]
+            portfolio=portfolio,
+            budget=_SpentAfterTheFirstSample(),  # type: ignore[arg-type]
+            settlement_bounds=SETTLEMENT_BOUNDS,
+            sleep=_no_sleep,
+        )
+
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        assert client.venue_calls == ["place"]
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_settlement_attempts == 0
+
+    async def test_a_live_resolution_that_cannot_read_the_fills_opens_pending(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The recovery path is the second `_open_position` caller and takes the same state."""
+        client = FakeClient(
+            place_error=TimeoutError("reset"), order_error=ExchangeConnectionError("x")
+        )
+        executor, _, portfolio = build(client=client)
+        await executor.dispatch(buy(), entry_assessment(), candle())
+
+        async def _live(*_a: Any, **_k: Any) -> PlacementVerdict:
+            return live_verdict()
+
+        monkeypatch.setattr("trading_bot.execution.executor.resolve_placement", _live)
+        await executor(candle(close_time=BAR + timedelta(minutes=1)))
+
+        position = portfolio.positions[SYMBOL]
+        assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+        assert position.entry_settlement_attempts == 3

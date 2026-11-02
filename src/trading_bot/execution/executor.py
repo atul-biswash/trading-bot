@@ -27,11 +27,18 @@ the pending record the raise leaves behind, which the next bar resolves.)
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Final, Literal
 
 from trading_bot.core.assessment import EntryIntent
-from trading_bot.core.enums import OrderSide, OrderType, PositionSide, ProtectionState
+from trading_bot.core.enums import (
+    EntrySettlementState,
+    OrderSide,
+    OrderType,
+    PositionSide,
+    ProtectionState,
+)
 from trading_bot.core.exceptions import (
     ClientRefusalError,
     ExchangeError,
@@ -80,11 +87,19 @@ from trading_bot.execution.resolution import (
     PlacementVerdict,
     resolve_placement,
 )
+from trading_bot.execution.settlement import (
+    DEFAULT_RETRY,
+    RetryPolicy,
+    SettlementOutcome,
+    SettlementStatus,
+    base_asset_of,
+    settle_entry,
+)
 from trading_bot.utils.helpers import utc_now
 from trading_bot.utils.logger import get_logger
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from collections.abc import Callable, Sequence
+    from collections.abc import Awaitable, Callable, Sequence
     from datetime import datetime
 
     from trading_bot.core.assessment import RiskAssessment
@@ -219,6 +234,14 @@ _EVENT_NO_ENTRY_FILL = "entry_fill_absent"
 #: from the first. It also fires on the query-failure path, which
 #: `entry_fill_absent` does not.
 _EVENT_DEBIT_ESTIMATED = "debit_from_requested_limit"
+#: M5o H1: an entry's fills were read and settled -- the quantity, the exact quote
+#: total, the VWAP and every commission beside its asset (R-OE: every entry fee is
+#: recorded). INFO, once per settlement, whichever path reached it.
+_EVENT_ENTRY_SETTLED = "entry_settled"
+#: M5o H1: the entry filled (or may have) and the bounded retries could not read its
+#: fills, so the position carries `PENDING_SETTLEMENT` and the reconciliation driver
+#: retries. WARNING. Not an expiry: the entry may well have filled.
+_EVENT_ENTRY_SETTLEMENT_PENDING = "entry_settlement_pending"
 #: Q-C section 4b's confirming query ran and its decision table answered. **The
 #: ONLY instrument that will ever report how long that costs**, because the
 #: close branch sits ahead of `dispatch`'s single budget sample -- see
@@ -711,6 +734,13 @@ class _EntryFill:
     * ``price`` set                     -- FILLED. Open the position.
     * ``price`` ``None``, answered      -- EXPIRED. No trade happened.
     * ``price`` ``None``, not answered  -- UNKNOWN. The venue did not say.
+
+    **FROM M5o H1 THE FIRST AND THIRD ARE THE ENTRY SETTLEMENT'S VERDICTS**
+    (``execution/settlement.py``): ``SETTLED`` carries the VWAP and the exact quote
+    total derived from the order's own fills, and ``PENDING`` -- the fills could not
+    be read after the bounded retries -- is the unanswered state, which now also
+    NAMES itself on the position (``PENDING_SETTLEMENT``) and counts its attempts,
+    where it used to leave a bare ``None`` that nothing retried (U13).
     """
 
     price: Money | None
@@ -722,11 +752,28 @@ class _EntryFill:
     #: ``price`` is: ``to_order`` derives the price from the total, so a price
     #: implies a total in production.
     quote_total: Money | None = None
+    #: Settlement attempts that began and did NOT read the fills. Zero unless the
+    #: fill is unanswered; recorded on the position so an operator can see it.
+    failed_attempts: int = 0
 
     @property
     def expired(self) -> bool:
         """The venue answered and the leg did not fill. The only refusable state."""
         return self.answered and self.price is None
+
+    @property
+    def settlement_state(self) -> EntrySettlementState:
+        """``PENDING_SETTLEMENT`` exactly when the venue never answered about the fills.
+
+        An EXPIRED fill is answered (and refused by dispatch); the recovery path,
+        which opens a position the verdict proved exists, keeps ``SETTLED`` for it,
+        as before.
+        """
+        return (
+            EntrySettlementState.SETTLED
+            if self.answered
+            else EntrySettlementState.PENDING_SETTLEMENT
+        )
 
 
 class OrderExecutor:
@@ -741,8 +788,16 @@ class OrderExecutor:
         settlement_bounds: CallBounds,
         persist_pending: PendingWriter | None = None,
         restored_pending: Sequence[Pending] = (),
+        entry_retry: RetryPolicy | None = None,
+        sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
         """Build the executor, optionally seeded with records from a prior process.
+
+        ``entry_retry`` and ``sleep`` are M5o H1's: the bounded retry of the entry
+        settlement (three attempts and waits of 0.25 s and 0.5 s unless stated) and
+        the sleep it waits with, injected as ``BaseExchangeClient`` injects its own so
+        a test records the waits and never sleeps. Both default, so every caller and
+        test that predates them is unchanged.
 
         **A RESTORED RECORD IS A QUESTION, NOT AN ANSWER.** It says only that
         some earlier process sent a placement and never learned the outcome --
@@ -787,6 +842,8 @@ class OrderExecutor:
         #: by the project owner's ruling, supplied by the composition root. Not
         #: ``budget``'s: a settlement follows a sell that has already spent it.
         self._settlement_bounds = settlement_bounds
+        self._entry_retry = DEFAULT_RETRY if entry_retry is None else entry_retry
+        self._sleep = sleep
         #: ``None`` means DO NOT PERSIST, and that default is what keeps every
         #: existing test and any caller not yet updated byte-for-byte
         #: unchanged. The composition root supplies the real writer.
@@ -980,8 +1037,7 @@ class OrderExecutor:
                     symbol=symbol,
                     entry_bar_time=record.entry_bar_time,
                     generation=record.generation,
-                    timeout_s=bounds.timeout_s,
-                    attempts=bounds.attempts,
+                    started_at=started_at,
                 )
                 # NO EXPIRY GUARD HERE, DELIBERATELY, and it is not an
                 # oversight. The verdict already IS the guard: `PLACED_LIVE`
@@ -999,6 +1055,8 @@ class OrderExecutor:
                     entry_limit=record.entry_limit,
                     entry_fill_price=fill.price,
                     entry_quote_total=fill.quote_total,
+                    entry_settlement=fill.settlement_state,
+                    settlement_attempts=fill.failed_attempts,
                     stop_loss=record.stop_loss,
                     take_profit=record.take_profit,
                     entry_bar_time=record.entry_bar_time,
@@ -1326,8 +1384,7 @@ class OrderExecutor:
             symbol=intent.symbol,
             entry_bar_time=entry_bar_time,
             generation=0,
-            timeout_s=bounds.timeout_s,
-            attempts=bounds.attempts,
+            started_at=started_at,
         )
         # P6, CLOSED HERE. Until this guard, a `Position` was constructed
         # unconditionally after a successful placement -- so an FOK that
@@ -1365,6 +1422,8 @@ class OrderExecutor:
             entry_limit=intent.entry_limit,
             entry_fill_price=fill.price,
             entry_quote_total=fill.quote_total,
+            entry_settlement=fill.settlement_state,
+            settlement_attempts=fill.failed_attempts,
             stop_loss=intent.levels.stop_loss,
             take_profit=intent.levels.take_profit,
             entry_bar_time=entry_bar_time,
@@ -1422,76 +1481,126 @@ class OrderExecutor:
         symbol: str,
         entry_bar_time: datetime,
         generation: int,
-        timeout_s: float,
-        attempts: int,
+        started_at: datetime,
     ) -> _EntryFill:
-        """What the working leg actually filled at, and whether the venue said.
+        """What the working leg actually filled at, and whether the venue said. M5o H1.
 
-        **The working leg is TERMINAL by the time the placement returns, and
-        that is why this belongs here rather than on a later bar.** Q-C
-        section 3 fixes it as ``LIMIT``+``FOK``: fill-or-kill cannot rest, so
-        it has filled completely or expired before the venue answers. A
-        resting ``LIMIT`` would make a query at this moment useless.
+        **IT NOW SETTLES THE ENTRY** (``execution/settlement.py``) where it used to make
+        one ``get_order`` and give up: the order read says whether and how much
+        executed, the order's own fills supply the exact quote total, the VWAP and every
+        commission beside its asset, and a failure waiting may cure is retried -- three
+        attempts, waits of 0.25 s and 0.5 s, every call gated by what remains of THIS
+        sequence's ``dispatch_deadline_s`` (``started_at`` is the sequence's start, so a
+        slow placement leaves the settlement less, and none left refuses to begin).
 
-        **REASONED, NOT MEASURED.** No entry leg has ever been point-queried
-        in this project. The measured resting-leg shape -- ``status=NEW``,
-        ``filled_quantity=0``, ``average_price=None``, observed on a
-        ``STOP_LOSS`` and a ``TAKE_PROFIT`` across two symbols on 2026-09-02
-        -- describes PROTECTIVE legs, which do rest, and must not be read as
-        describing this one. What is measured is the leg TYPE; that FOK is
-        terminal at return follows from it.
+        **The working leg is TERMINAL by the time the placement returns**, and that is
+        why this belongs here and not on a later bar. Q-C section 3 fixes it as
+        ``LIMIT``+``FOK``: it has filled completely or expired before the venue answers.
+        **REASONED, NOT MEASURED** for the leg's own point query; the measured resting
+        shape describes PROTECTIVE legs, which do rest.
 
-        **NEVER FALLS BACK TO THE REQUESTED LIMIT.** ``None`` on any failure,
-        any timeout, and any leg reporting no fill. The limit is measured
-        wrong by 76.65 and 2.09 per unit, and commit 4 made the ledger
-        durable, so a fallback would write a permanent distortion that is
-        afterwards indistinguishable from a correct figure. A refused booking
-        is visible and recoverable; a corrupt one is neither.
+        **NEVER FALLS BACK TO THE REQUESTED LIMIT.** ``answered=False`` on any persistent
+        failure and any exhausted budget, and ``price=None`` on a leg reporting no fill.
+        The limit is measured wrong by 76.65 and 2.09 per unit, and the ledger is
+        durable, so a fallback would write a permanent distortion afterwards
+        indistinguishable from a correct figure. A refused booking is visible and
+        recoverable; a corrupt one is neither.
 
-        **Never raises.** A dispatch that placed successfully must not be
-        turned into a failure by a follow-up read: the order list is already
-        at the venue, and the position must be recorded whatever this returns.
+        **A FAILURE IS NO LONGER A BARE ``None``.** It is ``PENDING_SETTLEMENT`` on the
+        position, with its attempts counted, retried each reconciliation pass, and the
+        ``collaborator_failed`` line of phase ``entry-fill-query`` is kept, once per
+        settlement, as the operator signal it always was.
+
+        **Never raises.** A dispatch that placed successfully must not be turned into a
+        failure by a follow-up read: the order list is already at the venue, and the
+        position must be recorded whatever this returns.
         """
+        quote_asset = self._portfolio.quote_asset
         try:
-            order = await self._client.get_order(
-                symbol,
-                client_order_id=client_order_id(
-                    symbol, entry_bar_time, OrderListLeg.WORKING, generation=generation
-                ),
-                timeout_s=timeout_s,
-                attempts=attempts,
-            )
-        except Exception as exc:  # never raises; see the docstring
-            # NOT ANSWERED. Nothing is known about the leg -- which is a
-            # different fact from "it did not fill", and the caller acts on the
-            # difference.
+            base_asset = base_asset_of(symbol, quote_asset)
+        except ValueError as exc:
+            # A symbol that does not end in the quote asset cannot have its commission
+            # classified. Unreachable behind the root's priming; never raising is the
+            # contract, so it is a pending settlement that says why.
             self._log_failure("entry-fill-query", symbol, exc)
             return _EntryFill(price=None, answered=False)
 
-        # A fill total with no quantity cannot yield a price, and an FOK that
-        # expired reports exactly that. `average_price` is the venue's own
-        # quotient; `filled_quote_quantity` is the total it came from. BOTH
-        # are returned from this one response (P-3h): the price is what the
-        # position's mark-to-market reads, and the total is what booking
-        # subtracts -- this comment read "the total is preferred nowhere here
-        # because a PRICE is what a position stores" until M5l P93, and the
-        # exponent -24 bookings it let through are `M5l-209`.
-        if order.filled_quantity <= 0 or order.average_price is None:
+        outcome = await settle_entry(
+            self._client,
+            symbol,
+            client_order_id=client_order_id(
+                symbol, entry_bar_time, OrderListLeg.WORKING, generation=generation
+            ),
+            base_asset=base_asset,
+            quote_asset=quote_asset,
+            bounds=lambda: self._budget.bounds_for_next_call(started_at=started_at, now=utc_now()),
+            policy=self._entry_retry,
+            sleep=self._sleep,
+        )
+        return self._entry_fill_from(outcome, symbol)
+
+    @staticmethod
+    def _entry_fill_from(outcome: SettlementOutcome, symbol: str) -> _EntryFill:
+        """Translate the settlement's verdict into the executor's, logging what it says."""
+        settlement = outcome.settlement
+        if outcome.status is SettlementStatus.SETTLED and settlement is not None:
+            extra: dict[str, object] = {
+                "event": _EVENT_ENTRY_SETTLED,
+                "symbol": symbol,
+                "order_id": settlement.order_id,
+                "quantity": settlement.quantity,
+                "quote_total": settlement.quote_quantity,
+                "price": settlement.price,
+                "fill_count": settlement.fill_count,
+                "attempts": outcome.attempts,
+                # EVERY ENTRY FEE IS RECORDED (R-OE), each amount beside its asset, as
+                # one string so both log sinks render it alike.
+                "fees": ",".join(f"{fee.asset}={fee.amount}" for fee in settlement.fees),
+            }
+            if settlement.unmeasured_fee_assets:
+                # R-OC's mark: absent when empty, never null.
+                extra["unmeasured_fee_assets"] = ",".join(settlement.unmeasured_fee_assets)
+            _log.info("Entry settled", extra=extra)
+            return _EntryFill(
+                price=settlement.price, answered=True, quote_total=settlement.quote_quantity
+            )
+        if outcome.status is SettlementStatus.EXPIRED:
+            order = outcome.order
             _log.warning(
                 "Entry leg reports no fill; the position's cost basis is unknown",
                 extra={
                     "event": _EVENT_NO_ENTRY_FILL,
                     "symbol": symbol,
-                    "status": order.status.value,
-                    "filled_quantity": order.filled_quantity,
+                    "status": "" if order is None else order.status.value,
+                    "filled_quantity": None if order is None else order.filled_quantity,
                 },
             )
-            # ANSWERED, and the answer was no. An FOK that found no
-            # counterparty: no trade happened, and the caller refuses.
+            # ANSWERED, and the answer was no. An FOK that found no counterparty: no
+            # trade happened, and the caller refuses.
             return _EntryFill(price=None, answered=True)
-        return _EntryFill(
-            price=order.average_price, answered=True, quote_total=order.filled_quote_quantity
+
+        # PENDING. NOT an expiry: nothing is known about the fills.
+        error_type, _, error = (outcome.failure or "").partition(": ")
+        _log.error(
+            "Executor phase failed",
+            extra={
+                "event": "collaborator_failed",
+                "phase": "entry-fill-query",
+                "symbol": symbol,
+                "error_type": error_type,
+                "error": error,
+            },
         )
+        _log.warning(
+            "Entry settlement is pending; the position opens with its cost basis unknown",
+            extra={
+                "event": _EVENT_ENTRY_SETTLEMENT_PENDING,
+                "symbol": symbol,
+                "attempts": outcome.attempts,
+                "failure": outcome.failure or "",
+            },
+        )
+        return _EntryFill(price=None, answered=False, failed_attempts=outcome.attempts)
 
     def _open_position(
         self,
@@ -1501,6 +1610,8 @@ class OrderExecutor:
         entry_limit: Money,
         entry_fill_price: Money | None,
         entry_quote_total: Money | None,
+        entry_settlement: EntrySettlementState,
+        settlement_attempts: int,
         stop_loss: Money | None,
         take_profit: Money | None,
         entry_bar_time: datetime,
@@ -1563,6 +1674,8 @@ class OrderExecutor:
             entry_price=entry_limit,
             entry_fill_price=entry_fill_price,
             entry_quote_total=entry_quote_total,
+            entry_settlement=entry_settlement,
+            entry_settlement_attempts=settlement_attempts,
             entry_bar_time=entry_bar_time,
             protection=ProtectionState.UNKNOWN,
             # BOTH IDENTIFIER SPACES, under names that say which is which. The
@@ -1626,7 +1739,12 @@ class OrderExecutor:
                     "quantity": quantity,
                 },
             )
-        self._portfolio.open_position(position, cost=quantity * cost_basis)
+        cost = quantity * cost_basis
+        if entry_settlement is EntrySettlementState.PENDING_SETTLEMENT:
+            # M5o H1: this debit is an ESTIMATE of what left the account. Remembered
+            # (memory only) so the late settlement can credit back the difference.
+            position.entry_debit_estimate = cost
+        self._portfolio.open_position(position, cost=cost)
 
     def _persist_after_removal(self, symbol: str) -> None:
         """Rewrite the durable set after ``symbol``'s record left ``_pending``."""
