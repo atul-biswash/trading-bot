@@ -26,6 +26,7 @@ from trading_bot.config.models import (
     TradingConfig,
 )
 from trading_bot.core.enums import (
+    EntrySettlementState,
     OrderSide,
     OrderStatus,
     OrderType,
@@ -140,6 +141,7 @@ class _StubClient:
         *,
         order_id: str | None = None,
         limit: int | None = None,
+        from_id: str | None = None,
         timeout_s: float | None = None,
         attempts: int | None = None,
     ) -> list[Trade]:
@@ -2335,3 +2337,230 @@ async def test_a_booking_with_no_entry_total_uses_the_quotient_and_omits_the_fie
     booked = [r for r in caplog.records if getattr(r, "event", None) == "exit_booked"]
     assert len(booked) == 1
     assert "entry_quote_total" not in vars(booked[0])
+
+
+# --------------------------------------------------------------------------
+# M5o H1: a pending entry settlement is retried on the reconciliation pass
+# --------------------------------------------------------------------------
+ENTRY_ORDER_ID = "55"
+#: The entry bought 0.001 BTC at 46,990.00: 46.99 quote against the 47.00 the position was
+#: debited when its fills were unread (0.001 x the 47,000.00 limit), so a late settlement
+#: credits back exactly 0.01.
+PENDING_ESTIMATE = Decimal("47.0000000")
+PENDING_QUOTE = Decimal("46.99000000")
+WORKING_ID = client_order_id("BTCUSDT", BAR, OrderListLeg.WORKING, generation=0)
+
+
+def _pending_entry(symbol: str = "BTCUSDT", *, attempts: int = 3) -> Position:
+    """An entry that filled and whose fills the dispatch could not read (M5o H1)."""
+    position = _position(symbol)
+    position.entry_settlement = EntrySettlementState.PENDING_SETTLEMENT
+    position.entry_settlement_attempts = attempts
+    position.entry_debit_estimate = PENDING_ESTIMATE
+    return position
+
+
+def _entry_order(symbol: str = "BTCUSDT") -> Order:
+    return Order(
+        order_id=ENTRY_ORDER_ID,
+        symbol=symbol,
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        status=OrderStatus.FILLED,
+        quantity=QTY,
+        filled_quantity=QTY,
+        client_order_id=WORKING_ID,
+    )
+
+
+def _entry_trade(*, quote: Decimal = PENDING_QUOTE, asset: str = "BTC") -> Trade:
+    return Trade(
+        trade_id="9",
+        order_id=ENTRY_ORDER_ID,
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        quantity=QTY,
+        price=Decimal("46990.00"),
+        quote_quantity=quote,
+        fee=Fee(amount=Decimal("0.00000000"), asset=asset),
+        filled_at=NOW,
+    )
+
+
+def _entry_client(
+    *, trades: list[Trade] | Exception | None = None, books: dict[str, list[Order]] | None = None
+) -> _StubClient:
+    return _StubClient(
+        books if books is not None else {"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]},
+        {WORKING_ID: _entry_order()},
+        trades={ENTRY_ORDER_ID: [_entry_trade()] if trades is None else trades},
+    )
+
+
+def _ledgered(*positions: Position) -> Portfolio:
+    portfolio = _portfolio(*positions)
+    portfolio.free_quote = Decimal("9953.00")
+    portfolio.ledger = Ledger(realised_pnl=Decimal("1.0"), pnl_date=NOW.date(), trades_count=1)
+    return portfolio
+
+
+def _entry_events(caplog: pytest.LogCaptureFixture, event: str) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == event]
+
+
+async def test_a_pending_entry_is_settled_on_the_next_pass_and_the_debit_trued_up(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The cure: one `get_order`, one `get_my_trades`, the cost basis lands, the balance is trued up.
+
+    9953.00 + 47.0000000 - 46.99000000 = 9953.01 exactly. MUTATION: skip the retry; settle
+    without calling `complete_entry_settlement` (the position stays pending); credit the
+    wrong sign. Persisted through the ledger writer, once, because a ledger exists.
+    """
+    position = _pending_entry()
+    portfolio = _ledgered(position)
+    client = _entry_client()
+    writer = _RecordingWriter()
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert position.entry_settlement is EntrySettlementState.SETTLED
+    assert position.entry_quote_total == PENDING_QUOTE
+    assert position.entry_fill_price == Decimal("46990")
+    assert position.entry_debit_estimate is None
+    assert portfolio.free_quote == Decimal("9953.01")
+    assert client.settled == [ENTRY_ORDER_ID]
+    assert WORKING_ID in client.queried
+    assert len(writer.calls) == 1
+    (line,) = _entry_events(caplog, "entry_settled_late")
+    assert vars(line).get("failed_attempts") == 3
+
+
+async def test_a_failed_retry_counts_the_attempt_and_stays_pending(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The failure is counted on the position (and so persisted), not swallowed silently.
+
+    MUTATION: do not increment; clear the pending state on a failure (which would stop
+    retrying and leave a position with no cost basis that nothing is waiting on).
+    """
+    position = _pending_entry(attempts=3)
+    portfolio = _ledgered(position)
+    client = _entry_client(trades=ExchangeConnectionError("reset"))
+    writer = _RecordingWriter()
+
+    with caplog.at_level(logging.INFO):
+        await _driver(portfolio, client, persist_ledger=writer)(_candle())
+
+    assert position.entry_settlement is EntrySettlementState.PENDING_SETTLEMENT
+    assert position.entry_settlement_attempts == 4
+    assert portfolio.free_quote == Decimal("9953.00")
+    (line,) = _entry_events(caplog, "entry_settlement_retry_failed")
+    assert vars(line).get("failed_attempts") == 4
+    assert len(writer.calls) == 1  # the counted attempt is persisted
+
+
+async def test_the_attempt_ceiling_stops_the_retry_and_says_so_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Three executor attempts plus five passes is eight: at 8 the driver stops, CRITICAL once.
+
+    The position is at 7, fails to 8 (the CRITICAL), and the next pass makes no call at all.
+    MUTATION: no ceiling (retried for ever); the CRITICAL on every pass at the ceiling.
+    """
+    position = _pending_entry(attempts=7)
+    portfolio = _ledgered(position)
+    client = _entry_client(trades=ExchangeConnectionError("reset"))
+    driver = _driver(portfolio, client, persist_ledger=_RecordingWriter())
+
+    with caplog.at_level(logging.INFO):
+        await driver(_candle())
+        asked_after_first = len(client.queried)
+        await driver(_candle())
+        await driver(_candle())
+
+    assert position.entry_settlement_attempts == 8
+    assert len(_entry_events(caplog, "entry_settlement_abandoned")) == 1
+    assert len(_entry_events(caplog, "entry_settlement_retry_failed")) == 1
+    # the later passes re-read the book (the stamp) but never the entry
+    assert client.queried.count(WORKING_ID) == 1
+    assert asked_after_first >= 1
+
+
+async def test_the_retry_spends_only_the_calls_the_pass_left_of_its_cap() -> None:
+    """Two positions, a cap of 3: the enumeration takes 2, so 1 is spare and a retry needs 2.
+
+    Nothing is retried and no attempt is counted. This is the pin on `M5o-040`'s
+    construction: the coherence term `calls x T_recon` is unchanged because the retry
+    only spends what the pass left. MUTATION: ignore `spare`, or count a deferred
+    position as an attempt.
+    """
+    btc = _pending_entry("BTCUSDT")
+    eth = _pending_entry("ETHUSDT")
+    portfolio = _ledgered(btc, eth)
+    client = _StubClient(
+        {
+            "BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)],
+            "ETHUSDT": [_order("ETHUSDT", OrderListLeg.STOP_LOSS)],
+        },
+        {},
+        trades={},
+    )
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert client.settled == []
+    assert WORKING_ID not in client.queried
+    assert (btc.entry_settlement_attempts, eth.entry_settlement_attempts) == (3, 3)
+
+
+async def test_a_settled_position_is_never_retried() -> None:
+    """The default state asks the venue nothing: every existing pass is unchanged by H1."""
+    portfolio = _ledgered(_position("BTCUSDT"))
+    client = _StubClient({"BTCUSDT": [_order("BTCUSDT", OrderListLeg.STOP_LOSS)]})
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert client.settled == []
+    assert client.queried == []
+
+
+async def test_a_cost_basis_cured_on_a_pass_books_an_exit_that_filled_on_the_same_pass() -> None:
+    """U13's chain closed from the other end: settle first, then book.
+
+    The position's entry fills were unread, and its stop leg FILLED. Without the retry
+    the booking is refused (`NO_COST_BASIS`) and the trade is unbooked; with it, the pass
+    reads the entry, then books the exit net of the cost basis it just learned.
+    MUTATION: run the retry after `_book_exits`.
+    """
+    position = _booking_position(entry_fill_price=None)
+    position.entry_settlement = EntrySettlementState.PENDING_SETTLEMENT
+    position.entry_settlement_attempts = 3
+    entry_quote = BOOK_QTY * BOOK_ENTRY_FILL
+    position.entry_debit_estimate = BOOK_QTY * BOOK_ENTRY_LIMIT
+    portfolio = _portfolio(position)
+    portfolio.free_quote = Decimal("9000")
+    entry = Order(
+        order_id=ENTRY_ORDER_ID,
+        symbol="BTCUSDT",
+        side=OrderSide.BUY,
+        type=OrderType.LIMIT,
+        status=OrderStatus.FILLED,
+        quantity=BOOK_QTY,
+        filled_quantity=BOOK_QTY,
+        client_order_id=WORKING_ID,
+    )
+    entry_trade = _entry_trade(quote=entry_quote).model_copy(update={"quantity": BOOK_QTY})
+    client = _StubClient(
+        {"BTCUSDT": [_filled_leg("BTCUSDT")]},
+        {WORKING_ID: entry},
+        trades={ENTRY_ORDER_ID: [entry_trade]},
+    )
+
+    await _driver(portfolio, client, persist_ledger=_RecordingWriter())(_candle())
+
+    assert "BTCUSDT" not in portfolio.positions  # booked and gone
+    assert portfolio.ledger is not None
+    assert portfolio.ledger.realised_pnl == BOOK_EXACT
+    assert client.settled[0] == ENTRY_ORDER_ID  # the entry was read BEFORE the exit's fills

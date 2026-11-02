@@ -41,7 +41,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Final
 
-from trading_bot.core.enums import ProtectionState
+from trading_bot.core.enums import EntrySettlementState, ProtectionState
 from trading_bot.core.exceptions import (
     ExchangeError,
     FeeFillsIncompleteError,
@@ -57,6 +57,11 @@ from trading_bot.core.exceptions import (
 # positions automatically, because the line and the refusal are then keyed off
 # the same fact. Making it public is a `core/` decision and is not taken here.
 from trading_bot.core.portfolio import _TRUSTED_PROTECTION, held_exit, settle_exit
+from trading_bot.exchange.ids import (
+    OrderListLeg,
+    client_order_id,
+    parse_list_client_order_id,
+)
 from trading_bot.execution.bookability import (
     SETTLEMENT_RETRY_LIMIT,
     BookabilityOutcome,
@@ -74,9 +79,17 @@ from trading_bot.execution.booking_line import (
     quote_total_fields,
     settlement_fields,
 )
+from trading_bot.execution.dispatch_budget import CallBounds
 from trading_bot.execution.reconciliation import (
     reconcile_open_positions,
     resolve_unresolved_legs,
+)
+from trading_bot.execution.settlement import (
+    DEFAULT_RETRY,
+    SINGLE_ATTEMPT,
+    SettlementStatus,
+    base_asset_of,
+    settle_entry,
 )
 from trading_bot.utils.helpers import timeframe_to_ms, utc_now
 from trading_bot.utils.logger import get_logger
@@ -123,6 +136,25 @@ _EVENT_EXIT_UNBOOKABLE = "exit_unbookable"
 #: position is KEPT and the next pass retries -- up to ``SETTLEMENT_RETRY_LIMIT``
 #: failed passes (P-3b), then it is HELD; WARNING, like a refusal.
 _EVENT_SETTLEMENT_DEFERRED = "exit_settlement_deferred"
+#: M5o H1. A position that opened with its entry fills unread was settled on a later
+#: pass: INFO, with the failed attempts it took.
+_EVENT_ENTRY_SETTLED_LATE = "entry_settled_late"
+#: A reconciliation pass tried to read a pending entry's fills and could not. WARNING.
+_EVENT_ENTRY_RETRY_FAILED = "entry_settlement_retry_failed"
+#: The attempt ceiling was reached, so retrying stops. CRITICAL, once: the position is
+#: protected and trades on, with no cost basis, until an operator or a restart.
+_EVENT_ENTRY_ABANDONED = "entry_settlement_abandoned"
+_PHASE_ENTRY_SETTLEMENT = "entry_settlement"
+
+#: **The attempt ceiling for a pending entry: the executor's own attempts plus one per
+#: pass for ``SETTLEMENT_RETRY_LIMIT`` passes** (3 + 5 = 8), the exit settlement's
+#: bound reused and not a new number. At the ceiling the driver stops retrying and says
+#: so once at CRITICAL (M5o-051). The owner may overrule it (OR-4, section 11 reading 4).
+ENTRY_SETTLEMENT_ATTEMPT_LIMIT: Final = DEFAULT_RETRY.max_attempts + SETTLEMENT_RETRY_LIMIT
+
+#: What one entry-settlement attempt can cost in calls: the order read and the first
+#: page of its fills. A second page (an order of more than 1000 fills) is not counted.
+_ENTRY_SETTLEMENT_CALLS: Final = 2
 #: P-3b: the ONE CRITICAL a position's ``SETTLEMENT_RETRY_LIMIT``-th failed
 #: settlement pass emits, beside ``Position.hold_settlement()``. Its OWN event,
 #: not ``exit_settlement_held``: that one is the terminal-fee hold, fed by a
@@ -419,6 +451,18 @@ class ReconciliationDriver:
 
         self._report(reported, queries=remainder)
 
+        # M5o H1: A PENDING ENTRY SETTLEMENT IS RETRIED HERE, BEFORE BOOKING, so that a
+        # cost basis cured on this pass can book an exit that filled on the same pass
+        # (U13's chain, closed from the other end). It spends only what the pass left
+        # of its `max_calls`: the enumeration and the point queries came first, and an
+        # unknown point-query count (a failed resolver) leaves nothing to spend. So the
+        # coherence validator's `calls x T_recon` term is unchanged by construction.
+        spare = remainder - point_queries if point_queries is not None else 0
+        try:
+            await self._retry_entry_settlements(reported, spare=spare)
+        except Exception as exc:  # the driver must never raise; see the docstring
+            self._log_phase_failure(_PHASE_ENTRY_SETTLEMENT, candle, exc)
+
         # BOOKING RUNS AFTER RESOLUTION, and the ordering is forced by where an
         # `ExitFill` can come from. There are two fill sites: one inside
         # `classify_protection`, for a protective leg the enumeration still
@@ -444,6 +488,153 @@ class ReconciliationDriver:
                     point_queries=point_queries,
                     settlements=settlements,
                 )
+
+    async def _retry_entry_settlements(
+        self, results: Sequence[tuple[Position, ProtectionAssessment]], *, spare: int
+    ) -> None:
+        """Retry the entry settlement of every pending position this pass visited, within ``spare`` calls.
+
+        **ONE ATTEMPT PER POSITION PER PASS, NO WAIT**: the retry is the next pass, as the
+        reconciler's own reads are (`ReconciliationBudget`'s ``attempts = 1``). Positions
+        are taken in the order the pass already sorted them, oldest stamp first, and
+        each costs :data:`_ENTRY_SETTLEMENT_CALLS` of ``spare``; when the spare is
+        used up the rest wait for the next pass without counting an attempt.
+
+        **A HELD POSITION IS NOT VISITED** (ruling A) and one at
+        :data:`ENTRY_SETTLEMENT_ATTEMPT_LIMIT` is not retried. Persisted once at the
+        end if anything changed, through the ledger writer when a ledger exists.
+        """
+        spent = 0
+        changed = False
+        try:
+            for position, _assessment in results:
+                if spare - spent < _ENTRY_SETTLEMENT_CALLS:
+                    break
+                if (
+                    position.entry_settlement is not EntrySettlementState.PENDING_SETTLEMENT
+                    or position.settlement_hold
+                    or position.entry_settlement_attempts >= ENTRY_SETTLEMENT_ATTEMPT_LIMIT
+                    or self._portfolio.positions.get(position.symbol) is not position
+                ):
+                    continue
+                spent += _ENTRY_SETTLEMENT_CALLS
+                await self._retry_one_entry(position)
+                changed = True
+        finally:
+            if changed:
+                self._persist_state()
+
+    async def _retry_one_entry(self, position: Position) -> None:
+        """One attempt to read one pending entry's fills; settle it, or count the failure."""
+        quote_asset = self._portfolio.quote_asset
+        parts = (
+            None
+            if position.order_list_id is None
+            else parse_list_client_order_id(position.order_list_id)
+        )
+        failure: str
+        try:
+            outcome = await settle_entry(
+                self._client,
+                position.symbol,
+                client_order_id=client_order_id(
+                    position.symbol,
+                    position.entry_bar_time,
+                    OrderListLeg.WORKING,
+                    generation=0 if parts is None else parts.generation,
+                ),
+                base_asset=base_asset_of(position.symbol, quote_asset),
+                quote_asset=quote_asset,
+                bounds=lambda: CallBounds(
+                    timeout_s=self._budget.timeout_s, attempts=self._budget.attempts
+                ),
+                policy=SINGLE_ATTEMPT,
+            )
+            if outcome.status is SettlementStatus.SETTLED and outcome.settlement is not None:
+                settlement = outcome.settlement
+                self._portfolio.complete_entry_settlement(position.symbol, settlement)
+                _log.info(
+                    "Entry settlement completed on a later pass",
+                    extra={
+                        "event": _EVENT_ENTRY_SETTLED_LATE,
+                        "symbol": position.symbol,
+                        "order_id": settlement.order_id,
+                        "quantity": settlement.quantity,
+                        "quote_total": settlement.quote_quantity,
+                        "price": settlement.price,
+                        "fill_count": settlement.fill_count,
+                        "failed_attempts": position.entry_settlement_attempts,
+                        "fees": ",".join(f"{fee.asset}={fee.amount}" for fee in settlement.fees),
+                    },
+                )
+                return
+            failure = (
+                outcome.failure
+                if outcome.failure is not None
+                else "the venue reports the entry order executed nothing"
+            )
+            counted = max(outcome.attempts, 1)
+        except ValueError as exc:
+            # The base asset of an odd symbol, or a settlement the ledger refused (a
+            # quantity that is not the position's): an anomaly counted as a failed
+            # attempt and reported, never raised out of the pass.
+            failure = f"{type(exc).__name__}: {exc}"
+            counted = 1
+
+        before = position.entry_settlement_attempts
+        position.entry_settlement_attempts = before + counted
+        _log.warning(
+            "Entry settlement is still pending",
+            extra={
+                "event": _EVENT_ENTRY_RETRY_FAILED,
+                "symbol": position.symbol,
+                "failed_attempts": position.entry_settlement_attempts,
+                "limit": ENTRY_SETTLEMENT_ATTEMPT_LIMIT,
+                "failure": failure,
+            },
+        )
+        if before < ENTRY_SETTLEMENT_ATTEMPT_LIMIT <= position.entry_settlement_attempts:
+            _log.critical(
+                "%s's entry settlement is abandoned after %d failed attempts; the position "
+                "stays protected and trades with NO COST BASIS, and a close will drop "
+                "unbooked (U13)",
+                position.symbol,
+                position.entry_settlement_attempts,
+                extra={
+                    "event": _EVENT_ENTRY_ABANDONED,
+                    "symbol": position.symbol,
+                    "failed_attempts": position.entry_settlement_attempts,
+                    "limit": ENTRY_SETTLEMENT_ATTEMPT_LIMIT,
+                    "failure": failure,
+                    "resolution": (
+                        "OPERATOR: read the entry order's fills at the venue; a restart "
+                        "re-reads the entry order at boot and may restore a cost basis."
+                    ),
+                },
+            )
+
+    def _persist_state(self) -> None:
+        """Write the open positions' records after a settlement state change. Never raises.
+
+        Through the ledger writer, which needs a ledger: with none accrued yet there is
+        nothing to hand it, and the change reaches disk at the next save of any kind.
+        A stale ``pending_settlement`` on disk is the CONSERVATIVE direction, and the
+        boot's own read of the entry order cures it (``M5o-050``).
+        """
+        ledger = self._portfolio.ledger
+        if self._persist_ledger is None or ledger is None:
+            return
+        try:
+            self._persist_ledger(ledger)
+        except Exception as exc:
+            _log.error(
+                "A settlement state change could not be persisted",
+                extra={
+                    "event": _EVENT_LEDGER_UNWRITABLE,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                },
+            )
 
     def _report(
         self,
