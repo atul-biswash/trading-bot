@@ -13,6 +13,27 @@ the owner's to confirm, and `R-DU` (S4 test C selects M5n's path; **branch 1 app
 `R-DT`, and `R-DX`, `R-DY`, `R-DZ` and `R-DT-3b` are recorded in it **on branch `m5n`** (P140 to P149), not on `main`: `main` holds
 the draft as amended at P139. Nothing in M5n starts the live engine, edits an S4 file or lifts the live block.
 
+> **ANNOTATED AT M5n P157: N0 IS RECORDED, N7 HAS RUN, AND ITS VERDICT IS FAIL.** Three statements above are no longer current,
+> and each was true of the state it described. *"recorded in it **on branch `m5n`** (P140 to P149), not on `main`"* has been false
+> since the merge at P154: the charter is on `main`. *"`STATUS: DRAFT, until M5m closes`"* is the charter's own header, unchanged
+> here. And the paragraph says nothing of N0 or N7, which have since happened. **N0** is recorded in `docs/M5N_CHARTER_DRAFT.md`
+> section 28 (`29ef8f1`): the line names `ddf3593`, R-DT clause 3 ends, the re-freeze window is closed, and the guard accepts on HEAD.
+> **N7** ran once: result file SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`, exit 0, 1,350 s
+> (`docs/RUN_LEDGER_M5N.md` sections 110 and 111). **The outcome: FAIL at N7.** Over `[2018-03-05, 2024-01-01)` at fee 0.10 percent
+> and stop slippage 1.20 percent no candidate passes the floor, the bootstrap bound and the deflated Sharpe: C1 passes the first two
+> and fails the DSR (0.5692 against 0.95); C3 is excluded at 12 trades against 30; C2, C4, C5 and C6 fail the bootstrap and the DSR.
+> No candidate is selected and the reserved window `[2024-01-01, 2026-10-01)` stays unread by every M5n candidate (N8 does not run on
+> these six). The six candidates' in-sample results are in `docs/research/LOG.md` Entry 8, which discharges Entry 7's carried residual.
+> **What survives:** the live block (every commission in every capture is still zero, base-quantity netting unbuilt), N = 6 as the
+> denominator, and the owner's decision on what M5n does after a FAIL, which this record does not take.
+>
+> **CARRIED, TESTS-ONLY (`M5n-274`, MEASURED at P156).** `tests/unit/test_s6_rehearsal.py` and `tests/unit/test_worktree_survey.py`
+> start git repositories without setting `core.fsmonitor=false`, and 18 stray `git fsmonitor--daemon` processes (about 143 MB of
+> working set) had accumulated by P156; two more were found and stopped at P157. That those two files are the source is REASONED,
+> not measured. The fix is a test-side environment or `-c core.fsmonitor=false` on the fixtures' git calls, touches no `src/` or
+> script, and is outside every M5n prompt so far. *Arming condition:* **whoever next edits `tests/unit/test_s6_rehearsal.py` or
+> `tests/unit/test_worktree_survey.py`**, or whoever next finds a stray `git fsmonitor--daemon` before a survey or a run.
+
 ## M5m's CLOSE -- the outcome, what resolved, and the register of everything still open
 
 **M5m outcome, recorded verbatim in `docs/PHASE_HISTORY.md` as the M5m entry:** *"M5m outcome. The shipped 1m SMA-crossover strategy
@@ -2131,6 +2152,11 @@ than twenty days.
 > three-line shape of the split, the candidates and the research log.
 
 > **ANNOTATED AT M5n P155: THE ARMING CONDITION ABOVE FIRED, AND *"which this commit does not fire (it registers nothing)"* IS SCOPED TO P113.** M5n's six candidates register with `@register_strategy` in `strategies/m5n/`, in the commits that arrived with the merge `12d9a33`; they join the registry only when `trading_bot.strategies.m5n` is imported, which only the N3, N4 and N7 scripts do. The condition's requirement is S6's own two bullets: a new strategy is a registry entry with its own tests, and every variant tried is recorded, with its parameters and in-sample result, in a research log under `docs/`. `docs/research/LOG.md` Entry 7 (`5dfc1ab`) meets it as far as today allows: six variants, R-DY's parameters, and their in-sample results as counts, since no return exists yet. **Carried, not met:** when N7 computes the six in-sample results they are added to that log as an Entry 8, a docs record and not code (`M5n-252`). **What survives:** the condition for the next registration of a strategy outside these six.
+
+> **ANNOTATED AT M5n P157: *"Carried, not met"* IS MET.** `docs/research/LOG.md` Entry 8 holds the six in-sample results beside their
+> parameters, rendered from N7's result file (SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679`), so the
+> residual Entry 7 carried is discharged and `M5n-252` is closed. **What survives:** the condition for the next registration of a
+> strategy outside these six, unchanged.
 
 **S7. The decision gate.** A candidate PASSES only if, **out of sample and net of fees and
 S2's stop slippage**, all of these hold:
