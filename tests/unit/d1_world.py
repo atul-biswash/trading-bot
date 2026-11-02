@@ -98,15 +98,22 @@ def build_minutes(
     omit: frozenset[int] = frozenset(),
     decision: str | None = None,
     omit_decisions: frozenset[int] = frozenset(),
+    also_decisions: Sequence[str] = (),
 ) -> HistoricalStore:
     """Store ``count`` minutes of ``symbol``'s 1m series under ``root``, and a decision series
-    aggregated from them when ``decision`` is ``"4h"`` or ``"1d"``; return the store."""
+    aggregated from them when ``decision`` is ``"4h"`` or ``"1d"``; return the store.
+
+    ``also_decisions`` names further series stored whole beside it, aggregated the same way, so a 4h
+    world can hold the 1d archive the buy-and-hold context reads. ``omit_decisions`` applies to
+    ``decision`` only."""
     named = dict(minutes or {})
     rows = {index: named.get(index, flat(base)) for index in range(count) if index not in omit}
     _ingest(root, symbol, "1m", rows)
     if decision is not None:
         bars = _aggregate(rows, STEP_MINUTES[decision])
         _ingest(root, symbol, decision, {s: r for s, r in bars.items() if s not in omit_decisions})
+    for extra in also_decisions:
+        _ingest(root, symbol, extra, _aggregate(rows, STEP_MINUTES[extra]))
     return HistoricalStore(root)
 
 
