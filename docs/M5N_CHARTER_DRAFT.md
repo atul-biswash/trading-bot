@@ -1,8 +1,10 @@
 # M5n charter: volatility-scaled trend and breakout research on 4h and 1d bars
 
-**STATUS: DRAFT, until M5m closes.** Written at P138, with HEAD at `8c3bc5c`, while S4 is still running. Nothing in it was a ruling except the text quoted in section 1, until P139 recorded the rulings of sections 3 and 11 and adopted R-DT (section 12); everything else is the executing session's proposal, marked PROPOSED, REASONED, UNMEASURED or OWNER where it is the owner's to fill. It edits no other file: not `docs/research/PROTOCOL.md`, not `docs/NEXT_MILESTONE.md`, no frozen S4 file and no code, and it reads no bar in `[2024-01-01, 2026-10-01)`. When M5m closes, the owner either ratifies this file (the DRAFT line is then replaced by a ruling and a date, in a commit of its own) or supersedes it.
+**STATUS: DRAFT LIFTED at P154, 2026-11-02** (M5m has closed: the annotated tag `milestone/M5m` resolves to `a31c81b`, its closing commit; the marker read *DRAFT, until M5m closes*, and section 25 records the lift). Written at P138, with HEAD at `8c3bc5c`, while S4 is still running. Nothing in it was a ruling except the text quoted in section 1, until P139 recorded the rulings of sections 3 and 11 and adopted R-DT (section 12); everything else is the executing session's proposal, marked PROPOSED, REASONED, UNMEASURED or OWNER where it is the owner's to fill. It edits no other file: not `docs/research/PROTOCOL.md`, not `docs/NEXT_MILESTONE.md`, no frozen S4 file and no code, and it reads no bar in `[2024-01-01, 2026-10-01)`. When M5m closes, the owner either ratifies this file (the DRAFT line is then replaced by a ruling and a date, in a commit of its own) or supersedes it.
 
 **Amended at P139 (HEAD `543d379`).** The owner ruled D1 to D4 and the two open points of section 11 and adopted R-DT; sections 3, 11 and 12 record them. Sections 5, 7 and 13, the ordering note after the item table and the item table's N1, N2, N4, N5, N6 and N9 rows are corrected in place where those rulings made their text false, and each correction is listed in the commit message. **The DRAFT marker stays until M5m closes.**
+
+**Amended at P154 on `main` (HEAD `12d9a33`, the merge of `m5n`).** The DRAFT marker is lifted, citing the tag `milestone/M5m`. Section 25 records R-DU as applied (S4 test C passed, so branch (1) holds), R-EE (the M5n ledger sections 74 to 106 live in `docs/RUN_LEDGER_M5N.md`) and U12 as a REASONED prerequisite for N9's live path. The section 5 note displaced by R-DU and the sentence in section 23 about `tag_missing` are annotated in place. **No `N0 complete` line is written: the re-freezes are still due (P155).**
 
 **Amended at P149 on branch `m5n` (HEAD `b7d6407`).** Section 22 records the survey practice, the fee telemetry definitions and the N0 guard verbatim, with the executing session's readings of each marked as the owner's to overrule. The old section 22 is section 24, and the new section 23 records the three frozen digests of the guard's condition (c).
 
@@ -95,6 +97,8 @@ S4 compares the backtester against what the live bot booked over `[W, M)`. M5n r
 The owner decision of section 1 already says to continue into M5n. These branches say what continuing means under each result, not whether to continue.
 
 **Displaced at P141 by R-DU (section 14).** The table above is the P138 proposal and is not the ruling: R-DU keys M5n's path to S4 test C (at least 80% of live entries reproduced) and gives its three branches in its own words, and where the table and R-DU differ, R-DU governs.
+
+> **ANNOTATED AT P154: THE S4 RESULT EXISTS AND R-DU BRANCH (1) APPLIES.** Test C passed (270 of 271 live entries reproduced, 99.63 percent), so the branch is the one R-DU names and not a row of the table above (section 25). **What survives:** the table as the P138 proposal it was.
 
 ## 6. Fee telemetry definitions
 
@@ -377,6 +381,30 @@ N7 frozen digest scripts/n7_evaluate.py 1f307de67f5aebd7af39a3d8fb5cd22a78d9fa67
 
 The estimator module is `05678b6`'s (after `58ad896`), the runner is `57588ee`'s, and the survey of both (ledger sections 105 and 106) is run on exactly these bytes, so a change the survey prompts is an amendment too. **No `N0 complete` line exists in this file**, so the guard still refuses at `tag_missing` on this tree, which is the correct state until N0 records the S4 result and the tag `milestone/M5m` exists.
 
+> **ANNOTATED AT P154: *"the guard still refuses at `tag_missing` on this tree"* IS NO LONGER TRUE.** The tag `milestone/M5m` exists and resolves to `a31c81b`. The guard's order in `check_n0_guard` is charter readable, then the tag, then the `N0 complete` line, so on this tree it now refuses at `n0_line_missing` (REASONED from that order; the guard was not run). **What survives:** the three digests above and the rule that the guard compares nothing else; and *"the correct state until N0 records the S4 result"*, which the missing line still is.
+
 ## 24. What this draft does not do
 
 It reads no bar in the reserved window and no 1m bar at all; it makes no venue call and runs no backtest; it fixes no number that a measurement should fix; it does not decide S4; and it does not touch the live-trading block. Its estimate of power is arithmetic, and the first thing done with it, after N0 records the S4 result, is to check it against the data.
+
+## 25. Lifted at P154: the DRAFT marker, R-DU applied, R-EE and U12
+
+Recorded on `main` after the merge of `m5n` (merge commit `12d9a33`), at P154, on 2026-11-02 by the machine's clock. The rulings below are the owner's P154 text, quoted; the readings after them are the executing session's and marked.
+
+**1. The DRAFT marker is lifted.** The marker read "DRAFT, until M5m closes." M5m closed at P153, and the annotated tag `milestone/M5m` resolves to `a31c81b`, its closing commit (`git rev-parse "milestone/M5m^{commit}"`). The tag is a ref and is not pushed. The header's note that the owner "either ratifies this file (the DRAFT line is then replaced by a ruling and a date, in a commit of its own) or supersedes it" is met by this commit: the P154 instruction is the ruling, and nothing here supersedes any section.
+
+**2. R-DU applied**, in the owner's words:
+
+> R-DU applied: S4 test C PASS (270 of 271, 99.63 percent; NEXT_MILESTONE S4 result at ddf3593), so branch (1) applies: N7 and N8 may proceed; A PASS and B FAIL (latch-caused) are recorded and do not gate M5n.
+
+*Reading (REASONED).* "May proceed" is permission and not completion: N7 stays behind the N0 guard (section 22), and N8 behind its own section 8 conditions. The figures are MEASURED where `docs/NEXT_MILESTONE.md` at `ddf3593` records them: A PASS, B FAIL (latch-caused, 321 against 271), C PASS, with E1 and E2 beside them as figures only.
+
+**3. R-EE**, in the owner's words:
+
+> R-EE  This file holds the M5n ledger sections written on branch m5n (ee8d485..2c32af0), with their original numbers. Any reference to 'RUN_LEDGER section N' in a commit of ee8d485..m5n, or in an M5n document (docs/M5N_CHARTER_DRAFT.md, docs/M5N_PREREGISTRATION.md), means section N of this file. docs/RUN_LEDGER.md keeps main's sections. Ruled at the M5n merge because both branches numbered sections 74 to 82; the pre-registration's text and digest are unchanged.
+
+*Where it is carried out (MEASURED).* `docs/RUN_LEDGER_M5N.md` holds sections 74 to 106 (33 sections), byte-exact from `m5n` at `2c32af0`, under that header; `docs/RUN_LEDGER.md` is `main`'s file, byte-identical to its blob at `a31c81b`. So every "section 74" to "section 82" in this charter and in the pre-registration means the M5n file's, and a citation of section 83 or later can be only the M5n file's.
+
+**4. U12 is a REASONED prerequisite for N9's live path**, under the gap guard and R-DZ. The grounds are `docs/NEXT_MILESTONE.md`'s U12 row and `M5m-772` to `M5m-787`: the gap guard refuses a `BUY` while the strategy's window spans a hole and the buffer never backfills, so on a 4h or 1d series one missed bar refuses entries for as many bars as the window is long; R-DZ (section 15) makes the same demand of the backtest by yielding no value for a window holding a missing decision bar. **This is a prerequisite for any live path N9 describes, not for N9's note**, which is design only (section 10), and the note marks the claim REASONED: no 4h or 1d live path has run, and the S4 feed holes it rests on were measured on the 1m series (`M5m-762`). U12 stays DEFERRED and unbuilt; nothing here schedules it.
+
+**5. What this commit does not do.** It writes no `N0 complete` line, because the re-freezes are still due (P155); the N7 guard therefore still refuses, now at `n0_line_missing` (section 23's annotation). It edits no frozen file and no code, and it does not touch `docs/research/PROTOCOL.md`: amendment 4 is drafted for review and uncommitted.
