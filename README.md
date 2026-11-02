@@ -355,8 +355,9 @@ so keys in `.env` are enough — they need not be exported.
 | `docs/QB_ESCALATION.md` | What `CRITICAL` does, its binding sites, and which can clear on their own | Handling failure paths |
 | `docs/M5_NUMBERS.md` | The safety numbers, each with its cost-if-wrong and its measurement status | Choosing or changing a threshold |
 | `docs/RUN_LEDGER.md` | Append-only observation log: every run, capture and census, each figure with its command and the digest of what it was read from | Asking "what did the bot actually do?" |
+| `docs/RUN_LEDGER_M5N.md` | The M5n ledger sections 74 to 106 written on branch `m5n` (R-EE), kept in a file of their own because both branches numbered sections 74 to 82; a "RUN_LEDGER section N" in an M5n document means this file's | Reading M5n's runs |
 | `docs/S4_PREREGISTRATION.md`, `docs/S4_CORRECTION_*.md`, `docs/S4_STOP_RUNBOOK.md` | The live-versus-backtest comparison on Testnet: what was fixed before it ran, the rulings after it started, and how it was stopped | Reading or repeating S4 |
-| `docs/research/` | The research protocol, its log, the S6 selection and the S7 null check | Before any backtest of a candidate |
+| `docs/research/` | The research protocol (amendment 4: M5n's one read is bound by the N8 runner, not the S6 guard), its log, the S6 selection and the S7 null check. Log Entry 7 records M5n's six registered candidates, which met the S6 `register_strategy` condition in part: their in-sample results are added as Entry 8 when N7 computes them | Before any backtest of a candidate |
 | `docs/M5N_CHARTER_DRAFT.md` | The charter of the next milestone, M5n: volatility-scaled trend and breakout research on 4h and 1d bars | Starting M5n |
 | `PROJECT_KNOWLEDGE.md` | Orientation for a reviewer with no repository access | Reviewing from outside |
 
@@ -412,7 +413,7 @@ src/trading_bot/
                  · bookability · booking_line · restoration · order_manager†
   backtesting/   engine · portfolio† · metrics · exchange_info · replay · fill_model
                  · simulated_executor · regimes · evidence · candidate · overrides · protocol
-                 · selection · gate · readmark · d1_trail · d1_executor · d1_risk
+                 · selection · gate · readmark · d1_trail · d1_executor · d1_risk · sharpe_stats
   paper/         simulator†
   persistence/   store · database† · models†
   notifications/ base† · telegram†
@@ -429,7 +430,7 @@ scripts/         check.py (the gate) · check_testnet.py · download_data.py
                  · record_testnet_klines.py (+ recorder_task.xml)
                  · n2_archive_check.py · n2_verify_bars.py · n3_entry_counts.py · n4_trade_counts.py
                  · s4_compare.py · s4_daily.py · s4_explore.py · s4_latch_compare.py · s4_wick_annotate.py · s5_report.py · s6_mark_read.py · s6_rehearsal.py · s6_select.py · s6_sweep.py
-                 · s7_gate.py · s7_null.py · store_check.py
+                 · s7_gate.py · s7_null.py · store_check.py · n7_evaluate.py
 tests/           unit/ · integration/
 ```
 
