@@ -474,7 +474,11 @@ async def test_the_page_cap_returns_a_short_list_and_the_derivation_refuses_it()
     )
 
     assert len(fills) == 6
-    with pytest.raises(EntryFillsIncompleteError, match=r"0\.01800000 against 0\.02000000"):
+    # BOTH refusal types are accepted by the `raises` and the TYPE is asserted after, so a
+    # derivation that refuses with the WRONG error fails as an assertion on the wrong value
+    # and not as a crash: under a cursor that repeats a fill the survey's q08 saw the
+    # inconsistent-error escape an `EntryFillsIncompleteError`-only `raises` (`M5o-063`).
+    with pytest.raises((EntryFillsIncompleteError, EntryFillsInconsistentError)) as raised:
         derive_entry_settlement(
             fills,
             order_id=ORDER_ID,
@@ -482,6 +486,8 @@ async def test_the_page_cap_returns_a_short_list_and_the_derivation_refuses_it()
             base_asset="BTC",
             quote_asset="USDT",
         )
+    assert type(raised.value) is EntryFillsIncompleteError
+    assert "0.01800000 against 0.02000000" in str(raised.value)
 
 
 async def test_paged_fills_settle_end_to_end() -> None:
