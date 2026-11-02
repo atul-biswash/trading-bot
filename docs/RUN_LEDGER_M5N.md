@@ -5016,3 +5016,83 @@ Three things are NOT tested by N7's in-sample figures and are named so they are 
 ### 6. The findings this section carries
 
 See the commit message.
+
+## 112. M5n P158: the closing rotation's read-only measurements -- the cumulative trial ledger, the findings checks, the gate and the arming trace (P158 R2)
+
+An observation log, so this section only adds; a citation names its file (R-EG). Read-only throughout: no venue call (the gate ran with both Testnet credential slots set empty in its environment, so the three credential-gated integration tests skipped), no recorded bar read, no run directory opened, nothing under any deploy or backtest clone. **No prediction was written before these measurements.** They are routine rotation checks whose expected values were the documented figures, and this section says so and scores nothing, rather than inventing a prediction after the fact.
+
+### 1. Halts, checked first
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not `041c604` | `git branch --show-current`, `git status --porcelain`, `git rev-parse --short HEAD` | `main`, empty, `041c604` |
+| a frozen M5n file differs from its digest | SHA-256 of the three files against the charter's section 23 | equal: `docs/M5N_PREREGISTRATION.md` `e6187480...d45e`, `src/trading_bot/backtesting/sharpe_stats.py` `2b55991c...dda82`, `scripts/n7_evaluate.py` `1f307de6...dcfff` |
+| a frozen S4 file differs from its digest | SHA-256 of the files `docs/S4_PREREGISTRATION.md` section 9 and section 10 name | equal: `scripts/s4_compare.py` `b8afa603...af08`, `scripts/trade_census.py` `926bdd46...d9bb`, `config.yaml` `f9e0d737...82a0`, `config.s4.yaml` `0f170bae...2594`, `docs/REGIME_LABELS.json` `6f78922b...0e72`, and the two Testnet `exchangeInfo` snapshots `40e24c66...dc7` and `87e5095e...77cc` (these are metadata files, not bars) |
+| CLAUDE.md's rotation procedure conflicts with a step | read side by side | no conflict. The prompt's steps omit `CLAUDE.md` and `README.md`, which the procedure's step 2 couples to the rotation; they are added as a commit of their own, and the PHASE_HISTORY entry is written last |
+| a command calls the venue or reads recorded bars | every command in this section | none. `check_findings.py` and `check_arming_conditions.py` read git and documents; the gate's unit tests are hermetic and its integration tests skipped |
+
+### 2. The cumulative trial ledger (step 1), by source
+
+Window convention: "in sample" is `[2017-08-17, 2024-01-01)` for every source except M5n's, which starts at `2018-03-05`; the reserved window is `[2024-01-01, 2026-10-01)`. Every source below runs BTCUSDT and ETHUSDT jointly (S5 on 1m and 5m, the rest on one timeframe per variant). Counts are read from the committed records named in the last column. They are DECLARED configurations, not independent trials: no effective number of trials is estimated here.
+
+| # | Source | What was evaluated | Configurations added | Reads of the reserved window | Recorded in |
+|---|---|---|---|---|---|
+| 1 | **S5's baseline** (P113 to P116) | the committed `config.yaml` as it stands: `sma_crossover` 20/50, BTCUSDT 1m and ETHUSDT 5m, at stop slippage 0.05, 0.66 and 1.20 percent (three runs) | **1** (not among the 216: its timeframes are not in the grid) | **all of it, by design** (window `[2017-08-17, 2026-10-01)`, class `straddling`) | `docs/research/LOG.md` Entries 1 to 3; `docs/RUN_LEDGER.md` section 50 |
+| 2 | **S6's sweep** (P120, P121) | all 216 declared variants (54 `sma_crossover` + 162 `rsi`; 1h, 4h, 1d; trend filter off and on) run in sample at the 1.20 percent arm: 216 sealed evidence-eligible records, one per variant; two variants carry a second run directory with an equal trade-log digest, counted once | **216** | none (all 218 sealed run directories are in-sample point runs) | PROTOCOL.md section 5; `docs/research/LOG.md` Entry 6; `docs/RUN_LEDGER.md` sections 54 and 56; `docs/research/selection.jsonl` SHA-256 `586fcfd6f30e844290c547742c56110ad37654b020e22c7f11a2a4cd02fbad89` |
+| 3 | **S6's selected candidates** and the walk-forward report | 6 of 12 cells had an eligible point: `sma_crossover` 1h off and on, `sma_crossover` 4h off, `rsi` 1h off and on, `rsi` 4h off; the four anchored folds 2020 to 2023 re-select inside the same in-sample records | **0** (the 6 are members of the 216) | none | `docs/research/LOG.md` Entry 6 |
+| 4 | **The M5m rehearsal** (P118, P119) | 2 variants (`sma_crossover` 4h, 10/50, filter off and on), both among the 216, in narrowed protocols: 9 invocations in `docs/RUN_LEDGER.md` section 52 (runs 1 to 6, the quarter scan, `final1`, `final2`) and 1 in section 53 (`p119-final`), over many windows; the quarter scan covers 28 single quarters, 2018 Q1 to 2024 Q4 | **0** (members of the 216) | **yes, for those two variants**: `2024-01-01` to `2025-04-01` (`M5m-447`); the figures were seen by the implementing assistant | `docs/research/LOG.md` Entry 5; `docs/RUN_LEDGER.md` sections 52 and 53 |
+| 5 | **The M5m smoke backtests** (P106 C6, P107 C7) | S5's baseline configuration again, BTCUSDT 1m and ETHUSDT 5m, `2024-03-01` to `2024-04-01`: two runs in section 32 and one in section 35, authorised by R-AE | **0** (the same configuration as row 1) | **yes: `2024-03-01` to `2024-04-01`** | `docs/RUN_LEDGER.md` sections 32 and 35 |
+| 6 | **M5n's six candidates at N7** (P157) | C1 `donchian_1d_20`, C2 `donchian_1d_55`, C3 `sma_cross_1d_50_200`, C4 `donchian_4h_20`, C5 `keltner_4h_20_2`, C6 `tsmom_1d_90`, in sample over `[2018-03-05, 2024-01-01)` at fee 0.10 and stop slippage 1.20 percent, once; the three sensitivities (fee 0.075, slippage 0.66, slippage 0.10) are the same six at other costs | **6** (none among the 216: LOG Entry 7) | none | `docs/RUN_LEDGER_M5N.md` section 111; `docs/research/LOG.md` Entries 7 and 8; result file SHA-256 `c64b98bca78f9c1bd32c4bc80390e0914eab2fb0a34e28655eaf3a42928fb679` |
+| 7 | **M5n's counts-only runs** (N3, N4b, N5, P146) | the same six candidates, counts only, no price, return or equity printed or stored | **0** | none | `docs/RUN_LEDGER_M5N.md` sections 83, 90, 94 and 98; `docs/RUN_LEDGER.md` section 83 (the audit) |
+| | **Distinct configurations evaluated in sample with a performance figure** | rows 1, 2 and 6 | **223 = 1 + 216 + 6** | | |
+
+**What the table leaves out, and why.** S4's live run and its backtest comparison (`config.yaml`'s `sma_crossover` 20/50 on 1m and 5m, window `[2026-10-11, 2026-11-01)`) lie after the reserved window and are a calibration of the backtester, not a configuration search. The S7 null check (`docs/research/s7_null.txt`) is computed from the six S6 candidates' own trades and adds no configuration. The one-day smoke backtest of `config.s4.yaml` on 2026-10-08 (`docs/RUN_LEDGER.md` section 40) is the same configuration as row 1, after the reserved window. Anything before M5m opened (M5k's and M5l's runs) is not a backtest of a configuration.
+
+**What N7's deflation counted, and what a future one must.** N7's deflated Sharpe ratio used N = 6, as the pre-registration fixes, and that is a record of what N7 computed. The owner's closing record (2) carries the ledger above forward: any future research deflation counts 223 declared configurations, not 6. REASONED, and not computed here: the expected best Sharpe under no skill rises with the number of trials, so with the variance of the trial Sharpe ratios held fixed (which a real recomputation over 223 configurations would not hold) a larger N can only make the deflated Sharpe ratio smaller, and C1's 0.5692 against 0.95 at N = 6 would not be raised by it. No deflated Sharpe ratio at N = 223 was computed, and none is claimed.
+
+**A gap in a list this ledger rests on (pre-existing, reported and not edited).** Row 5 reads the reserved window and is named in none of: `docs/M5N_CHARTER_DRAFT.md` section 26 point 3 (R-EF's "prior reads", which names S5's baseline and the rehearsal and quarter scan), the table in section 2 of `docs/RUN_LEDGER.md` section 83, or `docs/research/LOG.md` Entry 6's "unread for every variant except two cases" (which lists the rehearsal's two variants and S5's baseline). It adds no configuration, because it is S5's baseline, and it does not change the conclusion that no M5n candidate family was read on the window. What it changes is the count of prior reads: those lists name S5's baseline, the rehearsal and the quarter scan, and the ledger finds one more family of reads, the three smoke runs. This commit did not make those texts false; it declares the gap.
+
+### 3. The findings checks (step 4), as `scripts/check_findings.py` printed them
+
+| Command | Range | Result |
+|---|---|---|
+| `.venv/Scripts/python.exe scripts/check_findings.py "ee8d485..HEAD" M5n` | resolved `ee8d48578e616c3d26375062745b4cacc1269f3f` to `041c6047c122a1a217d6345ce77e36c19051890c`, 136 commits | **declared 290, distinct 290, max 290, no duplicate, no gap, no cited-not-declared, no blockless commit; exit 0** |
+| `.venv/Scripts/python.exe scripts/check_findings.py "milestone/M5m..HEAD" M5n` | `a31c81b` to `041c604`, 114 commits | the same: 290 declared, gapless, exit 0 |
+| `.venv/Scripts/python.exe scripts/check_findings.py "milestone/M5l..HEAD" M5m` | resolved `9f6d359b7c6ebd0b7642a22091debfeaeac4ea92` to `041c6047c122a1a217d6345ce77e36c19051890c`, 298 commits | **declared 787, distinct 787, max 787, no duplicate, no gap, no cited-not-declared; blockless `934eb45`; exit 1** |
+
+The M5m exit 1 is the known state and not a defect: `934eb45` is the owner's merge, which `CLAUDE.md` records as the one M5m commit carrying no block (*"every commit but the owner's merge `934eb45`"*). The two M5n ranges differ in size because `ee8d485` is the M5n charter's first commit, 22 commits before the `milestone/M5m` tag; the 22 declare no M5n finding, and all 290 M5n declarations are in the 114 after the tag. The counts here are at `041c604`; this rotation's own commits declare `M5n-291` onward and the closing counts are in the PHASE_HISTORY entry.
+
+### 4. The bare gate (step 4)
+
+`CHECK_ALLOW_PIPE` was not set. The command, from the repository root at HEAD `041c604` with the tracked tree clean at its start (the charter edit of R1 was uncommitted while it ran; it is documents only and touches no file a test reads as an input):
+
+`BINANCE_TESTNET_API_KEY= BINANCE_TESTNET_API_SECRET= .venv/Scripts/python.exe scripts/check.py > gate_p158.txt 2>&1`
+
+Both credential slots were set empty in the process environment, which overrides `.env` in `Secrets()`, so `has_credentials()` was false and no Testnet call was possible. Output in the scratchpad, 9,324 bytes, SHA-256 `6a39c5922f22ee73bf6d6cd9f4592c7b35f348993021323a583aea173735bc35`; exit code 0; 347.6 s.
+
+| Step | Reported |
+|---|---|
+| `ruff check src tests scripts` | All checks passed! |
+| `ruff format --check src tests scripts` | 272 files already formatted |
+| `mypy` | Success: no issues found in 135 source files |
+| `pytest` | **5516 passed, 4 skipped, 3 warnings in 334.08 s** |
+
+These are the documented uncredentialed figures, so the rotation moves no gate count. The four skips are the three credential-gated integration tests and `tests/unit/test_logger.py`'s POSIX-only `tzset` case, as `CLAUDE.md` says. **The credentialed figure, 5519 passed and 1 skipped, was not re-measured: doing so would call the venue, which the prompt's halt forbids.** It stays the documented P156 figure, DERIVED here as the 5516 plus the three tests that move from skipped to passed.
+
+**Stray daemons.** `CLAUDE.md`'s harness note and `M5n-274` say the test suite leaves `git fsmonitor--daemon` processes. After this gate ten were running (eight started inside the gate's window, `22:29:24` to `22:31:14` local time, two earlier), because the system `gitconfig` enables `core.fsmonitor`. They were listed by command line (`git fsmonitor--daemon run --detach --ipc-threads=8`), stopped, and counted at zero. This is one more observation for `M5n-274`, whose fix stays outside this rotation.
+
+### 5. The arming conditions, read against what M5n changed (step 3 of the procedure)
+
+`scripts/check_arming_conditions.py docs/NEXT_MILESTONE.md` found 57 candidates, 56 parsed and 1 unparsed (exit 1, which is the tool failing closed): the unparsed one is Q-C section 3's *"whoever amends Q-C section 3's leg set"*, accepted as such by ruling, and M5n amended no leg set. `git diff --name-only milestone/M5m..HEAD` lists 53 files; matching them against the 56 parsed conditions' file symbols fires three, and the trace of each is:
+
+| Condition | M5n file | Reading |
+|---|---|---|
+| line 34, `tests/unit/test_worktree_survey.py` (`M5n-274`) | the file was created at P156, before the condition was written at P157 | not fired: no edit followed the condition. REAFFIRMED |
+| *"whoever next edits the fill model in `backtesting/engine.py`"* | `src/trading_bot/backtesting/engine.py`, +48 lines | not fired: the diff adds `uses_d1_executor` and the D1 executor and risk-manager choice in `backtest_system`; the fill model is `backtesting/fill_model.py`, unchanged. REAFFIRMED |
+| *"whoever next makes an out-of-sample read of the reserved window, or edits `docs/research/PROTOCOL.md`"* (`M5m-510`) | `docs/research/PROTOCOL.md`, amendment 4 | fired at P155 and answered by the owner's ruling *"step 6 is AMENDED"*, recorded in the charter's section 26 and struck in `docs/NEXT_MILESTONE.md` |
+
+A fourth, U6's executor-port condition (line 3478), names `backtesting/engine.py` and is struck (U6 was resolved at M5m P105), so it is not live. The `register_strategy` condition names `strategies/registry.py`, which no M5n commit changed; LOG Entry 8 met its carried part and it is REAFFIRMED for the next registration outside these six.
+
+### 6. The findings this section carries
+
+See the commit message.
