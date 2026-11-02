@@ -2472,7 +2472,16 @@ async def test_the_attempt_ceiling_stops_the_retry_and_says_so_once(
     position = _pending_entry(attempts=7)
     portfolio = _ledgered(position)
     client = _entry_client(trades=ExchangeConnectionError("reset"))
-    driver = _driver(portfolio, client, persist_ledger=_RecordingWriter())
+    # AN ADVANCING CLOCK, AND IT IS WHAT MAKES THE LATER PASSES REAL. The driver's default
+    # clock here is the constant `NOW`; after the first pass the position's stamp equals it,
+    # `_is_due` asks `now - stamp > interval`, and the position is never visited again -- so
+    # the "no further call" assertions below held vacuously and survived a mutation that
+    # deleted the ceiling (the M5o survey's q14, `M5o-061`). Two minutes a pass against a
+    # one-minute dedup interval makes every pass due.
+    ticks = iter(NOW + timedelta(minutes=2 * n) for n in range(10))
+    driver = _driver(
+        portfolio, client, persist_ledger=_RecordingWriter(), clock=lambda: next(ticks)
+    )
 
     with caplog.at_level(logging.INFO):
         await driver(_candle())
