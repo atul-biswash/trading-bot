@@ -4689,3 +4689,58 @@ No change to a frozen file is planned, so the re-freeze of charter section 27's 
 ### 7. The findings this section carries
 
 See the commit message.
+
+## 108. M5n P156: the closing tests exist, and the binding predictions for the survey of the VERDICT mutations and the guard's re-parametrisation, before it is run (P156 C7, R-T, R-DQ, R-EG)
+
+An observation log, so this section only adds; a citation names its file (R-EG). Section 107 planned these tests and was committed first (`2df308c`); they are `50a114d`, 25 tests that pass on the unmutated runner, and under M5e-051 a prediction made before the tests existed is invalidated by writing them, so this section re-derives every count at the green baseline and **binds** them. The survey runs only after this section is committed. No recorded bar is read and nothing runs on recorded data: the survey mutates `scripts/n7_evaluate.py` in a throwaway worktree and runs `tests/unit/test_n7_evaluate.py` on generated fixtures. **Nothing here decides anything about S4.**
+
+### 1. Halts, checked before this section was written
+
+| Halt | Check | Observed |
+|---|---|---|
+| not on `main`, tree not clean, HEAD not the commit the prompt names | `git branch --show-current`, `git status --porcelain`, `git rev-parse` | `main`, empty, `5854581` (the prompt named `c49c6b7`; `50a114d` and `5854581` are P156's own two commits since) |
+| a frozen file differs | `sha256sum` | equal: the pre-registration `e6187480...d45e`, `sharpe_stats.py` `2b55991c...dda82`, `n7_evaluate.py` `1f307de6...dcfff` |
+| a closure needs a change to `n7_evaluate.py` or `sharpe_stats.py` | the green baseline of `50a114d` | **none**: all 25 tests pass on the unchanged runner, the 4h world among them |
+| free committed memory below 20 percent before a survey spec starts | `Win32_OperatingSystem` | 39.3 percent free (13,635 of 34,710 MB) before the daemons below were stopped, 41.4 percent after; measured again before each spec |
+| stray `git fsmonitor--daemon` processes | `Get-CimInstance Win32_Process` | **18**, 142.8 MB of working set together, left since the two daemons seen at the start of P156 (by its two full gate runs and its runs of the test file; which of them is not established); stopped. Not section 106's 30 GB, but the same kind of leak (see section 4) |
+| the survey's git environment | the shell | `GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0=false` for every command that starts a survey, so the worktree and every test repository run with `core.fsmonitor=false` |
+
+### 2. What changed from section 107's provisional counts
+
+Two, each from reading the tests as written. `b48` is 2, not 1, because T15 runs once for each pair being the late one (the owner's ruling allows this correction). The three `FROZEN_PATHS` removals are 6, 6 and 7, not 5, 5 and 6, because T1 (a digest line with text after its hash) also reaches the tuple: it drops the path's clean line, so a guard that no longer checks that path accepts the charter and the test's `pytest.raises` is unmet. Every other count stands.
+
+### 3. The binding predictions
+
+Short ids are `Class::test[param]`. "T" numbers are section 107's. A kill here is an assertion or an unmet `pytest.raises`; no crash is predicted.
+
+| Mutation | The break (`scripts/n7_evaluate.py`) | Predicted failures | Which |
+|---|---|---|---|
+| `b10` | `_DIGEST_LINE.fullmatch(line)` becomes `.match(line)` | **6** | T1 for each of the three paths, T2 for each of the three |
+| `b10b` | `.fullmatch` becomes `.search` | **9** | T1, T2 and T3 for each of the three paths |
+| `b11` | `refs/tags/{MILESTONE_TAG}` becomes `{MILESTONE_TAG}` | **1** | T4 |
+| `b14` | `main` ends `return 0` | **1** | T6 |
+| `b14b` | `main` ends `return 0 if ... == "SELECTED" else 1` | **2** | T8, and the E1 main test (a FAIL asserted to exit 0) |
+| `b30` | the books check (two lines) is removed | **1** | T10 |
+| `b34` | the `complete` check (four lines) is removed | **1** | T12 |
+| `b36` | the midnight filter (two lines) is removed | **2** | T13, T14 |
+| `b48` | `max(days)` becomes `min(days)` | **2** | T15 for the BTCUSDT-late and the ETHUSDT-late case |
+| `b49` | `max(first.values())` becomes `min(first.values())` | **2** | T16a, T16b |
+| `b47a` | the pre-registration is removed from `FROZEN_PATHS` | **6** | the four per-file guard tests for it (missing, repeated, edited, gone), T1 for it, and the constants test |
+| `b47b` | `sharpe_stats.py` is removed | **6** | the same six for it |
+| `b47` | `n7_evaluate.py` is removed | **7** | the four per-file tests, T1, the wrong-length test and the constants test for it |
+
+**46 failures are predicted over the 13 mutations** (6 + 9 + 1 + 1 + 2 + 1 + 1 + 2 + 2 + 2 + 6 + 6 + 7).
+
+**Declared abstentions.** Under `b10` T3 passes (a prefix stops a `match`) and the older wrong-length test passes (`abc123` is not 64 hexadecimal digits whichever pattern reads it). Under `b10b` the wrong-length test passes. Under `b11` `test_no_tag`, `test_a_tag_of_another_name` and the order test pass, because no branch of that name exists in them. Under `b14` T7 and T8 still get exit 0 and T9's exit 1 comes from the error branch above the line. Under `b14b` the INDETERMINATE and SELECTED exits are unchanged. Under `b30` the sums test and every E1 and E2 test pass: their books add up. Under `b36` the 1d probe test and every 1d world pass, because every 1d bar ends at midnight. Under `b48` and `b49` worlds E1 and E2 pass, because their pairs and candidates are defined on the same day. Under the three `FROZEN_PATHS` removals the per-file tests of the paths that stay pass, and T2 and T3 pass (acceptance is the outcome either way).
+
+**Where a prediction is most likely to be wrong, named in advance.** `b34`: T12 is a kill only if the BrokenD1 run, with its `complete` check gone, returns a run; if the mutated run raised anything else T12 would crash, not be killed. `b14b`: the E1 main test is counted because E1 ends in FAIL and the test asserts exit 0; if its judgement were SELECTED the count would be 1. `b36`: T14's line fits the marks exactly because the position's quantity is constant, and a rounding in the fill model would break an exact equality in the unmutated tree, which the green baseline excludes.
+
+### 4. The two specs, and the leak
+
+`survey_a_p156.json` (SHA-256 `628e6156cee4c362d0f3b1b895034c0f73295657a762c93a6b26acfdd4469c56`): `b10`, `b10b`, `b11`, `b47a`, `b47b`, `b47`. `survey_b_p156.json` (SHA-256 `d0bdae785fb3ed2a8e337726aec5d8ee5e3d33c82ee548871a3199be9f0f01ed`): `b14`, `b14b`, `b30`, `b34`, `b36`, `b48`, `b49`. Both are built by `scratch\p156\build_specs.py` (the session scratchpad), which asserts every anchor matches the committed runner exactly once, and both run `tests/unit/test_n7_evaluate.py` only.
+
+**The leak is still there.** Two test modules start git repositories without `core.fsmonitor=false`: `tests/unit/test_s6_rehearsal.py` and `tests/unit/test_worktree_survey.py` (a grep for `fsmonitor` finds 0 mentions in each, against 2 in `test_n7_evaluate.py` and 4 in `test_provenance.py`). They are the likely source of the 18 daemons (not shown: the daemons carry no repository name). They are outside this prompt's scope and are reported, not changed; the daemons are small here, and are stopped after each gate run.
+
+### 5. The findings this section carries
+
+See the commit message.
