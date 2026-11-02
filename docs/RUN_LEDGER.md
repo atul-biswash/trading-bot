@@ -8478,3 +8478,102 @@ An observation log, so this section only adds; a citation names its file (R-EG).
 
 - It does not establish that the 45 are right; the survey does, and a miss is recorded either way.
 - It does not claim every behaviour of H1 is mutated: the executor's `collaborator_failed` line, the `entry_settlement_pending` event's fields, the log of `entry_settled_late`, `base_asset_of`'s refusal and the `RetryPolicy` arithmetic are covered by tests that no mutation here probes. They are listed so a later reader does not read 21 as complete.
+
+## 90. M5o P161 H1: the arming audit scored, the predictions of section 87 scored, and where H1 stands (P161 C13)
+
+An observation log, so this section only adds; a citation names its file (R-EG). It scores what sections 87 and 89 predicted against what the survey, the gates and the Testnet read observed, and finishes the arming audit. Marks: MEASURED, REASONED, UNMEASURED.
+
+### 1. The mutation survey (section 89's 21 mutations, 45 predicted kills)
+
+**Run twice, and the first run HALTED.** Both ran with `scripts/worktree_survey.py` in a detached worktree outside the repository, git's fsmonitor disabled for it, credentials blanked, standard error empty (0 bytes), the import location printed from inside the worktree (`trading_bot` and the `tests` package both resolved under the worktree) before any result counted, an unmutated baseline of **707 passed**, every restore shown SHA-equal, every copied file shown intact, and `git worktree list` showing the main worktree only afterwards.
+
+| Run | HEAD | Outcome |
+|---|---|---|
+| 1 | `b36d174` | q01 to q13 MATCH except q05 (MORE); **q14 FEWER, predicted 1, observed 0: the survey HALTED** (an absent kill is indistinguishable from a mutation that never loaded) |
+| 2 | `b39bb9a` | all 21 ran: **20 MATCH, 1 MORE (q05), 0 FEWER**; 48 tests killed against 45 predicted |
+| 3 | `b39bb9a` plus the then-uncommitted `tests/unit/test_settlement.py` that `407d1a6` commits | q08 only, after its crash was fixed: predicted 4, observed 4, all four `[kill]` |
+
+| # | Mutation (what the code now did) | Predicted | Observed | Verdict |
+|---|---|---|---|---|
+| q01 | over-fill settles | 2 | 2 | MATCH |
+| q02 | duplicate id not checked | 1 | 1 | MATCH (the declared abstention, `[F9e-duplicate]`, held) |
+| q03 | a sell settles | 2 | 2 | MATCH |
+| q04 | sums and VWAP take the caller's decimal context | 1 | 1 | MATCH |
+| q05 | quote computed from price x quantity | 9 | **12** | **MORE** (3 beyond, diagnosed below) |
+| q06 | an open order with nothing executed is an expiry | 1 | 1 | MATCH |
+| q07 | first page from trade id 1 | 2 | 2 | MATCH (the abstention held) |
+| q08 | cursor does not advance past the last id | 4 | 4 | MATCH (one of the four a CRASH in run 2, fixed, see below) |
+| q09 | executor ignores the budget | 1 | 1 | MATCH |
+| q10 | an unanswered entry reads as settled | 4 | 4 | MATCH |
+| q11 | the debit estimate is not remembered | 1 | 1 | MATCH |
+| q12 | the `fees` field is blank | 2 | 2 | MATCH |
+| q13 | the retry has 99 spare calls | 1 | 1 | MATCH |
+| q14 | no attempt ceiling | 1 | 0, then 1 | **FEWER in run 1** (the test could not express it); MATCH in run 2 after the fix |
+| q15 | the retry phase is deleted | 4 | 4 | MATCH (the abstention held) |
+| q16 | the credit sign is flipped | 3 | 3 | MATCH |
+| q17 | a schema-2 record with the new keys loads | 1 | 1 | MATCH |
+| q18 | schema 4 is readable | 2 | 2 | MATCH |
+| q19 | a restored position stays pending after the boot read the total | 1 | 1 | MATCH |
+| q20 | the record always says "settled" | 1 | 1 | MATCH |
+| q21 | `fromId` goes out as a string | 1 | 1 | MATCH |
+
+**q14, the halt, explained.** The test `test_the_attempt_ceiling_stops_the_retry_and_says_so_once` ran its three passes on the driver's default clock, the constant `NOW`. After the first pass the position's stamp equals `NOW`, `_is_due` asks `now - stamp > dedup_interval`, and the position is never visited again, so passes two and three never reached the retry: the "no further call" assertions held vacuously and survived the deletion of the ceiling. This is a defect in the test and not in the mutation (`M5o-061`, fixed in `b39bb9a` with an advancing clock, then checked against the mutation in a one-mutation survey with the uncommitted file copied in: MATCH, `[kill]`).
+
+**q05, the three beyond, diagnosed (`M5o-062`).** Section 89 declared the executor and driver tests an abstention on the reasoning that the product `price x quantity` equals the venue's total numerically. That is true of the default fake and false of three tests whose fixtures break it deliberately: `test_the_dispatch_entry_total_lands_on_the_position_and_is_the_debit` and `test_a_live_resolution_carries_the_entry_total_and_debits_it` use a total of `48.99999999` that differs from `49` by design (the fixture exists to tell a debit computed from the total from one computed from the price), and `test_a_cost_basis_cured_on_a_pass_books_an_exit_that_filled_on_the_same_pass` builds its entry trade with a unit price unrelated to the quote it carries. All three are real coverage of the invariant q05 breaks (the quote total is the venue's, summed, never recomputed), recorded as the rule says a kill beyond prediction is. The declared abstention was wrong, and the diagnosis is the reach the prediction did not enumerate.
+
+**q08's crash (`M5o-063`).** In run 2 one of q08's four kills, `test_the_page_cap_returns_a_short_list_and_the_derivation_refuses_it`, was classified `[crash trading_bot.core.exceptions.EntryFillsInconsistentError]`: the repeated fill made the derivation raise `EntryFillsInconsistentError`, which `pytest.raises(EntryFillsIncompleteError)` does not catch, so it escaped. Section 89 said no mutation was predicted to be a crash; this one was. The test now accepts both refusal types and asserts the type (`407d1a6`); run 3 shows all four q08 kills as `[kill]`.
+
+**Not mutated by this survey, listed so 21 is not read as complete:** the `entry_settlement_pending` event's fields, `entry_settled_late`'s fields, `base_asset_of`'s refusal, `RetryPolicy`'s arithmetic, `Portfolio.complete_entry_settlement`'s refusals other than the credit sign and the ordering test, and `_restored_position`'s attempt count.
+
+### 2. The arming audit
+
+`scripts/check_arming_conditions.py` was run against the four documents that carry conditions, and printed: `docs/NEXT_MILESTONE.md` 60 candidates, 59 parsed, 1 unparsed (Q-C section 3's leg set, "the bold span names no backticked symbol", exit 1); `CLAUDE.md` 2 candidates, both parsed (the live-trading block's and `build_placement`'s, exit 0); `docs/QB_ESCALATION.md` 1 candidate, 0 parsed, 1 unparsed (*the halt flag's first writer*, exit 1); `docs/QC_PROTECTIVE_ORDERS.md` 0 candidates (exit 0). The two unparsed conditions are the ones `CLAUDE.md` records as found and accepted as such by ruling (`M5k-118`); neither names a symbol this item edited. H1 edited these files in `src/`: `core/enums.py`, `core/models.py`, `core/portfolio.py`, `core/exceptions.py`, `core/interfaces.py`, `exchange/binance_client.py`, `engine/modes.py`, `persistence/store.py`, `execution/settlement.py` (new), `execution/executor.py` and `execution/reconciliation_driver.py`. Each condition naming a symbol in those files was read in full.
+
+| Condition (by content) | Names | Verdict | Disposition |
+|---|---|---|---|
+| **U13**: *whoever next edits the entry-fill read and the debit estimate in `OrderExecutor._open_position` ... or `_book_resolved_close`* | `_open_position`, `entry-fill-query`, `debit_from_requested_limit` | **FIRED** at `f0d5dcb` (the read is replaced and the debit gains the estimate) | **REAFFIRMED, U13 stays OPEN.** H1 gives the recovery read and section 88 shows it obtains list 282240's entry today; H2 consumes it under R-OB. `_book_resolved_close` and the `NO_COST_BASIS` rung are untouched. The `entry-fill-query` phase name and the `debit_from_requested_limit` event are kept |
+| **K2**: *whoever next changes what `PersistedState` persists, or `_snapshot_unmanaged_holdings` / `_snapshot_live_order_lists`* | `PersistedState`, `persistence/store.py` | **FIRED** at `5f6e6a5`: the position record gains two keys and the schema is 3 | **REAFFIRMED.** K2's standing items (R3's once-per-symbol synthetic close, the base-held reading, "only a restart forgets") are unchanged; the boot's snapshots are not edited; the restore keeps a recorded pending settlement unless the boot read the total (q19) |
+| **U0**: *whoever next changes what `_persist_pending` or `_persist_ledger` writes* | `engine/modes.py` | **FIRED** at `5f6e6a5`: both closures write the position records, which now carry the two keys | **REAFFIRMED**, as C30, C32a and C32b-1 were: the carry `pending=persisted.pending` is untouched and neither closure's body was edited |
+| `ReconciliationDriver.__call__` *to be called from anywhere but `provider.on_candle`* | `execution/reconciliation_driver.py` | NOT FIRED | `__call__` gained a phase; its one caller, `provider.on_candle`, is unchanged. REAFFIRMED |
+| **M5n-274**: *whoever next edits `tests/unit/test_s6_rehearsal.py` or `tests/unit/test_worktree_survey.py`* | those two | **FIRED at P160** (`7872703` edited the second) and **the audit was not recorded then** | **RESOLVED** by section 86's measurement (delta 0 over two full bare gates). Recorded here, late, as the rule allows and as `M5k-118`'s precedent names (`M5o-064`). H1 edits neither file |
+| `store.save` or `PersistedState` (K1) | `persistence/store.py` | NOT FIRED | the diff's hunks lie in `SCHEMA_VERSION`, `_READABLE_SCHEMAS`, `PositionRecord`, `_dump_position` and `_load_positions`; neither `PersistedState` (line 434) nor `save` (line 810) changed. REAFFIRMED |
+| `PendingCloseRecord`, `_persist_pending` (N1) | `persistence/store.py`, `engine/modes.py` | NOT FIRED | neither edited |
+| `ReconciliationBudget`; `_report`, `reconcile_open_positions`' call cap | `execution/reconciliation_driver.py`, `execution/reconciliation.py` | NOT FIRED | none edited; the retry spends the pass's unspent calls without touching either |
+| `_settle`, `_defer_settlement` (N3) | `execution/executor.py` | NOT FIRED | not edited; N3 is still UNMEASURED (every sampled fill was a day old) |
+| `_book_exits`, `_refine`, `_log_booked`, the `_EVENT_*` renames | driver, reconciliation, booking_line | NOT FIRED | not edited and nothing renamed |
+| U12: `_record_gap_if_any`, a start time on `ExchangeClient.get_klines` | `data/market_data.py`, `core/interfaces.py` | NOT FIRED | H1 added `from_id` to `get_my_trades`, not a start time to `get_klines` |
+| `calculate_position_size`, `build_placement` (N2, the BNB question, and CLAUDE.md's) | `risk/position_sizing.py`, `execution/placement.py` | NOT FIRED | neither edited |
+| **The live-trading block**: *whoever next edits the mode resolution in `Settings.__init__` or `_cmd_run`, or authorises a run in `TradingMode.LIVE`* | `config/settings.py`, `main.py` | **NOT FIRED** | `git diff --stat 1da6acc..HEAD -- config/settings.py main.py scripts/check_testnet.py CLAUDE.md` is empty; the block is armed and unedited |
+| Halt flag on `Portfolio` (N5); `docs/QB_ESCALATION.md`'s and `docs/QC_PROTECTIVE_ORDERS.md`'s conditions | `core/portfolio.py` | NOT FIRED | `complete_entry_settlement` is a method, not a halt field |
+
+**The frozen files:** `git diff --stat 1da6acc..HEAD` over `scripts/s4_compare.py`, `s4_latch_compare.py`, `s4_wick_annotate.py`, `trade_census.py`, `config.s4.yaml`, `backtesting/sharpe_stats.py`, `scripts/n7_evaluate.py`, `docs/M5N_PREREGISTRATION.md` and `docs/S4_PREREGISTRATION.md` is empty.
+
+### 3. Section 87's predictions, scored
+
+| Prediction | Observed | Verdict |
+|---|---|---|
+| Settlement outputs of F1, F2a, F2b, F3, F4, F5, F5b (quantity, quote, VWAP, fees, third-asset mark, fill count, exponent included) | all seven equal on the first run, compared as strings | **HELD** |
+| Outcome fixtures: F6 (attempts 2, wait 0.25), F7 (attempts 3, waits 0.25 and 0.5, PENDING), F8 and F8b (the cursors `"0","9804","9807"` and `"0","9814","9817"`), F8c, F9, F9b to F9f | all as predicted on the first run | **HELD** |
+| Added weight per entry: +1 call and +5 weight on a fill, 0 on an expiry | **+5 weight, +1 call, measured** on nine real entries by the venue's own counter (section 88); the expiry path's 0 is covered by a fake test and was not seen on the venue | **HELD** (the fill), REASONED (the expiry) |
+| Worst case in dispatch +23 weight over today's 4 | not measured on the venue; arithmetic from the measured per-call weights | REASONED |
+| Added reconciliation time per bar: 0 by construction, no config line moves | `config.yaml`, the validator and `dispatch_deadline_s` are unchanged and every config test passed untouched in every gate | **HELD** |
+| Which existing tests change: `test_persistence_store.py` 4 to 9 | at least 8 failed in a first run whose listing was cut at 30 lines, then the file was rewritten; the count is not recoverable | **UNMEASURED** (`M5o-044`) |
+| `PositionRecord(` construction sites: 5, in 4 files | 5 sites, 4 files; the two in `test_modes.py` are shared helpers, so at least 13 tests failed through them | **HELD** for the sites, MISSED for the tests (`M5o-044`) |
+| `test_executor.py`: 2 to 8 tests | **9** at first sight: six through the shared `FakeClient`, three real overturns | **MISSED, above** (`M5o-047`) |
+| `test_binance_client.py` existing tests unchanged | unchanged | **HELD** |
+| Abstentions: `test_models.py`, `test_portfolio.py` | `test_models.py` **failed** (a derived completeness test on `Money` fields); `test_portfolio.py` additive, held | `test_models`: **MISSED** (`M5o-045`) |
+| Abstentions: risk, bookability, close_plan, market_data, backtesting, config, live_guard, reconciliation_pass | no failure in any of seven gates | **HELD** |
+
+### 4. Where H1 stands against the charter's exit evidence
+
+- **(1) a test per state of the settlement:** `tests/unit/test_settlement.py`, 47 tests, including the seven derived fixtures, the contradictions, the paging and the retry. Done.
+- **(2) a fixture reproducing `M5o-001`'s chain with the read failing then succeeding:** F6 at the settlement and `test_an_order_read_that_fails_once_is_retried_after_one_wait` at the executor, and the late cure in the driver. Done.
+- **(3) Testnet, the standard of section 26:** nine of nine single-fill entries equal in value and string (section 88). **A multi-fill entry is not in that sample and stays UNMEASURED.**
+- **The HALT conditions:** the call count changed and is measured (OR-9); no new port method (a keyword was added to one); no rung of `classify_bookability` gained a venue call; no `Position` schema change was left uncoordinated (schema 3, with old-version tests). Neither the live-trading block nor a frozen file was touched.
+- **What H1 does not do:** it does not consume the settlement at the `NO_COST_BASIS` rung (H2), it does not net a base commission (H4), and it does not persist an entry fee on the position (H3). The ledger is still gross of entry fees; nothing here changes R-a until H3.
+
+### 5. State at the close of the item
+
+- Commits since `1da6acc`: `4525f45`, `4ffc2b3`, `1808793`, `57969d9`, `5f6e6a5`, `951070d`, `f0d5dcb`, `c069af7`, `df0b762`, `b36d174`, `b39bb9a`, `407d1a6`, and the commit that records this section. Gate figure at `407d1a6`: **5600 passed, 4 skipped** with the credential slots blanked; the documented figure of 5516 is corrected at the M5o rotation.
+- Git fsmonitor daemons: 3 before and 3 after each of the item's last four gates, and still 3 after the settle wait; one extra appeared across the gate of `f0d5dcb` (2 to 3) and did not recur (`M5o-049`, source still not established).
+- Nothing was pushed.
